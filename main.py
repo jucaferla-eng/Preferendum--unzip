@@ -8,7 +8,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.sessions import SessionMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
 from db import engine, Base
 import models  # registers all SQLAlchemy models
