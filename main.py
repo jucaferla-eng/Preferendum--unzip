@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
 import os, jwt, bcrypt
 
-DATABASE_URL = os.getenv(“DATABASE_URL”, “sqlite:///./preferendum.db”)
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./preferendum.db")
 engine = create_engine(DATABASE_URL, connect_args={“check_same_thread”: False} if “sqlite” in DATABASE_URL else {})
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
