@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: preferendum-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: VOTE_ENCRYPTION_KEY
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: CONTRACT_ADDRESS
+        value: ""
+      - key: PREFERENDUM_WALLET_KEY
+        value: ""
+      - key: PREFERENDUM_WALLET_ADDRESS
+        value: ""
+    healthCheckPath: /
