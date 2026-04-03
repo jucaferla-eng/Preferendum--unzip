@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
 import os, jwt, bcrypt
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./preferendum.db")
+DATABASE_URL = os.getenv(“DATABASE_URL”, “sqlite:///./preferendum.db”)
 engine = create_engine(DATABASE_URL, connect_args={“check_same_thread”: False} if “sqlite” in DATABASE_URL else {})
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
@@ -60,11 +60,11 @@ password: str
 
 @app.get(”/”)
 def root():
-return {“system”:“Preferendum”,“version”:“1.0.0”,“status”:“running”,“dedication”:“En memoria de Jose Ignacio Fernandez (1989-2024)”}
+return {“system”: “Preferendum”, “version”: “1.0.0”, “status”: “running”}
 
 @app.get(”/health”)
 def health():
-return {“status”:“ok”}
+return {“status”: “ok”}
 
 @app.post(”/auth/register”)
 def register(data: RegisterInput, db: Session = Depends(get_db)):
