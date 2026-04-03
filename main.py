@@ -7,7 +7,7 @@
 # ============================================================
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.sessions import SessionMiddleware
+
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import create_engine, Column, Integer, String, Boolean
 from sqlalchemy.ext.declarative import declarative_base
@@ -33,7 +33,7 @@ gender = Column(String)
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title=‘Preferendum API’, version=‘1.0.0’, description=‘En memoria de Jose Ignacio Fernandez (1989-2024)’)
 app.add_middleware(CORSMiddleware, allow_origins=[’*’], allow_credentials=True, allow_methods=[’*’], allow_headers=[’*’])
-app.add_middleware(SessionMiddleware, secret_key=os.getenv(‘SESSION_SECRET’, ‘preferendum-secret’))
+
 SECRET = os.getenv(‘JWT_SECRET’, ‘preferendum-secret’)
 
 def get_db():
