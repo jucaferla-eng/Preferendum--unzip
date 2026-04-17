@@ -1,15 +1,15 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.sessions import SessionMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy import create_engine, Column, Integer, String, Boolean
+from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
 import os, jwt, bcrypt
 
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./preferendum.db')
-engine = create_engine(DATABASE_URL, connect_args={'check_same_thread': False} if 'sqlite' in DATABASE_URL else {})
+DB = os.getenv('DATABASE_URL', 'sqlite:///./preferendum.db')
+ARGS = {'check_same_thread': False} if 'sqlite' in DB else {}
+engine = create_engine(DB, connect_args=ARGS)
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
 
@@ -24,26 +24,8 @@ class User(Base):
     gender = Column(String)
 
 Base.metadata.create_all(bind=engine)
-
-app = FastAPI(
-    title='Preferendum API',
-    version='1.0.0',
-    description='En memoria de Jose Ignacio Fernandez (1989-2024)'
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=['*'],
-    allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*']
-)
-
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=os.getenv('SESSION_SECRET', 'preferendum-secret')
-)
-
+app = FastAPI(title='Preferendum API', version='1.0.0')
+app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_credentials=True, allow_methods=['*'], allow_headers=['*'])
 SECRET = os.getenv('JWT_SECRET', 'preferendum-secret')
 
 def get_db():
@@ -53,10 +35,10 @@ def get_db():
     finally:
         db.close()
 
-def make_token(user_id):
-    return jwt.encode({'sub': str(user_id)}, SECRET, algorithm='HS256')
+def make_token(uid):
+    return jwt.encode({'sub': str(uid)}, SECRET, algorithm='HS256')
 
-class RegisterInput(BaseModel):
+class Reg(BaseModel):
     email: str
     password: str
     name: str
@@ -64,61 +46,43 @@ class RegisterInput(BaseModel):
     county: str = ''
     gender: str = 'F'
 
-class LoginInput(BaseModel):
+class Log(BaseModel):
     email: str
     password: str
 
 @app.get('/')
 def root():
-    return {
-        'system': 'Preferendum',
-        'version': '1.0.0',
-        'status': 'running',
-        'dedication': 'En memoria de Jose Ignacio Fernandez (1989-2024)',
-        'docs': '/docs'
-    }
+    return {'system': 'Preferendum', 'status': 'running'}
 
 @app.get('/health')
 def health():
     return {'status': 'ok'}
 
 @app.post('/auth/register')
-def register(data: RegisterInput, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == data.email).first()
-    if existing:
+def register(data: Reg, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(400, 'Email already registered')
-    hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
-    user = User(
-        email=data.email,
-        name=data.name,
-        password=hashed,
-        country=data.country,
-        county=data.county,
-        gender=data.gender
-    )
-    db.add(user)
+    pw = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+    u = User(email=data.email, name=data.name, password=pw, country=data.country, county=data.county, gender=data.gender)
+    db.add(u)
     db.commit()
-    db.refresh(user)
-    token = make_token(user.id)
-    return {'token': token, 'user': {'id': user.id, 'name': user.name, 'email': user.email}}
+    db.refresh(u)
+    return {'token': make_token(u.id), 'user': {'id': u.id, 'name': u.name, 'email': u.email}}
 
 @app.post('/auth/login')
-def login(data: LoginInput, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == data.email).first()
-    if not user:
+def login(data: Log, db: Session = Depends(get_db)):
+    u = db.query(User).filter(User.email == data.email).first()
+    if not u or not bcrypt.checkpw(data.password.encode(), u.password.encode()):
         raise HTTPException(401, 'Invalid credentials')
-    if not bcrypt.checkpw(data.password.encode(), user.password.encode()):
-        raise HTTPException(401, 'Invalid credentials')
-    token = make_token(user.id)
-    return {'token': token, 'user': {'id': user.id, 'name': user.name, 'email': user.email}}
+    return {'token': make_token(u.id), 'user': {'id': u.id, 'name': u.name, 'email': u.email}}
 
 @app.get('/auth/me')
-def me(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer()), db: Session = Depends(get_db)):
+def me(creds: HTTPAuthorizationCredentials = Depends(HTTPBearer()), db: Session = Depends(get_db)):
     try:
-        payload = jwt.decode(credentials.credentials, SECRET, algorithms=['HS256'])
-        user = db.query(User).filter(User.id == int(payload['sub'])).first()
-        if not user:
-            raise HTTPException(404, 'User not found')
-        return {'id': user.id, 'name': user.name, 'email': user.email, 'gender': user.gender}
-    except Exception:
+        pay = jwt.decode(creds.credentials, SECRET, algorithms=['HS256'])
+        u = db.query(User).filter(User.id == int(pay['sub'])).first()
+        if not u:
+            raise HTTPException(404, 'Not found')
+        return {'id': u.id, 'name': u.name, 'email': u.email, 'gender': u.gender}
+    except:
         raise HTTPException(401, 'Invalid token')
