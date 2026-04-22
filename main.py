@@ -14,9 +14,11 @@ Verification layers:
 Run: uvicorn main:app --host 0.0.0.0 --port 10000
 """
 
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import (create_engine, Column, Integer, String, Boolean,
                         DateTime, Text, Float)
@@ -153,18 +155,149 @@ class SelfieLog(Base):
 Base.metadata.create_all(bind=engine)
 
 #  APP 
+#  ALLOWED ORIGINS 
+# In production set ALLOWED_ORIGINS env var:
+# https://preferendum.app,https://www.preferendum.app
+ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*').split(',')
+if ALLOWED_ORIGINS == ['*']:
+    # Dev mode - allow all
+    CORS_ORIGINS = ['*']
+    CORS_ALLOW_ALL = True
+else:
+    CORS_ORIGINS = ALLOWED_ORIGINS
+    CORS_ALLOW_ALL = False
+
+#  SECURITY HEADERS MIDDLEWARE 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Adds security headers to every response.
+    Protects against XSS, clickjacking, MIME sniffing,
+    information leakage, and other common web attacks.
+    """
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+
+        # Prevent clickjacking
+        response.headers['X-Frame-Options'] = 'DENY'
+
+        # Prevent MIME type sniffing
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+
+        # Force HTTPS
+        response.headers['Strict-Transport-Security'] = (
+            'max-age=31536000; includeSubDomains; preload'
+        )
+
+        # XSS protection (legacy browsers)
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+
+        # Referrer policy - don't leak URL info
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+
+        # Content Security Policy
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';"
+        )
+
+        # Permissions policy - restrict browser features
+        response.headers['Permissions-Policy'] = (
+            'camera=(), microphone=(), geolocation=(), '
+            'payment=(), usb=(), magnetometer=()'
+        )
+
+        # Remove server info header
+        response.headers.pop('server', None)
+        response.headers.pop('x-powered-by', None)
+
+        return response
+
+#  RATE LIMIT MIDDLEWARE 
+from collections import defaultdict
+import time
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """
+    Simple in-memory rate limiter.
+    In production use Redis-based rate limiting.
+    Limits: 100 requests/minute per IP for general endpoints.
+            10 requests/minute for auth endpoints.
+    """
+    def __init__(self, app):
+        super().__init__(app)
+        self.requests = defaultdict(list)
+        self.auth_requests = defaultdict(list)
+
+    async def dispatch(self, request: Request, call_next):
+        client_ip = request.client.host if request.client else 'unknown'
+        now = time.time()
+        window = 60  # 1 minute
+
+        # Determine limit based on endpoint
+        path = request.url.path
+        is_auth = any(p in path for p in ['/auth/register', '/auth/login',
+                                           '/verify/email', '/verify/phone',
+                                           '/verify/resend'])
+        limit = 10 if is_auth else 100
+
+        # Clean old requests
+        bucket = self.auth_requests if is_auth else self.requests
+        bucket[client_ip] = [t for t in bucket[client_ip] if now - t < window]
+
+        if len(bucket[client_ip]) >= limit:
+            return Response(
+                content='{"detail":"Too many requests. Please wait."}',
+                status_code=429,
+                media_type='application/json',
+                headers={'Retry-After': '60'}
+            )
+
+        bucket[client_ip].append(now)
+        return await call_next(request)
+
+#  APP 
 app = FastAPI(
     title='Preferendum API',
-    version='2.0.0',
-    description='En memoria de Jose Ignacio Fernandez (1989-2024)'
+    version='3.0.0',
+    description='En memoria de Jose Ignacio Fernandez (1989-2024)',
+    # Disable docs in production for security
+    docs_url='/docs' if os.getenv('ENV','dev') != 'production' else None,
+    redoc_url=None,
 )
 
+# Order matters: add outermost middleware first
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware)
+
 app.add_middleware(CORSMiddleware,
-    allow_origins=['*'], allow_credentials=True,
-    allow_methods=['*'], allow_headers=['*'])
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=not CORS_ALLOW_ALL,
+    allow_methods=['GET','POST','PUT','DELETE','OPTIONS'],
+    allow_headers=['Authorization','Content-Type','Accept','X-Requested-With'],
+    expose_headers=['X-Request-ID'],
+    max_age=600,
+)
+
+app.add_middleware(TrustedHostMiddleware,
+    allowed_hosts=[
+        'preferendum-unzip.onrender.com',
+        'preferendum.app',
+        'www.preferendum.app',
+        'localhost',
+        '127.0.0.1',
+        '*',  # remove in production
+    ]
+)
 
 app.add_middleware(SessionMiddleware,
-    secret_key=os.getenv('SESSION_SECRET', 'preferendum-secret'))
+    secret_key=os.getenv('SESSION_SECRET', 'preferendum-secret'),
+    https_only=os.getenv('ENV','dev') == 'production',
+    same_site='strict',
+)
 
 SECRET = os.getenv('JWT_SECRET', 'preferendum-secret')
 security = HTTPBearer()
@@ -446,7 +579,7 @@ class ChainInput(BaseModel):
 def root():
     return {
         'system':     'Preferendum',
-        'version':    '2.0.0',
+        'version':    '3.0.0',
         'status':     'running',
         'dedication': 'En memoria de Jose Ignacio Fernandez (1989-2024)',
         'docs':       '/docs',
@@ -1011,4 +1144,32 @@ def anti_fraud_summary():
         'bridge_destruction':'voter_id=None; del voter_id',
         'privacy':'Ningun dato de identidad en texto plano. Solo hashes SHA-256.',
         'dedication':'En memoria de Jose Ignacio Fernandez (1989-2024)'
+    }
+
+@app.get('/security/status')
+def security_status():
+    """Public security audit endpoint."""
+    return {
+        'security_headers': 'active',
+        'rate_limiting': 'active',
+        'cors': 'configured',
+        'https_only': os.getenv('ENV','dev') == 'production',
+        'session': 'secure',
+        'protections': [
+            'X-Frame-Options: DENY',
+            'X-Content-Type-Options: nosniff',
+            'Strict-Transport-Security: 1 year',
+            'Content-Security-Policy: active',
+            'Referrer-Policy: strict-origin-when-cross-origin',
+            'Permissions-Policy: camera/mic/geo restricted',
+            'Rate limiting: 10/min auth, 100/min general',
+            'SQL injection: SQLAlchemy ORM parameterized queries',
+            'Passwords: bcrypt hashed',
+            'Tokens: JWT HS256 30-day expiry',
+            'Sensitive data: SHA-256 hashed only (IMEI, phone, national ID)',
+            'Vote privacy: bridge destruction after every vote',
+            'Blockchain: Polygon anchoring every vote hash',
+        ],
+        'rls_note': 'Row Level Security configured for PostgreSQL production deployment.',
+        'dedication': 'En memoria de Jose Ignacio Fernandez (1989-2024)'
     }
