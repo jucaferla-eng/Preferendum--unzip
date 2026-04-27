@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Preferendum",
+    "slug": "preferendum",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.caip.preferendum",
+      "buildNumber": "1",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.caip.preferendum",
+      "versionCode": 1
+    },
+    "extra": {
+      "eas": {
+        "projectId": "cedfd3c0-28fd-49f1-90c6-8b9c83c61695"
+      }
+    },
+    "owner": "jifg749090"
+  }
+}
