@@ -1174,11 +1174,12 @@ def security_status():
         ],
         'rls_note': 'Row Level Security configured for PostgreSQL production deployment.',
         'dedication': 'En memoria de Jose Ignacio Fernandez (1989-2024)'
-    }
+    
 @app.get("/privacy")
 async def privacy():
     from fastapi.responses import HTMLResponse
     with open("privacy.html", "r") as f:
         content = f.read()
     return HTMLResponse(content=content)
+    }
 
