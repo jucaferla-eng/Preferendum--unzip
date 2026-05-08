@@ -1177,15 +1177,8 @@ def security_status():
     }
 @app.get("/privacy")
 async def privacy():
-    from fastapi.responses import FileResponse
-    return FileResponse("privacy.html")
-¿Puedes editar el main.py en GitHub?
-        .cc-install-nudge { container-type: inline-size; }
-        @keyframes ccInstallNudgeIn {
-          from { opacity: 0; transform: translateY(8px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
-        @container (max-width: 450px) {
-          .cc-install-nudge-icon { display: none; }
-        }
-      
+    from fastapi.responses import HTMLResponse
+    with open("privacy.html", "r") as f:
+        content = f.read()
+    return HTMLResponse(content=content)
+
