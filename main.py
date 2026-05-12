@@ -1183,4 +1183,4 @@ async def privacy():
     return HTMLResponse(content=content)
 from verification import router as verify_router
 app.include_router(verify_router)
-
+     }
