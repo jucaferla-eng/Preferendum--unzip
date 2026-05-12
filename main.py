@@ -1174,7 +1174,7 @@ def security_status():
         ],
         'rls_note': 'Row Level Security configured for PostgreSQL production deployment.',
         'dedication': 'En memoria de Jose Ignacio Fernandez (1989-2024)'
-    
+    }
 @app.get("/privacy")
 async def privacy():
     from fastapi.responses import HTMLResponse
@@ -1183,4 +1183,4 @@ async def privacy():
     return HTMLResponse(content=content)
 from verification import router as verify_router
 app.include_router(verify_router)
-     }
+     
