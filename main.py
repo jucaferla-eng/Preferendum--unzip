@@ -1181,7 +1181,6 @@ async def privacy():
     with open("privacy.html", "r") as f:
         content = f.read()
     return HTMLResponse(content=content)
-
 from verification import router as verify_router
 app.include_router(verify_router)
 
