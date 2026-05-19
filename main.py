@@ -354,7 +354,7 @@ def format_debate(debate, has_voted=False):
 
 def send_email_otp(email, code, name=''):
     resend_key = os.getenv('RESEND_API_KEY')
-    from_email = 'noreply@preferendum.com'
+    from_email = 'onboarding@resend.dev'
 
     if resend_key:
         try:
