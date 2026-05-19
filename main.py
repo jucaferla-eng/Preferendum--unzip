@@ -353,71 +353,36 @@ def format_debate(debate, has_voted=False):
 # ══════════════════════════════════════════════════════════════
 
 def send_email_otp(email, code, name=''):
-    sg_key = os.getenv('SENDGRID_API_KEY')
-    from_email = os.getenv('FROM_EMAIL', 'jucaferla@gmail.com')
+    resend_key = os.getenv('RESEND_API_KEY')
+    from_email = 'noreply@preferendum.com'
 
-    html = f"""
-    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;
-                background:#07090f;color:#fff;padding:40px;border-radius:12px;">
-        <h1 style="color:#3b82f6;font-size:28px;">prefer<span style="color:#fff">endum</span></h1>
-        <p>Hola {name or 'Ciudadano'}, tu codigo de verificacion es:</p>
-        <div style="background:#1e2a3d;border-radius:8px;padding:24px;text-align:center;">
-            <span style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#3b82f6;">{code}</span>
-        </div>
-        <p style="color:#94a3b8;font-size:14px;">Valido por 10 minutos.</p>
-        <p style="color:#4a5568;font-size:12px;font-style:italic;">
-            En memoria de Jose Ignacio Fernandez (1989-2024)
-        </p>
-    </div>
-    """
-
-    if sg_key:
+    if resend_key:
         try:
             data = json.dumps({
-                'personalizations': [{'to': [{'email': email}]}],
-                'from': {'email': from_email, 'name': 'Preferendum'},
+                'from': from_email,
+                'to': [email],
                 'subject': f'Tu codigo Preferendum: {code}',
-                'content': [
-                    {'type': 'text/plain', 'value': f'Tu codigo Preferendum: {code}. Valido 10 min.'},
-                    {'type': 'text/html', 'value': html}
-                ]
+                'html': f'<div style="font-family:sans-serif;padding:40px;background:#07090f;color:#fff;"><h1 style="color:#3b82f6;">preferendum</h1><p>Hola {name or "Ciudadano"},</p><p>Tu codigo de verificacion es:</p><div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#3b82f6;padding:20px;background:#1e2a3d;border-radius:8px;text-align:center;">{code}</div><p style="color:#94a3b8;">Valido por 10 minutos.</p></div>'
             }).encode()
             req = urllib.request.Request(
-                'https://api.sendgrid.com/v3/mail/send',
+                'https://api.resend.com/emails',
                 data=data,
                 headers={
-                    'Authorization': f'Bearer {sg_key}',
+                    'Authorization': f'Bearer {resend_key}',
                     'Content-Type': 'application/json'
                 },
                 method='POST'
             )
             with urllib.request.urlopen(req) as resp:
-                print(f'[SendGrid] {resp.status} to {email}')
+                result = json.loads(resp.read())
+                print(f'[Resend] Sent to {email}: {result}')
                 return True
         except Exception as e:
-            print(f'[SendGrid Error] {e}')
-
-    # Gmail fallback
-    gmail_user = os.getenv('GMAIL_USER', 'jucaferla@gmail.com')
-    gmail_pass = os.getenv('GMAIL_APP_PASSWORD')
-    if gmail_pass:
-        try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = f'Tu codigo Preferendum: {code}'
-            msg['From'] = f'Preferendum <{gmail_user}>'
-            msg['To'] = email
-            msg.attach(MIMEText(f'Tu codigo es: {code}. Valido 10 min.', 'plain'))
-            msg.attach(MIMEText(html, 'html'))
-            with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
-                s.login(gmail_user, gmail_pass)
-                s.sendmail(gmail_user, email, msg.as_string())
-            print(f'[Gmail] sent to {email}')
-            return True
-        except Exception as e:
-            print(f'[Gmail Error] {e}')
+            print(f'[Resend Error] {e}')
 
     print(f'[DEV EMAIL] To: {email} | Code: {code}')
     return True
+
 
 def send_sms_otp(phone, code):
     sid = os.getenv('TWILIO_ACCOUNT_SID')
