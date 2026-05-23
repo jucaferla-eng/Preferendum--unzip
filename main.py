@@ -353,35 +353,35 @@ def format_debate(debate, has_voted=False):
 # ══════════════════════════════════════════════════════════════
 
 def send_email_otp(email, code, name=''):
-    resend_key = os.getenv('RESEND_API_KEY')
-    from_email = 'onboarding@resend.dev'
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
 
-    if resend_key:
-        try:
-            data = json.dumps({
-                'from': from_email,
-                'to': [email],
-                'subject': f'Tu codigo Preferendum: {code}',
-                'html': f'<div style="font-family:sans-serif;padding:40px;background:#07090f;color:#fff;"><h1 style="color:#3b82f6;">preferendum</h1><p>Hola {name or "Ciudadano"},</p><p>Tu codigo de verificacion es:</p><div style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#3b82f6;padding:20px;background:#1e2a3d;border-radius:8px;text-align:center;">{code}</div><p style="color:#94a3b8;">Valido por 10 minutos.</p></div>'
-            }).encode()
-            req = urllib.request.Request(
-                'https://api.resend.com/emails',
-                data=data,
-                headers={
-                    'Authorization': f'Bearer {resend_key}',
-                    'Content-Type': 'application/json'
-                },
-                method='POST'
-            )
-            with urllib.request.urlopen(req) as resp:
-                result = json.loads(resp.read())
-                print(f'[Resend] Sent to {email}: {result}')
-                return True
-        except Exception as e:
-            print(f'[Resend Error] {e}')
+    gmail_user = os.getenv('GMAIL_USER', 'jucaferla@gmail.com')
+    gmail_pass = os.getenv('GMAIL_APP_PASSWORD')
 
-    print(f'[DEV EMAIL] To: {email} | Code: {code}')
-    return True
+    if not gmail_pass:
+        print(f'[DEV EMAIL] To: {email} | Code: {code}')
+        return True
+
+    html = f'<div style="font-family:sans-serif;padding:40px;background:#07090f;color:#fff;border-radius:12px;"><h1 style="color:#3b82f6;">prefer<span style="color:#fff">endum</span></h1><p>Hola {name or "Ciudadano"},</p><p>Tu código:</p><div style="background:#1e2a3d;padding:24px;text-align:center;border-radius:8px;"><span style="font-size:40px;font-weight:bold;letter-spacing:10px;color:#3b82f6;">{code}</span></div><p style="color:#94a3b8;">Válido 10 minutos.</p></div>'
+
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f'Tu código Preferendum: {code}'
+        msg['From']    = f'Preferendum <{gmail_user}>'
+        msg['To']      = email
+        msg.attach(MIMEText(f'Tu código es: {code}. Válido 10 min.', 'plain'))
+        msg.attach(MIMEText(html, 'html'))
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(gmail_user, gmail_pass)
+            server.sendmail(gmail_user, email, msg.as_string())
+        print(f'[Gmail] Sent to {email}')
+        return True
+    except Exception as e:
+        print(f'[Gmail Error] {e}')
+        print(f'[DEV EMAIL] To: {email} | Code: {code}')
+        return False
 
 
 def send_sms_otp(phone, code):
