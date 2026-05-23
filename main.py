@@ -997,6 +997,14 @@ def get_results(debate_id: int, db: Session = Depends(get_db)):
             'confirmed': debate.verifications_ok,
         },
     }
+@app.get('/marketers', response_class=HTMLResponse)
+def marketers_page():
+    with open('preferendum_marketers_landing.html', 'r') as f:
+        return f.read()
 
+@app.get('/organizers', response_class=HTMLResponse)
+def organizers_page():
+    with open('preferendum_organizers_landing.html', 'r') as f:
+        return f.read()
 from verification import router as verify_router
 app.include_router(verify_router)
