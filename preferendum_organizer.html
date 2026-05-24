@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preferendum — Bienvenida Organizador</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#07090f;--deep:#0b0e1a;--card:#0f1424;--rim:#1a2035;
+    --blue:#2563eb;--blue2:#3b82f6;--gold:#f59e0b;--green:#10b981;
+    --coral:#f43f5e;--white:#f0f4ff;--muted:#64748b;--text:#c8d4e8;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--bg);color:var(--text);font-family:'Syne',sans-serif;min-height:100vh;}
+
+  /* ── PAGES ── */
+  .page{display:none;min-height:100vh;}
+  .page.active{display:flex;}
+
+  /* ── PAGE 1: WELCOME ── */
+  #page-welcome{
+    flex-direction:column;
+    align-items:center;justify-content:center;
+    padding:60px 40px;text-align:center;
+    background:radial-gradient(ellipse at 50% 0%, rgba(37,99,235,0.12) 0%, transparent 60%);
+  }
+  .logo-big{font-family:'Instrument Serif',serif;font-size:52px;color:var(--white);letter-spacing:-2px;margin-bottom:8px;}
+  .logo-big span{color:var(--blue2);}
+  .logo-tag{font-family:'DM Mono',monospace;font-size:13px;color:var(--muted);letter-spacing:3px;text-transform:uppercase;margin-bottom:48px;}
+
+  .welcome-card{background:var(--card);border:1px solid var(--rim);border-radius:20px;padding:48px;max-width:680px;width:100%;text-align:left;margin-bottom:32px;}
+  .welcome-title{font-family:'Instrument Serif',serif;font-size:32px;color:var(--white);margin-bottom:16px;line-height:1.2;}
+  .welcome-body{font-size:15px;color:var(--text);line-height:1.8;margin-bottom:24px;}
+  .welcome-body strong{color:var(--white);}
+
+  .video-placeholder{
+    background:var(--deep);border:1px solid var(--rim);border-radius:12px;
+    padding:48px;text-align:center;margin-bottom:24px;cursor:pointer;
+    transition:border-color 0.2s;
+  }
+  .video-placeholder:hover{border-color:var(--blue);}
+  .play-btn{font-size:48px;margin-bottom:12px;}
+  .video-title{font-size:15px;color:var(--white);font-weight:600;margin-bottom:6px;}
+  .video-sub{font-size:13px;color:var(--muted);}
+
+  .btn-primary{background:var(--blue);color:#fff;border:none;padding:16px 32px;border-radius:10px;font-family:'Syne',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:all 0.2s;width:100%;}
+  .btn-primary:hover{background:var(--blue2);transform:translateY(-1px);box-shadow:0 8px 24px rgba(37,99,235,0.3);}
+  .btn-secondary{background:transparent;border:1px solid var(--rim);color:var(--text);padding:14px 28px;border-radius:10px;font-family:'Syne',sans-serif;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;width:100%;margin-top:12px;}
+  .btn-secondary:hover{border-color:var(--blue);color:var(--white);}
+
+  /* ── PAGE 2: RULES ── */
+  #page-rules{flex-direction:column;align-items:center;padding:60px 40px;}
+  .rules-container{max-width:720px;width:100%;}
+  .rules-header{text-align:center;margin-bottom:40px;}
+  .rules-title{font-family:'Instrument Serif',serif;font-size:36px;color:var(--white);margin-bottom:8px;}
+  .rules-subtitle{font-size:14px;color:var(--muted);}
+
+  .rule-section{margin-bottom:32px;}
+  .rule-section-title{font-size:12px;font-family:'DM Mono',monospace;color:var(--blue2);letter-spacing:2px;text-transform:uppercase;margin-bottom:16px;}
+
+  .rule-item{
+    display:flex;gap:16px;padding:16px 20px;
+    background:var(--card);border:1px solid var(--rim);
+    border-radius:12px;margin-bottom:10px;
+  }
+  .rule-item.allowed{border-left:3px solid var(--green);}
+  .rule-item.forbidden{border-left:3px solid var(--coral);}
+  .rule-icon{font-size:20px;min-width:28px;}
+  .rule-text{font-size:13px;color:var(--text);line-height:1.6;}
+  .rule-text strong{color:var(--white);}
+
+  .penalty-box{
+    background:rgba(244,63,94,0.08);border:1px solid rgba(244,63,94,0.3);
+    border-radius:12px;padding:20px 24px;margin-top:24px;
+  }
+  .penalty-title{font-size:13px;font-weight:700;color:var(--coral);margin-bottom:8px;}
+  .penalty-text{font-size:13px;color:var(--text);line-height:1.7;}
+
+  /* ── PAGE 3: TERMS ── */
+  #page-terms{flex-direction:column;align-items:center;padding:60px 40px;}
+  .terms-container{max-width:720px;width:100%;}
+  .terms-body{
+    background:var(--card);border:1px solid var(--rim);
+    border-radius:16px;padding:32px;
+    height:380px;overflow-y:auto;margin-bottom:24px;
+    font-size:13px;color:var(--text);line-height:1.8;
+  }
+  .terms-body h3{color:var(--white);font-size:14px;margin:20px 0 8px;}
+  .terms-body h3:first-child{margin-top:0;}
+  .terms-body p{margin-bottom:12px;}
+
+  .accept-box{
+    display:flex;align-items:flex-start;gap:14px;
+    background:var(--card);border:1px solid var(--rim);
+    border-radius:12px;padding:20px;margin-bottom:16px;cursor:pointer;
+    transition:border-color 0.2s;
+  }
+  .accept-box:hover{border-color:var(--blue);}
+  .accept-box.checked{border-color:var(--green);}
+  .checkbox{
+    width:22px;height:22px;border:2px solid var(--rim);border-radius:6px;
+    display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;margin-top:1px;transition:all 0.2s;
+  }
+  .accept-box.checked .checkbox{background:var(--green);border-color:var(--green);}
+  .check-mark{color:white;font-size:13px;display:none;}
+  .accept-box.checked .check-mark{display:block;}
+  .accept-label{font-size:13px;color:var(--text);line-height:1.6;}
+  .accept-label strong{color:var(--white);}
+
+  /* ── PAGE 4: REGISTER ── */
+  #page-register{flex-direction:column;align-items:center;justify-content:center;padding:60px 40px;}
+  .register-card{background:var(--card);border:1px solid var(--rim);border-radius:20px;padding:48px;max-width:560px;width:100%;}
+  .register-title{font-family:'Instrument Serif',serif;font-size:28px;color:var(--white);margin-bottom:6px;}
+  .register-subtitle{font-size:13px;color:var(--muted);margin-bottom:32px;}
+
+  .form-group{margin-bottom:20px;}
+  .form-label{display:block;font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;}
+  .form-input,.form-select{width:100%;background:var(--deep);border:1px solid var(--rim);border-radius:8px;padding:12px 14px;color:var(--white);font-family:'Syne',sans-serif;font-size:13px;outline:none;transition:border-color 0.2s;}
+  .form-input:focus,.form-select:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,0.1);}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+
+  .verified-badge{
+    display:inline-flex;align-items:center;gap:6px;
+    background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);
+    border-radius:20px;padding:4px 12px;font-size:11px;
+    color:var(--green);font-family:'DM Mono',monospace;
+    margin-bottom:24px;
+  }
+
+  /* ── PROGRESS BAR ── */
+  .progress-bar{
+    display:flex;align-items:center;gap:0;
+    max-width:720px;width:100%;margin:0 auto 48px;
+  }
+  .progress-step{
+    flex:1;display:flex;flex-direction:column;align-items:center;
+    position:relative;
+  }
+  .progress-step::before{
+    content:'';position:absolute;top:16px;left:50%;right:-50%;
+    height:2px;background:var(--rim);z-index:0;
+  }
+  .progress-step:last-child::before{display:none;}
+  .progress-step.done::before{background:var(--blue);}
+  .step-circle{
+    width:32px;height:32px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:12px;font-weight:700;z-index:1;
+    background:var(--deep);border:2px solid var(--rim);color:var(--muted);
+    margin-bottom:8px;
+  }
+  .progress-step.active .step-circle{background:var(--blue);border-color:var(--blue);color:#fff;}
+  .progress-step.done .step-circle{background:var(--green);border-color:var(--green);color:#fff;}
+  .step-label{font-size:11px;color:var(--muted);font-family:'DM Mono',monospace;text-align:center;}
+  .progress-step.active .step-label,.progress-step.done .step-label{color:var(--text);}
+</style>
+</head>
+<body>
+
+<!-- ── PAGE 1: WELCOME ── -->
+<div class="page active" id="page-welcome">
+  <div style="width:100%;max-width:720px;margin:0 auto;">
+
+    <div style="text-align:center;margin-bottom:48px;">
+      <div class="logo-big">prefer<span>endum</span></div>
+      <div class="logo-tag">Panel del Organizador</div>
+    </div>
+
+    <div class="progress-bar">
+      <div class="progress-step active"><div class="step-circle">1</div><div class="step-label">Bienvenida</div></div>
+      <div class="progress-step"><div class="step-circle">2</div><div class="step-label">Normas</div></div>
+      <div class="progress-step"><div class="step-circle">3</div><div class="step-label">Términos</div></div>
+      <div class="progress-step"><div class="step-circle">4</div><div class="step-label">Registro</div></div>
+    </div>
+
+    <div class="welcome-card">
+      <div class="welcome-title">Bienvenido a Preferendum</div>
+      <div class="welcome-body">
+        <p>Preferendum es <strong>participación verificada en decisiones</strong> — para cualquier organización que necesite conocer las preferencias de sus miembros, clientes, accionistas o trabajadores.</p>
+        <br>
+        <ul style="list-style:none;display:flex;flex-direction:column;gap:12px;margin-bottom:8px;">
+          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--blue2);font-size:18px;min-width:24px;">🏢</span><div><strong style="color:var(--white);">Empresas</strong> — Consulta a tus clientes sobre preferencias de productos, a tus accionistas para decisiones estratégicas, a tus trabajadores de forma permanente.</div></li>
+          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--gold);font-size:18px;min-width:24px;">🤝</span><div><strong style="color:var(--white);">Asociaciones profesionales y gremiales</strong> — Consulta a tus miembros sobre posiciones, acuerdos y decisiones que los representan.</div></li>
+          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--green);font-size:18px;min-width:24px;">🌾</span><div><strong style="color:var(--white);">Asociaciones productivas</strong> — Coordina posiciones de tu sector ante regulaciones, mercados y tecnologías emergentes.</div></li>
+          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--blue2);font-size:18px;min-width:24px;">🏛</span><div><strong style="color:var(--white);">Partidos políticos</strong> — Consulta a tus militantes sobre temas y posiciones. Sube la lista de quiénes pueden participar.</div></li>
+          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--muted);font-size:18px;min-width:24px;">🏘</span><div><strong style="color:var(--white);">Gobiernos y municipios</strong> — Consulta ciudadana verificada con resultados en blockchain y Legitimacy Score público.</div></li>
+        </ul>
+      </div>
+
+      <!-- Video -->
+      <div class="video-placeholder" onclick="alert('Reproduciendo video explicativo de Preferendum...')">
+        <div class="play-btn">▶️</div>
+        <div class="video-title">Cómo funciona Preferendum</div>
+        <div class="video-sub">6 minutos · Español · Con subtítulos</div>
+      </div>
+
+      <button class="btn-primary" onclick="goTo('rules')">Continuar → Ver normas de uso</button>
+      <button class="btn-secondary" onclick="goTo('register')">Ya soy organizador — Iniciar sesión</button>
+    </div>
+
+    <div style="text-align:center;font-size:12px;color:var(--muted);margin-top:24px;">
+      En memoria de José Ignacio Fernández (1989–2024)
+    </div>
+  </div>
+</div>
+
+<!-- ── PAGE 2: RULES ── -->
+<div class="page" id="page-rules">
+  <div class="rules-container">
+
+    <div style="text-align:center;margin-bottom:32px;">
+      <div class="logo-big" style="font-size:32px;">prefer<span>endum</span></div>
+    </div>
+
+    <div class="progress-bar">
+      <div class="progress-step done"><div class="step-circle">✓</div><div class="step-label">Bienvenida</div></div>
+      <div class="progress-step active"><div class="step-circle">2</div><div class="step-label">Normas</div></div>
+      <div class="progress-step"><div class="step-circle">3</div><div class="step-label">Términos</div></div>
+      <div class="progress-step"><div class="step-circle">4</div><div class="step-label">Registro</div></div>
+    </div>
+
+    <div class="rules-header">
+      <div class="rules-title">Normas de uso</div>
+      <div class="rules-subtitle">Lee atentamente antes de publicar una consulta en Preferendum</div>
+    </div>
+
+    <!-- ALLOWED -->
+    <div class="rule-section">
+      <div class="rule-section-title">✅ Lo que puedes hacer</div>
+
+      <div class="rule-item allowed">
+        <div class="rule-icon">🏛</div>
+        <div class="rule-text"><strong>Consultas de interés público:</strong> presupuestos, planes de desarrollo, políticas públicas, prioridades municipales o nacionales.</div>
+      </div>
+      <div class="rule-item allowed">
+        <div class="rule-icon">🏢</div>
+        <div class="rule-text"><strong>Consultas empresariales legítimas:</strong> preferencias de productos, opiniones de clientes, decisiones corporativas.</div>
+      </div>
+      <div class="rule-item allowed">
+        <div class="rule-icon">🗣</div>
+        <div class="rule-text"><strong>Debate abierto:</strong> los ciudadanos pueden opinar libremente. Las opiniones se organizan por nivel de conocimiento del tema.</div>
+      </div>
+      <div class="rule-item allowed">
+        <div class="rule-icon">📊</div>
+        <div class="rule-text"><strong>Resultados transparentes:</strong> los resultados son públicos, verificados en blockchain y con Legitimacy Score siempre visible.</div>
+      </div>
+    </div>
+
+    <!-- FORBIDDEN -->
+    <div class="rule-section">
+      <div class="rule-section-title">🚫 Lo que está prohibido</div>
+
+      <div class="rule-item forbidden">
+        <div class="rule-icon">⚠️</div>
+        <div class="rule-text"><strong>Contenido ofensivo o discriminatorio:</strong> no se permite lenguaje que menosprecie, insulte o discrimine por raza, género, religión, orientación sexual, nacionalidad u otra condición.</div>
+      </div>
+      <div class="rule-item forbidden">
+        <div class="rule-icon">📢</div>
+        <div class="rule-text"><strong>Propaganda política partidista:</strong> no se pueden crear consultas diseñadas para favorecer o perjudicar a un partido, candidato o figura política específica.</div>
+      </div>
+      <div class="rule-item forbidden">
+        <div class="rule-icon">❌</div>
+        <div class="rule-text"><strong>Desinformación:</strong> las opciones y el contexto deben ser verídicos. No se permite información falsa, manipulada o diseñada para engañar a los votantes.</div>
+      </div>
+      <div class="rule-item forbidden">
+        <div class="rule-icon">🔞</div>
+        <div class="rule-text"><strong>Contenido adulto o violento:</strong> no se permite ningún contenido de carácter sexual, violento o inapropiado para menores de 13 años.</div>
+      </div>
+      <div class="rule-item forbidden">
+        <div class="rule-icon">💰</div>
+        <div class="rule-text"><strong>Incentivos para votar:</strong> no está permitido ofrecer compensaciones, premios o beneficios a cambio de votos.</div>
+      </div>
+      <div class="rule-item forbidden">
+        <div class="rule-icon">🔒</div>
+        <div class="rule-text"><strong>Datos personales:</strong> no se puede solicitar a los votantes información personal más allá de lo necesario para verificar su identidad.</div>
+      </div>
+    </div>
+
+    <div class="penalty-box">
+      <div class="penalty-title">⚠️ Consecuencias del incumplimiento</div>
+      <div class="penalty-text">
+        Las consultas que violen estas normas serán <strong>suspendidas inmediatamente</strong> sin reembolso. Las cuentas con infracciones graves serán <strong>inhabilitadas permanentemente</strong>. Preferendum se reserva el derecho de revisar cualquier consulta y actuar cuando corresponda.
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px;margin-top:32px;">
+      <button class="btn-secondary" style="flex:1" onclick="goTo('welcome')">← Volver</button>
+      <button class="btn-primary" style="flex:2" onclick="goTo('terms')">Entendido → Ver términos y condiciones</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PAGE 3: TERMS ── -->
+<div class="page" id="page-terms">
+  <div class="terms-container">
+
+    <div style="text-align:center;margin-bottom:32px;">
+      <div class="logo-big" style="font-size:32px;">prefer<span>endum</span></div>
+    </div>
+
+    <div class="progress-bar">
+      <div class="progress-step done"><div class="step-circle">✓</div><div class="step-label">Bienvenida</div></div>
+      <div class="progress-step done"><div class="step-circle">✓</div><div class="step-label">Normas</div></div>
+      <div class="progress-step active"><div class="step-circle">3</div><div class="step-label">Términos</div></div>
+      <div class="progress-step"><div class="step-circle">4</div><div class="step-label">Registro</div></div>
+    </div>
+
+    <div class="rules-header">
+      <div class="rules-title">Términos y condiciones</div>
+      <div class="rules-subtitle">Lee y acepta los términos para continuar</div>
+    </div>
+
+    <div class="terms-body">
+      <h3>1. Naturaleza de la plataforma</h3>
+      <p>Preferendum es una plataforma de consulta ciudadana digital. Los resultados de las consultas no tienen carácter vinculante a menos que la institución organizadora así lo declare expresamente.</p>
+
+      <h3>2. Responsabilidad del organizador</h3>
+      <p>El organizador es responsable del contenido de su consulta, incluyendo la pregunta, las opciones y el contexto. Preferendum actúa como intermediario tecnológico y no es responsable por las decisiones tomadas en base a los resultados.</p>
+
+      <h3>3. Privacidad y protección de datos</h3>
+      <p>Los votos son anónimos. Después de registrarse, la identidad del votante se desvincula de su voto mediante "bridge destruction". Los datos demográficos (género, edad, región) se almacenan de forma anónima y nunca se vinculan a identidades individuales.</p>
+
+      <h3>4. Legitimacy Score</h3>
+      <p>El Legitimacy Score mide el porcentaje de votantes que verificaron que su voto fue contado correctamente. Este indicador es siempre público y no puede ser ocultado por el organizador.</p>
+
+      <h3>5. Publicidad en debates</h3>
+      <p>Preferendum puede mostrar publicidad entre las opiniones del debate. Los anunciantes no tienen acceso a datos personales de los votantes. El organizador puede solicitar restricciones de publicidad pagando una tarifa adicional.</p>
+
+      <h3>6. Blockchain y permanencia</h3>
+      <p>Los hashes de votos y resultados se anclan en la blockchain de Polygon. Una vez registrados, son inmutables y públicamente verificables. El organizador acepta que los resultados serán permanentes.</p>
+
+      <h3>7. Moderación de contenido</h3>
+      <p>Preferendum se reserva el derecho de suspender consultas que violen las normas de uso, sin previo aviso y sin reembolso en caso de infracciones graves.</p>
+
+      <h3>8. Tarifas y pagos</h3>
+      <p>Las consultas básicas son gratuitas hasta cierto volumen de participantes. Las consultas de mayor escala y las funciones premium tienen tarifas que se detallan en el plan de precios vigente.</p>
+
+      <h3>9. Jurisdicción</h3>
+      <p>Estos términos se rigen por las leyes de la República de Chile. Cualquier disputa se resolverá en los tribunales de Santiago, Chile.</p>
+
+      <h3>10. Contacto</h3>
+      <p>Para consultas sobre estos términos: legal@preferendum.com — CAIP Task Force, Santiago, Chile.</p>
+    </div>
+
+    <div class="accept-box" id="acceptBox1" onclick="toggleAccept('acceptBox1')">
+      <div class="checkbox"><span class="check-mark">✓</span></div>
+      <div class="accept-label"><strong>Acepto los términos y condiciones</strong> de Preferendum y me comprometo a usarla de acuerdo con sus normas de uso.</div>
+    </div>
+
+    <div class="accept-box" id="acceptBox2" onclick="toggleAccept('acceptBox2')">
+      <div class="checkbox"><span class="check-mark">✓</span></div>
+      <div class="accept-label"><strong>Confirmo que soy mayor de 18 años</strong> y que tengo autorización para representar a la organización que declaro ser.</div>
+    </div>
+
+    <div class="accept-box" id="acceptBox3" onclick="toggleAccept('acceptBox3')">
+      <div class="checkbox"><span class="check-mark">✓</span></div>
+      <div class="accept-label"><strong>Entiendo que el Legitimacy Score</strong> de mis consultas será siempre público y no podré ocultarlo.</div>
+    </div>
+
+    <div style="display:flex;gap:12px;margin-top:24px;">
+      <button class="btn-secondary" style="flex:1" onclick="goTo('rules')">← Volver</button>
+      <button class="btn-primary" style="flex:2" id="continueBtn" onclick="checkAccept()">Aceptar y continuar →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PAGE 4: REGISTER ── -->
+<div class="page" id="page-register">
+  <div class="register-card">
+
+    <div style="text-align:center;margin-bottom:32px;">
+      <div class="logo-big" style="font-size:28px;">prefer<span>endum</span></div>
+    </div>
+
+    <div class="progress-bar" style="margin-bottom:32px;">
+      <div class="progress-step done"><div class="step-circle">✓</div><div class="step-label">Bienvenida</div></div>
+      <div class="progress-step done"><div class="step-circle">✓</div><div class="step-label">Normas</div></div>
+      <div class="progress-step done"><div class="step-circle">✓</div><div class="step-label">Términos</div></div>
+      <div class="progress-step active"><div class="step-circle">4</div><div class="step-label">Registro</div></div>
+    </div>
+
+    <div class="verified-badge">🔒 Conexión segura · Datos encriptados</div>
+
+    <div class="register-title">Crear cuenta de organizador</div>
+    <div class="register-subtitle">Toda la información será verificada antes de publicar tu primera consulta.</div>
+
+    <div class="form-group">
+      <label class="form-label">Tipo de organización</label>
+      <select class="form-select">
+        <option>Empresa — Consulta a clientes / accionistas / trabajadores</option>
+        <option>Asociación profesional o gremial</option>
+        <option>Asociación productiva o sectorial</option>
+        <option>Partido político</option>
+        <option>Universidad o institución académica</option>
+        <option>Organización sin fines de lucro</option>
+        <option>Municipalidad / Gobierno local</option>
+        <option>Ministerio / Gobierno nacional</option>
+        <option>Congreso / Parlamento</option>
+        <option>Ciudadano particular</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Nombre de la organización</label>
+      <input class="form-input" type="text" placeholder="Ej: Municipalidad Las Condes">
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">País</label>
+        <select class="form-select">
+          <option>Chile</option>
+          <option>Argentina</option>
+          <option>Colombia</option>
+          <option>México</option>
+          <option>Perú</option>
+          <option>España</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Región / Estado</label>
+        <input class="form-input" type="text" placeholder="Ej: Región Metropolitana">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Email institucional</label>
+      <input class="form-input" type="email" placeholder="contacto@municipalidad.cl">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Nombre del responsable</label>
+      <input class="form-input" type="text" placeholder="Nombre completo">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Contraseña</label>
+      <input class="form-input" type="password" placeholder="Mínimo 8 caracteres">
+    </div>
+
+    <button class="btn-primary" onclick="register()" style="margin-top:8px;">Crear cuenta y acceder al panel →</button>
+
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--muted);">
+      ¿Ya tienes cuenta? <a href="#" style="color:var(--blue2);" onclick="login()">Iniciar sesión</a>
+    </div>
+  </div>
+</div>
+
+<script>
+function goTo(pageId){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-'+pageId).classList.add('active');
+  window.scrollTo(0,0);
+}
+
+function toggleAccept(id){
+  document.getElementById(id).classList.toggle('checked');
+}
+
+function checkAccept(){
+  const all = ['acceptBox1','acceptBox2','acceptBox3'].every(id=>document.getElementById(id).classList.contains('checked'));
+  if(!all){
+    alert('Debes aceptar todos los términos para continuar.');
+    return;
+  }
+  goTo('register');
+}
+
+function register(){
+  alert('✅ Cuenta creada exitosamente.\n\nRecibirás un email de verificación en tu correo institucional.\nUna vez verificado podrás publicar tu primera consulta.');
+}
+
+function login(){
+  alert('Iniciando sesión...\nAccediendo al panel del organizador.');
+}
+</script>
+</body>
+</html>
