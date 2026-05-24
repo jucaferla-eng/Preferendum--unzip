@@ -1027,6 +1027,10 @@ def organizer_register(data: RegisterInput, db: Session = Depends(get_db)):
 def organizer_panel():
     with open('preferendum_organizer.html', 'r') as f:
         return f.read()
+@app.get('/organizer-panel', response_class=HTMLResponse)
+def organizer_panel():
+    with open('preferendum_organizer.html', 'r') as f:
+        return f.read()
 
 from verification import router as verify_router
 app.include_router(verify_router)
