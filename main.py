@@ -1006,6 +1006,23 @@ def marketers_page():
 def organizers_page():
     with open('preferendum_organizers.html', 'r') as f:
         return f.read()
+@app.post('/organizers/register')
+def organizer_register(data: RegisterInput, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == data.email).first():
+        raise HTTPException(400, 'Email already registered')
+    hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+    user = User(
+        email=data.email, name=data.name, password=hashed,
+        phone=data.phone, country=data.country, role='organizer',
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {
+        'token': make_token(user.id, 'organizer'),
+        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': 'organizer'},
+        'message': 'Organizer account created'
+    }
 
 from verification import router as verify_router
 app.include_router(verify_router)
