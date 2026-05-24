@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preferendum — For Advertisers</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Mono:wght@300;400;500&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#060810;--paper:#f5f3ee;--bone:#e8e4dc;--warm:#d4cfc5;--blue:#1a3a8f;--blue2:#2952c4;--gold:#c49a2a;--gold2:#e8b830;--green:#1a7a4a;--coral:#c43a2a;--muted:#7a7570;--text:#2a2820;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--ink);color:var(--paper);font-family:'Manrope',sans-serif;overflow-x:hidden;}
+
+/* HERO */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 48px;text-align:center;background:var(--ink);position:relative;}
+.hero::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");pointer-events:none;z-index:0;opacity:0.3;}
+
+.nav{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:20px 48px;background:rgba(6,8,16,0.85);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,0.06);z-index:100;}
+.nav-logo{font-family:'Playfair Display',serif;font-size:20px;color:var(--paper);}
+.nav-logo span{color:var(--gold2);}
+.nav-cta{background:var(--gold);color:var(--ink);border:none;padding:10px 24px;border-radius:4px;font-family:'Manrope',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:all 0.2s;}
+.nav-cta:hover{background:var(--gold2);}
+
+.tag{font-family:'DM Mono',monospace;font-size:11px;color:var(--gold);letter-spacing:3px;text-transform:uppercase;margin-bottom:24px;}
+.hero-title{font-family:'Playfair Display',serif;font-size:clamp(48px,6vw,88px);color:var(--paper);line-height:1.05;letter-spacing:-2px;margin-bottom:24px;max-width:900px;}
+.hero-title em{color:var(--gold2);font-style:italic;}
+.hero-sub{font-size:18px;color:rgba(245,243,238,0.6);max-width:580px;line-height:1.8;margin-bottom:48px;}
+
+.hero-stats{display:flex;gap:48px;justify-content:center;border-top:1px solid rgba(255,255,255,0.08);padding-top:48px;margin-top:16px;width:100%;max-width:700px;}
+.stat-num{font-family:'Playfair Display',serif;font-size:40px;color:var(--gold2);line-height:1;margin-bottom:6px;}
+.stat-label{font-size:11px;color:rgba(245,243,238,0.5);font-family:'DM Mono',monospace;letter-spacing:1px;}
+
+/* SECTIONS */
+section{padding:100px 80px;max-width:1200px;margin:0 auto;width:100%;}
+.section-tag{font-family:'DM Mono',monospace;font-size:11px;color:var(--gold);letter-spacing:3px;text-transform:uppercase;margin-bottom:20px;}
+.section-title{font-family:'Playfair Display',serif;font-size:clamp(36px,4vw,56px);color:var(--paper);line-height:1.1;letter-spacing:-1.5px;margin-bottom:24px;}
+.section-title em{color:var(--gold2);font-style:italic;}
+.section-body{font-size:16px;color:rgba(245,243,238,0.65);line-height:1.8;max-width:640px;}
+
+/* THE DIFFERENCE */
+.diff-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:48px;}
+.diff-card{border-radius:16px;padding:36px;}
+.diff-card.old{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);}
+.diff-card.new{background:rgba(196,154,42,0.1);border:1px solid rgba(196,154,42,0.3);}
+.diff-label{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;margin-bottom:20px;}
+.diff-card.old .diff-label{color:rgba(245,243,238,0.3);}
+.diff-card.new .diff-label{color:var(--gold2);}
+.diff-item{display:flex;gap:12px;margin-bottom:14px;font-size:15px;line-height:1.6;}
+.diff-card.old .diff-item{color:rgba(245,243,238,0.45);}
+.diff-card.new .diff-item{color:var(--paper);}
+.diff-icon{min-width:20px;}
+
+/* WHY BETTER */
+.why-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-top:48px;}
+.why-card{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:32px;transition:all 0.3s;position:relative;overflow:hidden;}
+.why-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--gold);opacity:0.6;}
+.why-card:hover{background:rgba(196,154,42,0.08);border-color:rgba(196,154,42,0.3);transform:translateY(-4px);}
+.why-icon{font-size:28px;margin-bottom:16px;}
+.why-title{font-family:'Playfair Display',serif;font-size:20px;color:var(--paper);margin-bottom:10px;}
+.why-desc{font-size:14px;color:rgba(245,243,238,0.6);line-height:1.7;}
+.why-metric{margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.08);font-family:'DM Mono',monospace;font-size:13px;color:var(--gold2);}
+
+/* TARGETING */
+.targeting-section{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:24px;padding:60px;margin-top:48px;}
+.targeting-title{font-family:'Playfair Display',serif;font-size:32px;color:var(--paper);margin-bottom:16px;}
+.targeting-body{font-size:15px;color:rgba(245,243,238,0.6);line-height:1.8;margin-bottom:36px;max-width:600px;}
+.se-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;}
+.se-card{background:var(--ink);border-radius:12px;padding:20px;text-align:center;}
+.se-tier{font-family:'Playfair Display',serif;font-size:28px;color:var(--gold2);margin-bottom:6px;}
+.se-cpm{font-family:'DM Mono',monospace;font-size:13px;color:rgba(245,243,238,0.6);margin-bottom:8px;}
+.se-example{font-size:11px;color:rgba(245,243,238,0.4);}
+
+/* CPM TABLE */
+.cpm-section{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:48px;align-items:start;}
+.cpm-table{width:100%;border-collapse:collapse;}
+.cpm-table th{font-family:'DM Mono',monospace;font-size:10px;color:rgba(245,243,238,0.4);letter-spacing:1px;text-transform:uppercase;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.08);text-align:left;}
+.cpm-table td{padding:12px 0;font-size:13px;border-bottom:1px solid rgba(255,255,255,0.05);color:rgba(245,243,238,0.7);}
+.cpm-price{color:var(--gold2);font-weight:700;}
+
+/* QUOTE */
+.big-quote{text-align:center;padding:80px 48px;border-top:1px solid rgba(255,255,255,0.06);border-bottom:1px solid rgba(255,255,255,0.06);}
+.big-quote-text{font-family:'Playfair Display',serif;font-size:clamp(24px,3vw,40px);color:var(--paper);font-style:italic;line-height:1.4;max-width:800px;margin:0 auto;}
+.big-quote-text em{color:var(--gold2);}
+
+/* CTA */
+.cta-section{text-align:center;padding:100px 48px;}
+.cta-title{font-family:'Playfair Display',serif;font-size:clamp(36px,4vw,60px);color:var(--paper);line-height:1.1;letter-spacing:-1.5px;margin-bottom:20px;}
+.cta-sub{font-size:16px;color:rgba(245,243,238,0.6);margin-bottom:40px;max-width:480px;margin-left:auto;margin-right:auto;line-height:1.7;}
+.cta-btn{background:var(--gold);color:var(--ink);border:none;padding:18px 40px;border-radius:6px;font-family:'Manrope',sans-serif;font-size:16px;font-weight:700;cursor:pointer;transition:all 0.2s;display:inline-block;}
+.cta-btn:hover{background:var(--gold2);transform:translateY(-2px);box-shadow:0 12px 32px rgba(196,154,42,0.3);}
+.memorial{font-family:'Playfair Display',serif;font-style:italic;font-size:13px;color:rgba(245,243,238,0.3);margin-top:60px;}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-logo">prefer<span>endum</span></div>
+  <button class="nav-cta" onclick="document.querySelector('.cta-section').scrollIntoView({behavior:'smooth'})">Start advertising →</button>
+</nav>
+
+<!-- HERO -->
+<div class="hero" style="position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:120px 48px 80px;text-align:center;overflow:hidden;">
+  <!-- Crowd SVG background -->
+  <div style="position:absolute;inset:0;z-index:0;overflow:hidden;">
+    <svg viewBox="0 0 1440 900" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;object-fit:cover;">
+      <defs>
+        <radialGradient id="heroGrad" cx="50%" cy="40%" r="60%">
+          <stop offset="0%" stop-color="#1a3a8f" stop-opacity="0.3"/>
+          <stop offset="100%" stop-color="#060810" stop-opacity="1"/>
+        </radialGradient>
+        <filter id="blur"><feGaussianBlur stdDeviation="0.5"/></filter>
+      </defs>
+      <!-- Crowd silhouettes - row 1 back -->
+      <g fill="#0d1528" filter="url(#blur)">
+        <ellipse cx="80" cy="820" rx="18" ry="60"/>
+        <ellipse cx="140" cy="810" rx="16" ry="55"/>
+        <ellipse cx="200" cy="825" rx="19" ry="62"/>
+        <ellipse cx="260" cy="815" rx="17" ry="58"/>
+        <ellipse cx="320" cy="820" rx="20" ry="65"/>
+        <ellipse cx="380" cy="812" rx="16" ry="54"/>
+        <ellipse cx="440" cy="822" rx="18" ry="60"/>
+        <ellipse cx="500" cy="818" rx="17" ry="57"/>
+        <ellipse cx="560" cy="825" rx="19" ry="63"/>
+        <ellipse cx="620" cy="814" rx="16" ry="55"/>
+        <ellipse cx="680" cy="820" rx="20" ry="64"/>
+        <ellipse cx="740" cy="816" rx="17" ry="58"/>
+        <ellipse cx="800" cy="822" rx="18" ry="61"/>
+        <ellipse cx="860" cy="810" rx="16" ry="54"/>
+        <ellipse cx="920" cy="818" rx="19" ry="62"/>
+        <ellipse cx="980" cy="824" rx="17" ry="58"/>
+        <ellipse cx="1040" cy="820" rx="20" ry="65"/>
+        <ellipse cx="1100" cy="815" rx="16" ry="56"/>
+        <ellipse cx="1160" cy="822" rx="18" ry="60"/>
+        <ellipse cx="1220" cy="818" rx="17" ry="57"/>
+        <ellipse cx="1280" cy="824" rx="19" ry="63"/>
+        <ellipse cx="1340" cy="812" rx="16" ry="55"/>
+        <ellipse cx="1400" cy="820" rx="18" ry="61"/>
+      </g>
+      <!-- Heads row 1 -->
+      <g fill="#0f1d38">
+        <circle cx="80" cy="758" r="14"/>
+        <circle cx="140" cy="753" r="13"/>
+        <circle cx="200" cy="760" r="15"/>
+        <circle cx="260" cy="754" r="13"/>
+        <circle cx="320" cy="752" r="15"/>
+        <circle cx="380" cy="755" r="12"/>
+        <circle cx="440" cy="759" r="14"/>
+        <circle cx="500" cy="758" r="13"/>
+        <circle cx="560" cy="760" r="14"/>
+        <circle cx="620" cy="756" r="12"/>
+        <circle cx="680" cy="753" r="15"/>
+        <circle cx="740" cy="757" r="13"/>
+        <circle cx="800" cy="759" r="14"/>
+        <circle cx="860" cy="752" r="12"/>
+        <circle cx="920" cy="755" r="14"/>
+        <circle cx="980" cy="762" r="13"/>
+        <circle cx="1040" cy="752" r="15"/>
+        <circle cx="1100" cy="756" r="12"/>
+        <circle cx="1160" cy="759" r="14"/>
+        <circle cx="1220" cy="755" r="13"/>
+        <circle cx="1280" cy="761" r="14"/>
+        <circle cx="1340" cy="751" r="12"/>
+        <circle cx="1400" cy="757" r="14"/>
+      </g>
+      <!-- Row 2 mid -->
+      <g fill="#101e3a" opacity="0.9">
+        <ellipse cx="50" cy="700" rx="15" ry="50"/>
+        <ellipse cx="110" cy="692" rx="14" ry="48"/>
+        <ellipse cx="170" cy="698" rx="16" ry="52"/>
+        <ellipse cx="230" cy="694" rx="14" ry="47"/>
+        <ellipse cx="290" cy="700" rx="16" ry="53"/>
+        <ellipse cx="350" cy="695" rx="14" ry="48"/>
+        <ellipse cx="410" cy="701" rx="15" ry="51"/>
+        <ellipse cx="470" cy="696" rx="13" ry="46"/>
+        <ellipse cx="530" cy="700" rx="16" ry="52"/>
+        <ellipse cx="590" cy="694" rx="14" ry="47"/>
+        <ellipse cx="650" cy="699" rx="15" ry="50"/>
+        <ellipse cx="710" cy="695" rx="14" ry="48"/>
+        <ellipse cx="770" cy="701" rx="16" ry="53"/>
+        <ellipse cx="830" cy="693" rx="13" ry="46"/>
+        <ellipse cx="890" cy="698" rx="15" ry="50"/>
+        <ellipse cx="950" cy="702" rx="14" ry="48"/>
+        <ellipse cx="1010" cy="695" rx="16" ry="52"/>
+        <ellipse cx="1070" cy="699" rx="13" ry="46"/>
+        <ellipse cx="1130" cy="701" rx="15" ry="51"/>
+        <ellipse cx="1190" cy="694" rx="14" ry="47"/>
+        <ellipse cx="1250" cy="700" rx="16" ry="52"/>
+        <ellipse cx="1310" cy="696" rx="13" ry="46"/>
+        <ellipse cx="1370" cy="700" rx="15" ry="50"/>
+        <ellipse cx="1430" cy="695" rx="14" ry="48"/>
+      </g>
+      <!-- Heads row 2 -->
+      <g fill="#1a2d52" opacity="0.85">
+        <circle cx="50" cy="648" r="12"/>
+        <circle cx="110" cy="642" r="11"/>
+        <circle cx="170" cy="645" r="13"/>
+        <circle cx="230" cy="644" r="11"/>
+        <circle cx="290" cy="645" r="13"/>
+        <circle cx="350" cy="643" r="11"/>
+        <circle cx="410" cy="648" r="12"/>
+        <circle cx="470" cy="646" r="10"/>
+        <circle cx="530" cy="645" r="12"/>
+        <circle cx="590" cy="644" r="11"/>
+        <circle cx="650" cy="647" r="12"/>
+        <circle cx="710" cy="643" r="11"/>
+        <circle cx="770" cy="646" r="13"/>
+        <circle cx="830" cy="642" r="10"/>
+        <circle cx="890" cy="645" r="12"/>
+        <circle cx="950" cy="648" r="11"/>
+        <circle cx="1010" cy="643" r="13"/>
+        <circle cx="1070" cy="647" r="10"/>
+        <circle cx="1130" cy="645" r="12"/>
+        <circle cx="1190" cy="643" r="11"/>
+        <circle cx="1250" cy="646" r="12"/>
+        <circle cx="1310" cy="644" r="10"/>
+        <circle cx="1370" cy="647" r="12"/>
+        <circle cx="1430" cy="643" r="11"/>
+      </g>
+      <!-- Row 3 far back smaller -->
+      <g fill="#1e3258" opacity="0.6">
+        <circle cx="70" cy="600" r="9"/>
+        <circle cx="130" cy="596" r="8"/>
+        <circle cx="190" cy="602" r="9"/>
+        <circle cx="250" cy="598" r="8"/>
+        <circle cx="310" cy="601" r="10"/>
+        <circle cx="370" cy="597" r="8"/>
+        <circle cx="430" cy="602" r="9"/>
+        <circle cx="490" cy="599" r="8"/>
+        <circle cx="550" cy="601" r="9"/>
+        <circle cx="610" cy="597" r="8"/>
+        <circle cx="670" cy="600" r="10"/>
+        <circle cx="730" cy="598" r="8"/>
+        <circle cx="790" cy="602" r="9"/>
+        <circle cx="850" cy="596" r="8"/>
+        <circle cx="910" cy="600" r="9"/>
+        <circle cx="970" cy="598" r="8"/>
+        <circle cx="1030" cy="601" r="10"/>
+        <circle cx="1090" cy="597" r="8"/>
+        <circle cx="1150" cy="600" r="9"/>
+        <circle cx="1210" cy="598" r="8"/>
+        <circle cx="1270" cy="602" r="9"/>
+        <circle cx="1330" cy="596" r="8"/>
+        <circle cx="1390" cy="600" r="9"/>
+      </g>
+      <!-- Some raised hands/phones -->
+      <g fill="#2952c4" opacity="0.5">
+        <rect x="318" y="710" width="4" height="30" rx="2"/>
+        <rect x="560" y="705" width="4" height="28" rx="2"/>
+        <rect x="800" y="712" width="4" height="26" rx="2"/>
+        <rect x="1040" y="708" width="4" height="30" rx="2"/>
+        <rect x="1280" y="706" width="4" height="28" rx="2"/>
+      </g>
+      <!-- Gradient overlay top to show text -->
+      <rect width="1440" height="900" fill="url(#heroGrad)"/>
+      <rect width="1440" height="500" fill="url(#heroGrad2)" opacity="0"/>
+      <!-- Top dark overlay for text readability -->
+      <linearGradient id="topDark" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#060810" stop-opacity="0.95"/>
+        <stop offset="50%" stop-color="#060810" stop-opacity="0.6"/>
+        <stop offset="100%" stop-color="#060810" stop-opacity="0.85"/>
+      </linearGradient>
+      <rect width="1440" height="900" fill="url(#topDark)"/>
+    </svg>
+  </div>
+
+  <!-- Content over crowd -->
+  <div style="position:relative;z-index:1;">
+    <div class="tag">For advertisers</div>
+    <h1 class="hero-title">Stop buying attention.<br><em>Buy decisions.</em></h1>
+    <p class="hero-sub">People on Preferendum are not scrolling. They are actively deciding something that matters to them. That attention is worth ten times more.</p>
+    <div class="hero-stats">
+      <div><div class="stat-num">94%</div><div class="stat-label">Active engagement rate</div></div>
+      <div><div class="stat-num">$0.04</div><div class="stat-label">Average cost per voter reached</div></div>
+      <div><div class="stat-num">147K+</div><div class="stat-label">Voters per campaign</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- THE DIFFERENCE -->
+<section>
+  <div class="section-tag">The difference</div>
+  <h2 class="section-title">Other platforms sell scrolling.<br><em>We sell thinking.</em></h2>
+  <p class="section-body">When someone enters a debate on Preferendum, they read the issue, consider the arguments, and make a decision. That is the most valuable attention in the digital world.</p>
+
+  <div class="diff-grid">
+    <div class="diff-card old">
+      <div class="diff-label">Traditional digital advertising</div>
+      <div class="diff-item"><span class="diff-icon">→</span><span>People passively scrolling, watching, passing time</span></div>
+      <div class="diff-item"><span class="diff-icon">→</span><span>Attention easily lost in 1.7 seconds</span></div>
+      <div class="diff-item"><span class="diff-icon">→</span><span>Targeting based on browsing history</span></div>
+      <div class="diff-item"><span class="diff-icon">→</span><span>CPM based on demographics</span></div>
+      <div class="diff-item"><span class="diff-icon">→</span><span>You pay for impressions, not for real attention</span></div>
+    </div>
+    <div class="diff-card new">
+      <div class="diff-label">Preferendum advertising</div>
+      <div class="diff-item"><span class="diff-icon" style="color:var(--gold2)">✓</span><span>People actively reading, thinking, deciding</span></div>
+      <div class="diff-item"><span class="diff-icon" style="color:var(--gold2)">✓</span><span>Average 4+ minutes of focused attention per debate</span></div>
+      <div class="diff-item"><span class="diff-icon" style="color:var(--gold2)">✓</span><span>Targeting by geography and purchasing power</span></div>
+      <div class="diff-item"><span class="diff-icon" style="color:var(--gold2)">✓</span><span>CPM based on real income proxy (m² of housing)</span></div>
+      <div class="diff-item"><span class="diff-icon" style="color:var(--gold2)">✓</span><span>You pay per voter who actually saw your ad</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- WHY BETTER -->
+<section style="padding-top:0;">
+  <div class="section-tag">Why it works</div>
+  <h2 class="section-title">Three reasons your brand<br><em>belongs here.</em></h2>
+  <div class="why-grid">
+    <div class="why-card">
+      <div class="why-icon">🧠</div>
+      <div class="why-title">Maximum intent</div>
+      <div class="why-desc">A person debating "which infrastructure should my city invest in?" is the same person who decides which car to buy, which bank to trust, which brand to choose. They are in decision mode.</div>
+      <div class="why-metric">94.2% active engagement · Not passive scrolling</div>
+    </div>
+    <div class="why-card">
+      <div class="why-icon">📍</div>
+      <div class="why-title">Precise targeting</div>
+      <div class="why-desc">Every city is geographically divided by income. A debate in Las Condes reaches a different audience than a debate in Santiago Centro. We know the difference — without violating privacy.</div>
+      <div class="why-metric">Purchasing power proxy · No personal data sold</div>
+    </div>
+    <div class="why-card">
+      <div class="why-icon">⛓</div>
+      <div class="why-title">Verified results</div>
+      <div class="why-desc">Unlike any other platform, we can tell you exactly how many voters saw your ad — verified by blockchain. No inflated numbers. No bots. Immutable transparency.</div>
+      <div class="why-metric">Blockchain-verified impressions · Legitimacy Score</div>
+    </div>
+  </div>
+</section>
+
+<!-- TARGETING -->
+<section style="padding-top:0;">
+  <div class="targeting-section">
+    <div class="targeting-title">Reach who you actually want.</div>
+    <p class="targeting-body">Preferendum uses the square meters of housing in each area as a proxy for purchasing power — without accessing any personal financial data. Your ad reaches exactly the audience that matters for your brand.</p>
+    <div class="se-grid">
+      <div class="se-card">
+        <div class="se-tier">SE A</div>
+        <div class="se-cpm">CPM $12–15</div>
+        <div class="se-example">Las Condes · Vitacura · Beverly Hills · Kensington</div>
+      </div>
+      <div class="se-card">
+        <div class="se-tier">SE B</div>
+        <div class="se-cpm">CPM $7–11</div>
+        <div class="se-example">Providencia · Ñuñoa · Miraflores · Palermo</div>
+      </div>
+      <div class="se-card">
+        <div class="se-tier">SE C</div>
+        <div class="se-cpm">CPM $4–6</div>
+        <div class="se-example">Santiago Centro · Recoleta · Centro histórico</div>
+      </div>
+      <div class="se-card">
+        <div class="se-tier">SE D</div>
+        <div class="se-cpm">CPM $2–3</div>
+        <div class="se-example">Periferia · Massive reach · Volume markets</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- GLOBAL CPM -->
+<section style="padding-top:0;">
+  <div class="section-tag">Global reach</div>
+  <h2 class="section-title">One platform.<br><em>Every market.</em></h2>
+  <div class="cpm-section">
+    <div>
+      <p class="section-body">Preferendum operates in 18 languages across every continent. Your campaign reaches the right audience wherever Preferendum debates are active.</p>
+      <div style="margin-top:32px;">
+        <div style="font-family:'Playfair Display',serif;font-size:48px;color:var(--gold2);">18</div>
+        <div style="font-size:12px;color:rgba(245,243,238,0.4);font-family:'DM Mono',monospace;letter-spacing:1px;margin-top:4px;">Languages · Available now</div>
+      </div>
+    </div>
+    <table class="cpm-table">
+      <tr><th>Market</th><th>CPM</th><th>Countries</th></tr>
+      <tr><td>Premium</td><td class="cpm-price">$12–15</td><td style="color:rgba(245,243,238,0.5);font-size:12px;">US, UK, DE, JP, FR, CA, AU</td></tr>
+      <tr><td>Mid-tier</td><td class="cpm-price">$6–11</td><td style="color:rgba(245,243,238,0.5);font-size:12px;">BR, MX, CL, AR, KR, ES</td></tr>
+      <tr><td>Growth</td><td class="cpm-price">$3–5</td><td style="color:rgba(245,243,238,0.5);font-size:12px;">CO, PE, TR, PL, ZA, MY</td></tr>
+      <tr><td>Volume</td><td class="cpm-price">$1–3</td><td style="color:rgba(245,243,238,0.5);font-size:12px;">IN, ID, NG, PH, VN, TH</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- QUOTE -->
+<div class="big-quote">
+  <p class="big-quote-text">"A person who is <em>actively deciding</em> something is infinitely more valuable than a person who is passively scrolling."</p>
+</div>
+
+<!-- CTA -->
+<div class="cta-section">
+  <h2 class="cta-title">Your brand belongs<br>in every decision.</h2>
+  <p class="cta-sub">Join the advertisers who reach people when they are thinking — not when they are distracted.</p>
+  <button class="cta-btn" onclick="alert('Connecting you with our advertising team...')">Start your first campaign →</button>
+  <div class="memorial">In memory of José Ignacio Fernández (1989–2024)</div>
+</div>
+
+</body>
+</html>
