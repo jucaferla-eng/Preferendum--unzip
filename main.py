@@ -999,19 +999,13 @@ def get_results(debate_id: int, db: Session = Depends(get_db)):
     }
 @app.get('/marketers', response_class=HTMLResponse)
 def marketers_page():
-    return """<!DOCTYPE html><html><head><title>Preferendum - Advertisers</title></head>
-    <body style="background:#060810;color:#f0f4ff;font-family:sans-serif;padding:80px;text-align:center;">
-    <h1 style="font-size:60px;color:#e8b830;">Stop buying attention.<br>Buy decisions.</h1>
-    <p style="font-size:20px;color:#64748b;margin-top:24px;">Coming soon — Preferendum Advertiser Platform</p>
-    </body></html>"""
+    with open('preferendum_marketers.html', 'r') as f:
+        return f.read()
 
-@app.get('/organizers', response_class=HTMLResponse)  
+@app.get('/organizers', response_class=HTMLResponse)
 def organizers_page():
-    return """<!DOCTYPE html><html><head><title>Preferendum - Organizers</title></head>
-    <body style="background:#f5f3ee;color:#060810;font-family:sans-serif;padding:80px;text-align:center;">
-    <h1 style="font-size:60px;color:#1a3a8f;">You have the power<br>to ask.</h1>
-    <p style="font-size:20px;color:#7a7570;margin-top:24px;">Coming soon — Preferendum Organizer Platform</p>
-    </body></html>"""
+    with open('preferendum_organizers.html', 'r') as f:
+        return f.read()
 
 from verification import router as verify_router
 app.include_router(verify_router)
