@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 // ══ DESIGN TOKENS ══════════════════════════════════════════════
 const T = {
@@ -252,6 +252,19 @@ export default function PreferendumV8() {
 
   const API = 'https://preferendum-unzip.onrender.com';
 
+  const [authToken, setAuthToken]   = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [apiDebates, setApiDebates] = useState([]);
+  const [debatesLoading, setDebatesLoading] = useState(false);
+
+  // Opinions state
+  const [debateOpinions, setDebateOpinions] = useState([]);
+  const [opinionsLoading, setOpinionsLoading] = useState(false);
+  const [newOpinionText, setNewOpinionText] = useState('');
+  const [knowledgeLevel, setKnowledgeLevel] = useState('familiar');
+  const [postingOpinion, setPostingOpinion] = useState(false);
+  const [opinionError, setOpinionError] = useState('');
+
   const markDone = (step) => {
     setVfDone(prev=>({...prev,[step]:true}));
     setTimeout(()=>setVfStep(step+1),600);
@@ -295,6 +308,89 @@ export default function PreferendumV8() {
   const phone={background:T.bg,minHeight:"100vh",
     fontFamily:"-apple-system,system-ui,sans-serif",
     color:T.snow,maxWidth:420,margin:"0 auto"};
+
+  // ── API HELPERS ────────────────────────────────────────────
+  const apiFetch = async (method, path, body=null) => {
+    const headers = {'Content-Type':'application/json'};
+    if(authToken) headers['Authorization'] = `Bearer ${authToken}`;
+    const res = await fetch(`${API}${path}`, {
+      method, headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(data.detail || 'Error de conexión');
+    return data;
+  };
+
+  const transformDebate = (d) => ({
+    id:           d.id,
+    title:        d.title,
+    inst:         d.inst_name,
+    type:         d.debate_type === 'priv' ? 'priv' : 'gov',
+    opts:         d.options,
+    vals:         d.results ? d.results.map(r => r.count) : d.options.map(()=>0),
+    votes:        d.total_votes,
+    comments:     0,
+    status:       d.status,
+    closes:       d.closes_at ? new Date(d.closes_at).toLocaleDateString('es-CL') : null,
+    verify_opens: null,
+    verify_closes:d.verify_closes_at ? new Date(d.verify_closes_at).toLocaleDateString('es-CL') : null,
+  });
+
+  const loadDebates = async () => {
+    setDebatesLoading(true);
+    try {
+      const data = await apiFetch('GET', '/debates?country=CL');
+      if(data.debates && data.debates.length > 0) {
+        setApiDebates(data.debates.map(transformDebate));
+      }
+    } catch(e) { /* fall back to static data */ } finally {
+      setDebatesLoading(false);
+    }
+  };
+
+  // Reload debates every time the feed tab is opened
+  useEffect(() => { if(screen === 'feed') loadDebates(); }, [screen]);
+
+  const loadOpinions = async (debateId) => {
+    setOpinionsLoading(true);
+    setDebateOpinions([]);
+    try {
+      const data = await apiFetch('GET', `/debates/${debateId}/opinions`);
+      setDebateOpinions((data.items || []).filter(it => it.type === 'opinion').map(it => it.opinion));
+    } catch(e) { /* silently fail */ } finally {
+      setOpinionsLoading(false);
+    }
+  };
+
+  const postOpinion = async (debateId) => {
+    if(newOpinionText.trim().length < 20) {
+      setOpinionError('Mínimo 20 caracteres.');
+      return;
+    }
+    setPostingOpinion(true);
+    setOpinionError('');
+    try {
+      await apiFetch('POST', `/debates/${debateId}/opinions`, {
+        text: newOpinionText.trim(),
+        knowledge_level: knowledgeLevel,
+      });
+      setNewOpinionText('');
+      loadOpinions(debateId);
+    } catch(e) {
+      setOpinionError(e.message || 'Error al publicar.');
+    } finally {
+      setPostingOpinion(false);
+    }
+  };
+
+  useEffect(() => {
+    if(screen === 'debate' && selDebate) {
+      loadOpinions(selDebate.id);
+      setNewOpinionText('');
+      setOpinionError('');
+    }
+  }, [screen, selDebate?.id]);
 
   // ── TOP BAR ────────────────────────────────────────────────
   function TopBar({title,back,right}) {
@@ -448,13 +544,22 @@ export default function PreferendumV8() {
         </div>
         {vfError?<div style={{background:`${T.coral}22`,border:`1px solid ${T.coral}44`,
           borderRadius:8,padding:"10px 12px",fontSize:12,color:T.coral,marginBottom:12}}>{vfError}</div>:null}
-        <Btn label="Crear cuenta →" full
-          disabled={!vfName||!vfEmail||!vfPhone||!vfPw||vfPw!==vfPw2}
-          onPress={()=>{
+        <Btn label={vfLoading?"Creando cuenta...":"Crear cuenta →"} full
+          disabled={!vfName||!vfEmail||!vfPhone||!vfPw||vfPw!==vfPw2||vfLoading}
+          onPress={async()=>{
             if(vfPw!==vfPw2){setVfError("Las contraseñas no coinciden");return;}
-            setVfError("");
-            setVfStep(1);
-            go("verify-identity");
+            setVfError(""); setVfLoading(true);
+            try {
+              const data = await apiFetch('POST','/auth/register',{
+                email:vfEmail, name:vfName, password:vfPw,
+                phone:vfPhone, country:vfCountry||'CL', county:vfCounty||'',
+                gender:vfGender, dob:vfDob||'', national_id:vfNatId||'',
+              });
+              setAuthToken(data.token); setCurrentUser(data.user);
+            } catch(e) {
+              setVfError(e.message); setVfLoading(false); return;
+            }
+            setVfLoading(false); setVfStep(1); go("verify-identity");
           }}/>
         <div style={{textAlign:"center",marginTop:12}}>
           <button onClick={()=>go("login")} style={{background:"none",border:"none",
@@ -480,7 +585,17 @@ export default function PreferendumV8() {
         <Card>
           <Input label="Email" placeholder="tu@correo.cl" type="email" value={email} onChange={setEmail}/>
           <Input label="Contraseña" placeholder="••••••••" type="password" value={pw} onChange={setPw}/>
-          <Btn label="Entrar →" full onPress={()=>go("feed")}/>
+          {vfError&&<div style={{background:`${T.coral}22`,border:`1px solid ${T.coral}44`,
+            borderRadius:8,padding:"10px 12px",fontSize:12,color:T.coral,marginBottom:8}}>{vfError}</div>}
+          <Btn label={vfLoading?"Entrando...":"Entrar →"} full disabled={vfLoading}
+            onPress={async()=>{
+              setVfLoading(true); setVfError("");
+              try {
+                const data = await apiFetch('POST','/auth/login',{email,password:pw});
+                setAuthToken(data.token); setCurrentUser(data.user);
+                setVfLoading(false); go("feed");
+              } catch(e) { setVfError(e.message); setVfLoading(false); }
+            }}/>
         </Card>
         <div style={{textAlign:"center",marginTop:12}}>
           <button onClick={()=>go("register")} style={{background:"none",border:"none",
@@ -815,8 +930,13 @@ export default function PreferendumV8() {
           </div>
         </div>
 
-        {DEBATES.map((deb,di)=>{
-          const st=STATUS[deb.status];
+        {debatesLoading&&apiDebates.length===0&&(
+          <div style={{textAlign:"center",padding:32,color:T.fog,fontSize:13}}>
+            ⏳ Cargando debates...
+          </div>
+        )}
+        {(apiDebates.length>0?apiDebates:DEBATES).map((deb,di)=>{
+          const st=STATUS[deb.status]||STATUS["live"];
           const hasVoted=voted[deb.id];
           return (
             <div key={deb.id}>
@@ -940,10 +1060,17 @@ export default function PreferendumV8() {
                 Lee las opciones y elige. Tu voto se cifra con AES-256 y se ancla en blockchain Polygon.
               </div>
               {deb.opts.map((opt,i)=>(
-                <button key={i} onClick={()=>{
-                  const vc=`${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}`;
-                  setVoted({...voted,[deb.id]:{opt,code:vc}});
-                  DEMO_CODES[vc]={debateId:deb.id,choice:opt};
+                <button key={i} onClick={async()=>{
+                  try {
+                    const data = await apiFetch('POST',`/debates/${deb.id}/vote`,{option_index:i});
+                    const vc = data.verify_code;
+                    setVoted({...voted,[deb.id]:{opt,code:vc}});
+                  } catch(e) {
+                    // Fallback: generate local code if API is unreachable
+                    const vc=`${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}`;
+                    setVoted({...voted,[deb.id]:{opt,code:vc}});
+                    DEMO_CODES[vc]={debateId:deb.id,choice:opt};
+                  }
                   go("voted-success");
                 }} style={{width:"100%",padding:"12px 14px",borderRadius:10,
                   background:T.card,border:`1px solid ${T.rim}`,color:T.snow,
@@ -988,6 +1115,89 @@ export default function PreferendumV8() {
               </div>
             </Card>
           )}
+
+          {/* ── OPINIONS SECTION ─────────────────────────────── */}
+          <Card>
+            <Lbl>💬 Opiniones</Lbl>
+
+            {/* Post opinion form */}
+            <div style={{background:T.deep,borderRadius:10,padding:14,marginBottom:16,
+              border:`1px solid ${T.rim}`}}>
+              <div style={{fontSize:12,color:T.fog,marginBottom:8}}>Comparte tu perspectiva</div>
+              <textarea
+                value={newOpinionText}
+                onChange={e=>setNewOpinionText(e.target.value)}
+                placeholder="¿Qué piensas sobre este tema? (mínimo 20 caracteres)"
+                rows={3}
+                style={{width:"100%",background:"transparent",border:"none",outline:"none",
+                  color:T.white,fontSize:13,lineHeight:1.6,resize:"none",
+                  fontFamily:"-apple-system,system-ui,sans-serif",boxSizing:"border-box"}}
+              />
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                marginTop:10,gap:8,flexWrap:"wrap"}}>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {[
+                    {v:"expert",   l:"Experto"},
+                    {v:"good",     l:"Informado"},
+                    {v:"familiar", l:"Familiarizado"},
+                    {v:"low",      l:"Poco"},
+                    {v:"new",      l:"Nuevo"},
+                  ].map(({v,l})=>(
+                    <button key={v} onClick={()=>setKnowledgeLevel(v)}
+                      style={{padding:"4px 10px",borderRadius:20,fontSize:11,cursor:"pointer",
+                        border:`1px solid ${knowledgeLevel===v?T.blue:T.rim}`,
+                        background:knowledgeLevel===v?`${T.blue}22`:"transparent",
+                        color:knowledgeLevel===v?T.blue:T.fog,fontWeight:knowledgeLevel===v?700:400}}>
+                      {l}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={()=>postOpinion(deb.id)}
+                  disabled={postingOpinion||newOpinionText.trim().length<20}
+                  style={{padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",
+                    background:newOpinionText.trim().length>=20?T.blue:"#333",
+                    color:T.white,fontSize:13,fontWeight:700,
+                    opacity:postingOpinion?0.6:1,whiteSpace:"nowrap"}}>
+                  {postingOpinion?"Enviando…":"Publicar →"}
+                </button>
+              </div>
+              {opinionError&&(
+                <div style={{fontSize:12,color:T.coral,marginTop:8}}>{opinionError}</div>
+              )}
+            </div>
+
+            {/* Opinion list */}
+            {opinionsLoading&&(
+              <div style={{textAlign:"center",padding:"16px 0",fontSize:12,color:T.fog}}>
+                Cargando opiniones…
+              </div>
+            )}
+            {!opinionsLoading&&debateOpinions.length===0&&(
+              <div style={{textAlign:"center",padding:"16px 0",fontSize:12,color:T.fog}}>
+                Sé el primero en opinar.
+              </div>
+            )}
+            {debateOpinions.map((op,i)=>(
+              <div key={op.id||i} style={{
+                padding:"12px 0",
+                borderBottom:i<debateOpinions.length-1?`1px solid ${T.rim}`:"none"
+              }}>
+                <div style={{display:"flex",justifyContent:"space-between",
+                  alignItems:"flex-start",marginBottom:6}}>
+                  <div style={{fontSize:12,fontWeight:700,color:T.white}}>{op.user_name}</div>
+                  <div style={{fontSize:10,color:T.fog,flexShrink:0,marginLeft:8}}>
+                    {op.knowledge_level==="expert"?"🎓 Experto":
+                     op.knowledge_level==="good"?"📖 Informado":
+                     op.knowledge_level==="familiar"?"💡 Familiarizado":
+                     op.knowledge_level==="low"?"🌱 Poco":
+                     "✨ Nuevo"}
+                  </div>
+                </div>
+                <div style={{fontSize:13,color:T.silver,lineHeight:1.6}}>{op.text}</div>
+              </div>
+            ))}
+          </Card>
+
         </div>
         <VoterTabs/>
       </div>
@@ -1082,17 +1292,40 @@ export default function PreferendumV8() {
     const verifyingDebates=DEBATES.filter(d=>d.status==="verifying");
     const verifiedDebates=DEBATES.filter(d=>d.status==="verified");
 
-    const lookupVote=(code)=>{
-      const upper=code.toUpperCase();
-      const sessionEntry=Object.entries(voted).find(([id,v])=>v.code===upper);
-      if(sessionEntry){
-        const deb=DEBATES.find(d=>d.id===parseInt(sessionEntry[0]));
-        if(deb&&deb.status==="verifying") return {deb,choice:sessionEntry[1].opt};
+    const allDebs = apiDebates.length > 0 ? apiDebates : DEBATES;
+    const lookupVote = async (code) => {
+      const upper = code.toUpperCase();
+
+      // 1. Session votes — we know the debate_id
+      const sessionEntry = Object.entries(voted).find(([,v]) => v.code === upper);
+      if(sessionEntry) {
+        const debateId = parseInt(sessionEntry[0]);
+        try {
+          const data = await apiFetch('POST',`/debates/${debateId}/verify`,{code:upper});
+          if(data.found) {
+            const deb = allDebs.find(d=>d.id===debateId) ||
+              {id:debateId,title:data.debate_title,opts:[],inst:''};
+            return {deb, choice:data.your_vote};
+          }
+        } catch(e) {}
+        // Fallback to client-side data
+        const deb = allDebs.find(d=>d.id===debateId);
+        if(deb) return {deb, choice:sessionEntry[1].opt};
       }
-      const demo=DEMO_CODES[upper];
-      if(demo){
-        const deb=DEBATES.find(d=>d.id===demo.debateId);
-        if(deb&&deb.status==="verifying") return {deb,choice:demo.choice};
+
+      // 2. Demo codes (client-side)
+      const demo = DEMO_CODES[upper];
+      if(demo) {
+        const deb = allDebs.find(d=>d.id===demo.debateId);
+        if(deb && (deb.status==="verifying"||deb.status==="live")) return {deb,choice:demo.choice};
+      }
+
+      // 3. Try all loaded debates on backend
+      for(const deb of allDebs) {
+        try {
+          const data = await apiFetch('POST',`/debates/${deb.id}/verify`,{code:upper});
+          if(data.found) return {deb, choice:data.your_vote};
+        } catch(e) {}
       }
       return null;
     };
@@ -1142,11 +1375,16 @@ export default function PreferendumV8() {
                   </button>
                 ))}
               </div>
-              <Btn label="Decodificar mi voto →" full onPress={()=>{
+              <Btn label="Decodificar mi voto →" full onPress={async()=>{
                 if(!codeInput){alert("Ingresa tu código");return;}
                 setVStep("decoding");
-                const result=lookupVote(codeInput);
-                setTimeout(()=>{setFoundVote(result);setVStep(result?"reveal":"notfound");},2200);
+                // API lookup + animation mínima en paralelo
+                const [result] = await Promise.all([
+                  lookupVote(codeInput),
+                  new Promise(r=>setTimeout(r,2000)),
+                ]);
+                setFoundVote(result);
+                setVStep(result?"reveal":"notfound");
               }}/>
             </Card>
           )}
@@ -1207,12 +1445,28 @@ export default function PreferendumV8() {
               <Card>
                 <div style={{fontSize:14,fontWeight:700,color:T.white,marginBottom:6}}>¿Es correcto tu voto?</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                  <button onClick={()=>{setConfirmed(true);setConfs(prev=>({...prev,[foundVote.deb.id]:(prev[foundVote.deb.id]||0)+1}));}}
-                    style={{padding:"14px",borderRadius:12,background:T.teal,border:"none",color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+                  <button onClick={async()=>{
+                    setConfirmed(true);
+                    setConfs(prev=>({...prev,[foundVote.deb.id]:(prev[foundVote.deb.id]||0)+1}));
+                    try {
+                      const form=new FormData();
+                      form.append('code',codeInput.toUpperCase());
+                      form.append('confirmed','true');
+                      await fetch(`${API}/debates/${foundVote.deb.id}/verify/confirm`,{method:'POST',body:form});
+                    } catch(e){}
+                  }} style={{padding:"14px",borderRadius:12,background:T.teal,border:"none",color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
                     ✓ Sí, correcto
                   </button>
-                  <button onClick={()=>{setConfirmed(false);setDisputes(prev=>({...prev,[foundVote.deb.id]:(prev[foundVote.deb.id]||0)+1}));}}
-                    style={{padding:"14px",borderRadius:12,background:T.coral,border:"none",color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
+                  <button onClick={async()=>{
+                    setConfirmed(false);
+                    setDisputes(prev=>({...prev,[foundVote.deb.id]:(prev[foundVote.deb.id]||0)+1}));
+                    try {
+                      const form=new FormData();
+                      form.append('code',codeInput.toUpperCase());
+                      form.append('confirmed','false');
+                      await fetch(`${API}/debates/${foundVote.deb.id}/verify/confirm`,{method:'POST',body:form});
+                    } catch(e){}
+                  }} style={{padding:"14px",borderRadius:12,background:T.coral,border:"none",color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer"}}>
                     ✗ No es correcto
                   </button>
                 </div>
@@ -1303,7 +1557,7 @@ export default function PreferendumV8() {
           {Object.keys(voted).length===0?(
             <div style={{fontSize:13,color:T.fog}}>Aún no has votado en ningún debate.</div>
           ):Object.entries(voted).map(([id,v])=>{
-            const deb=DEBATES.find(d=>d.id===parseInt(id));
+            const deb=(apiDebates.length?apiDebates:DEBATES).find(d=>d.id===parseInt(id));
             const st=deb?STATUS[deb.status]:null;
             return (
               <div key={id} style={{padding:"10px 0",borderBottom:`1px solid ${T.rim}`}}>
