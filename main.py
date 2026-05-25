@@ -17,7 +17,8 @@ En memoria de José Ignacio Fernández (1989-2024)
 """
 
 import os, json, hashlib, random, string, re, base64
-import urllib.request, smtplib
+import urllib.request, urllib.error, smtplib
+import requests as _requests
 from datetime import datetime, timedelta
 from typing import Optional, List
 from email.mime.text import MIMEText
@@ -402,39 +403,28 @@ def send_email_otp(email, code, name=''):
         f'</div>'
     )
 
-    # Try Resend first (primary)
+    # Try Resend (uses requests to avoid Cloudflare bot detection on urllib)
     resend_key = os.getenv('RESEND_API_KEY')
     if resend_key:
-        # Try verified domain first, fall back to onboarding@resend.dev
-        from_addresses = [
-            'Preferendum <noreply@preferendum.com>',
-            'Preferendum <onboarding@resend.dev>',
-        ]
-        for from_addr in from_addresses:
-            try:
-                payload = json.dumps({
-                    'from': from_addr,
+        try:
+            resp = _requests.post(
+                'https://api.resend.com/emails',
+                json={
+                    'from': 'Preferendum <noreply@preferendum.com>',
                     'to': [email],
                     'subject': f'Tu código Preferendum: {code}',
                     'html': html,
                     'text': f'Tu código Preferendum es: {code}. Válido 10 minutos.',
-                }).encode()
-                req = urllib.request.Request(
-                    'https://api.resend.com/emails',
-                    data=payload,
-                    headers={'Authorization': f'Bearer {resend_key}', 'Content-Type': 'application/json'},
-                    method='POST'
-                )
-                with urllib.request.urlopen(req, timeout=10) as r:
-                    body = r.read().decode()
-                    print(f'[Resend] Sent from={from_addr} to={email} status={r.status} body={body}')
+                },
+                headers={'Authorization': f'Bearer {resend_key}'},
+                timeout=10,
+            )
+            print(f'[Resend] status={resp.status_code} body={resp.text}')
+            if resp.status_code in (200, 201):
                 return True
-            except urllib.error.HTTPError as e:
-                body = e.read().decode() if e.fp else ''
-                print(f'[Resend HTTPError] from={from_addr} status={e.code} body={body}')
-            except Exception as e:
-                print(f'[Resend Error] from={from_addr} error={e}')
-        print('[Resend] All from addresses failed — falling back to Gmail')
+        except Exception as e:
+            print(f'[Resend Error] {e}')
+        print('[Resend] Failed — falling back to Gmail')
 
     # Fallback: Gmail SMTP
     gmail_user = os.getenv('GMAIL_USER', 'jucaferla@gmail.com')
@@ -1605,31 +1595,21 @@ app.include_router(verify_router)
 def test_email_send(to: str, secret: str):
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
-    import urllib.error as _ue
     resend_key = os.getenv('RESEND_API_KEY')
-    results = []
-    if resend_key:
-        for from_addr in ['Preferendum <noreply@preferendum.com>', 'Preferendum <onboarding@resend.dev>']:
-            try:
-                payload = json.dumps({
-                    'from': from_addr, 'to': [to],
-                    'subject': 'Preferendum — Email Test',
-                    'text': 'Email delivery test. If you see this, Resend is working.',
-                }).encode()
-                req = urllib.request.Request(
-                    'https://api.resend.com/emails', data=payload,
-                    headers={'Authorization': f'Bearer {resend_key}', 'Content-Type': 'application/json'},
-                    method='POST'
-                )
-                with urllib.request.urlopen(req, timeout=10) as r:
-                    body = r.read().decode()
-                    results.append({'from': from_addr, 'status': r.status, 'body': body, 'ok': True})
-                    break
-            except _ue.HTTPError as e:
-                body = e.read().decode() if e.fp else ''
-                results.append({'from': from_addr, 'status': e.code, 'body': body, 'ok': False})
-            except Exception as e:
-                results.append({'from': from_addr, 'error': str(e), 'ok': False})
-    else:
-        results.append({'error': 'RESEND_API_KEY not set', 'ok': False})
-    return {'to': to, 'resend_key_set': bool(resend_key), 'results': results}
+    if not resend_key:
+        return {'to': to, 'ok': False, 'error': 'RESEND_API_KEY not set'}
+    try:
+        resp = _requests.post(
+            'https://api.resend.com/emails',
+            json={
+                'from': 'Preferendum <noreply@preferendum.com>',
+                'to': [to],
+                'subject': 'Preferendum — Email Test',
+                'text': 'Email delivery test. If you see this, Resend is working from noreply@preferendum.com.',
+            },
+            headers={'Authorization': f'Bearer {resend_key}'},
+            timeout=10,
+        )
+        return {'to': to, 'status': resp.status_code, 'body': resp.json(), 'ok': resp.status_code in (200, 201)}
+    except Exception as e:
+        return {'to': to, 'ok': False, 'error': str(e)}

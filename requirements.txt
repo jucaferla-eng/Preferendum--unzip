@@ -16,3 +16,4 @@ starlette==0.27.0
 web3==6.11.1
 twilio
 sendgrid
+requests
