@@ -254,6 +254,13 @@ class AdImpressionLog(Base):
     country     = Column(String, default='')
     created_at  = Column(DateTime, default=datetime.utcnow)
 
+class ClosedListEntry(Base):
+    __tablename__ = 'closed_list_entries'
+    id               = Column(Integer, primary_key=True)
+    debate_id        = Column(Integer, index=True)
+    national_id_hash = Column(String, index=True)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+
 Base.metadata.create_all(bind=engine)
 
 # ══════════════════════════════════════════════════════════════
@@ -384,19 +391,46 @@ def format_debate(debate, has_voted=False):
 # ══════════════════════════════════════════════════════════════
 
 def send_email_otp(email, code, name=''):
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
+    html = (
+        f'<div style="font-family:sans-serif;padding:40px;background:#07090f;color:#fff;border-radius:12px;">'
+        f'<h1 style="color:#2563eb;">prefer<span style="color:#fff">endum</span></h1>'
+        f'<p>Hola {name or "Ciudadano"},</p><p>Tu código de verificación:</p>'
+        f'<div style="background:#1e2a3d;padding:24px;text-align:center;border-radius:8px;">'
+        f'<span style="font-size:40px;font-weight:bold;letter-spacing:10px;color:#2563eb;">{code}</span></div>'
+        f'<p style="color:#94a3b8;">Válido por 10 minutos. No lo compartas con nadie.</p>'
+        f'<p style="color:#475569;font-size:12px;">En memoria de José Ignacio Fernández (1989-2024)</p>'
+        f'</div>'
+    )
 
+    # Try Resend first (primary)
+    resend_key = os.getenv('RESEND_API_KEY')
+    if resend_key:
+        try:
+            payload = json.dumps({
+                'from': 'Preferendum <noreply@preferendum.com>',
+                'to': [email],
+                'subject': f'Tu código Preferendum: {code}',
+                'html': html,
+                'text': f'Tu código Preferendum es: {code}. Válido 10 minutos.',
+            }).encode()
+            req = urllib.request.Request(
+                'https://api.resend.com/emails',
+                data=payload,
+                headers={'Authorization': f'Bearer {resend_key}', 'Content-Type': 'application/json'},
+                method='POST'
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                print(f'[Resend] Sent to {email}: {r.status}')
+            return True
+        except Exception as e:
+            print(f'[Resend Error] {e} — falling back to Gmail')
+
+    # Fallback: Gmail SMTP
     gmail_user = os.getenv('GMAIL_USER', 'jucaferla@gmail.com')
     gmail_pass = os.getenv('GMAIL_APP_PASSWORD')
-
     if not gmail_pass:
         print(f'[DEV EMAIL] To: {email} | Code: {code}')
         return True
-
-    html = f'<div style="font-family:sans-serif;padding:40px;background:#07090f;color:#fff;border-radius:12px;"><h1 style="color:#3b82f6;">prefer<span style="color:#fff">endum</span></h1><p>Hola {name or "Ciudadano"},</p><p>Tu código:</p><div style="background:#1e2a3d;padding:24px;text-align:center;border-radius:8px;"><span style="font-size:40px;font-weight:bold;letter-spacing:10px;color:#3b82f6;">{code}</span></div><p style="color:#94a3b8;">Válido 10 minutos.</p></div>'
-
     try:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = f'Tu código Preferendum: {code}'
@@ -517,6 +551,19 @@ class AdViewInput(BaseModel):
     age_group:   str = ''
     county:      str = ''
     country:     str = ''
+
+class OrganizerRegisterInput(BaseModel):
+    email:    str
+    password: str
+    name:     str
+    phone:    str = ''
+    country:  str = 'CL'
+    county:   str = ''
+    org_type: str = 'company'
+
+class EstimateInput(BaseModel):
+    budget_clp: int
+    communes:   List[str]
 
 # ══════════════════════════════════════════════════════════════
 # SEED DEMO DATA
@@ -1279,6 +1326,264 @@ def _format_campaign(c: AdCampaign) -> dict:
         'end_date':           c.end_date.isoformat() if c.end_date else None,
         'is_active':          c.is_active,
         'created_at':         c.created_at.isoformat(),
+    }
+
+# ══════════════════════════════════════════════════════════════
+# COMMUNE CPM TABLE (housing m² proxy — CLP per 1000 impressions)
+# ══════════════════════════════════════════════════════════════
+
+COMMUNE_CPM = {
+    'Vitacura':    {'se': 'A', 'cpm': 14.50, 'm2': '>120'},
+    'Las Condes':  {'se': 'A', 'cpm': 12.80, 'm2': '>120'},
+    'Providencia': {'se': 'A', 'cpm': 11.20, 'm2': '>120'},
+    'Ñuñoa':       {'se': 'B', 'cpm':  8.40, 'm2': '80-120'},
+    'Macul':       {'se': 'B', 'cpm':  7.60, 'm2': '80-120'},
+    'San Miguel':  {'se': 'B', 'cpm':  7.20, 'm2': '80-120'},
+    'Santiago':    {'se': 'C', 'cpm':  5.20, 'm2': '55-80'},
+    'Recoleta':    {'se': 'C', 'cpm':  4.40, 'm2': '55-80'},
+    'Maipú':       {'se': 'C', 'cpm':  5.60, 'm2': '55-80'},
+    'La Pintana':  {'se': 'D', 'cpm':  3.20, 'm2': '<55'},
+    'El Bosque':   {'se': 'D', 'cpm':  3.40, 'm2': '<55'},
+    'Cerro Navia': {'se': 'D', 'cpm':  3.00, 'm2': '<55'},
+}
+
+# ══════════════════════════════════════════════════════════════
+# ROUTES: ORGANIZER (v2 — /organizer/ prefix)
+# ══════════════════════════════════════════════════════════════
+
+@app.post('/organizer/register')
+def organizer_register_v2(data: OrganizerRegisterInput, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == data.email).first():
+        raise HTTPException(400, 'Email already registered')
+    hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+    user = User(
+        email=data.email, name=data.name, password=hashed,
+        phone=data.phone, country=data.country, county=data.county,
+        role='organizer',
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    code = gen_otp()
+    db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
+                   expires_at=datetime.utcnow() + timedelta(minutes=10)))
+    db.commit()
+    send_email_otp(user.email, code, user.name)
+    return {
+        'token': make_token(user.id, 'organizer'),
+        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': 'organizer'},
+        'message': f'Verification code sent to {user.email}'
+    }
+
+@app.post('/organizer/login')
+def organizer_login_v2(data: LoginInput, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email, User.role == 'organizer').first()
+    if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
+        raise HTTPException(401, 'Credenciales inválidas')
+    return {
+        'token': make_token(user.id, user.role),
+        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+    }
+
+@app.get('/organizer/consultations')
+def list_organizer_consultations(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debates = db.query(Debate).filter(Debate.creator_id == user.id).order_by(Debate.created_at.desc()).all()
+    return {'consultations': [format_debate(d) for d in debates], 'total': len(debates)}
+
+@app.post('/organizer/consultations')
+def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    if len(data.options) < 2:
+        raise HTTPException(400, 'At least 2 options required')
+    closes = datetime.fromisoformat(data.closes_at)
+    verify_closes = closes + timedelta(days=data.verify_days)
+    debate = Debate(
+        title=data.title, context=data.context,
+        options=json.dumps(data.options),
+        creator_id=user.id,
+        creator_type=data.creator_type, inst_name=data.inst_name or user.name,
+        debate_type=data.debate_type, scope=data.scope,
+        scope_country=data.scope_country, scope_commune=data.scope_commune,
+        target_gender=data.target_gender,
+        target_age_min=data.target_age_min, target_age_max=data.target_age_max,
+        closes_at=closes, verify_closes_at=verify_closes,
+        vote_counts=json.dumps({opt: 0 for opt in data.options}),
+    )
+    db.add(debate)
+    db.commit()
+    db.refresh(debate)
+    return {'consultation': format_debate(debate), 'message': 'Consultation created successfully'}
+
+@app.post('/organizer/closed-list')
+async def upload_closed_list(
+    debate_id: int = Form(...),
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debate = db.query(Debate).filter(Debate.id == debate_id, Debate.creator_id == user.id).first()
+    if not debate:
+        raise HTTPException(404, 'Consultation not found or not owned by you')
+    content = await file.read()
+    lines = content.decode('utf-8', errors='ignore').strip().splitlines()
+    added = 0
+    for line in lines:
+        nid = line.strip()
+        if not nid:
+            continue
+        h = hash_str(nid, prefix='closedlist:')
+        exists = db.query(ClosedListEntry).filter(
+            ClosedListEntry.debate_id == debate_id,
+            ClosedListEntry.national_id_hash == h
+        ).first()
+        if not exists:
+            db.add(ClosedListEntry(debate_id=debate_id, national_id_hash=h))
+            added += 1
+    db.commit()
+    return {'message': f'{added} voter IDs added to closed list', 'debate_id': debate_id, 'total_added': added}
+
+@app.get('/organizer/consultations/{consultation_id}/results')
+def get_consultation_results(consultation_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debate = db.query(Debate).filter(Debate.id == consultation_id, Debate.creator_id == user.id).first()
+    if not debate:
+        raise HTTPException(404, 'Consultation not found or not owned by you')
+    votes = db.query(DebateVote).filter(DebateVote.debate_id == consultation_id).all()
+    by_gender, by_age = {}, {}
+    for v in votes:
+        k = v.gender or 'unknown'
+        by_gender[k] = by_gender.get(k, 0) + 1
+        k2 = v.age_group or 'unknown'
+        by_age[k2] = by_age.get(k2, 0) + 1
+    return {
+        'consultation': format_debate(debate),
+        'legitimacy_score': debate.legitimacy_score,
+        'verifications': {'total': debate.verifications_total, 'confirmed': debate.verifications_ok},
+        'demographics': {'by_gender': by_gender, 'by_age': by_age},
+    }
+
+# ══════════════════════════════════════════════════════════════
+# ROUTES: MARKETER (v2 — /marketer/ prefix)
+# ══════════════════════════════════════════════════════════════
+
+@app.post('/marketer/register')
+def marketer_register(data: RegisterInput, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == data.email).first():
+        raise HTTPException(400, 'Email already registered')
+    hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+    user = User(
+        email=data.email, name=data.name, password=hashed,
+        phone=data.phone or '', country=data.country, role='marketer',
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {
+        'token': make_token(user.id, 'marketer'),
+        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': 'marketer'},
+        'message': 'Marketer account created'
+    }
+
+@app.post('/marketer/login')
+def marketer_login(data: LoginInput, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email, User.role.in_(['marketer', 'admin'])).first()
+    if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
+        raise HTTPException(401, 'Credenciales inválidas')
+    return {
+        'token': make_token(user.id, user.role),
+        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+    }
+
+@app.get('/marketer/communes')
+def get_communes():
+    return {
+        'communes': [
+            {'commune': name, 'se_tier': d['se'], 'cpm_usd': d['cpm'], 'm2_range': d['m2']}
+            for name, d in COMMUNE_CPM.items()
+        ],
+        'cost_per_view_clp': COST_PER_VIEW,
+    }
+
+@app.post('/marketer/estimate')
+def estimate_campaign(data: EstimateInput, db: Session = Depends(get_db)):
+    if not data.communes:
+        raise HTTPException(400, 'At least one commune required')
+    total_weight = sum(COMMUNE_CPM.get(c, {}).get('cpm', 5.0) for c in data.communes)
+    allocation = []
+    for commune in data.communes:
+        cpm = COMMUNE_CPM.get(commune, {}).get('cpm', 5.0)
+        weight = cpm / total_weight if total_weight > 0 else 1 / len(data.communes)
+        budget_for_commune = int(data.budget_clp * weight)
+        allocation.append({
+            'commune': commune,
+            'se_tier': COMMUNE_CPM.get(commune, {}).get('se', '?'),
+            'cpm_usd': cpm,
+            'budget_clp': budget_for_commune,
+            'estimated_impressions': int(budget_for_commune / COST_PER_VIEW),
+        })
+    return {
+        'budget_clp': data.budget_clp,
+        'total_estimated_impressions': sum(a['estimated_impressions'] for a in allocation),
+        'allocation': allocation,
+        'cost_per_view_clp': COST_PER_VIEW,
+    }
+
+@app.post('/marketer/campaigns')
+def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
+    campaign = AdCampaign(
+        advertiser_email    = data.advertiser_email,
+        advertiser_name     = data.advertiser_name,
+        title               = data.campaign_title,
+        budget_clp          = data.budget_clp,
+        ad_type             = data.ad_type,
+        target_country      = data.target_country,
+        target_gender       = data.target_gender,
+        target_age_ranges   = data.target_age_ranges,
+        target_categories   = data.target_categories,
+        excluded_categories = data.excluded_categories,
+        blocked_competitors = data.blocked_competitors,
+        start_date          = datetime.fromisoformat(data.start_date),
+        end_date            = datetime.fromisoformat(data.end_date),
+        is_active           = True,
+    )
+    db.add(campaign)
+    db.commit()
+    db.refresh(campaign)
+    return {'message': 'Campaign created', 'campaign_id': campaign.id, 'campaign': _format_campaign(campaign)}
+
+@app.get('/marketer/campaigns/{campaign_id}/metrics')
+def get_campaign_metrics(campaign_id: int, db: Session = Depends(get_db)):
+    campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(404, 'Campaign not found')
+    views = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == campaign_id).all()
+    total_imp = len(views)
+    spent = total_imp * COST_PER_VIEW
+    by_gender, by_age, by_commune = {}, {}, {}
+    for v in views:
+        by_gender[v.gender or 'N/A'] = by_gender.get(v.gender or 'N/A', 0) + 1
+        by_age[v.age_group or 'N/A'] = by_age.get(v.age_group or 'N/A', 0) + 1
+        by_commune[v.county or 'N/A'] = by_commune.get(v.county or 'N/A', 0) + 1
+    return {
+        'campaign_id':      campaign_id,
+        'title':            campaign.title,
+        'advertiser':       campaign.advertiser_name,
+        'budget_clp':       campaign.budget_clp,
+        'impressions':      total_imp,
+        'voters_reached':   total_imp,
+        'spent_clp':        spent,
+        'balance_clp':      max(0, campaign.budget_clp - spent),
+        'cost_per_view_clp': COST_PER_VIEW,
+        'is_active':        campaign.is_active,
+        'by_gender':        by_gender,
+        'by_age':           by_age,
+        'by_commune':       by_commune,
     }
 
 from verification import router as verify_router

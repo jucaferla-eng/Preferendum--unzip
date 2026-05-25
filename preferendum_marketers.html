@@ -388,9 +388,215 @@ section{padding:100px 80px;max-width:1200px;margin:0 auto;width:100%;}
 <div class="cta-section">
   <h2 class="cta-title">Your brand belongs<br>in every decision.</h2>
   <p class="cta-sub">Join the advertisers who reach people when they are thinking — not when they are distracted.</p>
-  <button class="cta-btn" onclick="alert('Connecting you with our advertising team...')">Start your first campaign →</button>
+  <button class="cta-btn" onclick="openCampaignModal()">Start your first campaign →</button>
   <div class="memorial">In memory of José Ignacio Fernández (1989–2024)</div>
 </div>
 
+<!-- CAMPAIGN MODAL -->
+<div id="campaign-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:1000;overflow-y:auto;padding:40px 16px;">
+  <div style="max-width:520px;margin:0 auto;background:#0d1120;border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:32px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+      <div style="font-family:'Playfair Display',serif;font-size:22px;color:#f5f3ee;">Launch a campaign</div>
+      <button onclick="closeCampaignModal()" style="background:none;border:none;color:#999;font-size:24px;cursor:pointer;">×</button>
+    </div>
+
+    <div id="modal-step-1">
+      <div style="font-size:12px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:16px;">Step 1 — Your account</div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Company / Brand name</label>
+        <input id="m-name" type="text" placeholder="Nike Chile" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Business email</label>
+        <input id="m-email" type="email" placeholder="marketing@brand.com" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+      </div>
+      <div style="margin-bottom:20px;">
+        <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Password</label>
+        <input id="m-password" type="password" placeholder="Min 8 characters" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+      </div>
+      <div id="step1-error" style="color:#f43f5e;font-size:12px;margin-bottom:12px;display:none;"></div>
+      <button id="step1-btn" onclick="registerMarketer()" style="width:100%;background:#c9a84c;color:#07090f;border:none;padding:14px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">Continue →</button>
+      <div style="text-align:center;margin-top:12px;font-size:12px;color:#888;">Already have an account? <a href="#" onclick="skipToStep2()" style="color:#c9a84c;">Sign in</a></div>
+    </div>
+
+    <div id="modal-step-2" style="display:none;">
+      <div style="font-size:12px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:16px;">Step 2 — Campaign details</div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Campaign name</label>
+        <input id="m-campaign-title" type="text" placeholder="Nike Air Max Launch 2026" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div>
+          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Budget (CLP)</label>
+          <input id="m-budget" type="number" placeholder="500000" min="10000" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Target gender</label>
+          <select id="m-gender" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+            <option value="all">All</option><option value="F">Women</option><option value="M">Men</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div>
+          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Start date</label>
+          <input id="m-start" type="date" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">End date</label>
+          <input id="m-end" type="date" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+        </div>
+      </div>
+      <div id="estimate-box" style="display:none;background:#0a0e1a;border:1px solid rgba(201,168,76,0.3);border-radius:8px;padding:14px;margin-bottom:16px;font-size:12px;color:#c9a84c;font-family:'DM Mono',monospace;"></div>
+      <div id="step2-error" style="color:#f43f5e;font-size:12px;margin-bottom:12px;display:none;"></div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="document.getElementById('modal-step-2').style.display='none';document.getElementById('modal-step-1').style.display='block';" style="flex:1;background:none;border:1px solid rgba(255,255,255,0.15);color:#888;padding:13px;border-radius:10px;font-size:13px;cursor:pointer;">← Back</button>
+        <button id="step2-btn" onclick="launchCampaign()" style="flex:2;background:#c9a84c;color:#07090f;border:none;padding:13px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">Launch campaign →</button>
+      </div>
+    </div>
+
+    <div id="modal-success" style="display:none;text-align:center;padding:24px 0;">
+      <div style="font-size:48px;margin-bottom:16px;">🎯</div>
+      <div style="font-family:'Playfair Display',serif;font-size:22px;color:#f5f3ee;margin-bottom:8px;">Campaign launched!</div>
+      <div id="success-detail" style="font-size:13px;color:#888;margin-bottom:24px;"></div>
+      <button onclick="closeCampaignModal()" style="background:#c9a84c;color:#07090f;border:none;padding:14px 32px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">Done</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'https://preferendum-unzip.onrender.com';
+let marketerToken = null;
+let marketerUser  = null;
+
+function openCampaignModal(){
+  document.getElementById('campaign-modal').style.display='block';
+  document.body.style.overflow='hidden';
+  const today = new Date();
+  const end   = new Date(); end.setDate(end.getDate()+30);
+  document.getElementById('m-start').value = today.toISOString().split('T')[0];
+  document.getElementById('m-end').value   = end.toISOString().split('T')[0];
+}
+function closeCampaignModal(){
+  document.getElementById('campaign-modal').style.display='none';
+  document.body.style.overflow='';
+}
+
+async function registerMarketer(){
+  const name     = document.getElementById('m-name').value.trim();
+  const email    = document.getElementById('m-email').value.trim();
+  const password = document.getElementById('m-password').value;
+  const errEl    = document.getElementById('step1-error');
+  const btn      = document.getElementById('step1-btn');
+
+  if(!name||!email||!password){ errEl.textContent='All fields required.'; errEl.style.display='block'; return; }
+  if(password.length<8){ errEl.textContent='Password must be at least 8 characters.'; errEl.style.display='block'; return; }
+
+  btn.textContent='Creating account...'; btn.disabled=true; errEl.style.display='none';
+  try {
+    const res = await fetch(`${API}/marketer/register`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name, email, password, phone:'', country:'CL', national_id:'' })
+    });
+    const data = await res.json();
+    if(!res.ok){
+      // If already registered, try to login
+      if(res.status===400){ await loginMarketerInline(email,password); return; }
+      throw new Error(data.detail||'Registration failed');
+    }
+    marketerToken = data.token;
+    marketerUser  = data.user;
+    skipToStep2();
+  } catch(e) {
+    errEl.textContent=e.message; errEl.style.display='block';
+  } finally {
+    btn.textContent='Continue →'; btn.disabled=false;
+  }
+}
+
+async function loginMarketerInline(email, password){
+  const errEl = document.getElementById('step1-error');
+  const res = await fetch(`${API}/marketer/login`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({email, password})
+  });
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.detail||'Invalid credentials');
+  marketerToken = data.token;
+  marketerUser  = data.user;
+  skipToStep2();
+}
+
+function skipToStep2(){
+  document.getElementById('modal-step-1').style.display='none';
+  document.getElementById('modal-step-2').style.display='block';
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  ['m-budget','m-start','m-end'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('change', fetchEstimate);
+  });
+});
+
+async function fetchEstimate(){
+  const budget = parseInt(document.getElementById('m-budget').value)||0;
+  if(budget<10000) return;
+  const box = document.getElementById('estimate-box');
+  try {
+    const res = await fetch(`${API}/marketer/estimate`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({budget_clp: budget, communes:['Las Condes','Providencia','Ñuñoa','Santiago','Maipú']})
+    });
+    const data = await res.json();
+    box.style.display='block';
+    box.innerHTML = `Estimated reach: <strong>${data.total_estimated_impressions.toLocaleString()}</strong> impressions · CLP ${COST_PER_VIEW}/view`;
+    const COST_PER_VIEW = data.cost_per_view_clp||20;
+    box.innerHTML = `Estimated reach: <strong>${data.total_estimated_impressions.toLocaleString()}</strong> voters · ${COST_PER_VIEW} CLP/view`;
+  } catch(e){ box.style.display='none'; }
+}
+
+async function launchCampaign(){
+  const campaignTitle = document.getElementById('m-campaign-title').value.trim();
+  const budget        = parseInt(document.getElementById('m-budget').value)||0;
+  const gender        = document.getElementById('m-gender').value;
+  const startDate     = document.getElementById('m-start').value;
+  const endDate       = document.getElementById('m-end').value;
+  const errEl         = document.getElementById('step2-error');
+  const btn           = document.getElementById('step2-btn');
+
+  if(!campaignTitle){ errEl.textContent='Enter a campaign name.'; errEl.style.display='block'; return; }
+  if(budget<10000){ errEl.textContent='Minimum budget is $10,000 CLP.'; errEl.style.display='block'; return; }
+  if(!startDate||!endDate){ errEl.textContent='Select start and end dates.'; errEl.style.display='block'; return; }
+
+  btn.textContent='Launching...'; btn.disabled=true; errEl.style.display='none';
+  const email = document.getElementById('m-email').value.trim();
+  const name  = document.getElementById('m-name').value.trim();
+  try {
+    const res = await fetch(`${API}/marketer/campaigns`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        advertiser_email: email, advertiser_name: name,
+        campaign_title: campaignTitle, budget_clp: budget,
+        ad_type:'banner', target_country:'CL', target_gender: gender,
+        target_age_ranges:'', target_categories:'', excluded_categories:'', blocked_competitors:'',
+        start_date: new Date(startDate).toISOString(),
+        end_date:   new Date(endDate).toISOString(),
+      })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail||'Failed to launch campaign');
+    document.getElementById('modal-step-2').style.display='none';
+    document.getElementById('modal-success').style.display='block';
+    document.getElementById('success-detail').textContent =
+      `Campaign ID #${data.campaign_id} · Budget: $${budget.toLocaleString()} CLP`;
+  } catch(e) {
+    errEl.textContent=e.message; errEl.style.display='block';
+  } finally {
+    btn.textContent='Launch campaign →'; btn.disabled=false;
+  }
+}
+</script>
 </body>
 </html>

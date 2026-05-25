@@ -388,67 +388,135 @@
 
     <div class="form-group">
       <label class="form-label">Tipo de organización</label>
-      <select class="form-select">
-        <option>Empresa — Consulta a clientes / accionistas / trabajadores</option>
-        <option>Asociación profesional o gremial</option>
-        <option>Asociación productiva o sectorial</option>
-        <option>Partido político</option>
-        <option>Universidad o institución académica</option>
-        <option>Organización sin fines de lucro</option>
-        <option>Municipalidad / Gobierno local</option>
-        <option>Ministerio / Gobierno nacional</option>
-        <option>Congreso / Parlamento</option>
-        <option>Ciudadano particular</option>
+      <select class="form-select" id="reg-org-type">
+        <option value="company">Empresa — Consulta a clientes / accionistas / trabajadores</option>
+        <option value="association">Asociación profesional o gremial</option>
+        <option value="sector">Asociación productiva o sectorial</option>
+        <option value="party">Partido político</option>
+        <option value="university">Universidad o institución académica</option>
+        <option value="ngo">Organización sin fines de lucro</option>
+        <option value="municipality">Municipalidad / Gobierno local</option>
+        <option value="ministry">Ministerio / Gobierno nacional</option>
+        <option value="congress">Congreso / Parlamento</option>
+        <option value="citizen">Ciudadano particular</option>
       </select>
     </div>
 
     <div class="form-group">
       <label class="form-label">Nombre de la organización</label>
-      <input class="form-input" type="text" placeholder="Ej: Municipalidad Las Condes">
+      <input class="form-input" id="reg-name" type="text" placeholder="Ej: Municipalidad Las Condes">
     </div>
 
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">País</label>
-        <select class="form-select">
-          <option>Chile</option>
-          <option>Argentina</option>
-          <option>Colombia</option>
-          <option>México</option>
-          <option>Perú</option>
-          <option>España</option>
+        <select class="form-select" id="reg-country">
+          <option value="CL">Chile</option>
+          <option value="AR">Argentina</option>
+          <option value="CO">Colombia</option>
+          <option value="MX">México</option>
+          <option value="PE">Perú</option>
+          <option value="ES">España</option>
         </select>
       </div>
       <div class="form-group">
         <label class="form-label">Región / Estado</label>
-        <input class="form-input" type="text" placeholder="Ej: Región Metropolitana">
+        <input class="form-input" id="reg-county" type="text" placeholder="Ej: Región Metropolitana">
       </div>
     </div>
 
     <div class="form-group">
       <label class="form-label">Email institucional</label>
-      <input class="form-input" type="email" placeholder="contacto@municipalidad.cl">
+      <input class="form-input" id="reg-email" type="email" placeholder="contacto@municipalidad.cl">
     </div>
 
     <div class="form-group">
       <label class="form-label">Nombre del responsable</label>
-      <input class="form-input" type="text" placeholder="Nombre completo">
+      <input class="form-input" id="reg-contact" type="text" placeholder="Nombre completo">
     </div>
 
     <div class="form-group">
       <label class="form-label">Contraseña</label>
-      <input class="form-input" type="password" placeholder="Mínimo 8 caracteres">
+      <input class="form-input" id="reg-password" type="password" placeholder="Mínimo 8 caracteres">
     </div>
 
-    <button class="btn-primary" onclick="register()" style="margin-top:8px;">Crear cuenta y acceder al panel →</button>
+    <div id="reg-error" style="color:#f43f5e;font-size:13px;margin-bottom:12px;display:none;"></div>
+    <button class="btn-primary" id="reg-btn" onclick="register()" style="margin-top:8px;">Crear cuenta y acceder al panel →</button>
 
     <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--muted);">
-      ¿Ya tienes cuenta? <a href="#" style="color:var(--blue2);" onclick="login()">Iniciar sesión</a>
+      ¿Ya tienes cuenta? <a href="#" style="color:var(--blue2);" onclick="goTo('login')">Iniciar sesión</a>
+    </div>
+  </div>
+</div>
+
+<!-- LOGIN PAGE -->
+<div class="page" id="page-login">
+  <div class="page-content">
+    <div class="register-title">Iniciar sesión</div>
+    <div class="register-subtitle">Accede a tu panel de organizador.</div>
+    <div class="form-group">
+      <label class="form-label">Email institucional</label>
+      <input class="form-input" id="login-email" type="email" placeholder="contacto@municipalidad.cl">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Contraseña</label>
+      <input class="form-input" id="login-password" type="password" placeholder="Tu contraseña">
+    </div>
+    <div id="login-error" style="color:#f43f5e;font-size:13px;margin-bottom:12px;display:none;"></div>
+    <button class="btn-primary" id="login-btn" onclick="login()">Iniciar sesión →</button>
+    <div style="text-align:center;margin-top:16px;font-size:12px;color:var(--muted);">
+      ¿No tienes cuenta? <a href="#" style="color:var(--blue2);" onclick="goTo('register')">Crear cuenta</a>
+    </div>
+  </div>
+</div>
+
+<!-- DASHBOARD PAGE -->
+<div class="page" id="page-dashboard">
+  <div class="page-content">
+    <div class="register-title">Panel del Organizador</div>
+    <div id="dash-user" style="font-size:13px;color:var(--muted);margin-bottom:24px;"></div>
+    <button class="btn-primary" onclick="showNewConsultation()" style="margin-bottom:16px;">+ Nueva consulta</button>
+    <div id="dash-consultations" style="margin-top:16px;"></div>
+
+    <!-- New consultation form -->
+    <div id="new-consultation-form" style="display:none;margin-top:24px;padding:24px;background:var(--deep);border-radius:12px;border:1px solid var(--rim);">
+      <div style="font-size:15px;font-weight:700;color:var(--white);margin-bottom:16px;">Nueva Consulta</div>
+      <div class="form-group">
+        <label class="form-label">Pregunta / Título</label>
+        <input class="form-input" id="nc-title" type="text" placeholder="Ej: ¿Cuál es la prioridad para el presupuesto 2027?">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Contexto (opcional)</label>
+        <textarea class="form-input" id="nc-context" rows="3" placeholder="Explica el contexto de la consulta..." style="resize:vertical;"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Opciones (una por línea, mínimo 2)</label>
+        <textarea class="form-input" id="nc-options" rows="4" placeholder="Opción A&#10;Opción B&#10;Opción C" style="resize:vertical;"></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Cierre de votación</label>
+          <input class="form-input" id="nc-closes" type="date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Días de verificación</label>
+          <input class="form-input" id="nc-verify-days" type="number" value="14" min="1" max="60">
+        </div>
+      </div>
+      <div id="nc-error" style="color:#f43f5e;font-size:13px;margin-bottom:12px;display:none;"></div>
+      <div style="display:flex;gap:12px;">
+        <button class="btn-secondary" style="flex:1" onclick="document.getElementById('new-consultation-form').style.display='none'">Cancelar</button>
+        <button class="btn-primary" style="flex:2" id="nc-btn" onclick="publishConsultation()">Publicar consulta →</button>
+      </div>
     </div>
   </div>
 </div>
 
 <script>
+const API = 'https://preferendum-unzip.onrender.com';
+let authToken = null;
+let currentUser = null;
+
 function goTo(pageId){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('page-'+pageId).classList.add('active');
@@ -461,19 +529,139 @@ function toggleAccept(id){
 
 function checkAccept(){
   const all = ['acceptBox1','acceptBox2','acceptBox3'].every(id=>document.getElementById(id).classList.contains('checked'));
-  if(!all){
-    alert('Debes aceptar todos los términos para continuar.');
-    return;
-  }
+  if(!all){ alert('Debes aceptar todos los términos para continuar.'); return; }
   goTo('register');
 }
 
-function register(){
-  alert('✅ Cuenta creada exitosamente.\n\nRecibirás un email de verificación en tu correo institucional.\nUna vez verificado podrás publicar tu primera consulta.');
+async function register(){
+  const name     = document.getElementById('reg-name').value.trim();
+  const email    = document.getElementById('reg-email').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const country  = document.getElementById('reg-country').value;
+  const county   = document.getElementById('reg-county').value.trim();
+  const orgType  = document.getElementById('reg-org-type').value;
+  const errEl    = document.getElementById('reg-error');
+  const btn      = document.getElementById('reg-btn');
+
+  if(!name||!email||!password){ errEl.textContent='Completa todos los campos obligatorios.'; errEl.style.display='block'; return; }
+  if(password.length<8){ errEl.textContent='La contraseña debe tener mínimo 8 caracteres.'; errEl.style.display='block'; return; }
+
+  btn.textContent='Creando cuenta...'; btn.disabled=true; errEl.style.display='none';
+  try {
+    const res = await fetch(`${API}/organizer/register`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ name, email, password, country, county, org_type: orgType, phone:'' })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail||'Error al crear cuenta');
+    authToken = data.token;
+    currentUser = data.user;
+    goTo('dashboard');
+    loadDashboard();
+  } catch(e) {
+    errEl.textContent = e.message; errEl.style.display='block';
+  } finally {
+    btn.textContent='Crear cuenta y acceder al panel →'; btn.disabled=false;
+  }
 }
 
-function login(){
-  alert('Iniciando sesión...\nAccediendo al panel del organizador.');
+async function login(){
+  const email    = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const errEl    = document.getElementById('login-error');
+  const btn      = document.getElementById('login-btn');
+
+  if(!email||!password){ errEl.textContent='Ingresa email y contraseña.'; errEl.style.display='block'; return; }
+
+  btn.textContent='Iniciando sesión...'; btn.disabled=true; errEl.style.display='none';
+  try {
+    const res = await fetch(`${API}/organizer/login`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ email, password })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail||'Credenciales inválidas');
+    authToken = data.token;
+    currentUser = data.user;
+    goTo('dashboard');
+    loadDashboard();
+  } catch(e) {
+    errEl.textContent = e.message; errEl.style.display='block';
+  } finally {
+    btn.textContent='Iniciar sesión →'; btn.disabled=false;
+  }
+}
+
+async function loadDashboard(){
+  document.getElementById('dash-user').textContent = `${currentUser.name} · ${currentUser.email}`;
+  const el = document.getElementById('dash-consultations');
+  el.innerHTML = '<div style="color:var(--muted);font-size:13px;">Cargando consultas...</div>';
+  try {
+    const res = await fetch(`${API}/organizer/consultations`, {
+      headers:{'Authorization':`Bearer ${authToken}`}
+    });
+    const data = await res.json();
+    if(!data.consultations||data.consultations.length===0){
+      el.innerHTML='<div style="color:var(--muted);font-size:13px;text-align:center;padding:24px;">No tienes consultas publicadas aún.</div>';
+      return;
+    }
+    el.innerHTML = data.consultations.map(c=>`
+      <div style="padding:16px;background:var(--deep);border:1px solid var(--rim);border-radius:10px;margin-bottom:12px;">
+        <div style="font-size:14px;font-weight:700;color:var(--white);margin-bottom:4px;">${c.title}</div>
+        <div style="font-size:12px;color:var(--muted);">${c.total_votes} votos · Estado: ${c.status} · Cierra: ${c.closes_at?new Date(c.closes_at).toLocaleDateString('es-CL'):'—'}</div>
+        <div style="font-size:12px;color:#10b981;margin-top:4px;">Legitimacy Score: ${c.legitimacy_score}%</div>
+      </div>
+    `).join('');
+  } catch(e) {
+    el.innerHTML=`<div style="color:#f43f5e;font-size:13px;">${e.message}</div>`;
+  }
+}
+
+function showNewConsultation(){
+  document.getElementById('new-consultation-form').style.display='block';
+  const today = new Date(); today.setDate(today.getDate()+7);
+  document.getElementById('nc-closes').value = today.toISOString().split('T')[0];
+  window.scrollTo(0,document.body.scrollHeight);
+}
+
+async function publishConsultation(){
+  const title      = document.getElementById('nc-title').value.trim();
+  const context    = document.getElementById('nc-context').value.trim();
+  const optionsRaw = document.getElementById('nc-options').value.trim();
+  const closesDate = document.getElementById('nc-closes').value;
+  const verifyDays = parseInt(document.getElementById('nc-verify-days').value)||14;
+  const errEl      = document.getElementById('nc-error');
+  const btn        = document.getElementById('nc-btn');
+
+  const options = optionsRaw.split('\n').map(o=>o.trim()).filter(Boolean);
+  if(!title){ errEl.textContent='Ingresa el título de la consulta.'; errEl.style.display='block'; return; }
+  if(options.length<2){ errEl.textContent='Debes ingresar al menos 2 opciones.'; errEl.style.display='block'; return; }
+  if(!closesDate){ errEl.textContent='Selecciona la fecha de cierre.'; errEl.style.display='block'; return; }
+
+  btn.textContent='Publicando...'; btn.disabled=true; errEl.style.display='none';
+  try {
+    const res = await fetch(`${API}/organizer/consultations`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':`Bearer ${authToken}`},
+      body: JSON.stringify({
+        title, context, options,
+        closes_at: new Date(closesDate).toISOString(),
+        verify_days: verifyDays,
+        creator_type: 'organizer', inst_name: currentUser.name,
+        debate_type: 'gov', scope: 'country', scope_country: 'CL',
+        scope_commune:'', target_gender:'all', target_age_min:13, target_age_max:99,
+      })
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail||'Error al publicar');
+    document.getElementById('new-consultation-form').style.display='none';
+    loadDashboard();
+    alert(`✅ Consulta publicada: "${data.consultation.title}"`);
+  } catch(e) {
+    errEl.textContent = e.message; errEl.style.display='block';
+  } finally {
+    btn.textContent='Publicar consulta →'; btn.disabled=false;
+  }
 }
 </script>
 </body>
