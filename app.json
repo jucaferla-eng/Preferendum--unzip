@@ -2,9 +2,15 @@
   "expo": {
     "name": "Preferendum",
     "slug": "preferendum",
-    "version": "6.0.2",
+    "version": "6.0.3",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#090D18"
+    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -18,7 +24,11 @@
     },
     "android": {
       "package": "com.caip.preferendum",
-      "versionCode": 1
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#090D18"
+      }
     },
     "extra": {
       "eas": {

@@ -3,42 +3,58 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView, StyleSheet, ActivityIndicator, View, Text } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
+import * as FileSystem from 'expo-file-system';
 
-const BG = '#0a0d14';
+const BG      = '#090D18';
+const API_URL = 'https://preferendum-unzip.onrender.com';
 
 export default function App() {
-  const [uri,   setUri]   = useState(null);
+  const [html,  setHtml]  = useState(null);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        // fromModule is synchronous; downloadAsync ensures the file is on disk
-        const asset = Asset.fromModule(require('./assets/app.html'));
-        await asset.downloadAsync();
+  useEffect(() => { loadHtml(); }, []);
 
-        if (!asset.localUri) {
-          throw new Error('asset.localUri is null after downloadAsync');
-        }
+  async function loadHtml() {
+    try {
+      // fromModule is synchronous; downloadAsync copies the bundled asset to disk
+      const asset = Asset.fromModule(require('./assets/app.html'));
+      await asset.downloadAsync();
 
-        setUri(asset.localUri);
-      } catch (e) {
-        setError(String(e));
+      if (!asset.localUri) {
+        throw new Error('asset.localUri is null — asset not cached on device');
       }
-    })();
-  }, []);
 
+      const content = await FileSystem.readAsStringAsync(asset.localUri);
+
+      if (!content || content.length < 500) {
+        throw new Error(`HTML too short (${content?.length ?? 0} chars) — bundle may be corrupt`);
+      }
+
+      setHtml(content);
+    } catch (e) {
+      // Surface the error visibly so we can diagnose in TestFlight
+      setError(String(e));
+    }
+  }
+
+  // Visible error — never a silent infinite spinner
   if (error) {
     return (
-      <View style={[styles.loading, { padding: 24 }]}>
-        <Text style={{ color: '#f43f5e', fontSize: 13, textAlign: 'center' }}>
+      <View style={[styles.loading, { padding: 32 }]}>
+        <Text style={{ color: '#f43f5e', fontSize: 13, textAlign: 'center', lineHeight: 20 }}>
           {error}
+        </Text>
+        <Text
+          onPress={loadHtml}
+          style={{ color: '#2563eb', fontSize: 14, marginTop: 20, fontWeight: '700' }}
+        >
+          Retry
         </Text>
       </View>
     );
   }
 
-  if (!uri) {
+  if (!html) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color="#2563eb" />
@@ -51,18 +67,15 @@ export default function App() {
       <StatusBar style="light" backgroundColor={BG} />
       <WebView
         style={styles.webview}
-        source={{ uri }}
+        // inline html + baseUrl makes fetch() calls go to the right origin
+        // avoiding CORS issues. This is the reliable approach for local HTML on iOS.
+        source={{ html, baseUrl: API_URL }}
         originWhitelist={['*']}
         javaScriptEnabled
         domStorageEnabled
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
-        // Required so file:// pages can fetch https:// API endpoints
-        allowUniversalAccessFromFileURLs
-        allowFileAccess
-        mixedContentMode="always"
-        onError={e => setError(e.nativeEvent.description || 'WebView error')}
-        onHttpError={e => console.warn('HTTP error:', e.nativeEvent.statusCode)}
+        onError={e => setError('WebView: ' + (e.nativeEvent.description || e.nativeEvent.code))}
       />
     </SafeAreaView>
   );
