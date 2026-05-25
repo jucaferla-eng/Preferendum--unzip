@@ -223,6 +223,37 @@ class DebateAd(Base):
     impressions = Column(Integer, default=0)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
+class AdCampaign(Base):
+    __tablename__ = 'ad_campaigns'
+    id                  = Column(Integer, primary_key=True)
+    advertiser_email    = Column(String, index=True)
+    advertiser_name     = Column(String)
+    title               = Column(String)
+    budget_clp          = Column(Integer, default=0)
+    spent_clp           = Column(Integer, default=0)
+    ad_type             = Column(String, default='banner')
+    target_country      = Column(String, default='')
+    target_gender       = Column(String, default='all')
+    target_age_ranges   = Column(String, default='')
+    target_categories   = Column(String, default='')
+    excluded_categories = Column(String, default='')
+    blocked_competitors = Column(String, default='')
+    start_date          = Column(DateTime, nullable=True)
+    end_date            = Column(DateTime, nullable=True)
+    is_active           = Column(Boolean, default=True)
+    created_at          = Column(DateTime, default=datetime.utcnow)
+
+class AdImpressionLog(Base):
+    __tablename__ = 'ad_impression_logs'
+    id          = Column(Integer, primary_key=True)
+    campaign_id = Column(Integer, index=True)
+    debate_id   = Column(Integer, index=True, nullable=True)
+    gender      = Column(String, default='')
+    age_group   = Column(String, default='')
+    county      = Column(String, default='')
+    country     = Column(String, default='')
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
 Base.metadata.create_all(bind=engine)
 
 # ══════════════════════════════════════════════════════════════
@@ -463,6 +494,29 @@ class CastVoteRequest(BaseModel):
 
 class VerifyVoteRequest(BaseModel):
     code: str
+
+class CampaignCreate(BaseModel):
+    advertiser_email:    str
+    advertiser_name:     str
+    campaign_title:      str
+    budget_clp:          int
+    ad_type:             str = 'banner'
+    target_country:      str = ''
+    target_gender:       str = 'all'
+    target_age_ranges:   str = ''
+    target_categories:   str = ''
+    excluded_categories: str = ''
+    blocked_competitors: str = ''
+    start_date:          str
+    end_date:            str
+
+class AdViewInput(BaseModel):
+    campaign_id: int
+    debate_id:   Optional[int] = None
+    gender:      str = ''
+    age_group:   str = ''
+    county:      str = ''
+    country:     str = ''
 
 # ══════════════════════════════════════════════════════════════
 # SEED DEMO DATA
@@ -1027,10 +1081,205 @@ def organizer_register(data: RegisterInput, db: Session = Depends(get_db)):
 def organizer_panel():
     with open('preferendum_organizer.html', 'r') as f:
         return f.read()
-@app.get('/organizer-panel', response_class=HTMLResponse)
-def organizer_panel():
-    with open('preferendum_organizer.html', 'r') as f:
-        return f.read()
+
+# ══════════════════════════════════════════════════════════════
+# ROUTES: ORGANIZER
+# ══════════════════════════════════════════════════════════════
+
+@app.post('/organizers/login')
+def organizer_login(data: LoginInput, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email, User.role == 'organizer').first()
+    if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
+        raise HTTPException(401, 'Invalid credentials')
+    return {
+        'token': make_token(user.id, user.role),
+        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+    }
+
+@app.get('/organizers/me/debates')
+def organizer_my_debates(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debates = db.query(Debate).filter(Debate.creator_id == user.id).order_by(Debate.created_at.desc()).all()
+    return {'debates': [format_debate(d) for d in debates], 'total': len(debates)}
+
+@app.post('/organizers/debates')
+def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    if len(data.options) < 2:
+        raise HTTPException(400, 'At least 2 options required')
+    closes = datetime.fromisoformat(data.closes_at)
+    verify_closes = closes + timedelta(days=data.verify_days)
+    debate = Debate(
+        title=data.title, context=data.context,
+        options=json.dumps(data.options),
+        creator_id=user.id,
+        creator_type=data.creator_type, inst_name=data.inst_name or user.name,
+        debate_type=data.debate_type, scope=data.scope,
+        scope_country=data.scope_country, scope_commune=data.scope_commune,
+        target_gender=data.target_gender,
+        target_age_min=data.target_age_min, target_age_max=data.target_age_max,
+        closes_at=closes, verify_closes_at=verify_closes,
+        vote_counts=json.dumps({opt: 0 for opt in data.options}),
+    )
+    db.add(debate)
+    db.commit()
+    db.refresh(debate)
+    return {'debate': format_debate(debate), 'message': 'Debate created successfully'}
+
+@app.put('/organizers/debates/{debate_id}/close')
+def organizer_close_debate(debate_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debate = db.query(Debate).filter(Debate.id == debate_id, Debate.creator_id == user.id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found or not owned by you')
+    debate.closes_at = datetime.utcnow()
+    db.commit()
+    return {'message': 'Debate closed', 'debate': format_debate(debate)}
+
+@app.get('/organizers/debates/{debate_id}/results')
+def organizer_debate_results(debate_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debate = db.query(Debate).filter(Debate.id == debate_id, Debate.creator_id == user.id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found or not owned by you')
+    formatted = format_debate(debate)
+    return {
+        'debate': formatted,
+        'legitimacy_score': debate.legitimacy_score,
+        'verifications': {
+            'total': debate.verifications_total,
+            'confirmed': debate.verifications_ok,
+        },
+    }
+
+# ══════════════════════════════════════════════════════════════
+# ROUTES: MARKETER / ADVERTISER
+# ══════════════════════════════════════════════════════════════
+
+COST_PER_VIEW = 20  # CLP por impresión
+
+@app.post('/advertiser/campaigns')
+def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
+    campaign = AdCampaign(
+        advertiser_email    = data.advertiser_email,
+        advertiser_name     = data.advertiser_name,
+        title               = data.campaign_title,
+        budget_clp          = data.budget_clp,
+        ad_type             = data.ad_type,
+        target_country      = data.target_country,
+        target_gender       = data.target_gender,
+        target_age_ranges   = data.target_age_ranges,
+        target_categories   = data.target_categories,
+        excluded_categories = data.excluded_categories,
+        blocked_competitors = data.blocked_competitors,
+        start_date          = datetime.fromisoformat(data.start_date),
+        end_date            = datetime.fromisoformat(data.end_date),
+        is_active           = True,
+    )
+    db.add(campaign)
+    db.commit()
+    db.refresh(campaign)
+    return {'message': 'Campaign created', 'campaign_id': campaign.id, 'campaign': _format_campaign(campaign)}
+
+@app.get('/advertiser/campaigns')
+def list_campaigns(email: str, db: Session = Depends(get_db)):
+    campaigns = db.query(AdCampaign).filter(AdCampaign.advertiser_email == email).order_by(AdCampaign.created_at.desc()).all()
+    return {'campaigns': [_format_campaign(c) for c in campaigns], 'total': len(campaigns)}
+
+@app.get('/advertiser/campaigns/{campaign_id}')
+def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
+    campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(404, 'Campaign not found')
+    return _format_campaign(campaign)
+
+@app.put('/advertiser/campaigns/{campaign_id}/pause')
+def pause_campaign(campaign_id: int, db: Session = Depends(get_db)):
+    campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(404, 'Campaign not found')
+    campaign.is_active = not campaign.is_active
+    db.commit()
+    return {'campaign_id': campaign_id, 'is_active': campaign.is_active}
+
+@app.get('/advertiser/dashboard/{campaign_id}')
+def get_dashboard(campaign_id: int, db: Session = Depends(get_db)):
+    campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(404, 'Campaign not found')
+    views     = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == campaign_id).all()
+    total_imp = len(views)
+    spent     = total_imp * COST_PER_VIEW
+    by_gender = {}
+    by_age    = {}
+    by_country= {}
+    for v in views:
+        by_gender[v.gender]    = by_gender.get(v.gender, 0) + 1
+        by_age[v.age_group]    = by_age.get(v.age_group, 0) + 1
+        by_country[v.country]  = by_country.get(v.country, 0) + 1
+    return {
+        'campaign_id':   campaign_id,
+        'title':         campaign.title,
+        'advertiser':    campaign.advertiser_name,
+        'budget_clp':    campaign.budget_clp,
+        'impressions':   total_imp,
+        'spent_clp':     spent,
+        'balance_clp':   max(0, campaign.budget_clp - spent),
+        'cost_per_view': COST_PER_VIEW,
+        'is_active':     campaign.is_active,
+        'by_gender':     by_gender,
+        'by_age':        by_age,
+        'by_country':    by_country,
+    }
+
+@app.post('/ads/view')
+async def track_ad_view(data: AdViewInput, db: Session = Depends(get_db)):
+    campaign = db.query(AdCampaign).filter(AdCampaign.id == data.campaign_id, AdCampaign.is_active == True).first()
+    if not campaign:
+        raise HTTPException(404, 'Campaign not found or inactive')
+    log = AdImpressionLog(
+        campaign_id = data.campaign_id,
+        debate_id   = data.debate_id,
+        gender      = data.gender,
+        age_group   = data.age_group,
+        county      = data.county,
+        country     = data.country,
+    )
+    db.add(log)
+    total_imp = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == data.campaign_id).count() + 1
+    spent     = total_imp * COST_PER_VIEW
+    if spent >= campaign.budget_clp:
+        campaign.is_active = False
+    db.commit()
+    return {
+        'message':     'Impression recorded',
+        'impressions': total_imp,
+        'spent_clp':   spent,
+        'balance_clp': max(0, campaign.budget_clp - spent),
+    }
+
+def _format_campaign(c: AdCampaign) -> dict:
+    return {
+        'id':                 c.id,
+        'title':              c.title,
+        'advertiser_name':    c.advertiser_name,
+        'advertiser_email':   c.advertiser_email,
+        'budget_clp':         c.budget_clp,
+        'ad_type':            c.ad_type,
+        'target_country':     c.target_country,
+        'target_gender':      c.target_gender,
+        'target_age_ranges':  c.target_age_ranges,
+        'target_categories':  c.target_categories,
+        'excluded_categories':c.excluded_categories,
+        'start_date':         c.start_date.isoformat() if c.start_date else None,
+        'end_date':           c.end_date.isoformat() if c.end_date else None,
+        'is_active':          c.is_active,
+        'created_at':         c.created_at.isoformat(),
+    }
 
 from verification import router as verify_router
 app.include_router(verify_router)
