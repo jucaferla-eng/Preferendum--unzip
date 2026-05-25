@@ -1599,3 +1599,37 @@ def get_campaign_metrics(campaign_id: int, db: Session = Depends(get_db)):
 
 from verification import router as verify_router
 app.include_router(verify_router)
+
+# ── ADMIN: email smoke test ──────────────────────────────────────
+@app.post('/admin/test-email')
+def test_email_send(to: str, secret: str):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import urllib.error as _ue
+    resend_key = os.getenv('RESEND_API_KEY')
+    results = []
+    if resend_key:
+        for from_addr in ['Preferendum <noreply@preferendum.com>', 'Preferendum <onboarding@resend.dev>']:
+            try:
+                payload = json.dumps({
+                    'from': from_addr, 'to': [to],
+                    'subject': 'Preferendum — Email Test',
+                    'text': 'Email delivery test. If you see this, Resend is working.',
+                }).encode()
+                req = urllib.request.Request(
+                    'https://api.resend.com/emails', data=payload,
+                    headers={'Authorization': f'Bearer {resend_key}', 'Content-Type': 'application/json'},
+                    method='POST'
+                )
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    body = r.read().decode()
+                    results.append({'from': from_addr, 'status': r.status, 'body': body, 'ok': True})
+                    break
+            except _ue.HTTPError as e:
+                body = e.read().decode() if e.fp else ''
+                results.append({'from': from_addr, 'status': e.code, 'body': body, 'ok': False})
+            except Exception as e:
+                results.append({'from': from_addr, 'error': str(e), 'ok': False})
+    else:
+        results.append({'error': 'RESEND_API_KEY not set', 'ok': False})
+    return {'to': to, 'resend_key_set': bool(resend_key), 'results': results}
