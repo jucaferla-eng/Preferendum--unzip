@@ -405,25 +405,36 @@ def send_email_otp(email, code, name=''):
     # Try Resend first (primary)
     resend_key = os.getenv('RESEND_API_KEY')
     if resend_key:
-        try:
-            payload = json.dumps({
-                'from': 'Preferendum <noreply@preferendum.com>',
-                'to': [email],
-                'subject': f'Tu código Preferendum: {code}',
-                'html': html,
-                'text': f'Tu código Preferendum es: {code}. Válido 10 minutos.',
-            }).encode()
-            req = urllib.request.Request(
-                'https://api.resend.com/emails',
-                data=payload,
-                headers={'Authorization': f'Bearer {resend_key}', 'Content-Type': 'application/json'},
-                method='POST'
-            )
-            with urllib.request.urlopen(req, timeout=10) as r:
-                print(f'[Resend] Sent to {email}: {r.status}')
-            return True
-        except Exception as e:
-            print(f'[Resend Error] {e} — falling back to Gmail')
+        # Try verified domain first, fall back to onboarding@resend.dev
+        from_addresses = [
+            'Preferendum <noreply@preferendum.com>',
+            'Preferendum <onboarding@resend.dev>',
+        ]
+        for from_addr in from_addresses:
+            try:
+                payload = json.dumps({
+                    'from': from_addr,
+                    'to': [email],
+                    'subject': f'Tu código Preferendum: {code}',
+                    'html': html,
+                    'text': f'Tu código Preferendum es: {code}. Válido 10 minutos.',
+                }).encode()
+                req = urllib.request.Request(
+                    'https://api.resend.com/emails',
+                    data=payload,
+                    headers={'Authorization': f'Bearer {resend_key}', 'Content-Type': 'application/json'},
+                    method='POST'
+                )
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    body = r.read().decode()
+                    print(f'[Resend] Sent from={from_addr} to={email} status={r.status} body={body}')
+                return True
+            except urllib.error.HTTPError as e:
+                body = e.read().decode() if e.fp else ''
+                print(f'[Resend HTTPError] from={from_addr} status={e.code} body={body}')
+            except Exception as e:
+                print(f'[Resend Error] from={from_addr} error={e}')
+        print('[Resend] All from addresses failed — falling back to Gmail')
 
     # Fallback: Gmail SMTP
     gmail_user = os.getenv('GMAIL_USER', 'jucaferla@gmail.com')

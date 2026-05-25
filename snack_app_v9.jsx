@@ -662,6 +662,10 @@ export default function PreferendumV8() {
             <span style={{fontSize:12,color:T.fog,fontWeight:400}}> · Verificación</span>
           </div>
           <div style={{fontSize:12,color:T.fog,fontWeight:700}}>{doneCount}/7</div>
+          <button onClick={()=>go("feed")} style={{background:"none",border:"none",
+            color:T.fog,fontSize:12,cursor:"pointer",marginLeft:8,padding:"4px 8px"}}>
+            Saltar →
+          </button>
         </div>
 
         <div style={{padding:"12px 16px 0"}}>
