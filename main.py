@@ -403,28 +403,29 @@ def send_email_otp(email, code, name=''):
         f'</div>'
     )
 
-    # Try Resend (uses requests to avoid Cloudflare bot detection on urllib)
+    # Try Resend — verified domain first, onboarding@resend.dev as fallback
     resend_key = os.getenv('RESEND_API_KEY')
     if resend_key:
-        try:
-            resp = _requests.post(
-                'https://api.resend.com/emails',
-                json={
-                    'from': 'Preferendum <noreply@preferendum.com>',
-                    'to': [email],
-                    'subject': f'Tu código Preferendum: {code}',
-                    'html': html,
-                    'text': f'Tu código Preferendum es: {code}. Válido 10 minutos.',
-                },
-                headers={'Authorization': f'Bearer {resend_key}'},
-                timeout=10,
-            )
-            print(f'[Resend] status={resp.status_code} body={resp.text}')
-            if resp.status_code in (200, 201):
-                return True
-        except Exception as e:
-            print(f'[Resend Error] {e}')
-        print('[Resend] Failed — falling back to Gmail')
+        for from_addr in ['Preferendum <noreply@preferendum.com>', 'Preferendum <onboarding@resend.dev>']:
+            try:
+                resp = _requests.post(
+                    'https://api.resend.com/emails',
+                    json={
+                        'from': from_addr,
+                        'to': [email],
+                        'subject': f'Tu código Preferendum: {code}',
+                        'html': html,
+                        'text': f'Tu código Preferendum es: {code}. Válido 10 minutos.',
+                    },
+                    headers={'Authorization': f'Bearer {resend_key}'},
+                    timeout=10,
+                )
+                print(f'[Resend] from={from_addr} status={resp.status_code} body={resp.text}')
+                if resp.status_code in (200, 201):
+                    return True
+            except Exception as e:
+                print(f'[Resend Error] from={from_addr} {e}')
+        print('[Resend] All addresses failed — falling back to Gmail')
 
     # Fallback: Gmail SMTP
     gmail_user = os.getenv('GMAIL_USER', 'jucaferla@gmail.com')
@@ -1598,18 +1599,17 @@ def test_email_send(to: str, secret: str):
     resend_key = os.getenv('RESEND_API_KEY')
     if not resend_key:
         return {'to': to, 'ok': False, 'error': 'RESEND_API_KEY not set'}
-    try:
-        resp = _requests.post(
-            'https://api.resend.com/emails',
-            json={
-                'from': 'Preferendum <noreply@preferendum.com>',
-                'to': [to],
-                'subject': 'Preferendum — Email Test',
-                'text': 'Email delivery test. If you see this, Resend is working from noreply@preferendum.com.',
-            },
-            headers={'Authorization': f'Bearer {resend_key}'},
-            timeout=10,
-        )
-        return {'to': to, 'status': resp.status_code, 'body': resp.json(), 'ok': resp.status_code in (200, 201)}
-    except Exception as e:
-        return {'to': to, 'ok': False, 'error': str(e)}
+    results = []
+    for from_addr in ['Preferendum <noreply@preferendum.com>', 'Preferendum <onboarding@resend.dev>']:
+        try:
+            resp = _requests.post(
+                'https://api.resend.com/emails',
+                json={'from': from_addr, 'to': [to], 'subject': 'Preferendum — Email Test',
+                      'text': f'Test from {from_addr}. If you see this, email is working.'},
+                headers={'Authorization': f'Bearer {resend_key}'},
+                timeout=10,
+            )
+            results.append({'from': from_addr, 'status': resp.status_code, 'body': resp.json(), 'ok': resp.status_code in (200, 201)})
+        except Exception as e:
+            results.append({'from': from_addr, 'ok': False, 'error': str(e)})
+    return {'to': to, 'results': results}
