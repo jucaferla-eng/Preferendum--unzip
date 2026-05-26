@@ -129,6 +129,10 @@
     margin-bottom:24px;
   }
 
+  /* ── DASHBOARD & LOGIN PAGES ── */
+  #page-dashboard,#page-login{flex-direction:column;align-items:center;padding:60px 40px;}
+  .page-content{max-width:680px;width:100%;}
+
   /* ── PROGRESS BAR ── */
   .progress-bar{
     display:flex;align-items:center;gap:0;
@@ -286,7 +290,7 @@
     </div>
 
     <div style="display:flex;gap:12px;margin-top:32px;">
-      <button class="btn-secondary" style="flex:1" onclick="goTo('welcome')">← Volver</button>
+      <button class="btn-secondary" style="flex:1" onclick="window.location.href='/organizers'">← Volver</button>
       <button class="btn-primary" style="flex:2" onclick="goTo('terms')">Entendido → Ver términos y condiciones</button>
     </div>
   </div>
