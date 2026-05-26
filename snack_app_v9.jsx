@@ -1652,17 +1652,19 @@ export default function PreferendumV8() {
         <div style={{textAlign:"center",padding:"20px 0"}}>
           <div style={{fontSize:48,marginBottom:12}}>🏛</div>
           <div style={{fontSize:22,fontWeight:900,color:T.white,marginBottom:4}}>Portal de Instituciones</div>
-          <div style={{fontSize:13,color:T.fog}}>Municipalidades · Empresas · ONGs · Sindicatos</div>
+          <div style={{fontSize:13,color:T.fog}}>Cualquier persona puede crear una consulta</div>
         </div>
         <Card>
-          <Lbl>Tipo de institución</Lbl>
+          <Lbl>Tipo de organización</Lbl>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
-            {[["🏛","Municipalidad",T.teal],["🏢","Empresa",T.blue],
-              ["🌿","ONG",T.green],["⚙️","Sindicato",T.gold]].map(([i,l,c])=>(
+            {[["🏢","Empresa",T.blue],["🤝","Asoc. Profesional",T.teal],
+              ["🌾","Sector Productivo",T.green],["🎓","Universidad",T.gold],
+              ["🏛","Municipalidad",T.teal],["🌐","Entidad Cívica",T.coral],
+              ["👤","Persona Natural",T.fog]].map(([i,l,c])=>(
               <div key={l} onClick={()=>go("inst-home")} style={{padding:12,borderRadius:10,
                 border:`1.5px solid ${c}44`,background:`${c}11`,textAlign:"center",cursor:"pointer"}}>
                 <div style={{fontSize:24,marginBottom:4}}>{i}</div>
-                <div style={{fontSize:12,fontWeight:700,color:c}}>{l}</div>
+                <div style={{fontSize:11,fontWeight:700,color:c}}>{l}</div>
               </div>
             ))}
           </div>
