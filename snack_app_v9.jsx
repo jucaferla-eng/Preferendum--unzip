@@ -205,6 +205,13 @@ export default function PreferendumV8() {
   const [ncOpts,setNcOpts]       = useState(['','','','']);
   const [ncCloses,setNcCloses]   = useState('');
   const [ncLoading,setNcLoading] = useState(false);
+  const [ncAudience,setNcAudience] = useState('all');
+  const [ncGender,setNcGender]   = useState('all');
+  const [ncAgeMin,setNcAgeMin]   = useState('13');
+  const [ncAgeMax,setNcAgeMax]   = useState('99');
+  const [ncCountry,setNcCountry] = useState('CL');
+  const [ncRegion,setNcRegion]   = useState('');
+  const [ncCommune,setNcCommune] = useState('');
 
   // Marketer state — Ad Creator
   const [mkScreen,setMkScreen]   = useState("hub"); // hub|adcreator|reward|dashboard
@@ -599,7 +606,8 @@ export default function PreferendumV8() {
               try {
                 const data = await apiFetch('POST','/auth/login',{email,password:pw});
                 setAuthToken(data.token); setCurrentUser(data.user);
-                setVfLoading(false); go("feed");
+                setVfLoading(false); go("debates-splash");
+                setTimeout(()=>go("feed"), 2200);
               } catch(e) { setVfError(e.message); setVfLoading(false); }
             }}/>
         </Card>
@@ -727,7 +735,8 @@ export default function PreferendumV8() {
                       try {
                         await apiFetch('POST','/verify/email/confirm',{code:emailCode,channel:'email'});
                         setVfDone(p=>({...p,1:true}));
-                        setVfStep(2);
+                        go("debates-splash");
+                        setTimeout(()=>go("feed"), 2200);
                       } catch(e) {
                         alert('Código incorrecto o expirado. Intenta de nuevo.');
                       } finally {
@@ -1797,6 +1806,51 @@ export default function PreferendumV8() {
               <Lbl>Cierre de votación</Lbl>
               <Input label="Fecha de cierre" type="date" value={ncCloses} onChange={setNcCloses}/>
             </Card>
+            <Card>
+              <Lbl>¿A quién va dirigida?</Lbl>
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,color:T.fog,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700}}>Audiencia</div>
+                {[["all","🌐 Todos los ciudadanos"],["members","🏢 Miembros de la empresa"],["association","🤝 Miembros de la asociación"],["closed","🔒 Lista cerrada"]].map(([v,l])=>(
+                  <div key={v} onClick={()=>setNcAudience(v)} style={{padding:"9px 12px",borderRadius:8,marginBottom:6,cursor:"pointer",
+                    border:`1.5px solid ${ncAudience===v?T.blue:T.rim}`,background:ncAudience===v?`${T.blue}18`:T.deep,
+                    fontSize:13,color:ncAudience===v?T.white:T.fog,fontWeight:ncAudience===v?700:400}}>{l}</div>
+                ))}
+              </div>
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,color:T.fog,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700}}>Género</div>
+                <div style={{display:"flex",gap:8}}>
+                  {[["all","Todos"],["male","Hombres"],["female","Mujeres"]].map(([v,l])=>(
+                    <div key={v} onClick={()=>setNcGender(v)} style={{flex:1,padding:"8px 4px",borderRadius:8,cursor:"pointer",textAlign:"center",
+                      border:`1.5px solid ${ncGender===v?T.blue:T.rim}`,background:ncGender===v?`${T.blue}18`:T.deep,
+                      fontSize:12,color:ncGender===v?T.white:T.fog,fontWeight:ncGender===v?700:400}}>{l}</div>
+                  ))}
+                </div>
+              </div>
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,color:T.fog,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700}}>Edad</div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <input value={ncAgeMin} onChange={e=>setNcAgeMin(e.target.value)} placeholder="Mín" type="number"
+                    style={{flex:1,padding:"9px 10px",borderRadius:8,background:T.deep,border:`1.5px solid ${T.rim}`,color:T.snow,fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                  <span style={{color:T.fog,fontSize:12}}>a</span>
+                  <input value={ncAgeMax} onChange={e=>setNcAgeMax(e.target.value)} placeholder="Máx" type="number"
+                    style={{flex:1,padding:"9px 10px",borderRadius:8,background:T.deep,border:`1.5px solid ${T.rim}`,color:T.snow,fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+                  <span style={{color:T.fog,fontSize:12}}>años</span>
+                </div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <div style={{fontSize:11,color:T.fog,textTransform:"uppercase",letterSpacing:"0.08em",fontWeight:700}}>Ubicación</div>
+                <select value={ncCountry} onChange={e=>setNcCountry(e.target.value)}
+                  style={{width:"100%",padding:"9px 10px",borderRadius:8,background:T.deep,border:`1.5px solid ${T.rim}`,color:T.snow,fontSize:13,outline:"none"}}>
+                  {[["CL","Chile"],["AR","Argentina"],["CO","Colombia"],["MX","México"],["PE","Perú"],["ES","España"],["ALL","Todos los países"]].map(([v,l])=>(
+                    <option key={v} value={v}>{l}</option>
+                  ))}
+                </select>
+                <input value={ncRegion} onChange={e=>setNcRegion(e.target.value)} placeholder="Estado / Región (opcional)"
+                  style={{width:"100%",padding:"9px 10px",borderRadius:8,background:T.deep,border:`1.5px solid ${T.rim}`,color:T.snow,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+                <input value={ncCommune} onChange={e=>setNcCommune(e.target.value)} placeholder="Comuna (opcional)"
+                  style={{width:"100%",padding:"9px 10px",borderRadius:8,background:T.deep,border:`1.5px solid ${T.rim}`,color:T.snow,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
+              </div>
+            </Card>
             <Btn label={ncLoading?"Publicando...":"🚀 Publicar debate"} full
               disabled={ncLoading||!ncTitle||ncOpts.filter(Boolean).length<2||!ncCloses}
               onPress={async()=>{
@@ -1808,12 +1862,17 @@ export default function PreferendumV8() {
                     closes_at:new Date(ncCloses).toISOString(),
                     verify_days:14,
                     creator_type:'organizer', inst_name:'Municipalidad Las Condes',
-                    debate_type:'gov', scope:'country', scope_country:'CL',
-                    scope_commune:'', target_gender:'all', target_age_min:13, target_age_max:99,
+                    debate_type:'gov', scope:ncCommune?'commune':ncRegion?'region':'country',
+                    scope_country:ncCountry, scope_commune:ncCommune,
+                    target_gender:ncGender,
+                    target_age_min:parseInt(ncAgeMin)||13,
+                    target_age_max:parseInt(ncAgeMax)||99,
                   });
                   const newDeb=data.debate;
                   if(newDeb) setApiDebates(prev=>[transformDebate(newDeb),...prev]);
                   setNcTitle('');setNcDesc('');setNcOpts(['','','','']);setNcCloses('');
+                  setNcAudience('all');setNcGender('all');setNcAgeMin('13');setNcAgeMax('99');
+                  setNcCountry('CL');setNcRegion('');setNcCommune('');
                   setInstTab("debates");
                   alert(`✅ Debate publicado: "${ncTitle}"\n\nYa aparece en el feed para todos los votantes.`);
                 } catch(e){
