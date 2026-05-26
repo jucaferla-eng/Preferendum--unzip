@@ -200,6 +200,11 @@ export default function PreferendumV8() {
 
   // Institution state
   const [instTab,setInstTab]     = useState("debates");
+  const [ncTitle,setNcTitle]     = useState('');
+  const [ncDesc,setNcDesc]       = useState('');
+  const [ncOpts,setNcOpts]       = useState(['','','','']);
+  const [ncCloses,setNcCloses]   = useState('');
+  const [ncLoading,setNcLoading] = useState(false);
 
   // Marketer state — Ad Creator
   const [mkScreen,setMkScreen]   = useState("hub"); // hub|adcreator|reward|dashboard
@@ -1641,7 +1646,7 @@ export default function PreferendumV8() {
   // ══════════════════════════════════════════════════════════════
   if(screen==="inst-login") return (
     <div style={phone}>
-      <TopBar title="Portal Institucional" back="launch"/>
+      <TopBar title="Portal Institucional" back="feed"/>
       <div style={{padding:"16px 16px 80px"}}>
         <div style={{textAlign:"center",padding:"20px 0"}}>
           <div style={{fontSize:48,marginBottom:12}}>🏛</div>
@@ -1676,6 +1681,8 @@ export default function PreferendumV8() {
       <div style={{background:T.deep,borderBottom:`1px solid ${T.rim}`,
         padding:"12px 16px",display:"flex",alignItems:"center",gap:10,
         position:"sticky",top:0,zIndex:99}}>
+        <button onClick={()=>go("inst-login")} style={{background:"none",border:"none",
+          color:T.fog,fontSize:13,cursor:"pointer",padding:"4px 8px 4px 0"}}>←</button>
         <div style={{fontSize:16}}>🏛</div>
         <div style={{flex:1}}>
           <div style={{fontWeight:900,fontSize:15,color:T.white}}>Municipalidad Las Condes</div>
@@ -1761,32 +1768,47 @@ export default function PreferendumV8() {
             </div>
             <Card>
               <Lbl>Información</Lbl>
-              <Input label="Título de la pregunta" placeholder="¿Prioridad para el presupuesto 2027?" value="" onChange={()=>{}}/>
-              <Input label="Descripción" placeholder="Explica el contexto..." value="" onChange={()=>{}}/>
+              <Input label="Título de la pregunta" placeholder="¿Cuál es la prioridad para el presupuesto 2027?" value={ncTitle} onChange={setNcTitle}/>
+              <Input label="Descripción (opcional)" placeholder="Explica el contexto..." value={ncDesc} onChange={setNcDesc}/>
             </Card>
             <Card>
               <Lbl>Opciones de votación</Lbl>
               {["Opción 1","Opción 2","Opción 3","Opción 4"].map((p,i)=>(
-                <input key={i} placeholder={p} style={{width:"100%",padding:"10px 14px",
-                  borderRadius:10,background:T.deep,border:`1.5px solid ${T.rim}`,
-                  color:T.snow,fontSize:14,outline:"none",fontFamily:"inherit",
-                  marginBottom:8,boxSizing:"border-box"}}/>
+                <input key={i} placeholder={p} value={ncOpts[i]}
+                  onChange={e=>{const o=[...ncOpts];o[i]=e.target.value;setNcOpts(o);}}
+                  style={{width:"100%",padding:"10px 14px",
+                    borderRadius:10,background:T.deep,border:`1.5px solid ${T.rim}`,
+                    color:T.snow,fontSize:14,outline:"none",fontFamily:"inherit",
+                    marginBottom:8,boxSizing:"border-box"}}/>
               ))}
             </Card>
             <Card>
-              <Lbl>Fechas</Lbl>
-              <Input label="Apertura de votación" type="date" value="" onChange={()=>{}}/>
-              <Input label="Cierre de votación" type="date" value="" onChange={()=>{}}/>
-              <Input label="Apertura de verificación" type="date" value="" onChange={()=>{}}/>
-              <Input label="Cierre de verificación" type="date" value="" onChange={()=>{}}/>
-              <div style={{fontSize:11,color:T.gold,lineHeight:1.6,marginTop:4}}>
-                ⚠️ La verificación solo puede abrirse después del cierre de la votación.
-              </div>
+              <Lbl>Cierre de votación</Lbl>
+              <Input label="Fecha de cierre" type="date" value={ncCloses} onChange={setNcCloses}/>
             </Card>
-            <Btn label="🚀 Publicar debate" full onPress={()=>{
-              alert("✅ Debate publicado.\n\nLos votantes pueden ver y votar hasta la fecha de cierre.");
-              setInstTab("debates");
-            }}/>
+            <Btn label={ncLoading?"Publicando...":"🚀 Publicar debate"} full
+              disabled={ncLoading||!ncTitle||ncOpts.filter(Boolean).length<2||!ncCloses}
+              onPress={async()=>{
+                const options=ncOpts.filter(Boolean);
+                setNcLoading(true);
+                try {
+                  const data=await apiFetch('POST','/debates',{
+                    title:ncTitle, context:ncDesc, options,
+                    closes_at:new Date(ncCloses).toISOString(),
+                    verify_days:14,
+                    creator_type:'organizer', inst_name:'Municipalidad Las Condes',
+                    debate_type:'gov', scope:'country', scope_country:'CL',
+                    scope_commune:'', target_gender:'all', target_age_min:13, target_age_max:99,
+                  });
+                  const newDeb=data.debate;
+                  if(newDeb) setApiDebates(prev=>[transformDebate(newDeb),...prev]);
+                  setNcTitle('');setNcDesc('');setNcOpts(['','','','']);setNcCloses('');
+                  setInstTab("debates");
+                  alert(`✅ Debate publicado: "${ncTitle}"\n\nYa aparece en el feed para todos los votantes.`);
+                } catch(e){
+                  alert('Error al publicar: '+(e.message||'Intenta de nuevo.'));
+                } finally { setNcLoading(false); }
+              }}/>
           </>
         )}
 
