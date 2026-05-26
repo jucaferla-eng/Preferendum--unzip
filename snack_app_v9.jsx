@@ -296,6 +296,7 @@ export default function PreferendumV8() {
     setScreen(s);
     if(extra.deb) setSelDebate(extra.deb);
     if(s==="feed"||s==="results"||s==="verify"||s==="profile") setTab(s);
+    if(s==="inst-home") setInstTab("debates");
     window.scrollTo&&window.scrollTo(0,0);
   };
 
@@ -1697,11 +1698,16 @@ export default function PreferendumV8() {
       <div style={{padding:"12px 16px 80px"}}>
         {instTab==="debates"&&(
           <>
-            <div style={{padding:"4px 0 14px"}}>
-              <div style={{fontSize:20,fontWeight:900,color:T.white}}>Mis debates</div>
+            <div style={{padding:"4px 0 14px",display:"flex",alignItems:"center"}}>
+              <div style={{fontSize:20,fontWeight:900,color:T.white,flex:1}}>Mis debates</div>
+              <button onClick={()=>setInstTab("create")} style={{padding:"6px 14px",borderRadius:8,
+                background:T.blue,border:"none",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                + Nuevo
+              </button>
             </div>
-            {DEBATES.filter(d=>d.type==="gov").map(deb=>{
-              const total=deb.vals.reduce((a,b)=>a+b,0)||1;
+            {(apiDebates.length>0?apiDebates:DEBATES.filter(d=>d.type==="gov")).map(deb=>{
+              const vals=deb.vals||[];
+              const total=vals.reduce((a,b)=>a+b,0)||1;
               return (
                 <Card key={deb.id}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
@@ -1709,23 +1715,26 @@ export default function PreferendumV8() {
                     <StatusBadge status={deb.status}/>
                   </div>
                   <div style={{display:"flex",gap:16,fontSize:11,color:T.fog,marginBottom:12}}>
-                    <span>🗳 {deb.votes} votos</span><span>💬 {deb.comments}</span>
+                    <span>🗳 {deb.votes||0} votos</span>
                   </div>
-                  {deb.opts.map((o,i)=>(
+                  {(deb.opts||[]).map((o,i)=>(
                     <div key={i} style={{marginBottom:8}}>
                       <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
                         <span style={{color:T.silver}}>{o}</span>
-                        <span style={{fontWeight:700,color:COLORS[i]}}>{Math.round(deb.vals[i]/total*100)}%</span>
+                        <span style={{fontWeight:700,color:COLORS[i%COLORS.length]}}>{vals[i]?Math.round(vals[i]/total*100):0}%</span>
                       </div>
                       <div style={{background:T.deep,borderRadius:4,height:7,overflow:"hidden"}}>
-                        <div style={{height:"100%",borderRadius:4,background:COLORS[i],
-                          width:Math.round(deb.vals[i]/total*100)+"%"}}/>
+                        <div style={{height:"100%",borderRadius:4,background:COLORS[i%COLORS.length],
+                          width:(vals[i]?Math.round(vals[i]/total*100):0)+"%"}}/>
                       </div>
                     </div>
                   ))}
                 </Card>
               );
             })}
+            {apiDebates.length===0&&debatesLoading&&(
+              <div style={{textAlign:"center",padding:24,color:T.fog,fontSize:13}}>Cargando debates...</div>
+            )}
           </>
         )}
 
