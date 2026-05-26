@@ -42,9 +42,13 @@ import bcrypt
 # ══════════════════════════════════════════════════════════════
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./preferendum.db')
+# Render provides postgres:// but SQLAlchemy 1.4+ requires postgresql://
+if DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 engine = create_engine(
     DATABASE_URL,
-    connect_args={'check_same_thread': False} if 'sqlite' in DATABASE_URL else {}
+    connect_args={'check_same_thread': False} if 'sqlite' in DATABASE_URL else {},
+    pool_pre_ping=True,
 )
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
@@ -267,20 +271,32 @@ class ClosedListEntry(Base):
 
 Base.metadata.create_all(bind=engine)
 
-# SQLite column migrations for new fields added after initial deploy
+# Column migrations — works for both SQLite and PostgreSQL
 def _migrate():
-    from sqlalchemy import text
+    from sqlalchemy import text, inspect
+    is_pg = 'postgresql' in DATABASE_URL
+    inspector = inspect(engine)
     with engine.connect() as conn:
-        for stmt in [
-            "ALTER TABLE debates ADD COLUMN follow_up_questions TEXT DEFAULT ''",
-            "ALTER TABLE debates ADD COLUMN reward TEXT DEFAULT ''",
-            "ALTER TABLE debate_votes ADD COLUMN vote_chain TEXT DEFAULT '[]'",
+        # debates table
+        existing_debate_cols = {c['name'] for c in inspector.get_columns('debates')} if inspector.has_table('debates') else set()
+        for col, definition in [
+            ('follow_up_questions', "TEXT DEFAULT ''"),
+            ('reward',              "TEXT DEFAULT ''"),
         ]:
+            if col not in existing_debate_cols:
+                try:
+                    conn.execute(text(f"ALTER TABLE debates ADD COLUMN {col} {definition}"))
+                    conn.commit()
+                except Exception:
+                    pass
+        # debate_votes table
+        existing_vote_cols = {c['name'] for c in inspector.get_columns('debate_votes')} if inspector.has_table('debate_votes') else set()
+        if 'vote_chain' not in existing_vote_cols:
             try:
-                conn.execute(text(stmt))
+                conn.execute(text("ALTER TABLE debate_votes ADD COLUMN vote_chain TEXT DEFAULT '[]'"))
                 conn.commit()
             except Exception:
-                pass  # column already exists
+                pass
 _migrate()
 
 # ══════════════════════════════════════════════════════════════

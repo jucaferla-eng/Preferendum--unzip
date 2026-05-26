@@ -1,18 +1,45 @@
+databases:
+  - name: preferendum-db
+    databaseName: preferendum
+    user: preferendum
+    plan: free
+    region: oregon
+
 services:
   - type: web
-    name: preferendum-api
+    name: preferendum-unzip
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    region: oregon
     envVars:
       - key: DATABASE_URL
-        sync: false
+        fromDatabase:
+          name: preferendum-db
+          property: connectionString
       - key: JWT_SECRET
-        generateValue: true
+        sync: false
       - key: VOTE_ENCRYPTION_KEY
-        generateValue: true
+        sync: false
       - key: SESSION_SECRET
-        generateValue: true
+        sync: false
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: FROM_EMAIL
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
       - key: CONTRACT_ADDRESS
         value: ""
       - key: PREFERENDUM_WALLET_KEY
