@@ -659,14 +659,326 @@ seed_demo_data()
 # ROUTES: ROOT
 # ══════════════════════════════════════════════════════════════
 
-@app.get('/')
+@app.get('/', response_class=HTMLResponse)
 def root():
-    return {
-        'system': 'Preferendum',
-        'version': '3.0.0',
-        'status': 'running',
-        'dedication': 'En memoria de Jose Ignacio Fernandez (1989-2024)',
-    }
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Preferendum — Plataforma de Decisiones Verificadas</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#090D18;--deep:#0b0f1e;--card:#0f1528;--rim:#1a2240;
+  --blue:#2563EB;--blue2:#3b82f6;--gold:#F59E0B;--green:#10B981;
+  --coral:#F43F5E;--white:#F0F4FF;--muted:#64748B;--silver:#94A3B8;
+}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--white);font-family:'Inter',sans-serif;min-height:100vh;overflow-x:hidden;}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:20px 48px;
+  background:rgba(9,13,24,0.85);backdrop-filter:blur(16px);
+  border-bottom:1px solid rgba(255,255,255,0.05);}
+.logo{font-family:'Playfair Display',serif;font-size:26px;color:var(--white);
+  letter-spacing:-0.5px;text-decoration:none;}
+.logo em{color:var(--blue);font-style:normal;}
+.nav-links{display:flex;gap:32px;align-items:center;}
+.nav-link{color:var(--silver);font-size:14px;font-weight:500;text-decoration:none;transition:color .2s;}
+.nav-link:hover{color:var(--white);}
+.nav-cta{background:var(--blue);color:#fff;padding:10px 22px;border-radius:8px;
+  font-size:14px;font-weight:600;text-decoration:none;transition:all .2s;}
+.nav-cta:hover{background:var(--blue2);transform:translateY(-1px);}
+
+/* HERO */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;text-align:center;padding:120px 24px 80px;
+  background:radial-gradient(ellipse 80% 60% at 50% 0%, rgba(37,99,235,0.15) 0%, transparent 60%),
+             radial-gradient(ellipse 40% 40% at 80% 80%, rgba(245,158,11,0.06) 0%, transparent 50%);}
+.hero-label{font-size:11px;letter-spacing:0.35em;color:var(--blue);text-transform:uppercase;
+  font-weight:600;margin-bottom:28px;opacity:0.9;}
+.hero-title{font-family:'Playfair Display',serif;font-size:clamp(48px,7vw,88px);
+  font-weight:900;color:var(--white);line-height:1.05;letter-spacing:-2px;
+  margin-bottom:28px;max-width:900px;}
+.hero-title .accent{color:var(--blue);}
+.hero-title .gold{color:var(--gold);}
+.hero-sub{font-size:18px;color:var(--silver);line-height:1.75;max-width:580px;
+  margin:0 auto 52px;font-weight:300;}
+.hero-sub strong{color:var(--white);font-weight:600;}
+
+.cta-row{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;margin-bottom:56px;}
+.btn-org{background:var(--blue);color:#fff;padding:18px 40px;border-radius:12px;
+  font-size:16px;font-weight:700;text-decoration:none;transition:all .25s;
+  box-shadow:0 4px 32px rgba(37,99,235,0.35);display:inline-flex;align-items:center;gap:10px;}
+.btn-org:hover{background:var(--blue2);transform:translateY(-3px);box-shadow:0 8px 48px rgba(37,99,235,0.5);}
+.btn-adv{background:transparent;color:var(--gold);padding:18px 40px;border-radius:12px;
+  font-size:16px;font-weight:700;text-decoration:none;transition:all .25s;
+  border:2px solid var(--gold);display:inline-flex;align-items:center;gap:10px;}
+.btn-adv:hover{background:rgba(245,158,11,0.1);transform:translateY(-3px);}
+
+.trust-bar{display:flex;gap:32px;justify-content:center;flex-wrap:wrap;}
+.trust-item{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);}
+.trust-dot{width:6px;height:6px;border-radius:50%;background:var(--green);}
+
+/* DIVIDER */
+.divider{height:1px;background:linear-gradient(90deg,transparent,var(--rim),transparent);margin:0 48px;}
+
+/* HOW IT WORKS */
+.section{padding:100px 24px;max-width:1100px;margin:0 auto;}
+.section-label{font-size:11px;letter-spacing:0.3em;color:var(--blue);
+  text-transform:uppercase;font-weight:600;margin-bottom:16px;}
+.section-title{font-family:'Playfair Display',serif;font-size:clamp(32px,4vw,52px);
+  font-weight:700;color:var(--white);line-height:1.15;margin-bottom:16px;}
+.section-sub{font-size:16px;color:var(--silver);line-height:1.75;max-width:560px;margin-bottom:60px;}
+
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px;}
+.step-card{background:var(--card);border:1px solid var(--rim);border-radius:16px;
+  padding:32px;transition:border-color .2s,transform .2s;}
+.step-card:hover{border-color:var(--blue);transform:translateY(-4px);}
+.step-num{font-family:'Playfair Display',serif;font-size:52px;font-weight:900;
+  color:var(--blue);opacity:0.2;line-height:1;margin-bottom:12px;}
+.step-title{font-size:18px;font-weight:700;color:var(--white);margin-bottom:10px;}
+.step-body{font-size:14px;color:var(--silver);line-height:1.7;}
+
+/* LEGITIMACY SCORE */
+.legitimacy{background:linear-gradient(135deg, rgba(16,185,129,0.05) 0%, rgba(37,99,235,0.05) 100%);
+  border-top:1px solid var(--rim);border-bottom:1px solid var(--rim);padding:100px 24px;}
+.legitimacy-inner{max-width:1100px;margin:0 auto;
+  display:grid;grid-template-columns:1fr 1fr;gap:80px;align-items:center;}
+.score-visual{display:flex;flex-direction:column;align-items:center;gap:16px;}
+.score-ring{width:220px;height:220px;border-radius:50%;
+  background:conic-gradient(var(--green) 0% 87%, var(--rim) 87% 100%);
+  display:flex;align-items:center;justify-content:center;position:relative;
+  box-shadow:0 0 60px rgba(16,185,129,0.2);}
+.score-ring::after{content:"";position:absolute;width:160px;height:160px;
+  border-radius:50%;background:var(--bg);}
+.score-num{position:relative;z-index:1;font-family:'Playfair Display',serif;
+  font-size:56px;font-weight:900;color:var(--green);}
+.score-label{font-size:13px;color:var(--silver);text-align:center;letter-spacing:0.05em;}
+.legitimacy-text .section-label{margin-bottom:12px;}
+.legitimacy-text .section-title{margin-bottom:20px;}
+.feature-list{list-style:none;display:flex;flex-direction:column;gap:14px;}
+.feature-list li{display:flex;align-items:flex-start;gap:12px;font-size:15px;color:var(--silver);line-height:1.6;}
+.feature-list li::before{content:"✓";color:var(--green);font-weight:700;flex-shrink:0;margin-top:2px;}
+
+/* SECTORS */
+.sectors{padding:100px 24px;max-width:1100px;margin:0 auto;}
+.sector-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:20px;}
+.sector-card{background:var(--card);border:1px solid var(--rim);border-radius:14px;
+  padding:28px 24px;cursor:default;transition:all .2s;}
+.sector-card:hover{border-color:var(--gold);background:rgba(245,158,11,0.04);}
+.sector-icon{font-size:36px;margin-bottom:14px;}
+.sector-name{font-size:16px;font-weight:700;color:var(--white);margin-bottom:8px;}
+.sector-desc{font-size:13px;color:var(--silver);line-height:1.65;}
+
+/* BLOCKCHAIN */
+.blockchain{background:var(--deep);border-top:1px solid var(--rim);
+  border-bottom:1px solid var(--rim);padding:80px 24px;text-align:center;}
+.blockchain-inner{max-width:700px;margin:0 auto;}
+.chain-badge{display:inline-flex;align-items:center;gap:10px;
+  background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);
+  border-radius:100px;padding:8px 20px;margin-bottom:32px;}
+.chain-badge-text{font-size:13px;font-weight:600;color:var(--gold);letter-spacing:0.05em;}
+.hash{font-family:'Courier New',monospace;font-size:13px;color:var(--muted);
+  background:var(--card);border:1px solid var(--rim);border-radius:8px;
+  padding:12px 16px;margin-top:24px;word-break:break-all;text-align:left;}
+.hash em{color:var(--green);font-style:normal;}
+
+/* CTA FINAL */
+.cta-final{padding:120px 24px;text-align:center;
+  background:radial-gradient(ellipse 60% 60% at 50% 100%, rgba(37,99,235,0.1) 0%, transparent 70%);}
+.cta-final .section-title{margin-bottom:20px;max-width:700px;margin-left:auto;margin-right:auto;}
+.cta-final .section-sub{margin-left:auto;margin-right:auto;margin-bottom:48px;}
+
+/* FOOTER */
+footer{border-top:1px solid var(--rim);padding:48px;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:20px;}
+.footer-logo{font-family:'Playfair Display',serif;font-size:20px;color:var(--white);}
+.footer-logo em{color:var(--blue);font-style:normal;}
+.footer-links{display:flex;gap:24px;}
+.footer-link{color:var(--muted);font-size:13px;text-decoration:none;transition:color .2s;}
+.footer-link:hover{color:var(--white);}
+.footer-memo{font-size:12px;color:var(--muted);font-style:italic;text-align:right;}
+
+@media(max-width:768px){
+  nav{padding:16px 20px;}
+  .nav-links .nav-link{display:none;}
+  .legitimacy-inner{grid-template-columns:1fr;gap:48px;}
+  .score-visual{order:-1;}
+  footer{flex-direction:column;text-align:center;}
+  .footer-memo{text-align:center;}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a href="/" class="logo">prefer<em>endum</em></a>
+  <div class="nav-links">
+    <a href="#como-funciona" class="nav-link">Cómo funciona</a>
+    <a href="#sectores" class="nav-link">Sectores</a>
+    <a href="/organizers" class="nav-link">Organizadores</a>
+    <a href="/marketers" class="nav-cta">Publicitarse →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-label">La nueva era de las decisiones colectivas</div>
+  <h1 class="hero-title">
+    Decisiones <span class="accent">verificadas</span><br/>
+    en <span class="gold">blockchain</span>
+  </h1>
+  <p class="hero-sub">
+    Preferendum permite a <strong>empresas, asociaciones, universidades y municipios</strong>
+    consultar a sus comunidades con resultados transparentes, verificables e irreversibles.
+  </p>
+  <div class="cta-row">
+    <a href="/organizers" class="btn-org">🏛 Soy Organizador →</a>
+    <a href="/marketers" class="btn-adv">📢 Soy Anunciante →</a>
+  </div>
+  <div class="trust-bar">
+    <div class="trust-item"><div class="trust-dot"></div>Verificado en Polygon</div>
+    <div class="trust-item"><div class="trust-dot"></div>AES-256 por voto</div>
+    <div class="trust-item"><div class="trust-dot"></div>Legitimacy Score público</div>
+    <div class="trust-item"><div class="trust-dot"></div>Bridge destruction garantizada</div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- HOW IT WORKS -->
+<div id="como-funciona" style="background:var(--deep);border-top:1px solid var(--rim);border-bottom:1px solid var(--rim);">
+<div class="section">
+  <div class="section-label">Cómo funciona</div>
+  <h2 class="section-title">Tres pasos hacia<br/>la decisión legítima</h2>
+  <p class="section-sub">Diseñado para organizaciones que necesitan resultados que nadie pueda cuestionar.</p>
+  <div class="steps">
+    <div class="step-card">
+      <div class="step-num">01</div>
+      <div class="step-title">Crea tu consulta</div>
+      <div class="step-body">Define la pregunta, las opciones y el universo de votantes. El sistema genera un ambiente de decisión verificado y auditable.</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">02</div>
+      <div class="step-title">Tu comunidad participa</div>
+      <div class="step-body">Votantes verificados con 7 capas de identidad. Cada voto cifrado con AES-256. El vínculo identidad-voto se destruye inmediatamente tras registrar.</div>
+    </div>
+    <div class="step-card">
+      <div class="step-num">03</div>
+      <div class="step-title">Resultados blockchain</div>
+      <div class="step-body">Hash inmutable en Polygon. Código XXXX-XXXX-XXXX por votante para verificar que su voto fue contado. Legitimacy Score siempre público.</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- LEGITIMACY SCORE -->
+<section class="legitimacy">
+<div class="legitimacy-inner">
+  <div class="score-visual">
+    <div class="score-ring">
+      <div class="score-num">87%</div>
+    </div>
+    <div class="score-label">Legitimacy Score™<br/>promedio en plataforma</div>
+  </div>
+  <div class="legitimacy-text">
+    <div class="section-label">Legitimacy Score™</div>
+    <h2 class="section-title">La métrica que<br/>el mundo no tenía</h2>
+    <ul class="feature-list">
+      <li>Porcentaje de votantes que verificaron que su voto fue contado correctamente</li>
+      <li>Siempre público — el organizador no puede ocultarlo ni modificarlo</li>
+      <li>Calculado en tiempo real durante el período de verificación post-cierre</li>
+      <li>Convierte resultados en <strong style="color:var(--white)">verdad verificable</strong>, no en cifras opinables</li>
+      <li>Estándar propio de Preferendum, patentado en proceso</li>
+    </ul>
+  </div>
+</div>
+</section>
+
+<!-- SECTORS -->
+<div id="sectores">
+<div class="sectors">
+  <div class="section-label">Sectores</div>
+  <h2 class="section-title">Para cualquier organización<br/>que necesite decidir bien</h2>
+  <p class="section-sub">Preferendum vende entornos de decisión — comunidades que están decidiendo activamente algo.</p>
+  <div class="sector-grid">
+    <div class="sector-card">
+      <div class="sector-icon">🏢</div>
+      <div class="sector-name">Empresas</div>
+      <div class="sector-desc">Consultas a accionistas, encuestas internas de clima laboral, decisiones estratégicas participativas con trazabilidad total.</div>
+    </div>
+    <div class="sector-card">
+      <div class="sector-icon">⚖️</div>
+      <div class="sector-name">Asociaciones</div>
+      <div class="sector-desc">Colegios profesionales, cámaras de comercio, federaciones. Elecciones internas con el estándar más alto del mercado.</div>
+    </div>
+    <div class="sector-card">
+      <div class="sector-icon">🎓</div>
+      <div class="sector-name">Universidades</div>
+      <div class="sector-desc">Elecciones de centros de alumnos, claustros académicos, consultas curriculares. Transparencia total ante la comunidad.</div>
+    </div>
+    <div class="sector-card">
+      <div class="sector-icon">🏛</div>
+      <div class="sector-name">Municipios</div>
+      <div class="sector-desc">Presupuestos participativos, consultas ciudadanas, plebiscitos locales. Resultados que la ciudadanía puede auditar.</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- BLOCKCHAIN -->
+<section class="blockchain">
+<div class="blockchain-inner">
+  <div class="chain-badge">
+    <span style="font-size:18px;">⛓</span>
+    <span class="chain-badge-text">ANCLADO EN POLYGON BLOCKCHAIN</span>
+  </div>
+  <h2 class="section-title">Inmutable por diseño</h2>
+  <p style="font-size:16px;color:var(--silver);line-height:1.75;margin-bottom:8px;">
+    Cada resultado de consulta genera un hash criptográfico que queda registrado permanentemente en la red Polygon.
+    Ningún administrador — ni siquiera Preferendum — puede alterar un resultado una vez publicado.
+  </p>
+  <div class="hash">
+    <em>0x</em>a3f9e2c1b847d6ea5f4921cc038b7d6e4a9f8c2103e5d7b9a4f21e8c6d0b3a9<br/>
+    <span style="font-size:11px;color:var(--muted);display:block;margin-top:6px;">Ejemplo de hash — Consulta #142 · Fundación Nacional de Rectores · 12 mayo 2026</span>
+  </div>
+</div>
+</section>
+
+<!-- CTA FINAL -->
+<section class="cta-final">
+  <div class="section-label">Empieza hoy</div>
+  <h2 class="section-title">¿Tu organización necesita<br/>decidir con legitimidad?</h2>
+  <p class="section-sub">La primera consulta es gratuita. Crea tu cuenta, publica tu pregunta y obtén resultados verificados en blockchain en 24 horas.</p>
+  <div class="cta-row">
+    <a href="/organizers" class="btn-org">🏛 Crear consulta como Organizador →</a>
+    <a href="/marketers" class="btn-adv">📢 Anunciar como Marketer →</a>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-logo">prefer<em>endum</em></div>
+  <div class="footer-links">
+    <a href="/privacy" class="footer-link">Privacidad</a>
+    <a href="/organizers" class="footer-link">Organizadores</a>
+    <a href="/marketers" class="footer-link">Anunciantes</a>
+    <a href="mailto:legal@preferendum.com" class="footer-link">Contacto</a>
+  </div>
+  <div class="footer-memo">
+    © 2026 Preferendum · CAIP Task Force · Santiago, Chile<br/>
+    <em>En memoria de José Ignacio Fernández (1989–2024)</em>
+  </div>
+</footer>
+
+</body>
+</html>""")
 
 @app.get('/health')
 def health():

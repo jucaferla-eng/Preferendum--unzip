@@ -647,7 +647,10 @@ export default function PreferendumV8() {
               </div>
             ))}
           </Card>
-          <Btn label="Ir al feed →" full onPress={()=>go("feed")}/>
+          <Btn label="Entrar a Preferendum →" full onPress={()=>{
+            go("debates-splash");
+            setTimeout(()=>go("feed"), 2200);
+          }}/>
         </div>
       </div>
     );
@@ -662,9 +665,9 @@ export default function PreferendumV8() {
             <span style={{fontSize:12,color:T.fog,fontWeight:400}}> · Verificación</span>
           </div>
           <div style={{fontSize:12,color:T.fog,fontWeight:700}}>{doneCount}/7</div>
-          <button onClick={()=>go("feed")} style={{background:"none",border:"none",
+          <button onClick={()=>go("launch")} style={{background:"none",border:"none",
             color:T.fog,fontSize:12,cursor:"pointer",marginLeft:8,padding:"4px 8px"}}>
-            Saltar →
+            ← Inicio
           </button>
         </div>
 
@@ -905,6 +908,29 @@ export default function PreferendumV8() {
   }
 
   // ══════════════════════════════════════════════════════════════
+  // SCREEN: DEBATES SPLASH TRANSITION
+  // ══════════════════════════════════════════════════════════════
+  if(screen==="debates-splash") return (
+    <div style={{...phone,background:T.bg,display:"flex",flexDirection:"column",
+      alignItems:"center",justifyContent:"center",minHeight:"100vh",
+      background:`radial-gradient(ellipse at 50% 40%, #0d1f4a 0%, ${T.bg} 65%)`}}>
+      <div style={{fontSize:11,letterSpacing:"0.45em",color:T.blue,
+        textTransform:"uppercase",fontWeight:600,marginBottom:32,opacity:0.8}}>
+        prefer<span style={{color:T.gold}}>endum</span>
+      </div>
+      <div style={{fontSize:68,fontWeight:900,color:T.white,letterSpacing:"0.08em",
+        fontFamily:"Georgia, 'Times New Roman', serif",textAlign:"center",
+        lineHeight:1,marginBottom:20,textShadow:`0 0 60px ${T.blue}44`}}>
+        DEBATES
+      </div>
+      <div style={{fontSize:13,color:T.fog,letterSpacing:"0.2em",
+        textTransform:"uppercase",fontWeight:500}}>
+        la plaza pública verificada
+      </div>
+    </div>
+  );
+
+  // ══════════════════════════════════════════════════════════════
   // SCREEN: FEED
   // ══════════════════════════════════════════════════════════════
   if(screen==="feed") return (
@@ -1124,22 +1150,27 @@ export default function PreferendumV8() {
           <Card>
             <Lbl>💬 Opiniones</Lbl>
 
-            {/* Post opinion form */}
-            <div style={{background:T.deep,borderRadius:10,padding:14,marginBottom:16,
-              border:`1px solid ${T.rim}`}}>
-              <div style={{fontSize:12,color:T.fog,marginBottom:8}}>Comparte tu perspectiva</div>
+            {/* Post opinion form — white writing space */}
+            <div style={{background:"#ffffff",borderRadius:10,padding:14,marginBottom:16,
+              border:"1.5px solid #e2e8f0",boxShadow:"0 2px 8px rgba(0,0,0,0.08)"}}>
+              <div style={{fontSize:11,color:"#64748b",marginBottom:8,
+                textTransform:"uppercase",letterSpacing:"0.06em",fontWeight:600}}>
+                Comparte tu perspectiva
+              </div>
               <textarea
                 value={newOpinionText}
                 onChange={e=>setNewOpinionText(e.target.value)}
                 placeholder="¿Qué piensas sobre este tema? (mínimo 20 caracteres)"
-                rows={3}
+                rows={4}
                 style={{width:"100%",background:"transparent",border:"none",outline:"none",
-                  color:T.white,fontSize:13,lineHeight:1.6,resize:"none",
-                  fontFamily:"-apple-system,system-ui,sans-serif",boxSizing:"border-box"}}
+                  color:"#0f172a",fontSize:14,lineHeight:1.7,resize:"none",
+                  fontFamily:"-apple-system,system-ui,sans-serif",boxSizing:"border-box",
+                  caretColor:T.blue}}
               />
+              <div style={{height:1,background:"#e2e8f0",margin:"10px 0"}}/>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                marginTop:10,gap:8,flexWrap:"wrap"}}>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                gap:8,flexWrap:"wrap"}}>
+                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
                   {[
                     {v:"expert",   l:"Experto"},
                     {v:"good",     l:"Informado"},
@@ -1149,18 +1180,19 @@ export default function PreferendumV8() {
                   ].map(({v,l})=>(
                     <button key={v} onClick={()=>setKnowledgeLevel(v)}
                       style={{padding:"4px 10px",borderRadius:20,fontSize:11,cursor:"pointer",
-                        border:`1px solid ${knowledgeLevel===v?T.blue:T.rim}`,
-                        background:knowledgeLevel===v?`${T.blue}22`:"transparent",
-                        color:knowledgeLevel===v?T.blue:T.fog,fontWeight:knowledgeLevel===v?700:400}}>
+                        border:`1.5px solid ${knowledgeLevel===v?T.blue:"#cbd5e1"}`,
+                        background:knowledgeLevel===v?T.blue:"transparent",
+                        color:knowledgeLevel===v?"#fff":"#475569",
+                        fontWeight:knowledgeLevel===v?700:400}}>
                       {l}
                     </button>
                   ))}
                 </div>
                 <button onClick={()=>postOpinion(deb.id)}
                   disabled={postingOpinion||newOpinionText.trim().length<20}
-                  style={{padding:"8px 16px",borderRadius:8,border:"none",cursor:"pointer",
-                    background:newOpinionText.trim().length>=20?T.blue:"#333",
-                    color:T.white,fontSize:13,fontWeight:700,
+                  style={{padding:"8px 18px",borderRadius:8,border:"none",cursor:"pointer",
+                    background:newOpinionText.trim().length>=20?T.blue:"#94a3b8",
+                    color:"#fff",fontSize:13,fontWeight:700,
                     opacity:postingOpinion?0.6:1,whiteSpace:"nowrap"}}>
                   {postingOpinion?"Enviando…":"Publicar →"}
                 </button>
