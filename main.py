@@ -311,6 +311,11 @@ def get_current_user(
     except Exception:
         raise HTTPException(401, 'Invalid token')
 
+def get_verified_user(user: User = Depends(get_current_user)):
+    if not user.email_verified:
+        raise HTTPException(403, 'Email verification required')
+    return user
+
 def count_verified(user):
     flags = [user.email_verified, user.phone_verified, user.id_verified,
              user.selfie_verified, user.imei_verified, user.geo_verified,
@@ -1229,6 +1234,7 @@ def list_debates(
 @app.get('/debates/feed')
 def get_feed(
     country: str = Query('CL'),
+    user: User = Depends(get_verified_user),
     db: Session = Depends(get_db)
 ):
     debates = db.query(Debate).filter(
@@ -1295,7 +1301,7 @@ def get_opinions(debate_id: int, db: Session = Depends(get_db)):
     return {'items': result, 'total_opinions': len(opinions)}
 
 @app.post('/debates/{debate_id}/opinions')
-def post_opinion(debate_id: int, data: OpinionCreate, db: Session = Depends(get_db)):
+def post_opinion(debate_id: int, data: OpinionCreate, user: User = Depends(get_verified_user), db: Session = Depends(get_db)):
     if len(data.text) < 20:
         raise HTTPException(400, 'Opinion must be at least 20 characters')
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
@@ -1309,7 +1315,7 @@ def post_opinion(debate_id: int, data: OpinionCreate, db: Session = Depends(get_
     return {'opinion': {'id': op.id, 'text': op.text, 'created_at': op.created_at.isoformat()}}
 
 @app.post('/debates/{debate_id}/vote')
-def cast_vote(debate_id: int, data: CastVoteRequest, db: Session = Depends(get_db)):
+def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_verified_user), db: Session = Depends(get_db)):
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
         raise HTTPException(404, 'Consultation not found')
