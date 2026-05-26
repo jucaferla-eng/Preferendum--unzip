@@ -174,6 +174,7 @@ class Debate(Base):
     verifications_ok    = Column(Integer, default=0)
     verifications_total = Column(Integer, default=0)
     follow_up_questions = Column(Text, default='')
+    reward           = Column(Text, default='')
     created_at       = Column(DateTime, default=datetime.utcnow)
 
 class Opinion(Base):
@@ -272,6 +273,7 @@ def _migrate():
     with engine.connect() as conn:
         for stmt in [
             "ALTER TABLE debates ADD COLUMN follow_up_questions TEXT DEFAULT ''",
+            "ALTER TABLE debates ADD COLUMN reward TEXT DEFAULT ''",
             "ALTER TABLE debate_votes ADD COLUMN vote_chain TEXT DEFAULT '[]'",
         ]:
             try:
@@ -406,6 +408,7 @@ def format_debate(debate, has_voted=False):
         'verifications_ok': debate.verifications_ok,
         'verifications_total': debate.verifications_total,
         'follow_up_questions': debate.follow_up_questions or '',
+        'reward': debate.reward or '',
         'has_voted': has_voted,
         'created_at': debate.created_at.isoformat(),
     }
@@ -543,6 +546,7 @@ class DebateCreate(BaseModel):
     closes_at:           str
     verify_days:         int = 14
     follow_up_questions: str = ''
+    reward:              str = ''
 
 class OpinionCreate(BaseModel):
     text:            str
@@ -1289,6 +1293,7 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
+        reward=data.reward or '',
     )
     db.add(debate)
     db.commit()

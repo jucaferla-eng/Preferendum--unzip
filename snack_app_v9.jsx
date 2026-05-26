@@ -212,7 +212,8 @@ export default function PreferendumV8() {
   const [ncCountry,setNcCountry] = useState('CL');
   const [ncRegion,setNcRegion]   = useState('');
   const [ncCommune,setNcCommune] = useState('');
-  // Branching questions state for creation form
+  // Reward and branching state for creation form
+  const [ncReward,setNcReward]       = useState('');
   const [ncBranching,setNcBranching] = useState(false);
   const [ncQ2,setNcQ2] = useState(Array(4).fill(null).map(()=>({on:false,title:'',opts:['','','']})));
   const [ncQ3,setNcQ3] = useState(Array(4).fill(null).map(()=>Array(3).fill(null).map(()=>({on:false,title:'',opts:['','']}))));
@@ -360,6 +361,7 @@ export default function PreferendumV8() {
       verify_opens: null,
       verify_closes:d.verify_closes_at ? new Date(d.verify_closes_at).toLocaleDateString('es-CL') : null,
       follow_ups:   followUps,
+      reward:       d.reward || '',
     };
   };
 
@@ -1046,6 +1048,13 @@ export default function PreferendumV8() {
                 <div style={{fontSize:15,fontWeight:700,color:T.white,marginBottom:8,lineHeight:1.4}}>
                   {deb.title}
                 </div>
+                {deb.reward&&(
+                  <div style={{background:`${T.gold}18`,border:`1px solid ${T.gold}44`,
+                    borderRadius:8,padding:"7px 10px",marginBottom:8,fontSize:12,
+                    color:T.gold,display:"flex",alignItems:"center",gap:6}}>
+                    🎁 <span><strong>Recompensa:</strong> {deb.reward}</span>
+                  </div>
+                )}
                 <div style={{marginBottom:10}}>
                   {deb.opts.map((o,i)=>(
                     <div key={i} style={{fontSize:12,color:COLORS[i],fontWeight:700,marginBottom:2}}>
@@ -1127,6 +1136,24 @@ export default function PreferendumV8() {
               </div>
             )}
           </Card>
+
+          {/* Reward banner */}
+          {deb.reward&&canVote&&(
+            <div style={{background:`${T.gold}18`,border:`1px solid ${T.gold}55`,
+              borderRadius:12,padding:"14px 16px",marginBottom:12,
+              display:"flex",alignItems:"flex-start",gap:12}}>
+              <div style={{fontSize:24,flexShrink:0}}>🎁</div>
+              <div>
+                <div style={{fontSize:13,fontWeight:800,color:T.gold,marginBottom:3}}>
+                  Recompensa por participar
+                </div>
+                <div style={{fontSize:13,color:T.white,lineHeight:1.5}}>{deb.reward}</div>
+                <div style={{fontSize:11,color:T.fog,marginTop:4}}>
+                  Válida para todos los participantes, independientemente de su respuesta.
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Vote — with optional branching questions */}
           {canVote&&(()=>{
@@ -1865,10 +1892,21 @@ export default function PreferendumV8() {
               ))}
             </Card>
             <Card>
+              <Lbl>Recompensa de participación</Lbl>
+              <div style={{fontSize:11,color:T.fog,marginBottom:8}}>
+                Opcional — se muestra antes de responder, independientemente del voto. Código de descuento, acceso anticipado, muestra de producto.
+              </div>
+              <input value={ncReward} onChange={e=>setNcReward(e.target.value)}
+                placeholder="Ej: 15% de descuento · Acceso anticipado · Muestra gratis"
+                style={{width:"100%",padding:"10px 14px",borderRadius:10,background:T.deep,
+                  border:`1.5px solid ${T.gold}66`,color:T.snow,fontSize:13,outline:"none",
+                  fontFamily:"inherit",boxSizing:"border-box"}}/>
+            </Card>
+            <Card>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:ncBranching?14:0}}>
                 <div>
-                  <Lbl style={{marginBottom:2}}>Preguntas de seguimiento</Lbl>
-                  <div style={{fontSize:11,color:T.fog}}>Muestra Q2 según la respuesta a Q1, Q3 según Q2</div>
+                  <Lbl style={{marginBottom:2}}>Árbol de preferencias</Lbl>
+                  <div style={{fontSize:11,color:T.fog}}>Q2 según respuesta a Q1, Q3 según Q2 — mapea el espacio entre extremos</div>
                 </div>
                 <div onClick={()=>setNcBranching(p=>!p)} style={{width:44,height:24,borderRadius:12,cursor:"pointer",
                   background:ncBranching?T.blue:T.rim,position:"relative",transition:"background 0.2s",flexShrink:0}}>
@@ -2014,7 +2052,7 @@ export default function PreferendumV8() {
                 setNcLoading(true);
                 try {
                   const data=await apiFetch('POST','/debates',{
-                    title:ncTitle, context:ncDesc, options,
+                    title:ncTitle, context:ncDesc, options, reward:ncReward,
                     closes_at:new Date(ncCloses).toISOString(),
                     verify_days:14,
                     creator_type:'organizer', inst_name:'Preferendum',
@@ -2028,7 +2066,7 @@ export default function PreferendumV8() {
                   const newDeb=data.debate;
                   if(newDeb) setApiDebates(prev=>[transformDebate(newDeb),...prev]);
                   const title=ncTitle;
-                  setNcTitle('');setNcDesc('');setNcOpts(['','','','']);setNcCloses('');
+                  setNcTitle('');setNcDesc('');setNcOpts(['','','','']);setNcCloses('');setNcReward('');
                   setNcAudience('all');setNcGender('all');setNcAgeMin('13');setNcAgeMax('99');
                   setNcCountry('CL');setNcRegion('');setNcCommune('');
                   setNcBranching(false);

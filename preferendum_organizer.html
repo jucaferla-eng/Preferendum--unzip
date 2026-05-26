@@ -182,14 +182,14 @@
     <div class="welcome-card">
       <div class="welcome-title">Bienvenido a Preferendum</div>
       <div class="welcome-body">
-        <p>Preferendum es <strong>participación verificada en decisiones</strong> — para cualquier organización que necesite conocer las preferencias de sus miembros, clientes, accionistas o trabajadores.</p>
+        <p>Preferendum es una <strong>red universal de preferencias y deliberación</strong>. Las preferencias reales existen entre los extremos — Preferendum es donde emergen.</p>
         <br>
         <ul style="list-style:none;display:flex;flex-direction:column;gap:12px;margin-bottom:8px;">
-          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--blue2);font-size:18px;min-width:24px;">🏢</span><div><strong style="color:var(--white);">Empresas</strong> — Consulta a tus clientes sobre preferencias de productos, a tus accionistas para decisiones estratégicas, a tus trabajadores de forma permanente.</div></li>
-          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--gold);font-size:18px;min-width:24px;">🤝</span><div><strong style="color:var(--white);">Asociaciones profesionales y gremiales</strong> — Consulta a tus miembros sobre posiciones, acuerdos y decisiones que los representan.</div></li>
-          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--green);font-size:18px;min-width:24px;">🌾</span><div><strong style="color:var(--white);">Asociaciones productivas</strong> — Coordina posiciones de tu sector ante regulaciones, mercados y tecnologías emergentes.</div></li>
-          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--blue2);font-size:18px;min-width:24px;">🏛</span><div><strong style="color:var(--white);">Partidos políticos</strong> — Consulta a tus militantes sobre temas y posiciones. Sube la lista de quiénes pueden participar.</div></li>
-          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--muted);font-size:18px;min-width:24px;">🏘</span><div><strong style="color:var(--white);">Gobiernos y municipios</strong> — Consulta ciudadana verificada con resultados en blockchain y Legitimacy Score público.</div></li>
+          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--blue2);font-size:18px;min-width:24px;">👟</span><div><strong style="color:var(--white);">Empresas y marcas</strong> — Lee el mercado antes de producir. Muestra 10 diseños, descubre cuál quiere Brasil y cuál quiere EE.UU., y envía el producto correcto al país correcto. Preguntas en cascada revelan el árbol completo de preferencias de tus consumidores.</div></li>
+          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--gold);font-size:18px;min-width:24px;">⚖️</span><div><strong style="color:var(--white);">Investigación de trade-offs</strong> — Mide la Tasa Marginal de Sustitución entre atributos. ¿Cuánto azúcar aceptan para tener más sabor? ¿Cuánta contaminación es tolerable por 500 empleos más? Preferencias cuantificadas, no sólo rankings.</div></li>
+          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--green);font-size:18px;min-width:24px;">🏛</span><div><strong style="color:var(--white);">Gobiernos y municipios</strong> — Consulta ciudadana verificada con resultados en blockchain y Legitimacy Score público. El único número que mide si la gente confía en el resultado.</div></li>
+          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--blue2);font-size:18px;min-width:24px;">🤝</span><div><strong style="color:var(--white);">Asociaciones profesionales y gremiales</strong> — Posiciones colectivas verificadas. No lo que la directiva asume — lo que los miembros realmente quieren.</div></li>
+          <li style="display:flex;gap:12px;align-items:flex-start;"><span style="color:var(--muted);font-size:18px;min-width:24px;">👤</span><div><strong style="color:var(--white);">Cualquier persona</strong> — Cualquier persona puede crear una consulta. Este es un principio central de Preferendum.</div></li>
         </ul>
       </div>
 
@@ -274,7 +274,7 @@
       </div>
       <div class="rule-item forbidden">
         <div class="rule-icon">💰</div>
-        <div class="rule-text"><strong>Incentivos para votar:</strong> no está permitido ofrecer compensaciones, premios o beneficios a cambio de votos.</div>
+        <div class="rule-text"><strong>Incentivos condicionados al voto:</strong> no está permitido ofrecer recompensas que dependan de votar de una forma específica (p.ej. "vota SÍ y recibe X"). Sí está permitido ofrecer una recompensa de participación — un código de descuento, acceso anticipado o muestra de producto — que se entrega a todos los participantes independientemente de cómo respondieron. Esto es inteligencia de mercado legítima.</div>
       </div>
       <div class="rule-item forbidden">
         <div class="rule-icon">🔒</div>
@@ -494,6 +494,11 @@
         <label class="form-label">Opciones (una por línea, mínimo 2)</label>
         <textarea class="form-input" id="nc-options" rows="4" placeholder="Opción A&#10;Opción B&#10;Opción C" style="resize:vertical;"></textarea>
       </div>
+      <div class="form-group">
+        <label class="form-label">🎁 Recompensa de participación <span style="font-weight:400;color:var(--muted)">(opcional)</span></label>
+        <input class="form-input" id="nc-reward" type="text" placeholder="Ej: 15% de descuento en tu próxima compra · Acceso anticipado · Muestra gratis">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">Se muestra a los participantes antes de responder — independientemente de cómo voten. Inteligencia de mercado legítima.</div>
+      </div>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Cierre de votación</label>
@@ -629,6 +634,7 @@ async function publishConsultation(){
   const title      = document.getElementById('nc-title').value.trim();
   const context    = document.getElementById('nc-context').value.trim();
   const optionsRaw = document.getElementById('nc-options').value.trim();
+  const reward     = document.getElementById('nc-reward').value.trim();
   const closesDate = document.getElementById('nc-closes').value;
   const verifyDays = parseInt(document.getElementById('nc-verify-days').value)||14;
   const errEl      = document.getElementById('nc-error');
@@ -645,7 +651,7 @@ async function publishConsultation(){
       method:'POST',
       headers:{'Content-Type':'application/json','Authorization':`Bearer ${authToken}`},
       body: JSON.stringify({
-        title, context, options,
+        title, context, options, reward,
         closes_at: new Date(closesDate).toISOString(),
         verify_days: verifyDays,
         creator_type: 'organizer', inst_name: currentUser.name,
