@@ -173,6 +173,7 @@ class Debate(Base):
     legitimacy_score = Column(Float, default=0.0)
     verifications_ok    = Column(Integer, default=0)
     verifications_total = Column(Integer, default=0)
+    follow_up_questions = Column(Text, default='')
     created_at       = Column(DateTime, default=datetime.utcnow)
 
 class Opinion(Base):
@@ -203,6 +204,7 @@ class DebateVote(Base):
     verified        = Column(Boolean, nullable=True)
     verified_at     = Column(DateTime, nullable=True)
     dispute_reason  = Column(Text, default='')
+    vote_chain      = Column(Text, default='[]')
     created_at      = Column(DateTime, default=datetime.utcnow)
 
 class HasVotedLog(Base):
@@ -263,6 +265,21 @@ class ClosedListEntry(Base):
     created_at       = Column(DateTime, default=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
+
+# SQLite column migrations for new fields added after initial deploy
+def _migrate():
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        for stmt in [
+            "ALTER TABLE debates ADD COLUMN follow_up_questions TEXT DEFAULT ''",
+            "ALTER TABLE debate_votes ADD COLUMN vote_chain TEXT DEFAULT '[]'",
+        ]:
+            try:
+                conn.execute(text(stmt))
+                conn.commit()
+            except Exception:
+                pass  # column already exists
+_migrate()
 
 # ══════════════════════════════════════════════════════════════
 # APP
@@ -388,6 +405,7 @@ def format_debate(debate, has_voted=False):
         'legitimacy_score': debate.legitimacy_score,
         'verifications_ok': debate.verifications_ok,
         'verifications_total': debate.verifications_total,
+        'follow_up_questions': debate.follow_up_questions or '',
         'has_voted': has_voted,
         'created_at': debate.created_at.isoformat(),
     }
@@ -519,11 +537,12 @@ class DebateCreate(BaseModel):
     scope:          str = 'country'
     scope_country:  str = 'CL'
     scope_commune:  str = ''
-    target_gender:  str = 'all'
-    target_age_min: int = 13
-    target_age_max: int = 99
-    closes_at:      str
-    verify_days:    int = 14
+    target_gender:       str = 'all'
+    target_age_min:      int = 13
+    target_age_max:      int = 99
+    closes_at:           str
+    verify_days:         int = 14
+    follow_up_questions: str = ''
 
 class OpinionCreate(BaseModel):
     text:            str
@@ -531,6 +550,7 @@ class OpinionCreate(BaseModel):
 
 class CastVoteRequest(BaseModel):
     option_index: int
+    vote_chain:   list = []
 
 class VerifyVoteRequest(BaseModel):
     code: str
@@ -1268,6 +1288,7 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
+        follow_up_questions=data.follow_up_questions or '',
     )
     db.add(debate)
     db.commit()
@@ -1334,6 +1355,7 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         option_index=data.option_index, option_text=option,
         verify_code=verify_code, vote_hash=vote_hash,
         encrypted_vote=encrypted, blockchain_tx=blockchain_tx,
+        vote_chain=json.dumps(data.vote_chain),
     )
     db.add(vote)
     counts = json.loads(debate.vote_counts or '{}')

@@ -212,6 +212,13 @@ export default function PreferendumV8() {
   const [ncCountry,setNcCountry] = useState('CL');
   const [ncRegion,setNcRegion]   = useState('');
   const [ncCommune,setNcCommune] = useState('');
+  // Branching questions state for creation form
+  const [ncBranching,setNcBranching] = useState(false);
+  const [ncQ2,setNcQ2] = useState(Array(4).fill(null).map(()=>({on:false,title:'',opts:['','','']})));
+  const [ncQ3,setNcQ3] = useState(Array(4).fill(null).map(()=>Array(3).fill(null).map(()=>({on:false,title:'',opts:['','']}))));
+  // Vote branching state
+  const [vBranchQ,setVBranchQ]     = useState(null);  // null = showing Q1
+  const [vBranchPath,setVBranchPath] = useState([]);   // [{optIdx,optText}]
 
   // Marketer state — Ad Creator
   const [mkScreen,setMkScreen]   = useState("hub"); // hub|adcreator|reward|dashboard
@@ -304,6 +311,7 @@ export default function PreferendumV8() {
     if(extra.deb) setSelDebate(extra.deb);
     if(s==="feed"||s==="results"||s==="verify"||s==="profile") setTab(s);
     if(s==="inst-home") setInstTab("debates");
+    setVBranchQ(null); setVBranchPath([]);
     window.scrollTo&&window.scrollTo(0,0);
   };
 
@@ -335,20 +343,25 @@ export default function PreferendumV8() {
     return data;
   };
 
-  const transformDebate = (d) => ({
-    id:           d.id,
-    title:        d.title,
-    inst:         d.inst_name,
-    type:         d.debate_type === 'priv' ? 'priv' : 'gov',
-    opts:         d.options,
-    vals:         d.results ? d.results.map(r => r.count) : d.options.map(()=>0),
-    votes:        d.total_votes,
-    comments:     0,
-    status:       d.status,
-    closes:       d.closes_at ? new Date(d.closes_at).toLocaleDateString('es-CL') : null,
-    verify_opens: null,
-    verify_closes:d.verify_closes_at ? new Date(d.verify_closes_at).toLocaleDateString('es-CL') : null,
-  });
+  const transformDebate = (d) => {
+    let followUps = null;
+    try { if(d.follow_up_questions) followUps = JSON.parse(d.follow_up_questions); } catch(e){}
+    return {
+      id:           d.id,
+      title:        d.title,
+      inst:         d.inst_name,
+      type:         d.debate_type === 'priv' ? 'priv' : 'gov',
+      opts:         d.options,
+      vals:         d.results ? d.results.map(r => r.count) : d.options.map(()=>0),
+      votes:        d.total_votes,
+      comments:     0,
+      status:       d.status,
+      closes:       d.closes_at ? new Date(d.closes_at).toLocaleDateString('es-CL') : null,
+      verify_opens: null,
+      verify_closes:d.verify_closes_at ? new Date(d.verify_closes_at).toLocaleDateString('es-CL') : null,
+      follow_ups:   followUps,
+    };
+  };
 
   const loadDebates = async () => {
     setDebatesLoading(true);
@@ -1115,37 +1128,86 @@ export default function PreferendumV8() {
             )}
           </Card>
 
-          {/* Vote */}
-          {canVote&&(
-            <Card style={{border:`1px solid ${T.blue}44`,background:`${T.blue}10`}}>
-              <Lbl>Emite tu voto</Lbl>
-              <div style={{fontSize:12,color:T.fog,marginBottom:12,lineHeight:1.6}}>
-                Lee las opciones y elige. Tu voto se cifra con AES-256 y se ancla en blockchain Polygon.
-              </div>
-              {deb.opts.map((opt,i)=>(
-                <button key={i} onClick={async()=>{
-                  try {
-                    const data = await apiFetch('POST',`/debates/${deb.id}/vote`,{option_index:i});
-                    const vc = data.verify_code;
-                    setVoted({...voted,[deb.id]:{opt,code:vc}});
-                  } catch(e) {
-                    // Fallback: generate local code if API is unreachable
-                    const vc=`${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}`;
-                    setVoted({...voted,[deb.id]:{opt,code:vc}});
-                    DEMO_CODES[vc]={debateId:deb.id,choice:opt};
-                  }
-                  go("voted-success");
-                }} style={{width:"100%",padding:"12px 14px",borderRadius:10,
-                  background:T.card,border:`1px solid ${T.rim}`,color:T.snow,
-                  fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:8,
-                  textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
-                  <div style={{width:10,height:10,borderRadius:2,background:COLORS[i],flexShrink:0}}/>
-                  <strong style={{color:T.fog}}>Opción {i+1}:</strong>&nbsp;
-                  <span style={{color:COLORS[i],fontWeight:700}}>{opt}</span>
-                </button>
-              ))}
-            </Card>
-          )}
+          {/* Vote — with optional branching questions */}
+          {canVote&&(()=>{
+            const isQ1 = vBranchQ===null;
+            const currentQ = isQ1 ? {title:deb.title, options:deb.opts, branches:deb.follow_ups} : vBranchQ;
+            const qLevel = vBranchPath.length + 1;
+            const totalQ = (() => {
+              let n=1; let q=deb.follow_ups;
+              if(q&&q.some(b=>b)){
+                n=2; const has3=q.filter(Boolean).some(b=>b.branches&&b.branches.some(Boolean));
+                if(has3) n=3;
+              }
+              return n;
+            })();
+            const submitVote = async (q1Idx, chain) => {
+              const q1Opt = deb.opts[q1Idx];
+              try {
+                const data = await apiFetch('POST',`/debates/${deb.id}/vote`,{option_index:q1Idx,vote_chain:chain});
+                setVoted({...voted,[deb.id]:{opt:q1Opt,code:data.verify_code,chain}});
+              } catch(e) {
+                const vc=`${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}`;
+                setVoted({...voted,[deb.id]:{opt:q1Opt,code:vc,chain}});
+                DEMO_CODES[vc]={debateId:deb.id,choice:q1Opt};
+              }
+              go("voted-success");
+            };
+            return (
+              <Card style={{border:`1px solid ${T.blue}44`,background:`${T.blue}10`}}>
+                {totalQ>1&&(
+                  <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
+                    {Array.from({length:totalQ},(_,k)=>(
+                      <div key={k} style={{flex:1,height:4,borderRadius:4,
+                        background:k<qLevel?T.blue:`${T.blue}30`}}/>
+                    ))}
+                    <span style={{fontSize:11,color:T.fog,marginLeft:4,whiteSpace:"nowrap"}}>
+                      {qLevel}/{totalQ}
+                    </span>
+                  </div>
+                )}
+                <Lbl>{isQ1?"Emite tu voto":"Pregunta de seguimiento"}</Lbl>
+                {!isQ1&&(
+                  <div style={{fontSize:13,fontWeight:700,color:T.white,marginBottom:12,lineHeight:1.4}}>
+                    {currentQ.title}
+                  </div>
+                )}
+                {isQ1&&(
+                  <div style={{fontSize:12,color:T.fog,marginBottom:12,lineHeight:1.6}}>
+                    Tu voto se cifra con AES-256 y se ancla en blockchain Polygon.
+                  </div>
+                )}
+                {currentQ.options.map((opt,i)=>(
+                  <button key={i} onClick={async()=>{
+                    const newStep = {level:qLevel, option_index:i, option_text:opt,
+                      question:currentQ.title||deb.title};
+                    const newPath = [...vBranchPath,newStep];
+                    const nextQ = currentQ.branches ? currentQ.branches[i] : null;
+                    if(nextQ && nextQ.title) {
+                      setVBranchPath(newPath);
+                      setVBranchQ(nextQ);
+                    } else {
+                      const q1Idx = vBranchPath.length>0 ? vBranchPath[0].option_index : i;
+                      await submitVote(q1Idx, newPath);
+                    }
+                  }} style={{width:"100%",padding:"12px 14px",borderRadius:10,
+                    background:T.card,border:`1px solid ${T.rim}`,color:T.snow,
+                    fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:8,
+                    textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:10,height:10,borderRadius:2,background:COLORS[i%COLORS.length],flexShrink:0}}/>
+                    {isQ1&&<><strong style={{color:T.fog}}>Opción {i+1}:</strong>&nbsp;</>}
+                    <span style={{color:COLORS[i%COLORS.length],fontWeight:700}}>{opt}</span>
+                  </button>
+                ))}
+                {!isQ1&&(
+                  <button onClick={()=>{setVBranchQ(null);setVBranchPath([]);}}
+                    style={{background:"none",border:"none",color:T.fog,fontSize:12,cursor:"pointer",marginTop:4}}>
+                    ← Cambiar respuesta anterior
+                  </button>
+                )}
+              </Card>
+            );
+          })()}
 
           {hasVoted&&(
             <Card style={{border:`1px solid ${T.green}44`,background:`${T.green}10`}}>
@@ -1803,6 +1865,85 @@ export default function PreferendumV8() {
               ))}
             </Card>
             <Card>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:ncBranching?14:0}}>
+                <div>
+                  <Lbl style={{marginBottom:2}}>Preguntas de seguimiento</Lbl>
+                  <div style={{fontSize:11,color:T.fog}}>Muestra Q2 según la respuesta a Q1, Q3 según Q2</div>
+                </div>
+                <div onClick={()=>setNcBranching(p=>!p)} style={{width:44,height:24,borderRadius:12,cursor:"pointer",
+                  background:ncBranching?T.blue:T.rim,position:"relative",transition:"background 0.2s",flexShrink:0}}>
+                  <div style={{position:"absolute",top:3,left:ncBranching?21:3,width:18,height:18,borderRadius:9,
+                    background:"white",transition:"left 0.2s"}}/>
+                </div>
+              </div>
+              {ncBranching&&ncOpts.map((opt,i)=>{
+                if(!opt) return null;
+                const q2=ncQ2[i];
+                return (
+                  <div key={i} style={{marginBottom:12,background:T.deep,borderRadius:10,padding:12,border:`1px solid ${T.rim}`}}>
+                    <div style={{fontSize:12,color:T.fog,marginBottom:8}}>
+                      Si votan <span style={{color:COLORS[i],fontWeight:700}}>"{opt}"</span> →
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:q2.on?10:0}}>
+                      <div style={{fontSize:12,color:T.silver}}>Agregar pregunta 2</div>
+                      <div onClick={()=>setNcQ2(prev=>{const n=prev.map(q=>({...q,opts:[...q.opts]}));n[i].on=!n[i].on;return n;})}
+                        style={{width:36,height:20,borderRadius:10,cursor:"pointer",flexShrink:0,
+                          background:q2.on?T.blue:T.muted,position:"relative",transition:"background 0.2s"}}>
+                        <div style={{position:"absolute",top:2,left:q2.on?17:2,width:16,height:16,borderRadius:8,
+                          background:"white",transition:"left 0.2s"}}/>
+                      </div>
+                    </div>
+                    {q2.on&&(
+                      <div style={{marginTop:8}}>
+                        <input placeholder="¿Pregunta de seguimiento?" value={q2.title}
+                          onChange={e=>setNcQ2(prev=>{const n=prev.map(q=>({...q,opts:[...q.opts]}));n[i].title=e.target.value;return n;})}
+                          style={{width:"100%",padding:"9px 12px",borderRadius:8,background:T.bg,
+                            border:`1.5px solid ${T.blue}`,color:T.snow,fontSize:13,outline:"none",
+                            fontFamily:"inherit",marginBottom:8,boxSizing:"border-box"}}/>
+                        {['a','b','c'].map((_, j)=>(
+                          <div key={j} style={{display:"flex",gap:6,marginBottom:6,alignItems:"center"}}>
+                            <div style={{width:8,height:8,borderRadius:2,background:COLORS[j],flexShrink:0}}/>
+                            <input placeholder={`Opción ${j+1}`} value={q2.opts[j]}
+                              onChange={e=>setNcQ2(prev=>{const n=prev.map(q=>({...q,opts:[...q.opts]}));n[i].opts[j]=e.target.value;return n;})}
+                              style={{flex:1,padding:"7px 10px",borderRadius:7,background:T.bg,
+                                border:`1px solid ${T.rim}`,color:T.snow,fontSize:12,outline:"none",fontFamily:"inherit"}}/>
+                            {q2.opts[j]&&ncQ3[i][j]&&(
+                              <div onClick={()=>setNcQ3(prev=>{const n=prev.map(r=>r.map(q=>({...q,opts:[...q.opts]})));n[i][j].on=!n[i][j].on;return n;})}
+                                title="Agregar Q3"
+                                style={{fontSize:14,cursor:"pointer",color:ncQ3[i][j].on?T.blue:T.fog,flexShrink:0}}>⤷</div>
+                            )}
+                          </div>
+                        ))}
+                        {['a','b','c'].map((_, j)=>{
+                          if(!q2.opts[j]||!ncQ3[i][j]||!ncQ3[i][j].on) return null;
+                          return (
+                            <div key={j} style={{marginTop:6,background:T.card,borderRadius:8,padding:10,
+                              border:`1px solid ${T.blue}33`}}>
+                              <div style={{fontSize:11,color:T.fog,marginBottom:6}}>
+                                Si responden <span style={{color:COLORS[j],fontWeight:700}}>"{q2.opts[j]}"</span> → Q3
+                              </div>
+                              <input placeholder="¿Tercera pregunta?" value={ncQ3[i][j].title}
+                                onChange={e=>setNcQ3(prev=>{const n=prev.map(r=>r.map(q=>({...q,opts:[...q.opts]})));n[i][j].title=e.target.value;return n;})}
+                                style={{width:"100%",padding:"7px 10px",borderRadius:7,background:T.bg,
+                                  border:`1.5px solid ${T.blue}66`,color:T.snow,fontSize:12,outline:"none",
+                                  fontFamily:"inherit",marginBottom:6,boxSizing:"border-box"}}/>
+                              {['p','q'].map((_,k)=>(
+                                <input key={k} placeholder={`Opción ${k+1}`} value={ncQ3[i][j].opts[k]}
+                                  onChange={e=>setNcQ3(prev=>{const n=prev.map(r=>r.map(q=>({...q,opts:[...q.opts]})));n[i][j].opts[k]=e.target.value;return n;})}
+                                  style={{width:"100%",padding:"7px 10px",borderRadius:7,background:T.bg,
+                                    border:`1px solid ${T.rim}`,color:T.snow,fontSize:12,outline:"none",
+                                    fontFamily:"inherit",marginBottom:4,boxSizing:"border-box"}}/>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </Card>
+            <Card>
               <Lbl>Cierre de votación</Lbl>
               <Input label="Fecha de cierre" type="date" value={ncCloses} onChange={setNcCloses}/>
             </Card>
@@ -1855,26 +1996,46 @@ export default function PreferendumV8() {
               disabled={ncLoading||!ncTitle||ncOpts.filter(Boolean).length<2||!ncCloses}
               onPress={async()=>{
                 const options=ncOpts.filter(Boolean);
+                // Build follow_up_questions tree
+                const followUpBranches = ncBranching ? ncOpts.map((opt,i)=>{
+                  if(!opt||!ncQ2[i].on||!ncQ2[i].title) return null;
+                  const q2Opts=ncQ2[i].opts.filter(Boolean);
+                  if(q2Opts.length<2) return null;
+                  return {
+                    title:ncQ2[i].title, options:q2Opts,
+                    branches:ncQ2[i].opts.map((o2,j)=>{
+                      if(!o2||!ncQ3[i][j]||!ncQ3[i][j].on||!ncQ3[i][j].title) return null;
+                      const q3Opts=ncQ3[i][j].opts.filter(Boolean);
+                      if(q3Opts.length<2) return null;
+                      return {title:ncQ3[i][j].title,options:q3Opts,branches:q3Opts.map(()=>null)};
+                    })
+                  };
+                }) : null;
                 setNcLoading(true);
                 try {
                   const data=await apiFetch('POST','/debates',{
                     title:ncTitle, context:ncDesc, options,
                     closes_at:new Date(ncCloses).toISOString(),
                     verify_days:14,
-                    creator_type:'organizer', inst_name:'Municipalidad Las Condes',
+                    creator_type:'organizer', inst_name:'Preferendum',
                     debate_type:'gov', scope:ncCommune?'commune':ncRegion?'region':'country',
                     scope_country:ncCountry, scope_commune:ncCommune,
                     target_gender:ncGender,
                     target_age_min:parseInt(ncAgeMin)||13,
                     target_age_max:parseInt(ncAgeMax)||99,
+                    follow_up_questions:followUpBranches?JSON.stringify(followUpBranches):'',
                   });
                   const newDeb=data.debate;
                   if(newDeb) setApiDebates(prev=>[transformDebate(newDeb),...prev]);
+                  const title=ncTitle;
                   setNcTitle('');setNcDesc('');setNcOpts(['','','','']);setNcCloses('');
                   setNcAudience('all');setNcGender('all');setNcAgeMin('13');setNcAgeMax('99');
                   setNcCountry('CL');setNcRegion('');setNcCommune('');
+                  setNcBranching(false);
+                  setNcQ2(Array(4).fill(null).map(()=>({on:false,title:'',opts:['','','']})));
+                  setNcQ3(Array(4).fill(null).map(()=>Array(3).fill(null).map(()=>({on:false,title:'',opts:['','']}))));
                   setInstTab("debates");
-                  alert(`✅ Debate publicado: "${ncTitle}"\n\nYa aparece en el feed para todos los votantes.`);
+                  alert(`✅ Debate publicado: "${title}"\n\nYa aparece en el feed para todos los votantes.`);
                 } catch(e){
                   alert('Error al publicar: '+(e.message||'Intenta de nuevo.'));
                 } finally { setNcLoading(false); }
