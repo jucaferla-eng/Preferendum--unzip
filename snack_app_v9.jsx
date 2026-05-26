@@ -716,9 +716,27 @@ export default function PreferendumV8() {
                 ?<div style={{textAlign:"center",padding:12,color:T.fog,fontSize:13}}>⏳ Verificando...</div>
                 :<>
                   <Btn label="Confirmar código →" full disabled={emailCode.length<6}
-                    onPress={()=>{setVfLoading(true);setTimeout(()=>{setVfLoading(false);setVfDone(p=>({...p,1:true}));setVfStep(2);},1800);}}/>
+                    onPress={async()=>{
+                      setVfLoading(true);
+                      try {
+                        await apiFetch('POST','/verify/email/confirm',{code:emailCode,channel:'email'});
+                        setVfDone(p=>({...p,1:true}));
+                        setVfStep(2);
+                      } catch(e) {
+                        alert('Código incorrecto o expirado. Intenta de nuevo.');
+                      } finally {
+                        setVfLoading(false);
+                      }
+                    }}/>
                   <div style={{textAlign:"center",marginTop:10}}>
-                    <button onClick={()=>{}} style={{background:"none",border:"none",color:T.fog,fontSize:12,cursor:"pointer"}}>
+                    <button onClick={async()=>{
+                      try {
+                        await apiFetch('POST','/verify/email/send');
+                        alert('Código reenviado a '+vfEmail);
+                      } catch(e) {
+                        alert('Error al reenviar. Intenta más tarde.');
+                      }
+                    }} style={{background:"none",border:"none",color:T.fog,fontSize:12,cursor:"pointer"}}>
                       No recibí el código — reenviar
                     </button>
                   </div>
