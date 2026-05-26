@@ -307,7 +307,10 @@ export default function PreferendumV8() {
   const [rwVcode,setRwVcode]     = useState(false);
   const csvRef = useRef();
 
+  const PROTECTED_SCREENS = ["feed","debate","voted-success","results","verify","profile"];
   const go = (s,extra={}) => {
+    // Auth gate: redirect to launch if no token on protected screens
+    if(PROTECTED_SCREENS.includes(s) && !authToken) { s="launch"; extra={}; }
     setScreen(s);
     if(extra.deb) setSelDebate(extra.deb);
     if(s==="feed"||s==="results"||s==="verify"||s==="profile") setTab(s);
@@ -977,6 +980,14 @@ export default function PreferendumV8() {
       </div>
     </div>
   );
+
+  // ══════════════════════════════════════════════════════════════
+  // AUTH GATE — safety net for protected screens
+  // ══════════════════════════════════════════════════════════════
+  if(PROTECTED_SCREENS.includes(screen) && !authToken) {
+    setTimeout(()=>setScreen("launch"),0);
+    return null;
+  }
 
   // ══════════════════════════════════════════════════════════════
   // SCREEN: FEED
@@ -1755,10 +1766,10 @@ export default function PreferendumV8() {
         <Card>
           <Lbl>Tipo de organización</Lbl>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
-            {[["🏢","Empresa",T.blue],["🤝","Asoc. Profesional",T.teal],
-              ["🌾","Sector Productivo",T.green],["🎓","Universidad",T.gold],
-              ["🏛","Municipalidad",T.teal],["🌐","Entidad Cívica",T.coral],
-              ["👤","Persona Natural",T.fog]].map(([i,l,c])=>(
+            {[["🏢","Empresa",T.blue],["🤝","Asociación profesional",T.teal],
+              ["🌾","Asociación productiva",T.green],["🎓","Universidad",T.gold],
+              ["🏛","Municipio",T.teal],["🌐","Entidad de representación ciudadana",T.coral],
+              ["👤","Cualquier persona",T.fog]].map(([i,l,c])=>(
               <div key={l} onClick={()=>go("inst-home")} style={{padding:12,borderRadius:10,
                 border:`1.5px solid ${c}44`,background:`${c}11`,textAlign:"center",cursor:"pointer"}}>
                 <div style={{fontSize:24,marginBottom:4}}>{i}</div>

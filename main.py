@@ -1757,6 +1757,8 @@ def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_c
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
+        follow_up_questions=data.follow_up_questions or '',
+        reward=data.reward or '',
     )
     db.add(debate)
     db.commit()
