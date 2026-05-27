@@ -419,6 +419,8 @@ def format_debate(debate, has_voted=False):
         'scope_country': debate.scope_country,
         'scope_commune': debate.scope_commune,
         'target_gender': debate.target_gender,
+        'target_age_min': debate.target_age_min,
+        'target_age_max': debate.target_age_max,
         'status': status,
         'total_votes': total,
         'opens_at': debate.opens_at.isoformat() if debate.opens_at else None,
