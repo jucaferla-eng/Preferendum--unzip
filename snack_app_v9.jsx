@@ -216,6 +216,7 @@ export default function PreferendumV8() {
   const [ncCommune,setNcCommune] = useState('');
   // Reward, visual, and branching state for creation form
   const [ncReward,setNcReward]       = useState('');
+  const [ncRewardCodes,setNcRewardCodes] = useState(''); // one code per line
   const [ncVisual,setNcVisual]       = useState(false);
   const [ncOptImages,setNcOptImages] = useState(Array(10).fill(''));
   const [ncBranching,setNcBranching] = useState(false);
@@ -637,7 +638,7 @@ export default function PreferendumV8() {
                 const data = await apiFetch('POST','/auth/login',{email,password:pw});
                 setAuthToken(data.token); setCurrentUser(data.user);
                 setVfLoading(false); go("debates-splash");
-                setTimeout(()=>go("feed"), 2200);
+                setTimeout(()=>{ setScreen("feed"); setTab("feed"); }, 2200);
               } catch(e) { setVfError(e.message); setVfLoading(false); }
             }}/>
         </Card>
@@ -693,7 +694,7 @@ export default function PreferendumV8() {
           </Card>
           <Btn label="Entrar a Preferendum →" full onPress={()=>{
             go("debates-splash");
-            setTimeout(()=>go("feed"), 2200);
+            setTimeout(()=>{ setScreen("feed"); setTab("feed"); }, 2200);
           }}/>
         </div>
       </div>
@@ -766,7 +767,7 @@ export default function PreferendumV8() {
                         await apiFetch('POST','/verify/email/confirm',{code:emailCode,channel:'email'});
                         setVfDone(p=>({...p,1:true}));
                         go("debates-splash");
-                        setTimeout(()=>go("feed"), 2200);
+                        setTimeout(()=>{ setScreen("feed"); setTab("feed"); }, 2200);
                       } catch(e) {
                         alert('Código incorrecto o expirado. Intenta de nuevo.');
                       } finally {
@@ -972,7 +973,7 @@ export default function PreferendumV8() {
             </div>
             <button onClick={()=>{
               go("debates-splash");
-              setTimeout(()=>go("feed"), 2200);
+              setTimeout(()=>{ setScreen("feed"); setTab("feed"); }, 2200);
             }} style={{background:"none",border:`1px solid ${T.fog}44`,
               borderRadius:10,padding:"10px 24px",color:T.fog,
               fontSize:13,cursor:"pointer",fontWeight:600}}>
@@ -1201,7 +1202,7 @@ export default function PreferendumV8() {
       const q1Opt = deb.opts[q1Idx];
       try {
         const data = await apiFetch('POST',`/debates/${deb.id}/vote`,{option_index:q1Idx,vote_chain:chain});
-        setVoted({...voted,[deb.id]:{opt:q1Opt,code:data.verify_code,chain,reward:deb.reward||''}});
+        setVoted({...voted,[deb.id]:{opt:q1Opt,code:data.verify_code,chain,reward:data.reward_code||deb.reward||''}});
       } catch(e) {
         const vc=`${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}`;
         setVoted({...voted,[deb.id]:{opt:q1Opt,code:vc,chain,reward:deb.reward||''}});
@@ -2235,13 +2236,28 @@ export default function PreferendumV8() {
             <Card>
               <Lbl>Recompensa de participación</Lbl>
               <div style={{fontSize:11,color:T.fog,marginBottom:8}}>
-                Opcional — se muestra antes de responder, independientemente del voto. Código de descuento, acceso anticipado, muestra de producto.
+                Opcional — descripción visible antes de votar (ej: "15% de descuento en tu próxima compra").
               </div>
               <input value={ncReward} onChange={e=>setNcReward(e.target.value)}
                 placeholder="Ej: 15% de descuento · Acceso anticipado · Muestra gratis"
                 style={{width:"100%",padding:"10px 14px",borderRadius:10,background:T.deep,
                   border:`1.5px solid ${T.gold}66`,color:T.snow,fontSize:13,outline:"none",
-                  fontFamily:"inherit",boxSizing:"border-box"}}/>
+                  fontFamily:"inherit",boxSizing:"border-box",marginBottom:10}}/>
+              <div style={{fontSize:11,color:T.fog,marginBottom:6}}>
+                Códigos únicos (uno por línea) — cada votante recibe uno diferente:
+              </div>
+              <textarea value={ncRewardCodes} onChange={e=>setNcRewardCodes(e.target.value)}
+                rows={4}
+                placeholder={"ADIDAS-K9X2-15\nADIDAS-M3P7-15\nADIDAS-Q8R1-15\n..."}
+                style={{width:"100%",padding:"10px 14px",borderRadius:10,background:T.deep,
+                  border:`1.5px solid ${T.gold}44`,color:T.snow,fontSize:12,outline:"none",
+                  fontFamily:"monospace",boxSizing:"border-box",resize:"vertical",
+                  lineHeight:1.6}}/>
+              {ncRewardCodes.trim()&&(
+                <div style={{fontSize:11,color:T.gold,marginTop:4}}>
+                  {ncRewardCodes.trim().split('\n').filter(c=>c.trim()).length} códigos cargados
+                </div>
+              )}
             </Card>
             <Card>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:ncBranching?14:0}}>
@@ -2410,9 +2426,17 @@ export default function PreferendumV8() {
                   if(newDeb) {
                     setApiDebates(prev=>[transformDebate(newDeb),...prev]);
                     setMyDebateIds(prev=>[newDeb.id,...prev]);
+                    // Upload unique reward codes if any were entered
+                    if(ncRewardCodes.trim()&&newDeb.id) {
+                      try {
+                        await apiFetch('POST',`/organizer/consultations/${newDeb.id}/reward-codes`,
+                          {codes:ncRewardCodes.trim()});
+                      } catch(_){}
+                    }
                   }
                   const title=ncTitle;
                   setNcTitle('');setNcDesc('');setNcOpts(['','','','']);setNcCloses('');setNcReward('');
+                  setNcRewardCodes('');
                   setNcVisual(false);setNcOptImages(Array(10).fill(''));
                   setNcAudience('all');setNcGender('all');setNcAgeMin('13');setNcAgeMax('99');
                   setNcCountry('CL');setNcRegion('');setNcCommune('');

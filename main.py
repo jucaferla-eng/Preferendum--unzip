@@ -25,7 +25,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from fastapi import (FastAPI, HTTPException, Depends, UploadFile,
-                     File, Form, Query)
+                     File, Form, Query, Request)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -230,6 +230,15 @@ class DebateAd(Base):
     cta         = Column(String, default='Ver más')
     logo_color  = Column(String, default='#3b82f6')
     impressions = Column(Integer, default=0)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+class DebateRewardCode(Base):
+    __tablename__ = 'debate_reward_codes'
+    id          = Column(Integer, primary_key=True)
+    debate_id   = Column(Integer, index=True)
+    code        = Column(String, nullable=False)
+    claimed     = Column(Boolean, default=False)
+    claimed_at  = Column(DateTime, nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
 class AdCampaign(Base):
@@ -1436,6 +1445,16 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
     counts[option] = counts.get(option, 0) + 1
     debate.vote_counts = json.dumps(counts)
     debate.total_votes = (debate.total_votes or 0) + 1
+    # Assign unique reward code from pool if available
+    reward_code = None
+    unclaimed = db.query(DebateRewardCode).filter(
+        DebateRewardCode.debate_id == debate_id,
+        DebateRewardCode.claimed == False
+    ).with_for_update(skip_locked=True).first()
+    if unclaimed:
+        unclaimed.claimed = True
+        unclaimed.claimed_at = datetime.utcnow()
+        reward_code = unclaimed.code
     db.commit()
     return {
         'success': True,
@@ -1444,6 +1463,7 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         'blockchain_tx': blockchain_tx,
         'total_votes': debate.total_votes,
         'current_results': counts,
+        'reward_code': reward_code,
         'message': 'Vote registered. Save your verification code.',
     }
 
@@ -1888,6 +1908,36 @@ def get_consultation_results(consultation_id: int, user: User = Depends(get_curr
         'verifications': {'total': debate.verifications_total, 'confirmed': debate.verifications_ok},
         'demographics': {'by_gender': by_gender, 'by_age': by_age},
     }
+
+@app.post('/organizer/consultations/{consultation_id}/reward-codes')
+async def upload_reward_codes(consultation_id: int, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debate = db.query(Debate).filter(Debate.id == consultation_id, Debate.creator_id == user.id).first()
+    if not debate:
+        raise HTTPException(404, 'Consultation not found or not owned by you')
+    body = await request.json()
+    codes_raw = body.get('codes', '')
+    codes = [c.strip() for c in codes_raw.strip().splitlines() if c.strip()]
+    for code in codes:
+        db.add(DebateRewardCode(debate_id=consultation_id, code=code))
+    db.commit()
+    total_remaining = db.query(DebateRewardCode).filter(
+        DebateRewardCode.debate_id == consultation_id,
+        DebateRewardCode.claimed == False
+    ).count()
+    return {'added': len(codes), 'total_remaining': total_remaining}
+
+@app.get('/organizer/consultations/{consultation_id}/reward-codes/status')
+def reward_codes_status(consultation_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    total = db.query(DebateRewardCode).filter(DebateRewardCode.debate_id == consultation_id).count()
+    remaining = db.query(DebateRewardCode).filter(
+        DebateRewardCode.debate_id == consultation_id,
+        DebateRewardCode.claimed == False
+    ).count()
+    return {'total': total, 'remaining': remaining, 'claimed': total - remaining}
 
 # ══════════════════════════════════════════════════════════════
 # ROUTES: MARKETER (v2 — /marketer/ prefix)
