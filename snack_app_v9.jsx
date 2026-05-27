@@ -200,6 +200,7 @@ export default function PreferendumV8() {
 
   // Institution state
   const [instTab,setInstTab]     = useState("debates");
+  const [ncInstName,setNcInstName] = useState('');
   const [ncTitle,setNcTitle]     = useState('');
   const [ncDesc,setNcDesc]       = useState('');
   const [ncOpts,setNcOpts]       = useState(['','','','']);
@@ -1007,10 +1008,12 @@ export default function PreferendumV8() {
         <div style={{fontWeight:900,fontSize:18,color:T.white,flex:1}}>
           prefer<span style={{color:T.blue}}>endum</span>
         </div>
-        <div style={{fontSize:12,color:T.fog}}>Las Condes · CL</div>
+        <div style={{fontSize:12,color:T.fog}}>{vfCounty||currentUser?.county||''}{(vfCounty||currentUser?.county)?` · ${currentUser?.country||vfCountry||'CL'}`:currentUser?.country||vfCountry||'CL'}</div>
         <div style={{width:32,height:32,borderRadius:"50%",background:T.blue,
           display:"flex",alignItems:"center",justifyContent:"center",
-          fontSize:14,fontWeight:700}}>M</div>
+          fontSize:14,fontWeight:700}}>
+          {(currentUser?.name||vfName||'P')[0].toUpperCase()}
+        </div>
       </div>
       <div style={{padding:"12px 16px 80px"}}>
         {/* Status legend */}
@@ -1545,49 +1548,101 @@ export default function PreferendumV8() {
   // ══════════════════════════════════════════════════════════════
   // SCREEN: RESULTS
   // ══════════════════════════════════════════════════════════════
-  if(screen==="results") return (
+  if(screen==="results") {
+    const allDebs = apiDebates.length > 0 ? apiDebates : DEBATES;
+    const votedDebs = allDebs.filter(d => voted[d.id]);
+    return (
     <div style={phone}>
-      <TopBar title="Resultados"/>
-      <div style={{padding:"12px 16px 80px"}}>
-        {DEBATES.map(deb=>{
-          const total=deb.vals.reduce((a,b)=>a+b,0)||1;
-          const winI=deb.vals.indexOf(Math.max(...deb.vals));
+      <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",
+        padding:"14px 16px",position:"sticky",top:0,zIndex:99}}>
+        <div style={{fontSize:11,color:"#64748b",textTransform:"uppercase",
+          letterSpacing:"0.1em",fontWeight:700,marginBottom:2}}>En tiempo real</div>
+        <div style={{fontSize:22,fontWeight:900,color:"#0f172a",letterSpacing:-0.5}}>
+          Zona de Resultados
+        </div>
+      </div>
+      <div style={{background:"#f8fafc",minHeight:"100vh",padding:"14px 14px 90px"}}>
+        {votedDebs.length===0?(
+          <div style={{textAlign:"center",padding:"60px 20px"}}>
+            <div style={{fontSize:56,marginBottom:16}}>🗳</div>
+            <div style={{fontSize:18,fontWeight:700,color:"#1e293b",marginBottom:8}}>
+              Aún no has votado
+            </div>
+            <div style={{fontSize:13,color:"#64748b",lineHeight:1.6,maxWidth:260,margin:"0 auto"}}>
+              Participa en un debate y aquí verás los resultados en tiempo real de tus temas.
+            </div>
+            <button onClick={()=>go("feed")} style={{marginTop:24,padding:"12px 28px",
+              borderRadius:12,background:T.blue,border:"none",color:"#fff",
+              fontSize:14,fontWeight:700,cursor:"pointer"}}>
+              Ver debates →
+            </button>
+          </div>
+        ):votedDebs.map(deb=>{
+          const myVote = voted[deb.id];
+          const vals = deb.vals||[];
+          const total = vals.reduce((a,b)=>a+b,0)||1;
+          const winI = vals.indexOf(Math.max(...vals));
+          const myOptIdx = (deb.opts||[]).indexOf(myVote?.opt);
           return (
-            <Card key={deb.id}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+            <div key={deb.id} style={{background:"#fff",borderRadius:16,
+              border:"1px solid #e2e8f0",padding:16,marginBottom:12,
+              boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
                 <StatusBadge status={deb.status}/>
-                <span style={{fontSize:11,color:T.fog}}>{deb.inst}</span>
+                <span style={{fontSize:11,color:"#64748b"}}>{deb.inst}</span>
               </div>
-              <div style={{fontSize:14,fontWeight:700,color:T.white,marginBottom:12}}>{deb.title}</div>
-              <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-                <Donut vals={deb.vals} size={110}/>
+              <div style={{fontSize:15,fontWeight:700,color:"#0f172a",marginBottom:14,lineHeight:1.4}}>
+                {deb.title}
+              </div>
+              {myVote?.opt&&(
+                <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",
+                  borderRadius:8,padding:"7px 11px",fontSize:12,color:"#1d4ed8",
+                  marginBottom:12,display:"flex",alignItems:"center",gap:6}}>
+                  ✓ Tu voto: <strong>{myVote.opt}</strong>
+                </div>
+              )}
+              <div style={{display:"flex",gap:10,alignItems:"flex-start",flexWrap:"wrap"}}>
+                <Donut vals={vals} size={100}/>
                 <div style={{flex:1,minWidth:120}}>
-                  {deb.opts.map((o,i)=>(
-                    <div key={i} style={{display:"flex",alignItems:"center",gap:5,marginBottom:5}}>
-                      <div style={{width:8,height:8,borderRadius:2,background:COLORS[i],flexShrink:0}}/>
-                      <div style={{fontSize:10,color:T.silver,flex:1}}>{o}</div>
-                      <div style={{fontSize:11,fontWeight:900,color:COLORS[i]}}>
-                        {Math.round(deb.vals[i]/total*100)}%
+                  {(deb.opts||[]).map((o,i)=>(
+                    <div key={i} style={{marginBottom:8}}>
+                      <div style={{display:"flex",justifyContent:"space-between",
+                        fontSize:12,marginBottom:3}}>
+                        <span style={{color:i===myOptIdx?"#1d4ed8":"#475569",
+                          fontWeight:i===myOptIdx?700:400}}>{o}{i===myOptIdx?" ✓":""}</span>
+                        <span style={{fontWeight:700,color:COLORS[i%COLORS.length]}}>
+                          {vals[i]?Math.round(vals[i]/total*100):0}%
+                        </span>
+                      </div>
+                      <div style={{background:"#f1f5f9",borderRadius:4,height:6,overflow:"hidden"}}>
+                        <div style={{height:"100%",borderRadius:4,
+                          background:COLORS[i%COLORS.length],
+                          width:(vals[i]?Math.round(vals[i]/total*100):0)+"%",
+                          transition:"width 0.6s ease"}}/>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
-              {deb.status!=="live"&&(
-                <div style={{background:`${T.green}18`,border:`1px solid ${T.green}44`,
-                  borderRadius:8,padding:"8px 12px",fontSize:11,color:T.green,marginTop:10}}>
+              {deb.status!=="live"&&vals[winI]>0&&(
+                <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",
+                  borderRadius:8,padding:"8px 12px",fontSize:12,color:"#15803d",marginTop:10}}>
                   ✅ <strong>{deb.opts[winI]}</strong>
-                  {" · "}{Math.round(deb.vals[winI]/total*100)}%
-                  {deb.status==="verified"&&` · ✓ ${deb.accuracy}% verificado`}
+                  {" · "}{Math.round(vals[winI]/total*100)}%
+                  {deb.status==="verified"&&deb.accuracy&&` · ✓ ${deb.accuracy}% verificado`}
                 </div>
               )}
-            </Card>
+              {myVote?.code&&(
+                <div style={{marginTop:10,fontSize:11,color:"#94a3b8",
+                  fontFamily:"monospace"}}>Código: {myVote.code}</div>
+              )}
+            </div>
           );
         })}
       </div>
       <VoterTabs/>
     </div>
-  );
+  );}
 
   // ══════════════════════════════════════════════════════════════
   // SCREEN: VERIFY
@@ -1848,9 +1903,11 @@ export default function PreferendumV8() {
         <div style={{textAlign:"center",padding:"16px 0 20px"}}>
           <div style={{width:72,height:72,borderRadius:"50%",background:T.blue,
             display:"flex",alignItems:"center",justifyContent:"center",
-            fontSize:28,fontWeight:900,margin:"0 auto 10px"}}>M</div>
-          <div style={{fontSize:18,fontWeight:700,color:T.white}}>María González</div>
-          <div style={{fontSize:12,color:T.fog}}>Las Condes · CL · ♀</div>
+            fontSize:28,fontWeight:900,margin:"0 auto 10px"}}>
+            {(currentUser?.name||vfName||'?')[0].toUpperCase()}
+          </div>
+          <div style={{fontSize:18,fontWeight:700,color:T.white}}>{currentUser?.name||vfName||'Mi perfil'}</div>
+          <div style={{fontSize:12,color:T.fog}}>{vfCounty||currentUser?.county||''}{(vfCounty||currentUser?.county)?' · ':''}{currentUser?.country||vfCountry||'CL'}</div>
           <div style={{marginTop:8,fontSize:10,fontWeight:700,padding:"3px 10px",
             borderRadius:10,background:`${T.green}22`,color:T.green,display:"inline-block"}}>
             ✓ Verificado 7 capas
@@ -1912,7 +1969,8 @@ export default function PreferendumV8() {
               </div>
             ))}
           </div>
-          <Input label="Email institucional" placeholder="contacto@lascondes.cl" value={email} onChange={setEmail}/>
+          <Input label="Nombre de tu organización" placeholder="Ej: Coca-Cola Chile, Universidad de Chile..." value={ncInstName} onChange={setNcInstName}/>
+          <Input label="Email institucional" placeholder="contacto@organización.cl" value={email} onChange={setEmail}/>
           <Input label="Contraseña" placeholder="••••••••" type="password" value={pw} onChange={setPw}/>
           <Btn label="Entrar al portal →" full onPress={()=>go("inst-home")}/>
         </Card>
@@ -1932,7 +1990,7 @@ export default function PreferendumV8() {
           color:T.fog,fontSize:13,cursor:"pointer",padding:"4px 8px 4px 0"}}>←</button>
         <div style={{fontSize:16}}>🏛</div>
         <div style={{flex:1}}>
-          <div style={{fontWeight:900,fontSize:15,color:T.white}}>Municipalidad Las Condes</div>
+          <div style={{fontWeight:900,fontSize:15,color:T.white}}>{ncInstName||'Mi organización'}</div>
           <div style={{fontSize:10,color:T.fog}}>Portal institucional</div>
         </div>
         <button onClick={()=>setInstTab("create")} style={{padding:"6px 12px",borderRadius:8,
@@ -2282,7 +2340,7 @@ export default function PreferendumV8() {
                     option_images:optImages,
                     closes_at:new Date(ncCloses).toISOString(),
                     verify_days:14,
-                    creator_type:'organizer', inst_name:'Preferendum',
+                    creator_type:'organizer', inst_name:ncInstName||currentUser?.name||'Preferendum',
                     debate_type:'gov', scope:ncCommune?'commune':ncRegion?'region':'country',
                     scope_country:ncCountry, scope_commune:ncCommune,
                     target_gender:ncGender,
