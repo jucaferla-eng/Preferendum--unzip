@@ -964,6 +964,21 @@ export default function PreferendumV8() {
             </Card>
           )}
 
+          {/* Skip verification — email OTP may not be available yet */}
+          <div style={{textAlign:"center",paddingTop:8,paddingBottom:24}}>
+            <div style={{fontSize:11,color:T.fog,marginBottom:10}}>
+              ¿No recibes el código? Puedes continuar y verificar más tarde.
+            </div>
+            <button onClick={()=>{
+              go("debates-splash");
+              setTimeout(()=>go("feed"), 2200);
+            }} style={{background:"none",border:`1px solid ${T.fog}44`,
+              borderRadius:10,padding:"10px 24px",color:T.fog,
+              fontSize:13,cursor:"pointer",fontWeight:600}}>
+              Continuar sin verificar →
+            </button>
+          </div>
+
         </div>
       </div>
     );
