@@ -6,13 +6,13 @@ const T = {
   deep:   "#0d1120",
   panel:  "#1a2035",
   card:   "#1e2640",
-  rim:    "#252d42",
-  mist:   "#3d4d6a",
-  fog:    "#5a7090",
-  silver: "#a0b8d0",
-  snow:   "#dce8f8",
+  rim:    "#2e3a55",
+  mist:   "#4a5e82",
+  fog:    "#8aa8cc",   // was #5a7090 — brighter for readability
+  silver: "#c4d6ec",  // was #a0b8d0
+  snow:   "#e8f0fc",  // was #dce8f8
   white:  "#ffffff",
-  blue:   "#2d6eff",
+  blue:   "#4d8aff",  // was #2d6eff — brighter so it pops on dark
   teal:   "#00d4b4",
   gold:   "#f5c030",
   coral:  "#ff4d6a",
@@ -441,7 +441,7 @@ export default function PreferendumV8() {
         padding:"12px 16px",display:"flex",alignItems:"center",gap:10,
         position:"sticky",top:0,zIndex:99}}>
         {back&&<button onClick={()=>go(back)} style={{background:"none",border:"none",
-          color:T.blue,fontSize:18,cursor:"pointer",padding:"0 4px"}}>←</button>}
+          color:T.snow,fontSize:18,cursor:"pointer",padding:"0 4px"}}>←</button>}
         <div style={{fontWeight:900,fontSize:17,color:T.white,flex:1}}>{title}</div>
         {right}
       </div>
@@ -709,7 +709,7 @@ export default function PreferendumV8() {
           </div>
           <div style={{fontSize:12,color:T.fog,fontWeight:700}}>{doneCount}/7</div>
           <button onClick={()=>go("launch")} style={{background:"none",border:"none",
-            color:T.fog,fontSize:12,cursor:"pointer",marginLeft:8,padding:"4px 8px"}}>
+            color:T.silver,fontSize:12,cursor:"pointer",marginLeft:8,padding:"4px 8px"}}>
             ← Inicio
           </button>
         </div>
@@ -1457,7 +1457,7 @@ export default function PreferendumV8() {
                       <span style={{color:COLORS[i%COLORS.length],fontWeight:700}}>{opt}</span>
                     </button>
                   ))}
-                  {!isQ1&&<button onClick={()=>{setVBranchQ(null);setVBranchPath([]);}} style={{background:"none",border:"none",color:T.fog,fontSize:12,cursor:"pointer",marginTop:4}}>← Cambiar respuesta anterior</button>}
+                  {!isQ1&&<button onClick={()=>{setVBranchQ(null);setVBranchPath([]);}} style={{background:"none",border:"none",color:T.silver,fontSize:12,cursor:"pointer",marginTop:4}}>← Cambiar respuesta anterior</button>}
                 </Card>
               );
             })()}
@@ -2005,7 +2005,7 @@ export default function PreferendumV8() {
         padding:"12px 16px",display:"flex",alignItems:"center",gap:10,
         position:"sticky",top:0,zIndex:99}}>
         <button onClick={()=>go("inst-login")} style={{background:"none",border:"none",
-          color:T.fog,fontSize:13,cursor:"pointer",padding:"4px 8px 4px 0"}}>←</button>
+          color:T.snow,fontSize:16,cursor:"pointer",padding:"4px 8px 4px 0"}}>←</button>
         <div style={{fontSize:16}}>🏛</div>
         <div style={{flex:1}}>
           <div style={{fontWeight:900,fontSize:15,color:T.white}}>{ncInstName||'Mi organización'}</div>
