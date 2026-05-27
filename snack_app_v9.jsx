@@ -102,12 +102,12 @@ function Btn({label,color=T.blue,onPress,full,small,outline,disabled}) {
   return (
     <button onClick={onPress} disabled={disabled} style={{
       width:full?"100%":"auto",
-      padding:small?"8px 16px":"13px 24px",
-      borderRadius:12,
+      padding:small?"10px 18px":"17px 28px",
+      borderRadius:14,
       background:disabled?"#252d42":outline?"transparent":color,
-      border:outline?`1.5px solid ${color}`:"none",
+      border:outline?`2px solid ${color}`:"none",
       color:disabled?T.fog:outline?color:"#fff",
-      fontSize:small?13:15,fontWeight:700,
+      fontSize:small?14:17,fontWeight:700,
       cursor:disabled?"not-allowed":"pointer",
       fontFamily:"inherit",marginTop:4,opacity:disabled?0.6:1,
     }}>{label}</button>
@@ -116,14 +116,14 @@ function Btn({label,color=T.blue,onPress,full,small,outline,disabled}) {
 
 function Input({label,placeholder,type="text",value,onChange,mono}) {
   return (
-    <div style={{marginBottom:14}}>
-      {label&&<div style={{fontSize:10,color:T.fog,textTransform:"uppercase",
-        letterSpacing:"0.08em",fontWeight:700,marginBottom:5}}>{label}</div>}
+    <div style={{marginBottom:16}}>
+      {label&&<div style={{fontSize:12,color:T.silver,textTransform:"uppercase",
+        letterSpacing:"0.07em",fontWeight:700,marginBottom:7}}>{label}</div>}
       <input type={type} placeholder={placeholder} value={value}
         onChange={e=>onChange(e.target.value)}
-        style={{width:"100%",padding:"11px 14px",borderRadius:10,
+        style={{width:"100%",padding:"14px 16px",borderRadius:12,
           background:T.deep,border:`1.5px solid ${T.rim}`,color:T.snow,
-          fontSize:14,outline:"none",fontFamily:mono?"monospace":"inherit",
+          fontSize:16,outline:"none",fontFamily:mono?"monospace":"inherit",
           letterSpacing:mono?"0.1em":"normal",boxSizing:"border-box"}}/>
     </div>
   );
@@ -131,23 +131,23 @@ function Input({label,placeholder,type="text",value,onChange,mono}) {
 
 function Card({children,style={}}) {
   return <div style={{background:T.panel,border:`1px solid ${T.rim}`,
-    borderRadius:14,padding:18,marginBottom:12,...style}}>{children}</div>;
+    borderRadius:16,padding:22,marginBottom:14,...style}}>{children}</div>;
 }
 
 function Lbl({children,style={}}) {
-  return <div style={{fontSize:10,color:T.fog,textTransform:"uppercase",
-    letterSpacing:"0.1em",fontWeight:700,marginBottom:10,...style}}>{children}</div>;
+  return <div style={{fontSize:12,color:T.fog,textTransform:"uppercase",
+    letterSpacing:"0.08em",fontWeight:700,marginBottom:12,...style}}>{children}</div>;
 }
 
 function StatusBadge({status}) {
   const st=STATUS[status];
-  return <span style={{fontSize:10,fontWeight:700,padding:"3px 9px",borderRadius:10,
+  return <span style={{fontSize:12,fontWeight:700,padding:"5px 11px",borderRadius:10,
     background:st.bg,color:st.color}}>{st.label}</span>;
 }
 
 function Chip({label,on,onClick,color=T.blue}) {
-  return <span onClick={onClick} style={{display:"inline-block",padding:"6px 13px",
-    borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",margin:"0 6px 6px 0",
+  return <span onClick={onClick} style={{display:"inline-block",padding:"8px 16px",
+    borderRadius:20,fontSize:14,fontWeight:700,cursor:"pointer",margin:"0 6px 8px 0",
     border:`1.5px solid ${on?color:T.rim}`,background:on?`${color}22`:T.deep,
     color:on?color:T.fog}}>{label}</span>;
 }
@@ -1036,18 +1036,7 @@ export default function PreferendumV8() {
         </div>
       </div>
       <div style={{padding:"12px 16px 80px"}}>
-        {/* Status legend */}
-        <div style={{background:T.panel,border:`1px solid ${T.rim}`,borderRadius:12,
-          padding:"12px 14px",marginBottom:14}}>
-          <div style={{fontSize:10,color:T.fog,textTransform:"uppercase",
-            letterSpacing:"0.08em",fontWeight:700,marginBottom:8}}>Estados de debate</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
-            {Object.entries(STATUS).map(([k,v])=>(
-              <span key={k} style={{fontSize:10,fontWeight:700,padding:"2px 8px",
-                borderRadius:10,background:v.bg,color:v.color}}>{v.label}</span>
-            ))}
-          </div>
-        </div>
+        {/* Status legend — collapsed to save space */}
 
         {debatesLoading&&apiDebates.length===0&&(
           <div style={{textAlign:"center",padding:32,color:T.fog,fontSize:13}}>
@@ -1076,56 +1065,67 @@ export default function PreferendumV8() {
               )}
               <div onClick={()=>go("debate",{deb})}
                 style={{background:T.panel,border:`1px solid ${T.rim}`,
-                borderRadius:14,padding:16,marginBottom:12,cursor:"pointer"}}>
-                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10,flexWrap:"wrap"}}>
-                  <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:10,
+                borderRadius:18,padding:"20px 20px 16px",marginBottom:14,cursor:"pointer"}}>
+
+                {/* Row 1: institution + status */}
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+                  <span style={{fontSize:12,fontWeight:700,padding:"4px 10px",borderRadius:20,
                     background:deb.type==="gov"?`${T.teal}22`:`${T.blue}22`,
                     color:deb.type==="gov"?T.teal:T.blue}}>
-                    {deb.type==="gov"?"🏛 Municipalidad":"🏢 Empresa"}
+                    {deb.type==="gov"?"🏛":"🏢"} {deb.inst}
                   </span>
-                  <span style={{fontSize:11,color:T.fog}}>{deb.inst}</span>
                   <StatusBadge status={deb.status}/>
+                  {hasVoted&&<span style={{fontSize:12,color:T.green,fontWeight:700}}>✓ Ya votaste</span>}
                 </div>
-                <div style={{fontSize:15,fontWeight:700,color:T.white,marginBottom:8,lineHeight:1.4}}>
+
+                {/* Row 2: title — the most important thing */}
+                <div style={{fontSize:20,fontWeight:800,color:T.white,marginBottom:14,lineHeight:1.45,letterSpacing:"-0.01em"}}>
                   {deb.title}
                 </div>
+
+                {/* Reward badge */}
                 {deb.reward&&(
                   <div style={{background:`${T.gold}18`,border:`1px solid ${T.gold}44`,
-                    borderRadius:8,padding:"7px 10px",marginBottom:8,fontSize:12,
-                    color:T.gold,display:"flex",alignItems:"center",gap:6}}>
-                    🎁 <span><strong>Recompensa:</strong> {deb.reward}</span>
+                    borderRadius:10,padding:"8px 12px",marginBottom:12,fontSize:13,
+                    color:T.gold,display:"flex",alignItems:"center",gap:7,fontWeight:600}}>
+                    🎁 {deb.reward}
                   </div>
                 )}
+
                 {/* Visual product strip */}
                 {deb.opt_images&&deb.opt_images.some(u=>u)?(
-                  <div style={{display:"flex",gap:6,marginBottom:10,overflowX:"auto",paddingBottom:2}}>
+                  <div style={{display:"flex",gap:8,marginBottom:12,overflowX:"auto",paddingBottom:2}}>
                     {deb.opts.map((o,i)=>deb.opt_images[i]?(
-                      <div key={i} style={{flexShrink:0,width:72,borderRadius:8,overflow:"hidden",
-                        border:`1.5px solid ${COLORS[i%COLORS.length]}44`}}>
+                      <div key={i} style={{flexShrink:0,width:80,borderRadius:10,overflow:"hidden",
+                        border:`2px solid ${COLORS[i%COLORS.length]}44`}}>
                         <img src={deb.opt_images[i]} alt={o}
-                          style={{width:72,height:72,objectFit:"cover",display:"block"}}/>
-                        <div style={{padding:"3px 4px",fontSize:9,color:COLORS[i%COLORS.length],
+                          style={{width:80,height:80,objectFit:"cover",display:"block"}}/>
+                        <div style={{padding:"5px 6px",fontSize:11,color:COLORS[i%COLORS.length],
                           fontWeight:700,textAlign:"center",overflow:"hidden",
                           whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{o}</div>
                       </div>
                     ):null)}
                   </div>
                 ):(
-                  <div style={{marginBottom:10}}>
-                    {deb.opts.map((o,i)=>(
-                      <div key={i} style={{fontSize:12,color:COLORS[i],fontWeight:700,marginBottom:2}}>
-                        Opción {i+1}: {o}
+                  /* Options as clean labeled rows */
+                  <div style={{marginBottom:12,display:"flex",flexDirection:"column",gap:7}}>
+                    {deb.opts.slice(0,4).map((o,i)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{width:12,height:12,borderRadius:3,background:COLORS[i%COLORS.length],flexShrink:0}}/>
+                        <span style={{fontSize:15,color:T.snow,fontWeight:500,lineHeight:1.3}}>{o}</span>
                       </div>
                     ))}
                   </div>
                 )}
-                <div style={{display:"flex",gap:12,fontSize:11,color:T.fog,alignItems:"center"}}>
+
+                {/* Row 3: footer stats */}
+                <div style={{display:"flex",gap:14,fontSize:13,color:T.fog,alignItems:"center",
+                  borderTop:`1px solid ${T.rim}`,paddingTop:12,marginTop:4}}>
                   <span>🗳 {deb.votes} votos</span>
-                  <span>💬 {deb.comments}</span>
-                  {hasVoted&&<span style={{color:T.green,fontWeight:700}}>✓ Votado</span>}
+                  {deb.comments>0&&<span>💬 {deb.comments}</span>}
                   {deb.status==="verifying"&&hasVoted&&
-                    <span style={{color:T.gold,fontWeight:700}}>· Verifica ahora →</span>}
-                  <span style={{marginLeft:"auto",color:T.blue,fontWeight:700}}>Ver →</span>
+                    <span style={{color:T.gold,fontWeight:700}}>Verifica →</span>}
+                  <span style={{marginLeft:"auto",color:T.blue,fontWeight:700,fontSize:14}}>Abrir →</span>
                 </div>
               </div>
             </div>
@@ -1159,14 +1159,14 @@ export default function PreferendumV8() {
       <div style={phone}>
         <TopBar title="DEBATE" back="feed" right={<StatusBadge status={deb.status}/>}/>
         <div style={{padding:"24px 20px",minHeight:"100vh",background:T.bg}}>
-          <div style={{fontSize:13,color:T.fog,marginBottom:4}}>{deb.inst}</div>
-          <div style={{fontSize:18,fontWeight:900,color:T.white,lineHeight:1.4,marginBottom:24}}>
+          <div style={{fontSize:14,color:T.fog,marginBottom:6}}>{deb.inst}</div>
+          <div style={{fontSize:22,fontWeight:900,color:T.white,lineHeight:1.4,marginBottom:28}}>
             {deb.title}
           </div>
-          <div style={{fontSize:15,fontWeight:700,color:T.white,marginBottom:6}}>
+          <div style={{fontSize:18,fontWeight:700,color:T.white,marginBottom:8}}>
             ¿Cuánto conoces sobre este tema?
           </div>
-          <div style={{fontSize:13,color:T.fog,marginBottom:20,lineHeight:1.6}}>
+          <div style={{fontSize:15,color:T.fog,marginBottom:22,lineHeight:1.65}}>
             Tu nivel se muestra junto a cada opinión para que los demás valoren el contexto.
           </div>
           {KNOWLEDGE_LEVELS.map(({v,l,desc,icon,color})=>(
@@ -1182,8 +1182,8 @@ export default function PreferendumV8() {
                onMouseLeave={e=>e.currentTarget.style.borderColor=T.rim}>
               <div style={{fontSize:28,flexShrink:0}}>{icon}</div>
               <div>
-                <div style={{fontSize:15,fontWeight:800,color:color,marginBottom:2}}>{l}</div>
-                <div style={{fontSize:12,color:T.fog,lineHeight:1.5}}>{desc}</div>
+                <div style={{fontSize:18,fontWeight:800,color:color,marginBottom:4}}>{l}</div>
+                <div style={{fontSize:14,color:T.fog,lineHeight:1.55}}>{desc}</div>
               </div>
               <div style={{marginLeft:"auto",fontSize:20,color:T.rim,flexShrink:0}}>›</div>
             </div>
@@ -1215,24 +1215,28 @@ export default function PreferendumV8() {
       <div style={phone}>
         {/* Header */}
         <div style={{background:T.deep,borderBottom:`1px solid ${T.rim}`,
-          padding:"12px 16px",position:"sticky",top:0,zIndex:99}}>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          padding:"14px 18px",position:"sticky",top:0,zIndex:99}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
             <button onClick={()=>go("feed")} style={{background:"none",border:"none",
-              color:T.blue,fontSize:18,cursor:"pointer",padding:"0 4px"}}>←</button>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:900,fontSize:16,color:T.white,letterSpacing:"0.04em"}}>DEBATE</div>
-              <div style={{fontSize:11,color:T.fog}}>{deb.inst}</div>
+              color:T.snow,fontSize:22,cursor:"pointer",padding:"0 4px",lineHeight:1}}>←</button>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,color:T.fog,fontWeight:600,marginBottom:2}}>{deb.inst}</div>
+              <div style={{fontSize:17,fontWeight:800,color:T.white,lineHeight:1.3,
+                overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,
+                WebkitBoxOrient:"vertical"}}>
+                {deb.title}
+              </div>
             </div>
             <StatusBadge status={deb.status}/>
           </div>
           {/* Tab bar */}
-          <div style={{display:"flex",gap:2}}>
+          <div style={{display:"flex",gap:4}}>
             {[["debate","💬 Debate"],["vote","🗳 Votar"],["results","📊 Resultados"]].map(([id,lbl])=>(
               <button key={id} onClick={()=>setDebateTab(id)} style={{
-                flex:1,padding:"8px 4px",borderRadius:8,border:"none",cursor:"pointer",
-                background:debateTab===id?T.blue:"transparent",
+                flex:1,padding:"10px 6px",borderRadius:10,border:"none",cursor:"pointer",
+                background:debateTab===id?T.blue:`${T.blue}18`,
                 color:debateTab===id?"#fff":T.fog,
-                fontSize:12,fontWeight:debateTab===id?700:400}}>
+                fontSize:14,fontWeight:debateTab===id?700:500}}>
                 {lbl}
               </button>
             ))}
@@ -1243,8 +1247,8 @@ export default function PreferendumV8() {
         {debateTab==="debate"&&(
           <div style={{background:"#f1f5f9",minHeight:"calc(100vh - 120px)",paddingBottom:80}}>
             {/* Topic card */}
-            <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"14px 16px"}}>
-              <div style={{fontSize:15,fontWeight:800,color:"#0f172a",lineHeight:1.4,marginBottom:6}}>
+            <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"20px 18px"}}>
+              <div style={{fontSize:20,fontWeight:800,color:"#0f172a",lineHeight:1.45,marginBottom:10}}>
                 {deb.title}
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
@@ -1366,7 +1370,7 @@ export default function PreferendumV8() {
                           op.knowledge_level==="good"?"high":
                           op.knowledge_level==="familiar"?"medium":"low").l}
                       </div>
-                      <div style={{fontSize:14,color:"#1e293b",lineHeight:1.65}}>{op.text}</div>
+                      <div style={{fontSize:15,color:"#1e293b",lineHeight:1.7}}>{op.text}</div>
                     </div>
                   </div>
                 </div>
@@ -1450,13 +1454,15 @@ export default function PreferendumV8() {
                     </div>
                   ):currentQ.options.map((opt,i)=>(
                     <button key={i} onClick={()=>handleOptionClick(i,opt)}
-                      style={{width:"100%",padding:"12px 14px",borderRadius:10,
-                        background:T.card,border:`1px solid ${T.rim}`,color:T.snow,
-                        fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:8,
-                        textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
-                      <div style={{width:10,height:10,borderRadius:2,background:COLORS[i%COLORS.length],flexShrink:0}}/>
-                      {isQ1&&<><strong style={{color:T.fog}}>Opción {i+1}:</strong>&nbsp;</>}
-                      <span style={{color:COLORS[i%COLORS.length],fontWeight:700}}>{opt}</span>
+                      style={{width:"100%",padding:"18px 20px",borderRadius:14,
+                        background:T.card,border:`1.5px solid ${COLORS[i%COLORS.length]}55`,
+                        color:T.snow,fontSize:17,fontWeight:700,cursor:"pointer",marginBottom:10,
+                        textAlign:"left",display:"flex",alignItems:"center",gap:14,
+                        transition:"border-color 0.15s,background 0.15s"}}
+                      onMouseEnter={e=>{e.currentTarget.style.background=`${COLORS[i%COLORS.length]}18`;e.currentTarget.style.borderColor=COLORS[i%COLORS.length];}}
+                      onMouseLeave={e=>{e.currentTarget.style.background=T.card;e.currentTarget.style.borderColor=`${COLORS[i%COLORS.length]}55`;}}>
+                      <div style={{width:16,height:16,borderRadius:4,background:COLORS[i%COLORS.length],flexShrink:0}}/>
+                      <span style={{color:T.white,lineHeight:1.4}}>{opt}</span>
                     </button>
                   ))}
                   {!isQ1&&<button onClick={()=>{setVBranchQ(null);setVBranchPath([]);}} style={{background:"none",border:"none",color:T.silver,fontSize:12,cursor:"pointer",marginTop:4}}>← Cambiar respuesta anterior</button>}
