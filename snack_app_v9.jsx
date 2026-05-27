@@ -220,8 +220,12 @@ export default function PreferendumV8() {
   const [ncQ2,setNcQ2] = useState(Array(4).fill(null).map(()=>({on:false,title:'',opts:['','','']})));
   const [ncQ3,setNcQ3] = useState(Array(4).fill(null).map(()=>Array(3).fill(null).map(()=>({on:false,title:'',opts:['','']}))));
   // Vote branching state
-  const [vBranchQ,setVBranchQ]     = useState(null);  // null = showing Q1
-  const [vBranchPath,setVBranchPath] = useState([]);   // [{optIdx,optText}]
+  const [vBranchQ,setVBranchQ]     = useState(null);
+  const [vBranchPath,setVBranchPath] = useState([]);
+  // Debate room state
+  const [debateTab,setDebateTab]         = useState('debate'); // 'debate'|'vote'|'results'
+  const [debateKnowledge,setDebateKnowledge] = useState({}); // {debateId: level}
+  const [charCount,setCharCount]         = useState(0);
 
   // Marketer state — Ad Creator
   const [mkScreen,setMkScreen]   = useState("hub"); // hub|adcreator|reward|dashboard
@@ -311,12 +315,12 @@ export default function PreferendumV8() {
 
   const PROTECTED_SCREENS = ["feed","debate","voted-success","results","verify","profile"];
   const go = (s,extra={}) => {
-    // Auth gate: redirect to launch if no token on protected screens
     if(PROTECTED_SCREENS.includes(s) && !authToken) { s="launch"; extra={}; }
     setScreen(s);
     if(extra.deb) setSelDebate(extra.deb);
     if(s==="feed"||s==="results"||s==="verify"||s==="profile") setTab(s);
     if(s==="inst-home") setInstTab("debates");
+    if(s==="debate") setDebateTab('debate');
     setVBranchQ(null); setVBranchPath([]);
     window.scrollTo&&window.scrollTo(0,0);
   };
@@ -1118,163 +1122,310 @@ export default function PreferendumV8() {
     const hasVoted=voted[deb.id];
     const canVote=deb.status==="live"&&!hasVoted;
     const total=deb.vals.reduce((a,b)=>a+b,0)||1;
+    const myKnowledge=debateKnowledge[deb.id];
+    const KNOWLEDGE_LEVELS=[
+      {v:"expert",  l:"Experto",  desc:"Tengo formación o experiencia directa en este tema.", icon:"🎓", color:T.blue},
+      {v:"high",    l:"Alto",     desc:"Conozco bien el tema y he leído sobre él.",            icon:"📖", color:T.teal},
+      {v:"medium",  l:"Medio",    desc:"Tengo nociones generales pero no soy especialista.",  icon:"💡", color:T.gold},
+      {v:"low",     l:"Bajo",     desc:"Es un tema nuevo para mí. Quiero aprender.",          icon:"🌱", color:T.fog},
+    ];
+    const knowledgeMeta=(v)=>KNOWLEDGE_LEVELS.find(k=>k.v===v)||KNOWLEDGE_LEVELS[2];
+
+    // ── KNOWLEDGE GATE ─────────────────────────────────────────
+    if(!myKnowledge) return (
+      <div style={phone}>
+        <TopBar title="DEBATE" back="feed" right={<StatusBadge status={deb.status}/>}/>
+        <div style={{padding:"24px 20px",minHeight:"100vh",background:T.bg}}>
+          <div style={{fontSize:13,color:T.fog,marginBottom:4}}>{deb.inst}</div>
+          <div style={{fontSize:18,fontWeight:900,color:T.white,lineHeight:1.4,marginBottom:24}}>
+            {deb.title}
+          </div>
+          <div style={{fontSize:15,fontWeight:700,color:T.white,marginBottom:6}}>
+            ¿Cuánto conoces sobre este tema?
+          </div>
+          <div style={{fontSize:13,color:T.fog,marginBottom:20,lineHeight:1.6}}>
+            Tu nivel se muestra junto a cada opinión para que los demás valoren el contexto.
+          </div>
+          {KNOWLEDGE_LEVELS.map(({v,l,desc,icon,color})=>(
+            <div key={v} onClick={()=>{
+              setDebateKnowledge(prev=>({...prev,[deb.id]:v}));
+              setKnowledgeLevel(v==="expert"?"expert":v==="high"?"good":v==="medium"?"familiar":"low");
+            }} style={{
+              background:T.panel,border:`1.5px solid ${T.rim}`,borderRadius:14,
+              padding:"16px 18px",marginBottom:10,cursor:"pointer",
+              display:"flex",alignItems:"center",gap:14,
+              transition:"border-color 0.15s"
+            }} onMouseEnter={e=>e.currentTarget.style.borderColor=color}
+               onMouseLeave={e=>e.currentTarget.style.borderColor=T.rim}>
+              <div style={{fontSize:28,flexShrink:0}}>{icon}</div>
+              <div>
+                <div style={{fontSize:15,fontWeight:800,color:color,marginBottom:2}}>{l}</div>
+                <div style={{fontSize:12,color:T.fog,lineHeight:1.5}}>{desc}</div>
+              </div>
+              <div style={{marginLeft:"auto",fontSize:20,color:T.rim,flexShrink:0}}>›</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+
+    // ── DEBATE ROOM ────────────────────────────────────────────
+    const km=knowledgeMeta(myKnowledge);
+    const CHAR_LIMIT=500;
+    const remaining=CHAR_LIMIT-newOpinionText.length;
+
+    // Vote submit helper (used in VOTAR tab)
+    const submitVote = async (q1Idx, chain) => {
+      const q1Opt = deb.opts[q1Idx];
+      try {
+        const data = await apiFetch('POST',`/debates/${deb.id}/vote`,{option_index:q1Idx,vote_chain:chain});
+        setVoted({...voted,[deb.id]:{opt:q1Opt,code:data.verify_code,chain}});
+      } catch(e) {
+        const vc=`${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}`;
+        setVoted({...voted,[deb.id]:{opt:q1Opt,code:vc,chain}});
+        DEMO_CODES[vc]={debateId:deb.id,choice:q1Opt};
+      }
+      go("voted-success");
+    };
+
     return (
       <div style={phone}>
-        <TopBar title={deb.inst} back="feed" right={<StatusBadge status={deb.status}/>}/>
-        <div style={{padding:"16px 16px 80px"}}>
-          <div style={{fontSize:20,fontWeight:900,color:T.white,lineHeight:1.3,marginBottom:6}}>{deb.title}</div>
-          <div style={{fontSize:11,color:T.fog,marginBottom:16}}>🗳 {deb.votes} votos · 💬 {deb.comments} comentarios</div>
-
-          {/* Status banner */}
-          <div style={{background:st.bg,border:`1px solid ${st.color}44`,
-            borderRadius:12,padding:"12px 14px",marginBottom:14}}>
-            <div style={{fontSize:13,fontWeight:700,color:st.color,marginBottom:4}}>{st.label}</div>
-            <div style={{fontSize:12,color:T.silver,lineHeight:1.6}}>
-              {deb.status==="live"&&`Puedes votar hasta el ${deb.closes}.`}
-              {deb.status==="closed"&&`Votación cerrada. Verificación abre: ${deb.verify_opens}.`}
-              {deb.status==="verifying"&&`Ingresa tu código en Verificar. Plazo: ${deb.verify_closes}.`}
-              {deb.status==="verified"&&`Resultado certificado. ${deb.accuracy}% de votantes confirmaron.`}
+        {/* Header */}
+        <div style={{background:T.deep,borderBottom:`1px solid ${T.rim}`,
+          padding:"12px 16px",position:"sticky",top:0,zIndex:99}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <button onClick={()=>go("feed")} style={{background:"none",border:"none",
+              color:T.blue,fontSize:18,cursor:"pointer",padding:"0 4px"}}>←</button>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:900,fontSize:16,color:T.white,letterSpacing:"0.04em"}}>DEBATE</div>
+              <div style={{fontSize:11,color:T.fog}}>{deb.inst}</div>
             </div>
+            <StatusBadge status={deb.status}/>
           </div>
+          {/* Tab bar */}
+          <div style={{display:"flex",gap:2}}>
+            {[["debate","💬 Debate"],["vote","🗳 Votar"],["results","📊 Resultados"]].map(([id,lbl])=>(
+              <button key={id} onClick={()=>setDebateTab(id)} style={{
+                flex:1,padding:"8px 4px",borderRadius:8,border:"none",cursor:"pointer",
+                background:debateTab===id?T.blue:"transparent",
+                color:debateTab===id?"#fff":T.fog,
+                fontSize:12,fontWeight:debateTab===id?700:400}}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
 
-          {/* Results */}
-          <Card>
-            <Lbl>Resultados {deb.status==="live"?"parciales":"finales"}</Lbl>
-            <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
-              <Donut vals={deb.vals} size={130}/>
-              <div style={{flex:1,minWidth:130}}>
-                {deb.opts.map((o,i)=>(
-                  <div key={i} style={{marginBottom:8}}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
-                      <span style={{color:T.silver}}>Opción {i+1}: <strong style={{color:COLORS[i]}}>{o}</strong></span>
-                      <span style={{fontWeight:900,color:COLORS[i]}}>{Math.round(deb.vals[i]/total*100)}%</span>
-                    </div>
-                    <div style={{background:T.deep,borderRadius:4,height:7,overflow:"hidden"}}>
-                      <div style={{height:"100%",borderRadius:4,background:COLORS[i],
-                        width:Math.round(deb.vals[i]/total*100)+"%"}}/>
-                    </div>
+        {/* ── TAB: DEBATE ─────────────────────────────── */}
+        {debateTab==="debate"&&(
+          <div style={{background:"#f1f5f9",minHeight:"calc(100vh - 120px)",paddingBottom:80}}>
+            {/* Topic card */}
+            <div style={{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"14px 16px"}}>
+              <div style={{fontSize:15,fontWeight:800,color:"#0f172a",lineHeight:1.4,marginBottom:6}}>
+                {deb.title}
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                <span style={{fontSize:11,padding:"2px 8px",borderRadius:10,
+                  background:`${km.color}18`,color:km.color,fontWeight:700}}>
+                  {km.icon} {km.l}
+                </span>
+                <span style={{fontSize:11,color:"#94a3b8"}}>🗳 {deb.votes} votos</span>
+                {canVote&&(
+                  <button onClick={()=>setDebateTab('vote')} style={{
+                    marginLeft:"auto",padding:"5px 12px",borderRadius:8,border:"none",
+                    background:T.blue,color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                    Pasar a votar →
+                  </button>
+                )}
+              </div>
+              {deb.reward&&canVote&&(
+                <div style={{background:"#fef9e7",border:"1px solid #fbbf24",borderRadius:8,
+                  padding:"8px 12px",marginTop:10,fontSize:12,color:"#92400e",
+                  display:"flex",alignItems:"center",gap:8}}>
+                  🎁 <span><strong>Recompensa:</strong> {deb.reward}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Write opinion */}
+            <div style={{background:"#fff",margin:"10px 12px",borderRadius:14,
+              boxShadow:"0 1px 4px rgba(0,0,0,0.08)",padding:"14px 16px"}}>
+              <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                <div style={{width:36,height:36,borderRadius:"50%",background:km.color,
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontSize:18,flexShrink:0}}>{km.icon}</div>
+                <div style={{flex:1}}>
+                  <textarea
+                    value={newOpinionText}
+                    onChange={e=>{if(e.target.value.length<=CHAR_LIMIT)setNewOpinionText(e.target.value);}}
+                    placeholder="¿Qué piensas sobre este tema? Argumenta tu postura..."
+                    rows={3}
+                    style={{width:"100%",background:"transparent",border:"none",outline:"none",
+                      color:"#0f172a",fontSize:14,lineHeight:1.7,resize:"none",
+                      fontFamily:"-apple-system,system-ui,sans-serif",
+                      boxSizing:"border-box",caretColor:T.blue}}
+                  />
+                  <div style={{display:"flex",justifyContent:"space-between",
+                    alignItems:"center",borderTop:"1px solid #e2e8f0",paddingTop:8,marginTop:4}}>
+                    <span style={{fontSize:11,color:remaining<50?"#ef4444":"#94a3b8",fontWeight:remaining<50?700:400}}>
+                      {remaining} caracteres restantes
+                    </span>
+                    <button onClick={()=>postOpinion(deb.id)}
+                      disabled={postingOpinion||newOpinionText.trim().length<20}
+                      style={{padding:"7px 18px",borderRadius:20,border:"none",cursor:"pointer",
+                        background:newOpinionText.trim().length>=20?T.blue:"#cbd5e1",
+                        color:"#fff",fontSize:13,fontWeight:700,
+                        opacity:postingOpinion?0.6:1}}>
+                      {postingOpinion?"Enviando…":"Publicar"}
+                    </button>
                   </div>
-                ))}
+                  {opinionError&&(
+                    <div style={{fontSize:12,color:"#ef4444",marginTop:6}}>{opinionError}</div>
+                  )}
+                </div>
               </div>
             </div>
-            {deb.status!=="live"&&(
-              <div style={{background:`${T.green}18`,border:`1px solid ${T.green}44`,
-                borderRadius:8,padding:"8px 12px",fontSize:12,color:T.green}}>
-                ✅ Ganador: <strong>{deb.opts[deb.vals.indexOf(Math.max(...deb.vals))]}</strong>
-                {" · "}{Math.round(Math.max(...deb.vals)/total*100)}%
-                {deb.status==="verified"&&` · ✓ ${deb.accuracy}% verificado`}
+
+            {/* Opinion feed */}
+            {opinionsLoading&&(
+              <div style={{textAlign:"center",padding:24,color:"#94a3b8",fontSize:13}}>
+                Cargando debate…
               </div>
             )}
-          </Card>
-
-          {/* Reward banner */}
-          {deb.reward&&canVote&&(
-            <div style={{background:`${T.gold}18`,border:`1px solid ${T.gold}55`,
-              borderRadius:12,padding:"14px 16px",marginBottom:12,
-              display:"flex",alignItems:"flex-start",gap:12}}>
-              <div style={{fontSize:24,flexShrink:0}}>🎁</div>
-              <div>
-                <div style={{fontSize:13,fontWeight:800,color:T.gold,marginBottom:3}}>
-                  Recompensa por participar
-                </div>
-                <div style={{fontSize:13,color:T.white,lineHeight:1.5}}>{deb.reward}</div>
-                <div style={{fontSize:11,color:T.fog,marginTop:4}}>
-                  Válida para todos los participantes, independientemente de su respuesta.
+            {!opinionsLoading&&debateOpinions.length===0&&(
+              <div style={{textAlign:"center",padding:32,color:"#94a3b8"}}>
+                <div style={{fontSize:32,marginBottom:8}}>💬</div>
+                <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>Sé el primero en opinar</div>
+                <div style={{fontSize:12}}>Comparte tu perspectiva sobre este tema.</div>
+              </div>
+            )}
+            {debateOpinions.map((op,i)=>(
+              <div key={op.id||i}>
+                {/* Ad every 5 opinions */}
+                {i>0&&i%5===0&&(
+                  <div style={{background:"#fff7ed",margin:"4px 12px",borderRadius:12,
+                    padding:"10px 14px",border:"1px solid #fed7aa"}}>
+                    <div style={{fontSize:9,color:"#c2410c",textTransform:"uppercase",
+                      letterSpacing:"0.08em",marginBottom:4}}>Publicidad</div>
+                    <div style={{fontSize:13,fontWeight:700,color:"#1c1917"}}>Patrocinado por la consulta</div>
+                  </div>
+                )}
+                {/* Opinion card */}
+                <div style={{background:"#fff",margin:"4px 12px",borderRadius:14,
+                  padding:"14px 16px",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+                  <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+                    <div style={{width:36,height:36,borderRadius:"50%",
+                      background:knowledgeMeta(op.knowledge_level==="expert"?"expert":
+                        op.knowledge_level==="good"?"high":
+                        op.knowledge_level==="familiar"?"medium":"low").color,
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:16,flexShrink:0}}>
+                      {knowledgeMeta(op.knowledge_level==="expert"?"expert":
+                        op.knowledge_level==="good"?"high":
+                        op.knowledge_level==="familiar"?"medium":"low").icon}
+                    </div>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                        <span style={{fontSize:13,fontWeight:700,color:"#0f172a"}}>{op.user_name}</span>
+                        <span style={{fontSize:10,color:"#94a3b8"}}>
+                          {new Date(op.created_at).toLocaleDateString('es-CL',{day:'numeric',month:'short'})}
+                        </span>
+                      </div>
+                      <div style={{fontSize:11,color:knowledgeMeta(
+                        op.knowledge_level==="expert"?"expert":
+                        op.knowledge_level==="good"?"high":
+                        op.knowledge_level==="familiar"?"medium":"low").color,
+                        fontWeight:600,marginBottom:6}}>
+                        {knowledgeMeta(op.knowledge_level==="expert"?"expert":
+                          op.knowledge_level==="good"?"high":
+                          op.knowledge_level==="familiar"?"medium":"low").icon}{" "}
+                        {knowledgeMeta(op.knowledge_level==="expert"?"expert":
+                          op.knowledge_level==="good"?"high":
+                          op.knowledge_level==="familiar"?"medium":"low").l}
+                      </div>
+                      <div style={{fontSize:14,color:"#1e293b",lineHeight:1.65}}>{op.text}</div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            ))}
+            {/* Bottom CTA to vote */}
+            {canVote&&debateOpinions.length>0&&(
+              <div style={{margin:"16px 12px",background:T.blue,borderRadius:14,padding:"16px 20px",
+                display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:800,color:"#fff",marginBottom:2}}>
+                    ¿Listo para votar?
+                  </div>
+                  <div style={{fontSize:11,color:"rgba(255,255,255,0.7)"}}>
+                    Tu voto se cifra con AES-256.
+                  </div>
+                </div>
+                <button onClick={()=>setDebateTab('vote')}
+                  style={{padding:"10px 18px",borderRadius:10,border:"2px solid #fff",
+                    background:"transparent",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                  Votar →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
-          {/* Vote — with optional branching questions */}
-          {canVote&&(()=>{
-            const isQ1 = vBranchQ===null;
-            const currentQ = isQ1 ? {title:deb.title, options:deb.opts, branches:deb.follow_ups} : vBranchQ;
-            const qLevel = vBranchPath.length + 1;
-            const totalQ = (() => {
-              let n=1; let q=deb.follow_ups;
-              if(q&&q.some(b=>b)){
-                n=2; const has3=q.filter(Boolean).some(b=>b.branches&&b.branches.some(Boolean));
-                if(has3) n=3;
-              }
-              return n;
-            })();
-            const submitVote = async (q1Idx, chain) => {
-              const q1Opt = deb.opts[q1Idx];
-              try {
-                const data = await apiFetch('POST',`/debates/${deb.id}/vote`,{option_index:q1Idx,vote_chain:chain});
-                setVoted({...voted,[deb.id]:{opt:q1Opt,code:data.verify_code,chain}});
-              } catch(e) {
-                const vc=`${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}`;
-                setVoted({...voted,[deb.id]:{opt:q1Opt,code:vc,chain}});
-                DEMO_CODES[vc]={debateId:deb.id,choice:q1Opt};
-              }
-              go("voted-success");
-            };
-            return (
-              <Card style={{border:`1px solid ${T.blue}44`,background:`${T.blue}10`}}>
-                {totalQ>1&&(
-                  <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
+        {/* ── TAB: VOTAR ──────────────────────────────── */}
+        {debateTab==="vote"&&(
+          <div style={{padding:"16px 16px 80px",background:T.bg,minHeight:"calc(100vh - 120px)"}}>
+            {deb.reward&&canVote&&(
+              <div style={{background:`${T.gold}18`,border:`1px solid ${T.gold}55`,
+                borderRadius:12,padding:"14px 16px",marginBottom:14,
+                display:"flex",alignItems:"flex-start",gap:12}}>
+                <div style={{fontSize:24,flexShrink:0}}>🎁</div>
+                <div>
+                  <div style={{fontSize:13,fontWeight:800,color:T.gold,marginBottom:3}}>Recompensa por participar</div>
+                  <div style={{fontSize:13,color:T.white,lineHeight:1.5}}>{deb.reward}</div>
+                </div>
+              </div>
+            )}
+            {canVote&&(()=>{
+              const isQ1=vBranchQ===null;
+              const currentQ=isQ1?{title:deb.title,options:deb.opts,branches:deb.follow_ups}:vBranchQ;
+              const qLevel=vBranchPath.length+1;
+              const totalQ=(()=>{let n=1;let q=deb.follow_ups;if(q&&q.some(b=>b)){n=2;if(q.filter(Boolean).some(b=>b.branches&&b.branches.some(Boolean)))n=3;}return n;})();
+              const handleOptionClick=async(i,opt)=>{
+                const newStep={level:qLevel,option_index:i,option_text:opt,question:currentQ.title||deb.title};
+                const newPath=[...vBranchPath,newStep];
+                const nextQ=currentQ.branches?currentQ.branches[i]:null;
+                if(nextQ&&nextQ.title){setVBranchPath(newPath);setVBranchQ(nextQ);}
+                else{const q1Idx=vBranchPath.length>0?vBranchPath[0].option_index:i;await submitVote(q1Idx,newPath);}
+              };
+              const hasImgs=isQ1&&deb.opt_images&&deb.opt_images.some(u=>u);
+              return (
+                <Card style={{border:`1px solid ${T.blue}44`,background:`${T.blue}10`}}>
+                  {totalQ>1&&(<div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
                     {Array.from({length:totalQ},(_,k)=>(
-                      <div key={k} style={{flex:1,height:4,borderRadius:4,
-                        background:k<qLevel?T.blue:`${T.blue}30`}}/>
+                      <div key={k} style={{flex:1,height:4,borderRadius:4,background:k<qLevel?T.blue:`${T.blue}30`}}/>
                     ))}
-                    <span style={{fontSize:11,color:T.fog,marginLeft:4,whiteSpace:"nowrap"}}>
-                      {qLevel}/{totalQ}
-                    </span>
-                  </div>
-                )}
-                <Lbl>{isQ1?"Emite tu voto":"Pregunta de seguimiento"}</Lbl>
-                {!isQ1&&(
-                  <div style={{fontSize:13,fontWeight:700,color:T.white,marginBottom:12,lineHeight:1.4}}>
-                    {currentQ.title}
-                  </div>
-                )}
-                {isQ1&&(
-                  <div style={{fontSize:12,color:T.fog,marginBottom:12,lineHeight:1.6}}>
-                    Tu voto se cifra con AES-256 y se ancla en blockchain Polygon.
-                  </div>
-                )}
-                {(()=>{
-                  const hasImgs = isQ1 && deb.opt_images && deb.opt_images.some(u=>u);
-                  const handleOptionClick = async (i, opt) => {
-                    const newStep = {level:qLevel, option_index:i, option_text:opt,
-                      question:currentQ.title||deb.title};
-                    const newPath = [...vBranchPath,newStep];
-                    const nextQ = currentQ.branches ? currentQ.branches[i] : null;
-                    if(nextQ && nextQ.title) {
-                      setVBranchPath(newPath);
-                      setVBranchQ(nextQ);
-                    } else {
-                      const q1Idx = vBranchPath.length>0 ? vBranchPath[0].option_index : i;
-                      await submitVote(q1Idx, newPath);
-                    }
-                  };
-                  if(hasImgs) return (
+                    <span style={{fontSize:11,color:T.fog,marginLeft:4}}>{qLevel}/{totalQ}</span>
+                  </div>)}
+                  <Lbl>{isQ1?"Emite tu voto":"Pregunta de seguimiento"}</Lbl>
+                  {!isQ1&&<div style={{fontSize:13,fontWeight:700,color:T.white,marginBottom:12,lineHeight:1.4}}>{currentQ.title}</div>}
+                  {isQ1&&<div style={{fontSize:12,color:T.fog,marginBottom:12,lineHeight:1.6}}>Tu voto se cifra con AES-256 y se ancla en blockchain Polygon.</div>}
+                  {hasImgs?(
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:6}}>
-                      {currentQ.options.map((opt,i)=>{
-                        const imgUrl = deb.opt_images[i];
-                        return (
-                          <button key={i} onClick={()=>handleOptionClick(i,opt)} style={{
-                            borderRadius:12,overflow:"hidden",cursor:"pointer",padding:0,
-                            border:`2px solid ${COLORS[i%COLORS.length]}66`,
-                            background:T.card,textAlign:"left"}}>
-                            {imgUrl
-                              ?<img src={imgUrl} alt={opt}
-                                  style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/>
-                              :<div style={{width:"100%",aspectRatio:"1",background:T.deep,display:"flex",
-                                  alignItems:"center",justifyContent:"center",fontSize:28}}>📦</div>
-                            }
-                            <div style={{padding:"8px 8px 10px",borderTop:`1px solid ${COLORS[i%COLORS.length]}33`}}>
-                              <div style={{fontSize:10,color:T.fog,marginBottom:2}}>Opción {i+1}</div>
-                              <div style={{fontSize:12,fontWeight:700,color:COLORS[i%COLORS.length],
-                                lineHeight:1.3}}>{opt}</div>
-                            </div>
-                          </button>
-                        );
-                      })}
+                      {currentQ.options.map((opt,i)=>(
+                        <button key={i} onClick={()=>handleOptionClick(i,opt)} style={{
+                          borderRadius:12,overflow:"hidden",cursor:"pointer",padding:0,
+                          border:`2px solid ${COLORS[i%COLORS.length]}66`,background:T.card}}>
+                          {deb.opt_images[i]
+                            ?<img src={deb.opt_images[i]} alt={opt} style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/>
+                            :<div style={{width:"100%",aspectRatio:"1",background:T.deep,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}>📦</div>}
+                          <div style={{padding:"8px 8px 10px",borderTop:`1px solid ${COLORS[i%COLORS.length]}33`}}>
+                            <div style={{fontSize:10,color:T.fog,marginBottom:2}}>Opción {i+1}</div>
+                            <div style={{fontSize:12,fontWeight:700,color:COLORS[i%COLORS.length],lineHeight:1.3}}>{opt}</div>
+                          </div>
+                        </button>
+                      ))}
                     </div>
-                  );
-                  return currentQ.options.map((opt,i)=>(
+                  ):currentQ.options.map((opt,i)=>(
                     <button key={i} onClick={()=>handleOptionClick(i,opt)}
                       style={{width:"100%",padding:"12px 14px",borderRadius:10,
                         background:T.card,border:`1px solid ${T.rim}`,color:T.snow,
@@ -1284,139 +1435,74 @@ export default function PreferendumV8() {
                       {isQ1&&<><strong style={{color:T.fog}}>Opción {i+1}:</strong>&nbsp;</>}
                       <span style={{color:COLORS[i%COLORS.length],fontWeight:700}}>{opt}</span>
                     </button>
-                  ));
-                })()}
-                {!isQ1&&(
-                  <button onClick={()=>{setVBranchQ(null);setVBranchPath([]);}}
-                    style={{background:"none",border:"none",color:T.fog,fontSize:12,cursor:"pointer",marginTop:4}}>
-                    ← Cambiar respuesta anterior
-                  </button>
-                )}
-              </Card>
-            );
-          })()}
-
-          {hasVoted&&(
-            <Card style={{border:`1px solid ${T.green}44`,background:`${T.green}10`}}>
-              <div style={{textAlign:"center"}}>
-                <div style={{fontSize:28,marginBottom:6}}>✅</div>
-                <div style={{fontSize:14,fontWeight:700,color:T.green,marginBottom:4}}>Ya votaste</div>
-                <div style={{fontSize:12,color:T.fog,marginBottom:8}}>
-                  Tu voto: <strong style={{color:T.white}}>{voted[deb.id].opt}</strong>
-                </div>
-                <div style={{fontFamily:"monospace",fontSize:14,color:T.blue,fontWeight:700,letterSpacing:"0.1em",marginBottom:8}}>
-                  {voted[deb.id].code}
-                </div>
-                {deb.status==="verifying"&&(
-                  <button onClick={()=>go("verify")} style={{background:"none",border:"none",
-                    color:T.gold,fontSize:13,fontWeight:700,cursor:"pointer"}}>
-                    🔍 La verificación está abierta — verifica ahora →
-                  </button>
-                )}
-              </div>
-            </Card>
-          )}
-
-          {!hasVoted&&deb.status!=="live"&&(
-            <Card style={{opacity:0.7}}>
-              <div style={{textAlign:"center",padding:"8px 0"}}>
-                <div style={{fontSize:24,marginBottom:6}}>🔒</div>
-                <div style={{fontSize:13,color:T.fog}}>
-                  {deb.status==="verified"?"Debate verificado y cerrado.":"La votación está cerrada. No participaste en este debate."}
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {/* ── OPINIONS SECTION ─────────────────────────────── */}
-          <Card>
-            <Lbl>💬 Opiniones</Lbl>
-
-            {/* Post opinion form — white writing space */}
-            <div style={{background:"#ffffff",borderRadius:10,padding:14,marginBottom:16,
-              border:"1.5px solid #e2e8f0",boxShadow:"0 2px 8px rgba(0,0,0,0.08)"}}>
-              <div style={{fontSize:11,color:"#64748b",marginBottom:8,
-                textTransform:"uppercase",letterSpacing:"0.06em",fontWeight:600}}>
-                Comparte tu perspectiva
-              </div>
-              <textarea
-                value={newOpinionText}
-                onChange={e=>setNewOpinionText(e.target.value)}
-                placeholder="¿Qué piensas sobre este tema? (mínimo 20 caracteres)"
-                rows={4}
-                style={{width:"100%",background:"transparent",border:"none",outline:"none",
-                  color:"#0f172a",fontSize:14,lineHeight:1.7,resize:"none",
-                  fontFamily:"-apple-system,system-ui,sans-serif",boxSizing:"border-box",
-                  caretColor:T.blue}}
-              />
-              <div style={{height:1,background:"#e2e8f0",margin:"10px 0"}}/>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                gap:8,flexWrap:"wrap"}}>
-                <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                  {[
-                    {v:"expert",   l:"Experto"},
-                    {v:"good",     l:"Informado"},
-                    {v:"familiar", l:"Familiarizado"},
-                    {v:"low",      l:"Poco"},
-                    {v:"new",      l:"Nuevo"},
-                  ].map(({v,l})=>(
-                    <button key={v} onClick={()=>setKnowledgeLevel(v)}
-                      style={{padding:"4px 10px",borderRadius:20,fontSize:11,cursor:"pointer",
-                        border:`1.5px solid ${knowledgeLevel===v?T.blue:"#cbd5e1"}`,
-                        background:knowledgeLevel===v?T.blue:"transparent",
-                        color:knowledgeLevel===v?"#fff":"#475569",
-                        fontWeight:knowledgeLevel===v?700:400}}>
-                      {l}
+                  ))}
+                  {!isQ1&&<button onClick={()=>{setVBranchQ(null);setVBranchPath([]);}} style={{background:"none",border:"none",color:T.fog,fontSize:12,cursor:"pointer",marginTop:4}}>← Cambiar respuesta anterior</button>}
+                </Card>
+              );
+            })()}
+            {hasVoted&&(
+              <Card style={{border:`1px solid ${T.green}44`,background:`${T.green}10`}}>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:28,marginBottom:6}}>✅</div>
+                  <div style={{fontSize:14,fontWeight:700,color:T.green,marginBottom:4}}>Ya votaste</div>
+                  <div style={{fontSize:12,color:T.fog,marginBottom:8}}>Tu voto: <strong style={{color:T.white}}>{voted[deb.id].opt}</strong></div>
+                  <div style={{fontFamily:"monospace",fontSize:14,color:T.blue,fontWeight:700,letterSpacing:"0.1em",marginBottom:8}}>{voted[deb.id].code}</div>
+                  {deb.status==="verifying"&&(
+                    <button onClick={()=>go("verify")} style={{background:"none",border:"none",color:T.gold,fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                      🔍 La verificación está abierta — verifica ahora →
                     </button>
+                  )}
+                </div>
+              </Card>
+            )}
+            {!hasVoted&&deb.status!=="live"&&(
+              <Card style={{opacity:0.7}}>
+                <div style={{textAlign:"center",padding:"8px 0"}}>
+                  <div style={{fontSize:24,marginBottom:6}}>🔒</div>
+                  <div style={{fontSize:13,color:T.fog}}>La votación está cerrada.</div>
+                </div>
+              </Card>
+            )}
+          </div>
+        )}
+
+        {/* ── TAB: RESULTADOS ─────────────────────────── */}
+        {debateTab==="results"&&(
+          <div style={{padding:"16px 16px 80px",background:T.bg,minHeight:"calc(100vh - 120px)"}}>
+            <Card>
+              <Lbl>Resultados {deb.status==="live"?"parciales":"finales"}</Lbl>
+              <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
+                <Donut vals={deb.vals} size={130}/>
+                <div style={{flex:1,minWidth:130}}>
+                  {deb.opts.map((o,i)=>(
+                    <div key={i} style={{marginBottom:8}}>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+                        <span style={{color:T.silver}}><strong style={{color:COLORS[i]}}>{o}</strong></span>
+                        <span style={{fontWeight:900,color:COLORS[i]}}>{Math.round(deb.vals[i]/total*100)}%</span>
+                      </div>
+                      <div style={{background:T.deep,borderRadius:4,height:7,overflow:"hidden"}}>
+                        <div style={{height:"100%",borderRadius:4,background:COLORS[i],width:Math.round(deb.vals[i]/total*100)+"%"}}/>
+                      </div>
+                    </div>
                   ))}
                 </div>
-                <button onClick={()=>postOpinion(deb.id)}
-                  disabled={postingOpinion||newOpinionText.trim().length<20}
-                  style={{padding:"8px 18px",borderRadius:8,border:"none",cursor:"pointer",
-                    background:newOpinionText.trim().length>=20?T.blue:"#94a3b8",
-                    color:"#fff",fontSize:13,fontWeight:700,
-                    opacity:postingOpinion?0.6:1,whiteSpace:"nowrap"}}>
-                  {postingOpinion?"Enviando…":"Publicar →"}
-                </button>
               </div>
-              {opinionError&&(
-                <div style={{fontSize:12,color:T.coral,marginTop:8}}>{opinionError}</div>
-              )}
-            </div>
-
-            {/* Opinion list */}
-            {opinionsLoading&&(
-              <div style={{textAlign:"center",padding:"16px 0",fontSize:12,color:T.fog}}>
-                Cargando opiniones…
-              </div>
-            )}
-            {!opinionsLoading&&debateOpinions.length===0&&(
-              <div style={{textAlign:"center",padding:"16px 0",fontSize:12,color:T.fog}}>
-                Sé el primero en opinar.
-              </div>
-            )}
-            {debateOpinions.map((op,i)=>(
-              <div key={op.id||i} style={{
-                padding:"12px 0",
-                borderBottom:i<debateOpinions.length-1?`1px solid ${T.rim}`:"none"
-              }}>
-                <div style={{display:"flex",justifyContent:"space-between",
-                  alignItems:"flex-start",marginBottom:6}}>
-                  <div style={{fontSize:12,fontWeight:700,color:T.white}}>{op.user_name}</div>
-                  <div style={{fontSize:10,color:T.fog,flexShrink:0,marginLeft:8}}>
-                    {op.knowledge_level==="expert"?"🎓 Experto":
-                     op.knowledge_level==="good"?"📖 Informado":
-                     op.knowledge_level==="familiar"?"💡 Familiarizado":
-                     op.knowledge_level==="low"?"🌱 Poco":
-                     "✨ Nuevo"}
-                  </div>
+              {deb.status!=="live"&&(
+                <div style={{background:`${T.green}18`,border:`1px solid ${T.green}44`,borderRadius:8,padding:"8px 12px",fontSize:12,color:T.green}}>
+                  ✅ Ganador: <strong>{deb.opts[deb.vals.indexOf(Math.max(...deb.vals))]}</strong>
+                  {" · "}{Math.round(Math.max(...deb.vals)/total*100)}%
+                  {deb.status==="verified"&&` · ✓ ${deb.accuracy||0}% verificado`}
                 </div>
-                <div style={{fontSize:13,color:T.silver,lineHeight:1.6}}>{op.text}</div>
-              </div>
-            ))}
-          </Card>
+              )}
+            </Card>
+            <div style={{background:`${T.teal}18`,border:`1px solid ${T.teal}44`,borderRadius:12,padding:"12px 16px",marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:700,color:T.teal,marginBottom:2}}>🔗 Legitimacy Score</div>
+              <div style={{fontSize:24,fontWeight:900,color:T.teal}}>{deb.votes>0?`${Math.round((deb.legitimacy_score||0)*100)}%`:"—"}</div>
+              <div style={{fontSize:11,color:T.fog}}>Porcentaje de votantes que verificaron su voto.</div>
+            </div>
+          </div>
+        )}
 
-        </div>
         <VoterTabs/>
       </div>
     );
