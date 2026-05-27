@@ -201,6 +201,7 @@ export default function PreferendumV8() {
   // Institution state
   const [instTab,setInstTab]     = useState("debates");
   const [ncInstName,setNcInstName] = useState('');
+  const [myDebateIds,setMyDebateIds] = useState([]); // IDs created in this session
   const [ncTitle,setNcTitle]     = useState('');
   const [ncDesc,setNcDesc]       = useState('');
   const [ncOpts,setNcOpts]       = useState(['','','','']);
@@ -388,8 +389,10 @@ export default function PreferendumV8() {
     }
   };
 
-  // Reload debates every time the feed tab is opened
-  useEffect(() => { if(screen === 'feed') loadDebates(); }, [screen]);
+  // Reload debates when entering feed or inst-home
+  useEffect(() => {
+    if(screen === 'feed' || screen === 'inst-home') loadDebates();
+  }, [screen]);
 
   const loadOpinions = async (debateId) => {
     setOpinionsLoading(true);
@@ -2000,47 +2003,68 @@ export default function PreferendumV8() {
       </div>
 
       <div style={{padding:"12px 16px 80px"}}>
-        {instTab==="debates"&&(
+        {instTab==="debates"&&(()=>{
+          const allDebs = apiDebates.length > 0 ? apiDebates : [];
+          // Show all backend debates; highlight ones created this session
+          const myDebs = myDebateIds.length > 0
+            ? allDebs.filter(d => myDebateIds.includes(d.id))
+            : [];
+          const otherDebs = myDebateIds.length > 0
+            ? allDebs.filter(d => !myDebateIds.includes(d.id))
+            : allDebs;
+          const displayDebs = [...myDebs, ...otherDebs];
+          return (
           <>
             <div style={{padding:"4px 0 14px",display:"flex",alignItems:"center"}}>
-              <div style={{fontSize:20,fontWeight:900,color:T.white,flex:1}}>Mis debates</div>
+              <div style={{fontSize:20,fontWeight:900,color:T.white,flex:1}}>
+                {myDebateIds.length > 0 ? `Mis consultas (${myDebs.length})` : 'Consultas'}
+              </div>
               <button onClick={()=>setInstTab("create")} style={{padding:"6px 14px",borderRadius:8,
                 background:T.blue,border:"none",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-                + Nuevo
+                + Nueva
               </button>
             </div>
-            {(apiDebates.length>0?apiDebates:DEBATES.filter(d=>d.type==="gov")).map(deb=>{
+            {debatesLoading&&displayDebs.length===0&&(
+              <div style={{textAlign:"center",padding:24,color:T.fog,fontSize:13}}>Cargando consultas...</div>
+            )}
+            {!debatesLoading&&displayDebs.length===0&&(
+              <div style={{textAlign:"center",padding:32,color:T.fog,fontSize:13}}>
+                <div style={{fontSize:40,marginBottom:12}}>📋</div>
+                <div>Aún no hay consultas.</div>
+                <div style={{fontSize:11,marginTop:6}}>Crea la primera con el botón + Nueva.</div>
+              </div>
+            )}
+            {displayDebs.map(deb=>{
+              const isMine = myDebateIds.includes(deb.id);
               const vals=deb.vals||[];
               const total=vals.reduce((a,b)=>a+b,0)||1;
               return (
-                <Card key={deb.id}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                    <div style={{fontSize:14,fontWeight:700,color:T.white,flex:1}}>{deb.title}</div>
+                <Card key={deb.id} style={isMine?{border:`1.5px solid ${T.teal}44`,background:`${T.teal}08`}:{}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    {isMine&&<span style={{fontSize:9,fontWeight:700,padding:"2px 7px",borderRadius:8,
+                      background:`${T.teal}22`,color:T.teal}}>TU CONSULTA</span>}
                     <StatusBadge status={deb.status}/>
                   </div>
-                  <div style={{display:"flex",gap:16,fontSize:11,color:T.fog,marginBottom:12}}>
-                    <span>🗳 {deb.votes||0} votos</span>
-                  </div>
+                  <div style={{fontSize:14,fontWeight:700,color:T.white,marginBottom:6,lineHeight:1.4}}>{deb.title}</div>
+                  <div style={{fontSize:11,color:T.fog,marginBottom:10}}>{deb.inst} · 🗳 {deb.votes||0} votos</div>
                   {(deb.opts||[]).map((o,i)=>(
-                    <div key={i} style={{marginBottom:8}}>
+                    <div key={i} style={{marginBottom:7}}>
                       <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
                         <span style={{color:T.silver}}>{o}</span>
                         <span style={{fontWeight:700,color:COLORS[i%COLORS.length]}}>{vals[i]?Math.round(vals[i]/total*100):0}%</span>
                       </div>
-                      <div style={{background:T.deep,borderRadius:4,height:7,overflow:"hidden"}}>
+                      <div style={{background:T.deep,borderRadius:4,height:6,overflow:"hidden"}}>
                         <div style={{height:"100%",borderRadius:4,background:COLORS[i%COLORS.length],
-                          width:(vals[i]?Math.round(vals[i]/total*100):0)+"%"}}/>
+                          width:(vals[i]?Math.round(vals[i]/total*100):0)+"%",transition:"width 0.5s ease"}}/>
                       </div>
                     </div>
                   ))}
                 </Card>
               );
             })}
-            {apiDebates.length===0&&debatesLoading&&(
-              <div style={{textAlign:"center",padding:24,color:T.fog,fontSize:13}}>Cargando debates...</div>
-            )}
           </>
-        )}
+          );
+        })()}
 
         {instTab==="dashboard"&&(
           <>
@@ -2349,7 +2373,10 @@ export default function PreferendumV8() {
                     follow_up_questions:followUpBranches?JSON.stringify(followUpBranches):'',
                   });
                   const newDeb=data.debate;
-                  if(newDeb) setApiDebates(prev=>[transformDebate(newDeb),...prev]);
+                  if(newDeb) {
+                    setApiDebates(prev=>[transformDebate(newDeb),...prev]);
+                    setMyDebateIds(prev=>[newDeb.id,...prev]);
+                  }
                   const title=ncTitle;
                   setNcTitle('');setNcDesc('');setNcOpts(['','','','']);setNcCloses('');setNcReward('');
                   setNcVisual(false);setNcOptImages(Array(10).fill(''));

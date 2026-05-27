@@ -421,7 +421,7 @@ def format_debate(debate, has_voted=False):
         'target_gender': debate.target_gender,
         'status': status,
         'total_votes': total,
-        'opens_at': debate.opens_at.isoformat(),
+        'opens_at': debate.opens_at.isoformat() if debate.opens_at else None,
         'closes_at': debate.closes_at.isoformat() if debate.closes_at else None,
         'verify_closes_at': debate.verify_closes_at.isoformat() if debate.verify_closes_at else None,
         'legitimacy_score': debate.legitimacy_score,
@@ -1306,12 +1306,20 @@ async def upload_image(
 def list_debates(
     country: str = Query('CL'),
     commune: str = Query(None),
-    limit:   int = Query(20),
+    limit:   int = Query(50),
     db: Session = Depends(get_db)
 ):
-    q = db.query(Debate).filter(Debate.scope_country == country)
+    q = db.query(Debate)
+    if country and country != 'ALL':
+        q = q.filter(Debate.scope_country == country)
     debates = q.order_by(Debate.created_at.desc()).limit(limit).all()
-    return {'debates': [format_debate(d) for d in debates]}
+    safe = []
+    for d in debates:
+        try:
+            safe.append(format_debate(d))
+        except Exception:
+            pass
+    return {'debates': safe}
 
 @app.get('/debates/feed')
 def get_feed(
