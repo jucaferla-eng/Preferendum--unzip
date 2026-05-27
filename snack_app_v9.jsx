@@ -2,17 +2,17 @@ import { useState, useRef, useEffect } from "react";
 
 // ══ DESIGN TOKENS ══════════════════════════════════════════════
 const T = {
-  bg:     "#0a0d14",
-  deep:   "#0d1120",
-  panel:  "#1a2035",
-  card:   "#1e2640",
-  rim:    "#2e3a55",
-  mist:   "#4a5e82",
-  fog:    "#8aa8cc",   // was #5a7090 — brighter for readability
-  silver: "#c4d6ec",  // was #a0b8d0
-  snow:   "#e8f0fc",  // was #dce8f8
-  white:  "#ffffff",
-  blue:   "#4d8aff",  // was #2d6eff — brighter so it pops on dark
+  bg:     "#090c13",   // deep civic navy
+  deep:   "#0e1322",   // header / top bar
+  panel:  "#161e30",   // card bg — distinct from bg
+  card:   "#1c2640",   // raised card
+  rim:    "#2c3e5c",   // borders
+  mist:   "#5a78a0",   // very tertiary only
+  fog:    "#90b8d8",   // secondary text — clearly readable on dark
+  silver: "#cce0f0",   // body text, labels
+  snow:   "#edf5ff",   // primary content text
+  white:  "#ffffff",   // titles, headings
+  blue:   "#4d8aff",
   teal:   "#00d4b4",
   gold:   "#f5c030",
   coral:  "#ff4d6a",
