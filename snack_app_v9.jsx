@@ -2381,7 +2381,7 @@ export default function PreferendumV8() {
                     verify_days:14,
                     creator_type:'organizer', inst_name:ncInstName||currentUser?.name||'Preferendum',
                     debate_type:'gov', scope:ncCommune?'commune':ncRegion?'region':'country',
-                    scope_country:ncCountry, scope_commune:ncCommune,
+                    scope_country:ncAudience==='all'?'ALL':ncCountry, scope_commune:ncCommune,
                     target_gender:ncGender,
                     target_age_min:parseInt(ncAgeMin)||13,
                     target_age_max:parseInt(ncAgeMax)||99,
@@ -2400,8 +2400,7 @@ export default function PreferendumV8() {
                   setNcBranching(false);
                   setNcQ2(Array(4).fill(null).map(()=>({on:false,title:'',opts:['','','']})));
                   setNcQ3(Array(4).fill(null).map(()=>Array(3).fill(null).map(()=>({on:false,title:'',opts:['','']}))));
-                  setInstTab("debates");
-                  alert(`✅ Debate publicado: "${title}"\n\nYa aparece en el feed para todos los votantes.`);
+                  go("feed");
                 } catch(e){
                   alert('Error al publicar: '+(e.message||'Intenta de nuevo.'));
                 } finally { setNcLoading(false); }
