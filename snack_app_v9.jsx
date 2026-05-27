@@ -212,8 +212,10 @@ export default function PreferendumV8() {
   const [ncCountry,setNcCountry] = useState('CL');
   const [ncRegion,setNcRegion]   = useState('');
   const [ncCommune,setNcCommune] = useState('');
-  // Reward and branching state for creation form
+  // Reward, visual, and branching state for creation form
   const [ncReward,setNcReward]       = useState('');
+  const [ncVisual,setNcVisual]       = useState(false);
+  const [ncOptImages,setNcOptImages] = useState(Array(10).fill(''));
   const [ncBranching,setNcBranching] = useState(false);
   const [ncQ2,setNcQ2] = useState(Array(4).fill(null).map(()=>({on:false,title:'',opts:['','','']})));
   const [ncQ3,setNcQ3] = useState(Array(4).fill(null).map(()=>Array(3).fill(null).map(()=>({on:false,title:'',opts:['','']}))));
@@ -356,6 +358,7 @@ export default function PreferendumV8() {
       inst:         d.inst_name,
       type:         d.debate_type === 'priv' ? 'priv' : 'gov',
       opts:         d.options,
+      opt_images:   d.option_images || [],
       vals:         d.results ? d.results.map(r => r.count) : d.options.map(()=>0),
       votes:        d.total_votes,
       comments:     0,
@@ -1066,13 +1069,29 @@ export default function PreferendumV8() {
                     🎁 <span><strong>Recompensa:</strong> {deb.reward}</span>
                   </div>
                 )}
-                <div style={{marginBottom:10}}>
-                  {deb.opts.map((o,i)=>(
-                    <div key={i} style={{fontSize:12,color:COLORS[i],fontWeight:700,marginBottom:2}}>
-                      Opción {i+1}: {o}
-                    </div>
-                  ))}
-                </div>
+                {/* Visual product strip */}
+                {deb.opt_images&&deb.opt_images.some(u=>u)?(
+                  <div style={{display:"flex",gap:6,marginBottom:10,overflowX:"auto",paddingBottom:2}}>
+                    {deb.opts.map((o,i)=>deb.opt_images[i]?(
+                      <div key={i} style={{flexShrink:0,width:72,borderRadius:8,overflow:"hidden",
+                        border:`1.5px solid ${COLORS[i%COLORS.length]}44`}}>
+                        <img src={deb.opt_images[i]} alt={o}
+                          style={{width:72,height:72,objectFit:"cover",display:"block"}}/>
+                        <div style={{padding:"3px 4px",fontSize:9,color:COLORS[i%COLORS.length],
+                          fontWeight:700,textAlign:"center",overflow:"hidden",
+                          whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{o}</div>
+                      </div>
+                    ):null)}
+                  </div>
+                ):(
+                  <div style={{marginBottom:10}}>
+                    {deb.opts.map((o,i)=>(
+                      <div key={i} style={{fontSize:12,color:COLORS[i],fontWeight:700,marginBottom:2}}>
+                        Opción {i+1}: {o}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div style={{display:"flex",gap:12,fontSize:11,color:T.fog,alignItems:"center"}}>
                   <span>🗳 {deb.votes} votos</span>
                   <span>💬 {deb.comments}</span>
@@ -1215,8 +1234,9 @@ export default function PreferendumV8() {
                     Tu voto se cifra con AES-256 y se ancla en blockchain Polygon.
                   </div>
                 )}
-                {currentQ.options.map((opt,i)=>(
-                  <button key={i} onClick={async()=>{
+                {(()=>{
+                  const hasImgs = isQ1 && deb.opt_images && deb.opt_images.some(u=>u);
+                  const handleOptionClick = async (i, opt) => {
                     const newStep = {level:qLevel, option_index:i, option_text:opt,
                       question:currentQ.title||deb.title};
                     const newPath = [...vBranchPath,newStep];
@@ -1228,15 +1248,44 @@ export default function PreferendumV8() {
                       const q1Idx = vBranchPath.length>0 ? vBranchPath[0].option_index : i;
                       await submitVote(q1Idx, newPath);
                     }
-                  }} style={{width:"100%",padding:"12px 14px",borderRadius:10,
-                    background:T.card,border:`1px solid ${T.rim}`,color:T.snow,
-                    fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:8,
-                    textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{width:10,height:10,borderRadius:2,background:COLORS[i%COLORS.length],flexShrink:0}}/>
-                    {isQ1&&<><strong style={{color:T.fog}}>Opción {i+1}:</strong>&nbsp;</>}
-                    <span style={{color:COLORS[i%COLORS.length],fontWeight:700}}>{opt}</span>
-                  </button>
-                ))}
+                  };
+                  if(hasImgs) return (
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:6}}>
+                      {currentQ.options.map((opt,i)=>{
+                        const imgUrl = deb.opt_images[i];
+                        return (
+                          <button key={i} onClick={()=>handleOptionClick(i,opt)} style={{
+                            borderRadius:12,overflow:"hidden",cursor:"pointer",padding:0,
+                            border:`2px solid ${COLORS[i%COLORS.length]}66`,
+                            background:T.card,textAlign:"left"}}>
+                            {imgUrl
+                              ?<img src={imgUrl} alt={opt}
+                                  style={{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}/>
+                              :<div style={{width:"100%",aspectRatio:"1",background:T.deep,display:"flex",
+                                  alignItems:"center",justifyContent:"center",fontSize:28}}>📦</div>
+                            }
+                            <div style={{padding:"8px 8px 10px",borderTop:`1px solid ${COLORS[i%COLORS.length]}33`}}>
+                              <div style={{fontSize:10,color:T.fog,marginBottom:2}}>Opción {i+1}</div>
+                              <div style={{fontSize:12,fontWeight:700,color:COLORS[i%COLORS.length],
+                                lineHeight:1.3}}>{opt}</div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                  return currentQ.options.map((opt,i)=>(
+                    <button key={i} onClick={()=>handleOptionClick(i,opt)}
+                      style={{width:"100%",padding:"12px 14px",borderRadius:10,
+                        background:T.card,border:`1px solid ${T.rim}`,color:T.snow,
+                        fontSize:14,fontWeight:600,cursor:"pointer",marginBottom:8,
+                        textAlign:"left",display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:10,height:10,borderRadius:2,background:COLORS[i%COLORS.length],flexShrink:0}}/>
+                      {isQ1&&<><strong style={{color:T.fog}}>Opción {i+1}:</strong>&nbsp;</>}
+                      <span style={{color:COLORS[i%COLORS.length],fontWeight:700}}>{opt}</span>
+                    </button>
+                  ));
+                })()}
                 {!isQ1&&(
                   <button onClick={()=>{setVBranchQ(null);setVBranchPath([]);}}
                     style={{background:"none",border:"none",color:T.fog,fontSize:12,cursor:"pointer",marginTop:4}}>
@@ -1892,15 +1941,94 @@ export default function PreferendumV8() {
               <Input label="Descripción (opcional)" placeholder="Explica el contexto..." value={ncDesc} onChange={setNcDesc}/>
             </Card>
             <Card>
-              <Lbl>Opciones de votación</Lbl>
-              {["Opción 1","Opción 2","Opción 3","Opción 4"].map((p,i)=>(
-                <input key={i} placeholder={p} value={ncOpts[i]}
-                  onChange={e=>{const o=[...ncOpts];o[i]=e.target.value;setNcOpts(o);}}
-                  style={{width:"100%",padding:"10px 14px",
-                    borderRadius:10,background:T.deep,border:`1.5px solid ${T.rim}`,
-                    color:T.snow,fontSize:14,outline:"none",fontFamily:"inherit",
-                    marginBottom:8,boxSizing:"border-box"}}/>
-              ))}
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div>
+                  <Lbl style={{marginBottom:2}}>Opciones de votación</Lbl>
+                  <div style={{fontSize:11,color:T.fog}}>Modo visual: muestra imágenes de productos</div>
+                </div>
+                <div onClick={()=>{setNcVisual(p=>!p);}} style={{width:44,height:24,borderRadius:12,cursor:"pointer",
+                  background:ncVisual?T.teal:T.rim,position:"relative",transition:"background 0.2s",flexShrink:0}}>
+                  <div style={{position:"absolute",top:3,left:ncVisual?21:3,width:18,height:18,borderRadius:9,
+                    background:"white",transition:"left 0.2s"}}/>
+                </div>
+              </div>
+              {ncVisual?(
+                <>
+                  {ncOpts.map((opt,i)=>(
+                    <div key={i} style={{display:"flex",gap:8,marginBottom:10,alignItems:"flex-start"}}>
+                      {/* Image upload box */}
+                      <div style={{flexShrink:0}}>
+                        <input id={`opt-img-${i}`} type="file" accept="image/*" style={{display:"none"}}
+                          onChange={async e=>{
+                            const f=e.target.files[0];
+                            if(!f)return;
+                            const formData=new FormData();
+                            formData.append('file',f);
+                            try {
+                              const res=await fetch(`${API}/upload/image`,{
+                                method:'POST',
+                                headers:{Authorization:`Bearer ${authToken}`},
+                                body:formData
+                              });
+                              const data=await res.json();
+                              if(!res.ok) throw new Error(data.detail||'Upload failed');
+                              setNcOptImages(prev=>{const n=[...prev];n[i]=data.url;return n;});
+                            } catch(err) {
+                              alert('Error al subir imagen: '+err.message);
+                            }
+                          }}/>
+                        <div onClick={()=>document.getElementById(`opt-img-${i}`).click()}
+                          style={{width:72,height:72,borderRadius:10,cursor:"pointer",overflow:"hidden",
+                            border:`2px dashed ${ncOptImages[i]?COLORS[i%COLORS.length]:T.rim}`,
+                            background:T.deep,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                          {ncOptImages[i]
+                            ?<img src={ncOptImages[i]} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+                            :<div style={{textAlign:"center"}}>
+                              <div style={{fontSize:20}}>📷</div>
+                              <div style={{fontSize:9,color:T.fog,marginTop:2}}>Subir</div>
+                            </div>
+                          }
+                        </div>
+                      </div>
+                      {/* Option name */}
+                      <div style={{flex:1}}>
+                        <input placeholder={`Producto / opción ${i+1}`} value={opt}
+                          onChange={e=>{const o=[...ncOpts];o[i]=e.target.value;setNcOpts(o);}}
+                          style={{width:"100%",padding:"10px 12px",borderRadius:10,background:T.deep,
+                            border:`1.5px solid ${ncOpts[i]?COLORS[i%COLORS.length]+'66':T.rim}`,
+                            color:T.snow,fontSize:13,outline:"none",fontFamily:"inherit",boxSizing:"border-box"}}/>
+                      </div>
+                      {/* Remove button (min 2) */}
+                      {ncOpts.length>2&&(
+                        <button onClick={()=>{
+                          setNcOpts(p=>p.filter((_,j)=>j!==i));
+                          setNcOptImages(p=>{const n=[...p];n.splice(i,1);n.push('');return n;});
+                        }} style={{background:"none",border:"none",color:T.coral,fontSize:18,cursor:"pointer",
+                          padding:"8px 4px",flexShrink:0}}>×</button>
+                      )}
+                    </div>
+                  ))}
+                  {ncOpts.length<10&&(
+                    <button onClick={()=>setNcOpts(p=>[...p,''])}
+                      style={{width:"100%",padding:"10px",borderRadius:10,background:"transparent",
+                        border:`1.5px dashed ${T.teal}66`,color:T.teal,fontSize:13,fontWeight:700,
+                        cursor:"pointer",marginTop:4}}>
+                      + Agregar producto
+                    </button>
+                  )}
+                </>
+              ):(
+                <>
+                  {["Opción 1","Opción 2","Opción 3","Opción 4"].map((p,i)=>(
+                    <input key={i} placeholder={p} value={ncOpts[i]}
+                      onChange={e=>{const o=[...ncOpts];o[i]=e.target.value;setNcOpts(o);}}
+                      style={{width:"100%",padding:"10px 14px",
+                        borderRadius:10,background:T.deep,border:`1.5px solid ${T.rim}`,
+                        color:T.snow,fontSize:14,outline:"none",fontFamily:"inherit",
+                        marginBottom:8,boxSizing:"border-box"}}/>
+                  ))}
+                </>
+              )}
             </Card>
             <Card>
               <Lbl>Recompensa de participación</Lbl>
@@ -2041,7 +2169,7 @@ export default function PreferendumV8() {
                   style={{width:"100%",padding:"9px 10px",borderRadius:8,background:T.deep,border:`1.5px solid ${T.rim}`,color:T.snow,fontSize:13,outline:"none",boxSizing:"border-box"}}/>
               </div>
             </Card>
-            <Btn label={ncLoading?"Publicando...":"🚀 Publicar debate"} full
+            <Btn label={ncLoading?"Publicando...":ncVisual?"🖼 Publicar consulta visual":"🚀 Publicar debate"} full
               disabled={ncLoading||!ncTitle||ncOpts.filter(Boolean).length<2||!ncCloses}
               onPress={async()=>{
                 const options=ncOpts.filter(Boolean);
@@ -2060,10 +2188,12 @@ export default function PreferendumV8() {
                     })
                   };
                 }) : null;
+                const optImages = ncVisual ? ncOptImages.slice(0,options.length) : [];
                 setNcLoading(true);
                 try {
                   const data=await apiFetch('POST','/debates',{
                     title:ncTitle, context:ncDesc, options, reward:ncReward,
+                    option_images:optImages,
                     closes_at:new Date(ncCloses).toISOString(),
                     verify_days:14,
                     creator_type:'organizer', inst_name:'Preferendum',
@@ -2078,6 +2208,7 @@ export default function PreferendumV8() {
                   if(newDeb) setApiDebates(prev=>[transformDebate(newDeb),...prev]);
                   const title=ncTitle;
                   setNcTitle('');setNcDesc('');setNcOpts(['','','','']);setNcCloses('');setNcReward('');
+                  setNcVisual(false);setNcOptImages(Array(10).fill(''));
                   setNcAudience('all');setNcGender('all');setNcAgeMin('13');setNcAgeMax('99');
                   setNcCountry('CL');setNcRegion('');setNcCommune('');
                   setNcBranching(false);

@@ -179,6 +179,7 @@ class Debate(Base):
     verifications_total = Column(Integer, default=0)
     follow_up_questions = Column(Text, default='')
     reward           = Column(Text, default='')
+    option_images    = Column(Text, default='[]')
     created_at       = Column(DateTime, default=datetime.utcnow)
 
 class Opinion(Base):
@@ -282,6 +283,7 @@ def _migrate():
         for col, definition in [
             ('follow_up_questions', "TEXT DEFAULT ''"),
             ('reward',              "TEXT DEFAULT ''"),
+            ('option_images',       "TEXT DEFAULT '[]'"),
         ]:
             if col not in existing_debate_cols:
                 try:
@@ -395,6 +397,7 @@ def get_debate_status(debate):
 def format_debate(debate, has_voted=False):
     opts = json.loads(debate.options or '[]')
     counts = json.loads(debate.vote_counts or '{}')
+    imgs = json.loads(debate.option_images or '[]')
     status = get_debate_status(debate)
     total = debate.total_votes or 0
     results = []
@@ -407,6 +410,7 @@ def format_debate(debate, has_voted=False):
         'title': debate.title,
         'context': debate.context,
         'options': opts,
+        'option_images': imgs,
         'results': results,
         'creator_type': debate.creator_type,
         'inst_name': debate.inst_name,
@@ -563,6 +567,7 @@ class DebateCreate(BaseModel):
     verify_days:         int = 14
     follow_up_questions: str = ''
     reward:              str = ''
+    option_images:       List[str] = []
 
 class OpinionCreate(BaseModel):
     text:            str
@@ -1257,6 +1262,43 @@ def verify_status(user: User = Depends(get_current_user)):
     }
 
 # ══════════════════════════════════════════════════════════════
+# ROUTES: IMAGE UPLOAD (Cloudinary)
+# ══════════════════════════════════════════════════════════════
+
+@app.post('/upload/image')
+async def upload_image(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user)
+):
+    cld_url = os.getenv('CLOUDINARY_URL')
+    if not cld_url:
+        raise HTTPException(503, 'Image upload not configured. Set CLOUDINARY_URL in environment variables.')
+    try:
+        import cloudinary
+        import cloudinary.uploader
+    except ImportError:
+        raise HTTPException(503, 'cloudinary package not installed')
+    if not (file.content_type or '').startswith('image/'):
+        raise HTTPException(400, 'Only image files allowed')
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(400, 'Image too large — max 10 MB')
+    try:
+        result = cloudinary.uploader.upload(
+            contents,
+            folder='preferendum/products',
+            resource_type='image',
+            transformation=[
+                {'width': 900, 'height': 900, 'crop': 'limit'},
+                {'quality': 'auto:good'},
+                {'fetch_format': 'auto'},
+            ]
+        )
+        return {'url': result['secure_url']}
+    except Exception as e:
+        raise HTTPException(500, f'Upload failed: {str(e)}')
+
+# ══════════════════════════════════════════════════════════════
 # ROUTES: DEBATES
 # ══════════════════════════════════════════════════════════════
 
@@ -1310,6 +1352,7 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
         reward=data.reward or '',
+        option_images=json.dumps(data.option_images or []),
     )
     db.add(debate)
     db.commit()
@@ -1531,6 +1574,9 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
+        follow_up_questions=data.follow_up_questions or '',
+        reward=data.reward or '',
+        option_images=json.dumps(data.option_images or []),
     )
     db.add(debate)
     db.commit()
@@ -1775,6 +1821,7 @@ def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_c
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
         reward=data.reward or '',
+        option_images=json.dumps(data.option_images or []),
     )
     db.add(debate)
     db.commit()
