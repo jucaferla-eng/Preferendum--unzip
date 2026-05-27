@@ -1201,10 +1201,10 @@ export default function PreferendumV8() {
       const q1Opt = deb.opts[q1Idx];
       try {
         const data = await apiFetch('POST',`/debates/${deb.id}/vote`,{option_index:q1Idx,vote_chain:chain});
-        setVoted({...voted,[deb.id]:{opt:q1Opt,code:data.verify_code,chain}});
+        setVoted({...voted,[deb.id]:{opt:q1Opt,code:data.verify_code,chain,reward:deb.reward||''}});
       } catch(e) {
         const vc=`${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}`;
-        setVoted({...voted,[deb.id]:{opt:q1Opt,code:vc,chain}});
+        setVoted({...voted,[deb.id]:{opt:q1Opt,code:vc,chain,reward:deb.reward||''}});
         DEMO_CODES[vc]={debateId:deb.id,choice:q1Opt};
       }
       go("voted-success");
@@ -1469,6 +1469,13 @@ export default function PreferendumV8() {
                   <div style={{fontSize:14,fontWeight:700,color:T.green,marginBottom:4}}>Ya votaste</div>
                   <div style={{fontSize:12,color:T.fog,marginBottom:8}}>Tu voto: <strong style={{color:T.white}}>{voted[deb.id].opt}</strong></div>
                   <div style={{fontFamily:"monospace",fontSize:14,color:T.blue,fontWeight:700,letterSpacing:"0.1em",marginBottom:8}}>{voted[deb.id].code}</div>
+                  {voted[deb.id].reward&&(
+                    <div style={{background:`${T.gold}18`,border:`1px solid ${T.gold}55`,
+                      borderRadius:10,padding:"10px 14px",marginBottom:10}}>
+                      <div style={{fontSize:11,color:T.gold,fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.05em"}}>🎁 Tu recompensa</div>
+                      <div style={{fontFamily:"monospace",fontSize:15,color:T.white,fontWeight:700,letterSpacing:"0.08em"}}>{voted[deb.id].reward}</div>
+                    </div>
+                  )}
                   {deb.status==="verifying"&&(
                     <button onClick={()=>go("verify")} style={{background:"none",border:"none",color:T.gold,fontSize:13,fontWeight:700,cursor:"pointer"}}>
                       🔍 La verificación está abierta — verifica ahora →
@@ -1616,8 +1623,19 @@ export default function PreferendumV8() {
               {myVote?.opt&&(
                 <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",
                   borderRadius:8,padding:"7px 11px",fontSize:12,color:"#1d4ed8",
-                  marginBottom:12,display:"flex",alignItems:"center",gap:6}}>
+                  marginBottom:myVote?.reward?8:12,display:"flex",alignItems:"center",gap:6}}>
                   ✓ Tu voto: <strong>{myVote.opt}</strong>
+                </div>
+              )}
+              {myVote?.reward&&(
+                <div style={{background:"#fffbeb",border:"1px solid #fcd34d",
+                  borderRadius:8,padding:"7px 11px",marginBottom:12,
+                  display:"flex",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:12}}>🎁</span>
+                  <div>
+                    <div style={{fontSize:10,color:"#92400e",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em"}}>Tu recompensa</div>
+                    <div style={{fontFamily:"monospace",fontSize:13,color:"#78350f",fontWeight:700}}>{myVote.reward}</div>
+                  </div>
                 </div>
               )}
               <div style={{display:"flex",gap:10,alignItems:"flex-start",flexWrap:"wrap"}}>
