@@ -2400,7 +2400,7 @@ export default function PreferendumV8() {
                   setNcBranching(false);
                   setNcQ2(Array(4).fill(null).map(()=>({on:false,title:'',opts:['','','']})));
                   setNcQ3(Array(4).fill(null).map(()=>Array(3).fill(null).map(()=>({on:false,title:'',opts:['','']}))));
-                  go("feed");
+                  setInstTab("debates");
                 } catch(e){
                   alert('Error al publicar: '+(e.message||'Intenta de nuevo.'));
                 } finally { setNcLoading(false); }
