@@ -338,9 +338,10 @@ export default function PreferendumV8() {
 
   const estImp = budget?Math.round(parseInt(budget)/4.8).toLocaleString():"—";
 
-  const phone={background:T.bg,minHeight:"100vh",
+  const phone={background:T.bg,height:"100vh",overflowY:"auto",
     fontFamily:"-apple-system,system-ui,sans-serif",
-    color:T.snow,maxWidth:420,margin:"0 auto"};
+    color:T.snow,maxWidth:420,margin:"0 auto",
+    WebkitOverflowScrolling:"touch"};
 
   // ── API HELPERS ────────────────────────────────────────────
   const apiFetch = async (method, path, body=null) => {
