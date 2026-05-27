@@ -1950,6 +1950,30 @@ def get_campaign_metrics(campaign_id: int, db: Session = Depends(get_db)):
         'by_commune':       by_commune,
     }
 
+@app.get('/admin/db-info')
+def db_info():
+    db_url = DATABASE_URL
+    is_pg = 'postgresql' in db_url or 'postgres' in db_url
+    masked = db_url[:15] + '...' if len(db_url) > 15 else db_url
+    try:
+        with engine.connect() as conn:
+            if is_pg:
+                from sqlalchemy import text
+                row = conn.execute(text("SELECT version()")).fetchone()
+                version = row[0][:60] if row else 'unknown'
+            else:
+                version = 'SQLite'
+        connected = True
+    except Exception as e:
+        version = str(e)[:80]
+        connected = False
+    return {
+        'db_type': 'postgresql' if is_pg else 'sqlite',
+        'connected': connected,
+        'db_version': version,
+        'url_prefix': masked,
+    }
+
 from verification import router as verify_router
 app.include_router(verify_router)
 
