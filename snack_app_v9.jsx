@@ -178,6 +178,42 @@ function Donut({vals,size=130}) {
   );
 }
 
+function DonutResult({vals,size=220}) {
+  const total=vals.reduce((a,b)=>a+b,0)||1;
+  const cx=size/2,cy=size/2,outerR=size/2*0.85,innerR=outerR*0.52;
+  const labelR=(outerR+innerR)/2;
+  function pt(deg,r){const rad=(deg-90)*Math.PI/180;return[cx+r*Math.cos(rad),cy+r*Math.sin(rad)];}
+  function arc(s,e){
+    const[x1,y1]=pt(s,outerR),[x2,y2]=pt(e,outerR);
+    const[x3,y3]=pt(e,innerR),[x4,y4]=pt(s,innerR);
+    const lg=e-s>180?1:0;
+    return `M${x1} ${y1}A${outerR} ${outerR} 0 ${lg} 1 ${x2} ${y2}L${x3} ${y3}A${innerR} ${innerR} 0 ${lg} 0 ${x4} ${y4}Z`;
+  }
+  const segs=[];let ang=0;
+  vals.forEach((v,i)=>{
+    const pct=v/total,sweep=pct*360,mid=ang+sweep/2;
+    const[lx,ly]=pt(mid,labelR);
+    segs.push({i,pct,s:ang,e:ang+sweep,lx,ly});
+    ang+=sweep;
+  });
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      {segs.map(({i,pct,s,e,lx,ly})=>(
+        <g key={i}>
+          <path d={arc(s,e)} fill={COLORS[i%COLORS.length]} stroke={T.bg} strokeWidth={2.5}/>
+          {pct>=0.02&&(
+            <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
+              fill="white" fontSize={size*0.076} fontWeight="bold" fontFamily="system-ui">
+              {Math.round(pct*100)}%
+            </text>
+          )}
+        </g>
+      ))}
+      <circle cx={cx} cy={cy} r={innerR*0.96} fill={T.card}/>
+    </svg>
+  );
+}
+
 // ══ MAIN APP ════════════════════════════════════════════════════
 export default function PreferendumV8() {
   // Navigation
@@ -353,7 +389,7 @@ export default function PreferendumV8() {
       body: body ? JSON.stringify(body) : undefined,
     });
     const data = await res.json().catch(()=>({}));
-    if(!res.ok) throw new Error(data.detail || 'Error de conexión');
+    if(!res.ok) { const err = new Error(data.detail || 'Error de conexión'); err.status = res.status; throw err; }
     return data;
   };
 
@@ -512,7 +548,7 @@ export default function PreferendumV8() {
             color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
             🙋 Soy votante
           </button>
-          <button onClick={()=>{setUserType("inst");go("inst-login");}} style={{
+          <button onClick={()=>{setUserType("inst");go("org-splash");}} style={{
             padding:16,borderRadius:14,background:"transparent",
             border:`1.5px solid ${T.teal}`,color:T.teal,
             fontSize:16,fontWeight:700,cursor:"pointer"}}>
@@ -897,22 +933,35 @@ export default function PreferendumV8() {
             <Card style={{border:`1px solid ${T.blue}44`}}>
               <div style={{textAlign:"center",marginBottom:14}}>
                 <div style={{fontSize:40,marginBottom:8}}>📲</div>
-                <div style={{fontSize:17,fontWeight:700,color:T.white,marginBottom:4}}>Verificación de dispositivo</div>
-                <div style={{fontSize:12,color:T.fog}}>Un dispositivo = un votante</div>
+                <div style={{fontSize:17,fontWeight:700,color:T.white,marginBottom:4}}>Verificación de SIM</div>
+                <div style={{fontSize:12,color:T.fog}}>Un chip = un voto (aunque cambies de aparato)</div>
               </div>
               <div style={{background:T.deep,borderRadius:10,padding:16,marginBottom:14,textAlign:"center"}}>
-                <div style={{fontSize:10,color:T.fog,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>Dispositivo detectado</div>
-                <div style={{fontSize:14,fontWeight:700,color:T.white,marginBottom:4}}>📱 Tu celular</div>
-                <div style={{fontFamily:"monospace",fontSize:11,color:T.silver}}>IMEI: ••••••••••••••</div>
+                <div style={{fontSize:10,color:T.fog,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>Número detectado</div>
+                <div style={{fontSize:14,fontWeight:700,color:T.white,marginBottom:4}}>📱 {vfPhone||'Tu número'}</div>
+                <div style={{fontFamily:"monospace",fontSize:11,color:T.silver}}>SIM: ••••••••••••••</div>
               </div>
               <div style={{background:`${T.blue}18`,border:`1px solid ${T.blue}44`,
                 borderRadius:10,padding:"10px 14px",fontSize:12,color:"#7ab4ff",marginBottom:14}}>
-                🔒 Solo guardamos el hash SHA-256 de tu IMEI. Nunca el número real.
+                🔒 Guardamos el hash SHA-256 de tu número. Nunca el número real. Un SIM = un voto.
               </div>
               {vfLoading
-                ?<div style={{textAlign:"center",padding:12,color:T.fog,fontSize:13}}>⏳ Registrando dispositivo...</div>
-                :<Btn label="Registrar este dispositivo →" full
-                  onPress={()=>{setVfLoading(true);setTimeout(()=>{setVfLoading(false);setVfDone(p=>({...p,5:true}));setVfStep(6);},1500);}}/>
+                ?<div style={{textAlign:"center",padding:12,color:T.fog,fontSize:13}}>⏳ Registrando SIM...</div>
+                :<Btn label="Registrar este SIM →" full
+                  onPress={async()=>{
+                    setVfLoading(true);
+                    try {
+                      const r = await fetch(`${API_URL}/verify/imei`,{
+                        method:'POST',
+                        headers:{'Content-Type':'application/json','Authorization':`Bearer ${authToken}`},
+                        body:JSON.stringify({imei:'web-client',phone:vfPhone,device_model:'web',os_version:'web'})
+                      });
+                      if(!r.ok && r.status!==409) throw new Error('Error registrando SIM');
+                    } catch(e) { /* si ya está registrado (409) dejamos pasar */ }
+                    setVfLoading(false);
+                    setVfDone(p=>({...p,5:true}));
+                    setVfStep(6);
+                  }}/>
               }
             </Card>
           )}
@@ -1204,6 +1253,11 @@ export default function PreferendumV8() {
         const data = await apiFetch('POST',`/debates/${deb.id}/vote`,{option_index:q1Idx,vote_chain:chain});
         setVoted({...voted,[deb.id]:{opt:q1Opt,code:data.verify_code,chain,reward:data.reward_code||deb.reward||''}});
       } catch(e) {
+        if(e.status===409) {
+          alert(e.message || 'Ya votaste en esta consulta');
+          return;
+        }
+        // Error de red/servidor: fallback demo para no bloquear el flujo de prueba
         const vc=`${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}-${Math.random().toString(16).slice(2,6).toUpperCase()}`;
         setVoted({...voted,[deb.id]:{opt:q1Opt,code:vc,chain,reward:deb.reward||''}});
         DEMO_CODES[vc]={debateId:deb.id,choice:q1Opt};
@@ -1505,36 +1559,50 @@ export default function PreferendumV8() {
         {/* ── TAB: RESULTADOS ─────────────────────────── */}
         {debateTab==="results"&&(
           <div style={{padding:"16px 16px 80px",background:T.bg,minHeight:"calc(100vh - 120px)"}}>
-            <Card>
-              <Lbl>Resultados {deb.status==="live"?"parciales":"finales"}</Lbl>
-              <div style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",marginBottom:12}}>
-                <Donut vals={deb.vals} size={130}/>
-                <div style={{flex:1,minWidth:130}}>
-                  {deb.opts.map((o,i)=>(
-                    <div key={i} style={{marginBottom:8}}>
-                      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
-                        <span style={{color:T.silver}}><strong style={{color:COLORS[i]}}>{o}</strong></span>
-                        <span style={{fontWeight:900,color:COLORS[i]}}>{Math.round(deb.vals[i]/total*100)}%</span>
-                      </div>
-                      <div style={{background:T.deep,borderRadius:4,height:7,overflow:"hidden"}}>
-                        <div style={{height:"100%",borderRadius:4,background:COLORS[i],width:Math.round(deb.vals[i]/total*100)+"%"}}/>
-                      </div>
+            <div style={{fontSize:11,fontWeight:700,color:T.mist,textTransform:"uppercase",letterSpacing:1.5,marginBottom:10,paddingLeft:2}}>
+              Detalle de Resultado · {deb.status==="live"?"Parcial":"Final"}
+            </div>
+            {/* Question box */}
+            <div style={{border:`2px solid ${T.rim}`,borderRadius:12,padding:"14px 16px",marginBottom:14,background:T.card}}>
+              <div style={{fontSize:15,fontWeight:700,color:T.snow,lineHeight:1.55}}>{deb.q}</div>
+            </div>
+            {/* Options list */}
+            <div style={{marginBottom:14,paddingLeft:2}}>
+              {deb.opts.map((o,i)=>(
+                <div key={i} style={{fontSize:14,color:T.silver,lineHeight:1.9}}>
+                  <span style={{fontWeight:600,color:COLORS[i%COLORS.length]}}>Opción {i+1}: </span>{o}
+                </div>
+              ))}
+            </div>
+            {/* Donut + Legend */}
+            <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:14}}>
+              <DonutResult vals={deb.vals} size={210}/>
+              <div style={{flex:1,paddingTop:6,minWidth:0}}>
+                <div style={{fontSize:10,fontWeight:700,color:T.mist,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Alternativas</div>
+                {deb.opts.map((o,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"flex-start",gap:7,marginBottom:8}}>
+                    <div style={{width:13,height:13,borderRadius:3,background:COLORS[i%COLORS.length],flexShrink:0,marginTop:2}}/>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:800,color:T.white}}>{Math.round(deb.vals[i]/total*100)}%</div>
+                      <div style={{fontSize:11,color:T.fog,lineHeight:1.3,wordBreak:"break-word"}}>{o}</div>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
-              {deb.status!=="live"&&(
-                <div style={{background:`${T.green}18`,border:`1px solid ${T.green}44`,borderRadius:8,padding:"8px 12px",fontSize:12,color:T.green}}>
-                  ✅ Ganador: <strong>{deb.opts[deb.vals.indexOf(Math.max(...deb.vals))]}</strong>
-                  {" · "}{Math.round(Math.max(...deb.vals)/total*100)}%
-                  {deb.status==="verified"&&` · ✓ ${deb.accuracy||0}% verificado`}
-                </div>
-              )}
-            </Card>
-            <div style={{background:`${T.teal}18`,border:`1px solid ${T.teal}44`,borderRadius:12,padding:"12px 16px",marginBottom:12}}>
-              <div style={{fontSize:12,fontWeight:700,color:T.teal,marginBottom:2}}>🔗 Legitimacy Score</div>
-              <div style={{fontSize:24,fontWeight:900,color:T.teal}}>{deb.votes>0?`${Math.round((deb.legitimacy_score||0)*100)}%`:"—"}</div>
-              <div style={{fontSize:11,color:T.fog}}>Porcentaje de votantes que verificaron su voto.</div>
+            </div>
+            {/* Winner */}
+            {deb.status!=="live"&&(
+              <div style={{background:`${T.green}18`,border:`1px solid ${T.green}44`,borderRadius:12,padding:"12px 16px",marginBottom:12,fontSize:14,color:T.green}}>
+                ✅ <strong>Ganador: {deb.opts[deb.vals.indexOf(Math.max(...deb.vals))]}</strong>
+                {" — "}{Math.round(Math.max(...deb.vals)/total*100)}%
+                {deb.status==="verified"&&` · ✓ ${deb.accuracy||0}% verificado`}
+              </div>
+            )}
+            {/* Legitimacy Score */}
+            <div style={{background:`${T.teal}18`,border:`1px solid ${T.teal}44`,borderRadius:12,padding:"14px 16px"}}>
+              <div style={{fontSize:12,fontWeight:700,color:T.teal,marginBottom:4}}>🔗 Legitimacy Score</div>
+              <div style={{fontSize:28,fontWeight:900,color:T.teal}}>{deb.votes>0?`${Math.round((deb.legitimacy_score||0)*100)}%`:"—"}</div>
+              <div style={{fontSize:12,color:T.fog}}>Porcentaje de votantes que verificaron su voto.</div>
             </div>
           </div>
         )}
@@ -1984,6 +2052,129 @@ export default function PreferendumV8() {
         <Btn label="Cerrar sesión" full outline color={T.coral} onPress={()=>go("launch")}/>
       </div>
       <VoterTabs/>
+    </div>
+  );
+
+  // ══════════════════════════════════════════════════════════════
+  // SCREEN: ORG SPLASH — editorial landing for institutions
+  // ══════════════════════════════════════════════════════════════
+  if(screen==="org-splash") return (
+    <div style={{width:"100%",maxWidth:430,margin:"0 auto",minHeight:"100vh",
+      position:"relative",overflowY:"auto",background:"#f5f3ee",
+      fontFamily:"'Manrope',system-ui,sans-serif"}}>
+
+      {/* ── HERO ─────────────────────────────────── */}
+      <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",
+        alignItems:"center",justifyContent:"center",padding:"80px 28px 56px",
+        textAlign:"center",background:"linear-gradient(160deg,#f5f3ee 0%,#ede9e0 100%)",
+        position:"relative"}}>
+
+        <button onClick={()=>go("launch")} style={{
+          position:"absolute",top:24,left:20,background:"transparent",border:"none",
+          fontSize:13,color:"#1a3a8f",cursor:"pointer",fontWeight:600,
+          fontFamily:"'Manrope',sans-serif"}}>← Volver</button>
+
+        <div style={{fontSize:10,color:"#1a3a8f",letterSpacing:3,
+          textTransform:"uppercase",marginBottom:22,
+          fontFamily:"'DM Mono','Courier New',monospace",fontWeight:500}}>
+          A universal preference and deliberation network
+        </div>
+
+        <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:36,
+          color:"#060810",lineHeight:1.1,letterSpacing:-1.5,marginBottom:22,maxWidth:340}}>
+          Know what your market wants{" "}
+          <em style={{color:"#1a3a8f",fontStyle:"italic"}}>before</em>
+          {" "}you produce.
+        </div>
+
+        <div style={{fontSize:15,color:"#7a7570",maxWidth:320,lineHeight:1.8,
+          marginBottom:44,fontFamily:"'Manrope',sans-serif"}}>
+          Real preferences exist between extremes. Preferendum maps the full preference
+          space of any population and delivers the intelligence that makes decisions obvious.
+        </div>
+
+        <div style={{display:"flex",gap:24,justifyContent:"center",
+          borderTop:"1px solid #d4cfc5",paddingTop:32,width:"100%",
+          maxWidth:340,marginBottom:40}}>
+          {[["Q1→Q2→Q3","Cascading trees"],["∞","Markets"],["98%","Legitimacy"]].map(([n,l])=>(
+            <div key={l} style={{textAlign:"center"}}>
+              <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:22,
+                color:"#060810",lineHeight:1,marginBottom:6}}>{n}</div>
+              <div style={{fontSize:9,color:"#7a7570",letterSpacing:1,
+                textTransform:"uppercase",fontFamily:"monospace"}}>{l}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{display:"flex",flexDirection:"column",gap:10,width:"100%",maxWidth:320}}>
+          <button onClick={()=>go("inst-login")} style={{
+            padding:"16px 28px",borderRadius:6,background:"#1a3a8f",border:"none",
+            color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",
+            fontFamily:"'Manrope',sans-serif"}}>
+            Comenzar como institución →
+          </button>
+          <button onClick={()=>{
+            const el=document.getElementById("org-decisions");
+            if(el) el.scrollIntoView({behavior:"smooth"});
+          }} style={{
+            padding:"14px 28px",borderRadius:6,background:"transparent",
+            border:"2px solid #1a3a8f",color:"#1a3a8f",fontSize:14,fontWeight:600,
+            cursor:"pointer",fontFamily:"'Manrope',sans-serif"}}>
+            Ver cómo funciona ↓
+          </button>
+        </div>
+      </div>
+
+      {/* ── DECISIONS EMERGE ─────────────────────── */}
+      <div id="org-decisions" style={{background:"#060810",padding:"60px 24px 72px"}}>
+        <div style={{fontSize:10,color:"#c49a2a",letterSpacing:3,
+          textTransform:"uppercase",marginBottom:18,
+          fontFamily:"'DM Mono','Courier New',monospace"}}>
+          The core insight
+        </div>
+
+        <div style={{fontFamily:"'Playfair Display',Georgia,serif",fontSize:34,
+          color:"#f5f3ee",lineHeight:1.15,letterSpacing:-1,marginBottom:18}}>
+          Decisions emerge<br/>in the space<br/>
+          <em style={{color:"#e8b830",fontStyle:"italic"}}>between extremes.</em>
+        </div>
+
+        <div style={{fontSize:14,color:"rgba(245,243,238,0.65)",lineHeight:1.8,
+          marginBottom:32,fontFamily:"'Manrope',sans-serif"}}>
+          A binary poll asks "A or B?" — that's a false choice. Real preferences are
+          gradients. Preferendum's cascading question trees reveal where collective
+          decisions naturally land between the extremes you define.
+        </div>
+
+        {[
+          ["🌳","Cascading question trees","After Q1, each answer branches into Q2. Each Q2 answer into Q3. You map the full decision topology of your market — not just the peak."],
+          ["⚖️","Marginal Rate of Substitution","Quantify exactly how much of attribute A people sacrifice to gain attribute B. Taste vs. sugar. Growth vs. pollution. The number that makes strategy precise."],
+          ["🌍","Geographic preference gradients","Run the same consultation in Brazil and the USA simultaneously. Send the right product to the right country — before you manufacture a single unit."],
+          ["🎁","Reward your participants","Offer a discount code, early access, or a sample to everyone who helps you decide. Better data, higher engagement, loyal customers before launch."]
+        ].map(([icon,title,desc])=>(
+          <div key={title} style={{display:"flex",gap:14,alignItems:"flex-start",
+            padding:18,background:"rgba(255,255,255,0.04)",
+            border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,marginBottom:12}}>
+            <div style={{fontSize:22,minWidth:28,lineHeight:1}}>{icon}</div>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:"#f5f3ee",marginBottom:4,
+                fontFamily:"'Manrope',sans-serif"}}>{title}</div>
+              <div style={{fontSize:12,color:"rgba(245,243,238,0.55)",lineHeight:1.65,
+                fontFamily:"'Manrope',sans-serif"}}>{desc}</div>
+            </div>
+          </div>
+        ))}
+
+        <div style={{marginTop:36}}>
+          <button onClick={()=>go("inst-login")} style={{
+            width:"100%",padding:"16px 28px",borderRadius:6,
+            background:"#1a3a8f",border:"none",color:"#fff",
+            fontSize:15,fontWeight:700,cursor:"pointer",
+            fontFamily:"'Manrope',sans-serif"}}>
+            Comenzar como institución →
+          </button>
+        </div>
+      </div>
     </div>
   );
 

@@ -221,6 +221,15 @@ class HasVotedLog(Base):
     verify_code = Column(String)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
+class SimVoteLog(Base):
+    """Un SIM (phone_hash) solo puede votar una vez por debate.
+    Bloquea aunque el chip cambie de aparato o el usuario cree otra cuenta."""
+    __tablename__ = 'sim_vote_log'
+    id          = Column(Integer, primary_key=True)
+    debate_id   = Column(Integer, index=True, nullable=False)
+    phone_hash  = Column(String, index=True, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
 class DebateAd(Base):
     __tablename__ = 'debate_ads'
     id          = Column(Integer, primary_key=True)
@@ -1425,6 +1434,25 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         raise HTTPException(404, 'Consultation not found')
     if get_debate_status(debate) != 'live':
         raise HTTPException(400, 'Consultation is not open for voting')
+
+    # Bloqueo 1: misma cuenta
+    already = db.query(HasVotedLog).filter(
+        HasVotedLog.user_id == user.id,
+        HasVotedLog.debate_id == debate_id
+    ).first()
+    if already:
+        raise HTTPException(409, 'Ya votaste en esta consulta')
+
+    # Bloqueo 2: mismo SIM (aunque cambien de cuenta o de aparato)
+    if user.phone:
+        phone_hash = hash_str(user.phone.replace(' ', '').replace('-', ''), 'pref-sim-')
+        sim_voted = db.query(SimVoteLog).filter(
+            SimVoteLog.phone_hash == phone_hash,
+            SimVoteLog.debate_id == debate_id
+        ).first()
+        if sim_voted:
+            raise HTTPException(409, 'Este número de teléfono ya votó en esta consulta')
+
     opts = json.loads(debate.options or '[]')
     if data.option_index < 0 or data.option_index >= len(opts):
         raise HTTPException(400, 'Invalid option')
@@ -1441,6 +1469,9 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         vote_chain=json.dumps(data.vote_chain),
     )
     db.add(vote)
+    db.add(HasVotedLog(debate_id=debate_id, user_id=user.id, verify_code=verify_code))
+    if user.phone:
+        db.add(SimVoteLog(debate_id=debate_id, phone_hash=phone_hash))
     counts = json.loads(debate.vote_counts or '{}')
     counts[option] = counts.get(option, 0) + 1
     debate.vote_counts = json.dumps(counts)
