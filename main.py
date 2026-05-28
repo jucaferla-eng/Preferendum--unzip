@@ -239,6 +239,15 @@ class NationalIdVoteLog(Base):
     national_id_hash = Column(String, index=True, nullable=False)
     created_at       = Column(DateTime, default=datetime.utcnow)
 
+class ImeiVoteLog(Base):
+    """Un aparato (IMEI) solo puede votar una vez por debate.
+    Bloquea aunque cambien el chip o la cuenta."""
+    __tablename__ = 'imei_vote_log'
+    id          = Column(Integer, primary_key=True)
+    debate_id   = Column(Integer, index=True, nullable=False)
+    imei_hash   = Column(String, index=True, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
 class DebateAd(Base):
     __tablename__ = 'debate_ads'
     id          = Column(Integer, primary_key=True)
@@ -1472,6 +1481,16 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         if nid_voted:
             raise HTTPException(409, 'Este documento de identidad ya votó en esta consulta')
 
+    # Bloqueo 4: mismo aparato físico por IMEI
+    imei_log = db.query(IMEILog).filter(IMEILog.user_id == user.id).first()
+    if imei_log:
+        imei_voted = db.query(ImeiVoteLog).filter(
+            ImeiVoteLog.imei_hash == imei_log.imei_hash,
+            ImeiVoteLog.debate_id == debate_id
+        ).first()
+        if imei_voted:
+            raise HTTPException(409, 'Este aparato ya fue usado para votar en esta consulta')
+
     opts = json.loads(debate.options or '[]')
     if data.option_index < 0 or data.option_index >= len(opts):
         raise HTTPException(400, 'Invalid option')
@@ -1493,6 +1512,8 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         db.add(SimVoteLog(debate_id=debate_id, phone_hash=phone_hash))
     if user.national_id:
         db.add(NationalIdVoteLog(debate_id=debate_id, national_id_hash=nid_hash))
+    if imei_log:
+        db.add(ImeiVoteLog(debate_id=debate_id, imei_hash=imei_log.imei_hash))
     counts = json.loads(debate.vote_counts or '{}')
     counts[option] = counts.get(option, 0) + 1
     debate.vote_counts = json.dumps(counts)
