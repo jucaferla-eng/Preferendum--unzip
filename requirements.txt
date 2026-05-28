@@ -19,3 +19,4 @@ sendgrid
 requests
 psycopg2-binary
 cloudinary
+boto3

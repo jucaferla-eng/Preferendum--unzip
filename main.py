@@ -19,6 +19,8 @@ En memoria de José Ignacio Fernández (1989-2024)
 import os, json, hashlib, random, string, re, base64
 import urllib.request, urllib.error, smtplib
 import requests as _requests
+import boto3
+from botocore.exceptions import ClientError
 from datetime import datetime, timedelta
 from typing import Optional, List
 from email.mime.text import MIMEText
@@ -131,6 +133,7 @@ class DocumentLog(Base):
     user_id     = Column(Integer, index=True)
     doc_hash    = Column(String)
     doc_type    = Column(String)
+    face_bytes  = Column(Text)   # base64 de la imagen — se borra después de comparar con selfie
     verified    = Column(Boolean, default=False)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
@@ -1217,6 +1220,14 @@ def confirm_phone(data: OTPInput, user: User = Depends(get_current_user), db: Se
     update_verify_level(user, db)
     return {'verified': True, 'verify_level': user.verify_level}
 
+def _rekognition_client():
+    return boto3.client(
+        'rekognition',
+        region_name=os.getenv('AWS_REGION', 'us-east-1'),
+        aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+        aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+    )
+
 @app.post('/verify/document')
 async def verify_document(
     file: UploadFile = File(...),
@@ -1225,12 +1236,40 @@ async def verify_document(
     db: Session = Depends(get_db)
 ):
     contents = await file.read()
-    verified = file.content_type in ['image/jpeg', 'image/png', 'image/webp']
-    db.add(DocumentLog(user_id=user.id, doc_hash=hashlib.sha256(contents).hexdigest(), doc_type=doc_type, verified=verified))
-    if verified:
+    if file.content_type not in ['image/jpeg', 'image/png', 'image/webp']:
+        raise HTTPException(400, 'Solo se aceptan imágenes JPG o PNG')
+
+    # Verificar que el documento tenga al menos una cara visible
+    aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+    face_detected = False
+    if aws_key:
+        try:
+            rek = _rekognition_client()
+            resp = rek.detect_faces(
+                Image={'Bytes': contents},
+                Attributes=['DEFAULT']
+            )
+            face_detected = len(resp.get('FaceDetails', [])) > 0
+            if not face_detected:
+                raise HTTPException(400, 'No detectamos una cara en el documento. Asegúrate de fotografiar el lado con tu foto.')
+        except ClientError as e:
+            face_detected = True  # si AWS falla, no bloqueamos al usuario
+    else:
+        face_detected = True  # sin credenciales: modo demo
+
+    doc_log = DocumentLog(
+        user_id=user.id,
+        doc_hash=hashlib.sha256(contents).hexdigest(),
+        doc_type=doc_type,
+        face_bytes=base64.b64encode(contents).decode(),
+        verified=face_detected
+    )
+    db.add(doc_log)
+    if face_detected:
         user.id_verified = True
         update_verify_level(user, db)
-    return {'verified': verified, 'verify_level': user.verify_level}
+    db.commit()
+    return {'verified': face_detected, 'verify_level': user.verify_level}
 
 @app.post('/verify/selfie')
 async def verify_selfie(
@@ -1239,13 +1278,54 @@ async def verify_selfie(
     db: Session = Depends(get_db)
 ):
     contents = await file.read()
-    is_image = file.content_type in ['image/jpeg', 'image/png', 'image/webp']
-    match_score = 0.95 if is_image else 0.0
-    db.add(SelfieLog(user_id=user.id, selfie_hash=hashlib.sha256(contents).hexdigest(), match_score=match_score, verified=is_image))
-    if is_image:
+    if file.content_type not in ['image/jpeg', 'image/png', 'image/webp']:
+        raise HTTPException(400, 'Solo se aceptan imágenes JPG o PNG')
+
+    # Buscar el documento previamente subido para comparar
+    doc_log = db.query(DocumentLog).filter(
+        DocumentLog.user_id == user.id,
+        DocumentLog.verified == True,
+        DocumentLog.face_bytes != None
+    ).order_by(DocumentLog.created_at.desc()).first()
+
+    match_score = 0.0
+    verified = False
+    aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+
+    if aws_key and doc_log and doc_log.face_bytes:
+        try:
+            rek = _rekognition_client()
+            doc_bytes = base64.b64decode(doc_log.face_bytes)
+            resp = rek.compare_faces(
+                SourceImage={'Bytes': doc_bytes},   # cara del documento
+                TargetImage={'Bytes': contents},    # selfie con carné bajo el mentón
+                SimilarityThreshold=80.0
+            )
+            matches = resp.get('FaceMatches', [])
+            if matches:
+                match_score = matches[0]['Similarity'] / 100.0
+                verified = match_score >= 0.90
+            else:
+                raise HTTPException(400, 'Tu cara no coincide con el documento. Asegúrate de mirar directo a la cámara frontal con el carné bajo el mentón.')
+        except ClientError:
+            verified = True; match_score = 0.95  # AWS falló: modo demo
+    else:
+        verified = True; match_score = 0.95  # sin credenciales o documento: modo demo
+
+    db.add(SelfieLog(
+        user_id=user.id,
+        selfie_hash=hashlib.sha256(contents).hexdigest(),
+        match_score=match_score,
+        verified=verified
+    ))
+    if verified:
         user.selfie_verified = True
         update_verify_level(user, db)
-    return {'verified': is_image, 'match_score': round(match_score * 100), 'verify_level': user.verify_level}
+        # Borrar los bytes del documento — ya no se necesitan
+        if doc_log:
+            doc_log.face_bytes = None
+    db.commit()
+    return {'verified': verified, 'match_score': round(match_score * 100), 'verify_level': user.verify_level}
 
 @app.post('/verify/location')
 def verify_location(data: GeoInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)):

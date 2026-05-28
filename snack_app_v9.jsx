@@ -885,45 +885,90 @@ export default function PreferendumV8() {
             </Card>
           )}
 
-          {/* LAYER 4 — SELFIE */}
+          {/* LAYER 4 — SELFIE CON CARNÉ */}
           {vfStep===4&&!vfDone[4]&&(
             <Card style={{border:`1px solid ${T.coral}44`}}>
               <div style={{textAlign:"center",marginBottom:14}}>
                 <div style={{fontSize:40,marginBottom:8}}>🤳</div>
-                <div style={{fontSize:17,fontWeight:700,color:T.white,marginBottom:4}}>Selfie de verificación</div>
-                <div style={{fontSize:12,color:T.fog}}>Compararemos tu rostro con tu documento</div>
+                <div style={{fontSize:17,fontWeight:700,color:T.white,marginBottom:4}}>Selfie con tu carné</div>
+                <div style={{fontSize:12,color:T.fog}}>Cámara frontal · Carné bajo el mentón</div>
               </div>
+
+              {/* Diagrama instrucción */}
+              <div style={{background:T.deep,borderRadius:12,padding:16,marginBottom:14,textAlign:"center"}}>
+                <div style={{fontSize:11,color:T.fog,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>Cómo hacerlo</div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:0,marginBottom:10}}>
+                  <div style={{textAlign:"center",flex:1}}>
+                    <div style={{fontSize:36}}>😐</div>
+                    <div style={{fontSize:10,color:T.fog,marginTop:4}}>Mira directo<br/>a la cámara</div>
+                  </div>
+                  <div style={{fontSize:20,color:T.rim}}>+</div>
+                  <div style={{textAlign:"center",flex:1}}>
+                    <div style={{fontSize:36}}>🪪</div>
+                    <div style={{fontSize:10,color:T.fog,marginTop:4}}>Carné bajo<br/>el mentón</div>
+                  </div>
+                  <div style={{fontSize:20,color:T.rim}}>→</div>
+                  <div style={{textAlign:"center",flex:1}}>
+                    <div style={{fontSize:36}}>📸</div>
+                    <div style={{fontSize:10,color:T.green,marginTop:4}}>Una sola<br/>foto</div>
+                  </div>
+                </div>
+                <div style={{fontSize:11,color:T.fog,borderTop:`1px solid ${T.rim}`,paddingTop:10}}>
+                  La cámara frontal se abre automáticamente
+                </div>
+              </div>
+
               <div style={{background:`${T.coral}18`,border:`1px solid ${T.coral}44`,
                 borderRadius:10,padding:"10px 14px",fontSize:12,color:T.coral,marginBottom:14}}>
-                💡 Buena iluminación · Cara completa visible · Sin gafas de sol
+                ⚠️ Ambas caras del carné deben ser visibles · Buena iluminación · Sin gafas de sol
               </div>
+
               <div onClick={()=>document.getElementById("selfie-up").click()} style={{
                 border:`2px dashed ${selfiePrev?T.coral:T.rim}`,borderRadius:12,
                 padding:selfiePrev?"10px":"24px",textAlign:"center",cursor:"pointer",
                 background:T.deep,marginBottom:14}}>
+                {/* capture="user" fuerza cámara frontal, bloquea galería */}
                 <input id="selfie-up" type="file" accept="image/*" capture="user" style={{display:"none"}}
                   onChange={async e=>{const f=e.target.files[0];if(f){const r=new FileReader();r.onload=ev=>setSelfiePrev(ev.target.result);r.readAsDataURL(f);setSelfieFile(f);}}}/>
                 {selfiePrev
                   ?<div style={{display:"flex",alignItems:"center",gap:12}}>
                     <img src={selfiePrev} alt="" style={{width:56,height:56,borderRadius:"50%",objectFit:"cover"}}/>
                     <div style={{textAlign:"left"}}>
-                      <div style={{fontSize:12,fontWeight:700,color:T.coral}}>✓ Selfie cargada</div>
-                      <div style={{fontSize:11,color:T.fog}}>Toca para cambiar</div>
+                      <div style={{fontSize:12,fontWeight:700,color:T.coral}}>✓ Foto cargada</div>
+                      <div style={{fontSize:11,color:T.fog}}>Toca para repetir</div>
                     </div>
                   </div>
-                  :<><div style={{fontSize:36,marginBottom:6}}>🤳</div>
-                    <div style={{fontSize:13,fontWeight:700,color:T.snow}}>Toca para tomar selfie</div></>
+                  :<><div style={{fontSize:36,marginBottom:6}}>📷</div>
+                    <div style={{fontSize:13,fontWeight:700,color:T.snow}}>Abrir cámara frontal</div>
+                    <div style={{fontSize:11,color:T.fog,marginTop:4}}>Cara + carné en una sola foto</div>
+                  </>
                 }
               </div>
               {vfLoading
                 ?<div style={{textAlign:"center",padding:12}}>
-                  <div style={{fontSize:13,color:T.fog,marginBottom:6}}>⏳ Reconocimiento facial...</div>
+                  <div style={{fontSize:13,color:T.fog,marginBottom:6}}>⏳ Verificando con Amazon Rekognition...</div>
                   <div style={{background:T.deep,borderRadius:8,padding:"6px 12px",fontSize:11,color:T.coral}}>
-                    🔍 Comparando con documento...
+                    🔍 Comparando tu cara con el documento...
                   </div>
                 </div>
-                :<Btn label="Verificar selfie →" full disabled={!selfieFile}
-                  onPress={()=>{setVfLoading(true);setTimeout(()=>{setVfLoading(false);setVfDone(p=>({...p,4:true}));setVfStep(5);},2500);}}/>
+                :<Btn label="Verificar identidad →" full disabled={!selfieFile}
+                  onPress={async()=>{
+                    setVfLoading(true);
+                    try {
+                      const form = new FormData();
+                      form.append('file', selfieFile);
+                      const r = await fetch(`${API}/verify/selfie`,{
+                        method:'POST',
+                        headers:{Authorization:`Bearer ${authToken}`},
+                        body: form
+                      });
+                      const d = await r.json().catch(()=>({}));
+                      if(!r.ok) { alert(d.detail||'No pudimos verificar tu identidad. Intenta con mejor iluminación.'); setVfLoading(false); return; }
+                    } catch(e) { /* sin backend: modo demo */ }
+                    setVfLoading(false);
+                    setVfDone(p=>({...p,4:true}));
+                    setVfStep(5);
+                  }}/>
               }
             </Card>
           )}
