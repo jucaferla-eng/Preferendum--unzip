@@ -230,6 +230,15 @@ class SimVoteLog(Base):
     phone_hash  = Column(String, index=True, nullable=False)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
+class NationalIdVoteLog(Base):
+    """Un RUT/DNI solo puede votar una vez por debate.
+    Bloquea aunque el usuario tenga chip nuevo y cuenta nueva."""
+    __tablename__ = 'national_id_vote_log'
+    id               = Column(Integer, primary_key=True)
+    debate_id        = Column(Integer, index=True, nullable=False)
+    national_id_hash = Column(String, index=True, nullable=False)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+
 class DebateAd(Base):
     __tablename__ = 'debate_ads'
     id          = Column(Integer, primary_key=True)
@@ -1453,6 +1462,16 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         if sim_voted:
             raise HTTPException(409, 'Este número de teléfono ya votó en esta consulta')
 
+    # Bloqueo 3: mismo RUT/DNI (aunque tenga chip nuevo y cuenta nueva)
+    if user.national_id:
+        nid_hash = hash_str(user.national_id.replace('.', '').replace('-', '').upper(), 'pref-nid-')
+        nid_voted = db.query(NationalIdVoteLog).filter(
+            NationalIdVoteLog.national_id_hash == nid_hash,
+            NationalIdVoteLog.debate_id == debate_id
+        ).first()
+        if nid_voted:
+            raise HTTPException(409, 'Este documento de identidad ya votó en esta consulta')
+
     opts = json.loads(debate.options or '[]')
     if data.option_index < 0 or data.option_index >= len(opts):
         raise HTTPException(400, 'Invalid option')
@@ -1472,6 +1491,8 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
     db.add(HasVotedLog(debate_id=debate_id, user_id=user.id, verify_code=verify_code))
     if user.phone:
         db.add(SimVoteLog(debate_id=debate_id, phone_hash=phone_hash))
+    if user.national_id:
+        db.add(NationalIdVoteLog(debate_id=debate_id, national_id_hash=nid_hash))
     counts = json.loads(debate.vote_counts or '{}')
     counts[option] = counts.get(option, 0) + 1
     debate.vote_counts = json.dumps(counts)
