@@ -2406,14 +2406,8 @@ def admin_patch_debate(debate_id: int, secret: str, target_age_min: int = None, 
 # MARKET DATA AGENT — índice de ingreso por comuna
 # ══════════════════════════════════════════════════════════════
 
-@app.post('/admin/run-market-agent')
-def run_market_agent(secret: str, db: Session = Depends(get_db)):
-    """Corre el agente de datos inmobiliarios. Llamar mensualmente."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
-        raise HTTPException(403, 'Forbidden')
-    from market_data_agent import run_full_agent, get_fallback_table
-    result = run_full_agent()
-    communes = result['communes'] if result['total_communes'] > 0 else get_fallback_table()
+def _save_communes_to_db(communes: list, db):
+    """Guarda o actualiza comunas en la BD. Recalcula índice global después."""
     saved = 0
     for c in communes:
         existing = db.query(CommuneMarketData).filter(
@@ -2428,19 +2422,87 @@ def run_market_agent(secret: str, db: Session = Depends(get_db)):
             existing.updated_at   = datetime.utcnow()
         else:
             db.add(CommuneMarketData(
-                country      = c['country'],
-                commune      = c['commune'],
-                price_m2_avg = c.get('price_m2_avg', 0),
-                income_index = c['income_index'],
-                cpm_usd      = c['cpm_usd'],
-                se_tier      = c['se_tier'],
-                portal       = c.get('portal', 'fallback'),
-                sample_count = c.get('sample_count', 0),
-                scraped_at   = datetime.utcnow(),
+                country=c['country'], commune=c['commune'],
+                price_m2_avg=c.get('price_m2_avg', 0),
+                income_index=c['income_index'], cpm_usd=c['cpm_usd'],
+                se_tier=c['se_tier'], portal=c.get('portal', 'fallback'),
+                sample_count=c.get('sample_count', 0),
+                scraped_at=datetime.utcnow(),
             ))
         saved += 1
     db.commit()
+    # Recalcular índice global con todos los datos en BD
+    _recalculate_global_index(db)
+    return saved
+
+
+def _recalculate_global_index(db):
+    """Recalcula el índice 100 = mediana global cada vez que entra un país nuevo."""
+    all_rows = db.query(CommuneMarketData).filter(CommuneMarketData.price_m2_avg > 0).all()
+    if not all_rows:
+        return
+    prices = sorted([r.price_m2_avg for r in all_rows])
+    median = prices[len(prices) // 2]
+    from market_data_agent import calculate_cpm_from_index, get_se_tier
+    for row in all_rows:
+        row.income_index = round((row.price_m2_avg / median) * 100, 1)
+        row.cpm_usd      = calculate_cpm_from_index(row.income_index)
+        row.se_tier      = get_se_tier(row.income_index)
+    db.commit()
+
+
+@app.post('/admin/run-market-agent')
+def run_market_agent(secret: str, db: Session = Depends(get_db)):
+    """Corre el agente completo de una vez. Para uso manual o pruebas."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from market_data_agent import run_full_agent, get_fallback_table
+    result = run_full_agent()
+    communes = result['communes'] if result['total_communes'] > 0 else get_fallback_table()
+    saved = _save_communes_to_db(communes, db)
     return {'ok': True, 'communes_saved': saved, 'countries': result.get('countries', []), 'errors': result.get('errors', [])}
+
+
+@app.post('/admin/run-market-agent/daily')
+def run_market_agent_daily(secret: str, db: Session = Depends(get_db)):
+    """
+    Corre UN país por día — respeta el límite gratuito de Apify.
+    El orden es rotativo: día 1=CL, día 2=AR, día 3=MX... vuelve a empezar.
+    En ~8 días cubre todos los países. Se repite cada 6 meses.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from market_data_agent import PORTALS, run_apify_scraper, aggregate_by_commune, get_fallback_table, calculate_cpm_from_index, get_se_tier
+
+    # Determinar qué país toca hoy según día del año
+    day_of_year = datetime.utcnow().timetuple().tm_yday
+    portal = PORTALS[day_of_year % len(PORTALS)]
+    country = portal['country']
+
+    print(f'[DailyAgent] Día {day_of_year} → procesando {portal["portal"]} ({country})')
+
+    items = run_apify_scraper(portal, max_items=300)
+    commune_prices = aggregate_by_commune(items, country)
+
+    if not commune_prices:
+        # Sin datos de Apify — usar fallback solo para este país
+        fallback = [c for c in get_fallback_table() if c['country'] == country]
+        saved = _save_communes_to_db(fallback, db)
+        return {'ok': True, 'country': country, 'portal': portal['portal'],
+                'source': 'fallback', 'communes_saved': saved}
+
+    communes = []
+    for commune, price_m2 in commune_prices.items():
+        communes.append({
+            'country': country, 'commune': commune,
+            'price_m2_avg': price_m2, 'income_index': 100.0,
+            'cpm_usd': 6.0, 'se_tier': 'C',
+            'portal': portal['portal'], 'sample_count': len(items),
+        })
+
+    saved = _save_communes_to_db(communes, db)
+    return {'ok': True, 'country': country, 'portal': portal['portal'],
+            'source': 'apify', 'communes_saved': saved}
 
 
 @app.get('/communes')

@@ -47,3 +47,17 @@ services:
       - key: PREFERENDUM_WALLET_ADDRESS
         value: ""
     healthCheckPath: /
+
+  - type: cron
+    name: market-data-daily
+    runtime: python
+    schedule: "0 6 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: >
+      python -c "
+      import requests;
+      requests.post(
+        'https://preferendum-unzip.onrender.com/admin/run-market-agent/daily',
+        params={'secret': 'preferendum-admin-2024'},
+        timeout=600
+      )"
