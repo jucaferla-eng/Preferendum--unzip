@@ -3382,6 +3382,20 @@ def agent_chat(data: AgentChatInput, request: Request):
     return {'response': result['response'], 'source': 'agent', 'tool_calls': result['tool_calls'], 'blocked': False}
 
 
+@app.get('/agent/debug')
+def agent_debug(secret: str):
+    """Diagnóstico — verifica variables de entorno del agente."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    ak = os.getenv('ANTHROPIC_API_KEY', '')
+    return {
+        'anthropic_key_set':    bool(ak),
+        'anthropic_key_len':    len(ak),
+        'anthropic_key_prefix': ak[:10] + '...' if ak else 'NOT SET',
+        'apify_set':            bool(os.getenv('APIFY_API_TOKEN')),
+        'aws_set':              bool(os.getenv('AWS_ACCESS_KEY_ID')),
+    }
+
 @app.get('/agent/security-log')
 def agent_security_log(secret: str):
     """Audit log de seguridad — solo admins."""
