@@ -3369,14 +3369,31 @@ class AgentChatInput(BaseModel):
     language: str = 'es'
 
 @app.post('/agent/chat')
-def agent_chat(data: AgentChatInput):
-    """Soporte al usuario: explica el sistema, responde preguntas, ayuda con problemas."""
+def agent_chat(data: AgentChatInput, request: Request):
+    """Soporte con seguridad: anti-injection, rate limiting, audit log, sanitización."""
     from preferendum_agent import run_agent, quick_faq_response
+    ip = request.headers.get('X-Forwarded-For', request.client.host or '0.0.0.0').split(',')[0].strip()
     fast = quick_faq_response(data.message)
     if fast:
-        return {'response': fast, 'source': 'faq', 'tool_calls': []}
-    result = run_agent(data.message, data.history or [])
-    return {'response': result['response'], 'source': 'agent', 'tool_calls': result['tool_calls']}
+        return {'response': fast, 'source': 'faq', 'tool_calls': [], 'blocked': False}
+    result = run_agent(data.message, data.history or [], ip=ip)
+    if result.get('blocked'):
+        return {'response': result['response'], 'source': 'security', 'tool_calls': [], 'blocked': True}
+    return {'response': result['response'], 'source': 'agent', 'tool_calls': result['tool_calls'], 'blocked': False}
+
+
+@app.get('/agent/security-log')
+def agent_security_log(secret: str):
+    """Audit log de seguridad — solo admins."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import _audit_log, _blocked_ips, _rate_limit_store
+    return {
+        'total_interactions': len(_audit_log),
+        'blocked_ips':        len(_blocked_ips),
+        'recent_high_risk':   [e for e in _audit_log[-50:] if e['risk_score'] >= 70],
+        'rate_limited_ips':   {ip: len(ts) for ip, ts in _rate_limit_store.items() if len(ts) > 5},
+    }
 
 @app.post('/agent/moderate')
 def agent_moderate(content_type: str, title: str = '', body: str = '', options: str = ''):
