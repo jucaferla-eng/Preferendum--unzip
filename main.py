@@ -282,9 +282,18 @@ class AdCampaign(Base):
     budget_clp          = Column(Integer, default=0)
     spent_clp           = Column(Integer, default=0)
     ad_type             = Column(String, default='banner')
-    target_country      = Column(String, default='')
-    target_gender       = Column(String, default='all')
-    target_age_ranges   = Column(String, default='')
+    # ── Targeting geográfico ──
+    target_country      = Column(String, default='')        # 'CL' / 'AR' / '' = todos
+    target_communes     = Column(String, default='')        # 'Vitacura,Las Condes' / '' = todas
+    # ── Targeting de nivel de ingreso ──
+    target_se_tiers     = Column(String, default='A,B,C,D') # tiers deseados: 'A,B' = premium
+    target_income_min   = Column(Float, default=0.0)        # índice mínimo (0 = sin límite)
+    target_income_max   = Column(Float, default=9999.0)     # índice máximo (9999 = sin límite)
+    # ── Targeting demográfico ──
+    target_gender       = Column(String, default='all')     # 'F' / 'M' / 'all'
+    target_age_min      = Column(Integer, default=13)
+    target_age_max      = Column(Integer, default=99)
+    target_age_ranges   = Column(String, default='')        # legacy
     target_categories   = Column(String, default='')
     excluded_categories = Column(String, default='')
     blocked_competitors = Column(String, default='')
@@ -363,6 +372,22 @@ def _migrate():
                 conn.commit()
             except Exception:
                 pass
+        # ad_campaigns — nuevas columnas de targeting por ingreso
+        existing_ad_cols = {c['name'] for c in inspector.get_columns('ad_campaigns')} if inspector.has_table('ad_campaigns') else set()
+        for col, defn in [
+            ('target_communes',   "TEXT DEFAULT ''"),
+            ('target_se_tiers',   "TEXT DEFAULT 'A,B,C,D'"),
+            ('target_income_min', 'FLOAT DEFAULT 0.0'),
+            ('target_income_max', 'FLOAT DEFAULT 9999.0'),
+            ('target_age_min',    'INTEGER DEFAULT 13'),
+            ('target_age_max',    'INTEGER DEFAULT 99'),
+        ]:
+            if col not in existing_ad_cols:
+                try:
+                    conn.execute(text(f'ALTER TABLE ad_campaigns ADD COLUMN {col} {defn}'))
+                    conn.commit()
+                except Exception:
+                    pass
         # selfie_logs — face_bytes como referencia para re-autenticación facial
         existing_selfie_cols = {c['name'] for c in inspector.get_columns('selfie_logs')} if inspector.has_table('selfie_logs') else set()
         if 'face_bytes' not in existing_selfie_cols:
@@ -712,8 +737,17 @@ class CampaignCreate(BaseModel):
     campaign_title:      str
     budget_clp:          int
     ad_type:             str = 'banner'
+    # Geo
     target_country:      str = ''
+    target_communes:     str = ''        # 'Vitacura,Las Condes' / '' = todas
+    # Nivel de ingreso
+    target_se_tiers:     str = 'A,B,C,D' # 'A,B' = solo premium
+    target_income_min:   float = 0.0
+    target_income_max:   float = 9999.0
+    # Demo
     target_gender:       str = 'all'
+    target_age_min:      int = 13
+    target_age_max:      int = 99
     target_age_ranges:   str = ''
     target_categories:   str = ''
     excluded_categories: str = ''
@@ -2253,41 +2287,154 @@ def marketer_login(data: LoginInput, db: Session = Depends(get_db)):
     }
 
 @app.get('/marketer/communes')
-def get_communes():
+def get_marketer_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
+    """Tabla de comunas con índice de ingreso y CPM — viene del agente de datos."""
+    from market_data_agent import get_fallback_table
+    rows = db.query(CommuneMarketData)
+    if country: rows = rows.filter(CommuneMarketData.country == country)
+    if se_tier: rows = rows.filter(CommuneMarketData.se_tier == se_tier)
+    rows = rows.order_by(CommuneMarketData.income_index.desc()).all()
+    if rows:
+        return {'communes': [{'country': r.country, 'commune': r.commune,
+            'income_index': r.income_index, 'cpm_usd': r.cpm_usd, 'se_tier': r.se_tier} for r in rows],
+            'source': 'database'}
+    fallback = get_fallback_table()
+    if country: fallback = [c for c in fallback if c['country'] == country]
+    if se_tier:  fallback = [c for c in fallback if c['se_tier'] == se_tier]
+    return {'communes': fallback, 'source': 'fallback'}
+
+
+def _optimize_campaign(budget_clp: float, target_country: str, target_communes: str,
+                        target_se_tiers: str, target_income_min: float, target_income_max: float,
+                        target_gender: str, target_age_min: int, target_age_max: int, db) -> dict:
+    """
+    Motor de optimización de campaña.
+    Objetivo: minimizar costo por contacto al mercado objetivo.
+    Lógica: distribuir presupuesto proporcionalmente a votantes alcanzables,
+    priorizando comunas con mayor densidad del target y menor CPM relativo.
+    """
+    from market_data_agent import get_fallback_table
+    USD_TO_CLP = 950
+
+    # 1. Obtener comunas disponibles
+    rows = db.query(CommuneMarketData)
+    if target_country:
+        rows = rows.filter(CommuneMarketData.country == target_country)
+    rows = rows.all()
+    if not rows:
+        data = get_fallback_table()
+        if target_country:
+            data = [c for c in data if c['country'] == target_country]
+    else:
+        data = [{'country': r.country, 'commune': r.commune, 'income_index': r.income_index,
+                 'cpm_usd': r.cpm_usd, 'se_tier': r.se_tier} for r in rows]
+
+    # 2. Filtrar por nivel de ingreso (SE tier e índice)
+    tiers = [t.strip() for t in target_se_tiers.split(',') if t.strip()]
+    data = [c for c in data if c['se_tier'] in tiers]
+    data = [c for c in data if target_income_min <= c['income_index'] <= target_income_max]
+    if target_communes:
+        selected = [c.strip() for c in target_communes.split(',')]
+        data = [c for c in data if c['commune'] in selected]
+
+    if not data:
+        return {'error': 'Ninguna comuna coincide con los criterios de targeting'}
+
+    # 3. Estimar votantes alcanzables por comuna
+    # Factor demográfico: ajustar por género y edad objetivo
+    age_range = target_age_max - target_age_min
+    age_factor = min(1.0, age_range / 60.0)   # 60 años = 100% población activa
+    gender_factor = 0.52 if target_gender == 'F' else 0.48 if target_gender == 'M' else 1.0
+    demo_factor = age_factor * gender_factor
+
+    # Población estimada por commune (proxy: índice de ingreso → densidad urbana)
+    for c in data:
+        pop_est = int(50000 * (1 + c['income_index'] / 200))
+        c['voters_est'] = int(pop_est * 0.75 * 0.35 * demo_factor)
+
+    # 4. Distribuir presupuesto — proporcional a votantes, penalizando CPM alto
+    # Peso = votantes / cpm → más peso a comunas con más audiencia y menor costo
+    total_weight = sum(c['voters_est'] / max(c['cpm_usd'], 0.1) for c in data)
+    budget_usd = budget_clp / USD_TO_CLP
+
+    allocation = []
+    total_impressions = 0
+    total_contacts = 0
+
+    for c in data:
+        weight = (c['voters_est'] / max(c['cpm_usd'], 0.1)) / total_weight
+        budget_commune_usd = budget_usd * weight
+        impressions = int((budget_commune_usd / c['cpm_usd']) * 1000)
+        contacts = min(impressions, c['voters_est'])
+        allocation.append({
+            'country':       c['country'],
+            'commune':       c['commune'],
+            'se_tier':       c['se_tier'],
+            'income_index':  c['income_index'],
+            'cpm_usd':       c['cpm_usd'],
+            'budget_clp':    int(budget_commune_usd * USD_TO_CLP),
+            'budget_pct':    round(weight * 100, 1),
+            'impressions':   impressions,
+            'contacts_est':  contacts,
+        })
+        total_impressions += impressions
+        total_contacts    += contacts
+
+    allocation.sort(key=lambda x: x['contacts_est'], reverse=True)
+    cost_per_contact = round((budget_clp / total_contacts), 0) if total_contacts > 0 else 0
+
     return {
-        'communes': [
-            {'commune': name, 'se_tier': d['se'], 'cpm_usd': d['cpm'], 'm2_range': d['m2']}
-            for name, d in COMMUNE_CPM.items()
-        ],
-        'cost_per_view_clp': COST_PER_VIEW,
+        'budget_clp':           int(budget_clp),
+        'budget_usd':           round(budget_usd, 2),
+        'total_communes':       len(allocation),
+        'total_impressions':    total_impressions,
+        'total_contacts_est':   total_contacts,
+        'cost_per_contact_clp': cost_per_contact,
+        'cpm_promedio':         round(budget_usd / (total_impressions / 1000), 2) if total_impressions > 0 else 0,
+        'targeting': {
+            'country':     target_country or 'todos',
+            'se_tiers':    tiers,
+            'income_range': f'{target_income_min}–{target_income_max}',
+            'gender':      target_gender,
+            'age':         f'{target_age_min}–{target_age_max}',
+        },
+        'allocation': allocation,
     }
 
+
 @app.post('/marketer/estimate')
-def estimate_campaign(data: EstimateInput, db: Session = Depends(get_db)):
-    if not data.communes:
-        raise HTTPException(400, 'At least one commune required')
-    total_weight = sum(COMMUNE_CPM.get(c, {}).get('cpm', 5.0) for c in data.communes)
-    allocation = []
-    for commune in data.communes:
-        cpm = COMMUNE_CPM.get(commune, {}).get('cpm', 5.0)
-        weight = cpm / total_weight if total_weight > 0 else 1 / len(data.communes)
-        budget_for_commune = int(data.budget_clp * weight)
-        allocation.append({
-            'commune': commune,
-            'se_tier': COMMUNE_CPM.get(commune, {}).get('se', '?'),
-            'cpm_usd': cpm,
-            'budget_clp': budget_for_commune,
-            'estimated_impressions': int(budget_for_commune / COST_PER_VIEW),
-        })
-    return {
-        'budget_clp': data.budget_clp,
-        'total_estimated_impressions': sum(a['estimated_impressions'] for a in allocation),
-        'allocation': allocation,
-        'cost_per_view_clp': COST_PER_VIEW,
-    }
+def estimate_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
+    """Simula la campaña y muestra la optimización antes de confirmar."""
+    result = _optimize_campaign(
+        budget_clp=data.budget_clp,
+        target_country=data.target_country,
+        target_communes=data.target_communes,
+        target_se_tiers=data.target_se_tiers,
+        target_income_min=data.target_income_min,
+        target_income_max=data.target_income_max,
+        target_gender=data.target_gender,
+        target_age_min=data.target_age_min,
+        target_age_max=data.target_age_max,
+        db=db,
+    )
+    return result
+
 
 @app.post('/marketer/campaigns')
 def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
+    """Crea la campaña y devuelve la optimización de asignación."""
+    optimization = _optimize_campaign(
+        budget_clp=data.budget_clp,
+        target_country=data.target_country,
+        target_communes=data.target_communes,
+        target_se_tiers=data.target_se_tiers,
+        target_income_min=data.target_income_min,
+        target_income_max=data.target_income_max,
+        target_gender=data.target_gender,
+        target_age_min=data.target_age_min,
+        target_age_max=data.target_age_max,
+        db=db,
+    )
     campaign = AdCampaign(
         advertiser_email    = data.advertiser_email,
         advertiser_name     = data.advertiser_name,
@@ -2295,7 +2442,13 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         budget_clp          = data.budget_clp,
         ad_type             = data.ad_type,
         target_country      = data.target_country,
+        target_communes     = data.target_communes,
+        target_se_tiers     = data.target_se_tiers,
+        target_income_min   = data.target_income_min,
+        target_income_max   = data.target_income_max,
         target_gender       = data.target_gender,
+        target_age_min      = data.target_age_min,
+        target_age_max      = data.target_age_max,
         target_age_ranges   = data.target_age_ranges,
         target_categories   = data.target_categories,
         excluded_categories = data.excluded_categories,
@@ -2307,7 +2460,8 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
     db.add(campaign)
     db.commit()
     db.refresh(campaign)
-    return {'message': 'Campaign created', 'campaign_id': campaign.id, 'campaign': _format_campaign(campaign)}
+    return {'message': 'Campaign created', 'campaign_id': campaign.id,
+            'optimization': optimization, 'campaign': _format_campaign(campaign)}
 
 @app.get('/marketer/campaigns/{campaign_id}/metrics')
 def get_campaign_metrics(campaign_id: int, db: Session = Depends(get_db)):
