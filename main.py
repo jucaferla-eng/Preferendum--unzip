@@ -556,7 +556,7 @@ def send_email_otp(email, code, name=''):
 
 
 def send_welcome_certificate(email, name, user_id):
-    cert_url = f'https://preferendum-unzip.onrender.com/verify/status'
+    cert_url = f'https://preferendum-unzip.onrender.com/debates/feed'
     qr_url   = f'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={cert_url}&bgcolor=07090f&color=2563eb&format=png'
     cert_id  = f'PRF-{user_id:06d}'
     html = (
