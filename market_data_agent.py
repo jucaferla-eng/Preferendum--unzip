@@ -72,10 +72,21 @@ def fetch_sii_avaluo_by_commune(region: str = 'RM') -> dict:
 
 
 def combine_indices(price_m2_index: float, sii_index: float,
-                    weight_price: float = 0.4, weight_sii: float = 0.6) -> float:
+                    weight_price: float = 0.6, weight_sii: float = 0.4) -> float:
     """
-    Combina el índice de precio de arriendo con el índice de avalúo SII.
-    Peso 50/50 por defecto — ajustable si un dato falta.
+    Combina arriendo m² (variable principal) con avalúo SII (corrección patrimonial).
+
+    Lógica:
+    - Arriendo m² es la variable correcta: el banco presta hasta 25% del valor
+      de la vivienda, el dueño fija el arriendo para cubrir el dividendo, el
+      dividendo refleja el precio de compra, que refleja el ingreso del comprador.
+      O sea: arriendo m² = ingreso del consumidor, no un proxy sino la variable real.
+    - SII corrige barrios patrimoniales (Ñuñoa, Lo Barnechea) donde hay casas
+      antiguas grandes que no se arriendan y el arriendo subestima el nivel real.
+    - Para el resto del mundo: solo arriendo (weight_sii=0), captura todo.
+
+    Ponderación Chile: 60% arriendo + 40% SII
+    Ponderación global: 100% arriendo
     """
     if price_m2_index <= 0 and sii_index <= 0:
         return 100.0
