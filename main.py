@@ -16,6 +16,7 @@ Run: uvicorn main:app --host 0.0.0.0 --port 10000
 En memoria de José Ignacio Fernández (1989-2024)
 """
 
+from __future__ import annotations
 import os, json, hashlib, random, string, re, base64
 import urllib.request, urllib.error, smtplib
 import requests as _requests
