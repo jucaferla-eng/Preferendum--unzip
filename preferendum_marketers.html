@@ -420,46 +420,144 @@ section{padding:100px 80px;max-width:1200px;margin:0 auto;width:100%;}
     </div>
 
     <div id="modal-step-2" style="display:none;">
-      <div style="font-size:12px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:16px;">Step 2 — Campaign details</div>
+      <div style="font-size:12px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:16px;">Step 2 — Campaña y audiencia</div>
+
       <div style="margin-bottom:14px;">
-        <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Campaign name</label>
+        <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Nombre de campaña</label>
         <input id="m-campaign-title" type="text" placeholder="Nike Air Max Launch 2026" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
       </div>
+
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
         <div>
-          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Budget (CLP)</label>
+          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Presupuesto (CLP)</label>
           <input id="m-budget" type="number" placeholder="500000" min="10000" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
         </div>
         <div>
-          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Target gender</label>
-          <select id="m-gender" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
-            <option value="all">All</option><option value="F">Women</option><option value="M">Men</option>
+          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">País</label>
+          <select id="m-country" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+            <option value="CL">Chile</option><option value="AR">Argentina</option><option value="MX">México</option>
+            <option value="CO">Colombia</option><option value="BR">Brasil</option><option value="US">USA</option>
+            <option value="">Todos los países</option>
           </select>
         </div>
       </div>
+
+      <!-- TARGETING TABLE — nivel de ingreso -->
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">Nivel de ingreso objetivo</label>
+        <div style="background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:12px;">
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;">
+            <label id="tier-AAA-label" onclick="toggleTier('AAA')" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:8px 10px;border-radius:6px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.1);">
+              <input type="checkbox" id="tier-AAA" checked style="accent-color:#c9a84c;"> <span style="font-size:12px;color:#c9a84c;font-weight:700;">AAA</span><span style="font-size:10px;color:#888;margin-left:2px;">Vitacura · Lo Barnechea</span>
+            </label>
+            <label id="tier-AAB-label" onclick="toggleTier('AAB')" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:8px 10px;border-radius:6px;border:1px solid rgba(201,168,76,0.5);background:rgba(201,168,76,0.1);">
+              <input type="checkbox" id="tier-AAB" checked style="accent-color:#c9a84c;"> <span style="font-size:12px;color:#c9a84c;font-weight:700;">AAB</span><span style="font-size:10px;color:#888;margin-left:2px;">Las Condes · La Reina</span>
+            </label>
+            <label id="tier-ABB-label" onclick="toggleTier('ABB')" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:8px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.03);">
+              <input type="checkbox" id="tier-ABB" style="accent-color:#c9a84c;"> <span style="font-size:12px;color:#f5f3ee;font-weight:700;">ABB</span><span style="font-size:10px;color:#888;margin-left:2px;">Providencia · Ñuñoa</span>
+            </label>
+            <label id="tier-BBB-label" onclick="toggleTier('BBB')" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:8px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.03);">
+              <input type="checkbox" id="tier-BBB" style="accent-color:#c9a84c;"> <span style="font-size:12px;color:#f5f3ee;font-weight:700;">BBB</span><span style="font-size:10px;color:#888;margin-left:2px;">La Florida · Maipú</span>
+            </label>
+            <label id="tier-BBC-label" onclick="toggleTier('BBC')" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:8px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.03);">
+              <input type="checkbox" id="tier-BBC" style="accent-color:#c9a84c;"> <span style="font-size:12px;color:#f5f3ee;font-weight:700;">BBC</span><span style="font-size:10px;color:#888;margin-left:2px;">Santiago · Recoleta</span>
+            </label>
+            <label id="tier-BCC-label" onclick="toggleTier('BCC')" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:8px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.03);">
+              <input type="checkbox" id="tier-BCC" style="accent-color:#c9a84c;"> <span style="font-size:12px;color:#f5f3ee;font-weight:700;">BCC</span><span style="font-size:10px;color:#888;margin-left:2px;">La Pintana · Cerro Navia</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px;">
+        <div>
+          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Género</label>
+          <select id="m-gender" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+            <option value="all">Todos</option><option value="F">Mujeres</option><option value="M">Hombres</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Edad mín.</label>
+          <input id="m-age-min" type="number" value="18" min="13" max="99" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Edad máx.</label>
+          <input id="m-age-max" type="number" value="65" min="13" max="99" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
+        </div>
+      </div>
+
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
         <div>
-          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Start date</label>
+          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Fecha inicio</label>
           <input id="m-start" type="date" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
         </div>
         <div>
-          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">End date</label>
+          <label style="display:block;font-size:11px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:6px;">Fecha término</label>
           <input id="m-end" type="date" style="width:100%;background:#07090f;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:11px 14px;color:#f5f3ee;font-size:13px;box-sizing:border-box;outline:none;">
         </div>
       </div>
+
       <div id="estimate-box" style="display:none;background:#0a0e1a;border:1px solid rgba(201,168,76,0.3);border-radius:8px;padding:14px;margin-bottom:16px;font-size:12px;color:#c9a84c;font-family:'DM Mono',monospace;"></div>
       <div id="step2-error" style="color:#f43f5e;font-size:12px;margin-bottom:12px;display:none;"></div>
       <div style="display:flex;gap:10px;">
-        <button onclick="document.getElementById('modal-step-2').style.display='none';document.getElementById('modal-step-1').style.display='block';" style="flex:1;background:none;border:1px solid rgba(255,255,255,0.15);color:#888;padding:13px;border-radius:10px;font-size:13px;cursor:pointer;">← Back</button>
-        <button id="step2-btn" onclick="launchCampaign()" style="flex:2;background:#c9a84c;color:#07090f;border:none;padding:13px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">Launch campaign →</button>
+        <button onclick="document.getElementById('modal-step-2').style.display='none';document.getElementById('modal-step-1').style.display='block';" style="flex:1;background:none;border:1px solid rgba(255,255,255,0.15);color:#888;padding:13px;border-radius:10px;font-size:13px;cursor:pointer;">← Atrás</button>
+        <button id="step2-btn" onclick="launchCampaign()" style="flex:2;background:#c9a84c;color:#07090f;border:none;padding:13px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">Lanzar campaña →</button>
       </div>
     </div>
 
-    <div id="modal-success" style="display:none;text-align:center;padding:24px 0;">
-      <div style="font-size:48px;margin-bottom:16px;">🎯</div>
-      <div style="font-family:'Playfair Display',serif;font-size:22px;color:#f5f3ee;margin-bottom:8px;">Campaign launched!</div>
-      <div id="success-detail" style="font-size:13px;color:#888;margin-bottom:24px;"></div>
-      <button onclick="closeCampaignModal()" style="background:#c9a84c;color:#07090f;border:none;padding:14px 32px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">Done</button>
+    <!-- DASHBOARD — aparece después de lanzar -->
+    <div id="modal-success" style="display:none;padding:8px 0;">
+      <div style="text-align:center;margin-bottom:20px;">
+        <div style="font-size:40px;margin-bottom:8px;">🎯</div>
+        <div style="font-family:'Playfair Display',serif;font-size:20px;color:#f5f3ee;margin-bottom:4px;">¡Campaña activa!</div>
+        <div id="success-detail" style="font-size:12px;color:#888;"></div>
+      </div>
+
+      <!-- CONTADOR DE PRESUPUESTO -->
+      <div style="background:#07090f;border:1px solid rgba(201,168,76,0.4);border-radius:12px;padding:16px;margin-bottom:16px;">
+        <div style="font-size:10px;color:#888;font-family:'DM Mono',monospace;letter-spacing:1px;text-transform:uppercase;margin-bottom:12px;">Presupuesto en tiempo real</div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px;">
+          <div>
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Disponible</div>
+            <div id="dash-balance" style="font-size:26px;font-weight:900;color:#c9a84c;font-family:'DM Mono',monospace;">$—</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:11px;color:#888;margin-bottom:2px;">Gastado</div>
+            <div id="dash-spent" style="font-size:18px;font-weight:700;color:#f43f5e;font-family:'DM Mono',monospace;">$—</div>
+          </div>
+        </div>
+        <!-- Barra de progreso -->
+        <div style="background:rgba(255,255,255,0.08);border-radius:4px;height:6px;overflow:hidden;">
+          <div id="dash-progress-bar" style="height:100%;background:linear-gradient(90deg,#c9a84c,#f43f5e);border-radius:4px;width:0%;transition:width 0.5s;"></div>
+        </div>
+        <div id="dash-pct" style="font-size:11px;color:#888;text-align:right;margin-top:4px;">0% consumido</div>
+      </div>
+
+      <!-- MÉTRICAS CLAVE -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+        <div style="background:#07090f;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px;text-align:center;">
+          <div style="font-size:10px;color:#888;font-family:'DM Mono',monospace;text-transform:uppercase;margin-bottom:6px;">Personas alcanzadas</div>
+          <div id="dash-contacts" style="font-size:28px;font-weight:900;color:#f5f3ee;">—</div>
+        </div>
+        <div style="background:#07090f;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px;text-align:center;">
+          <div style="font-size:10px;color:#888;font-family:'DM Mono',monospace;text-transform:uppercase;margin-bottom:6px;">Costo por contacto</div>
+          <div id="dash-cpc" style="font-size:28px;font-weight:900;color:#f5f3ee;">$—</div>
+        </div>
+      </div>
+
+      <!-- TABLA DE TARGETING — desglose por tier -->
+      <div style="background:#07090f;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:14px;margin-bottom:16px;">
+        <div style="font-size:10px;color:#888;font-family:'DM Mono',monospace;text-transform:uppercase;margin-bottom:10px;">A quiénes llegaste</div>
+        <div id="dash-tier-table">
+          <div style="font-size:12px;color:#888;text-align:center;padding:8px;">Cargando...</div>
+        </div>
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.06);">
+          <div style="font-size:10px;color:#888;font-family:'DM Mono',monospace;text-transform:uppercase;margin-bottom:6px;">% dentro de tu target</div>
+          <div id="dash-in-target" style="font-size:16px;font-weight:700;color:#10b981;">—%</div>
+        </div>
+      </div>
+
+      <button onclick="closeCampaignModal()" style="width:100%;background:none;border:1px solid rgba(255,255,255,0.15);color:#888;padding:13px;border-radius:10px;font-size:13px;cursor:pointer;">Cerrar</button>
     </div>
   </div>
 </div>
@@ -477,11 +575,6 @@ function openCampaignModal(){
   document.getElementById('m-start').value = today.toISOString().split('T')[0];
   document.getElementById('m-end').value   = end.toISOString().split('T')[0];
 }
-function closeCampaignModal(){
-  document.getElementById('campaign-modal').style.display='none';
-  document.body.style.overflow='';
-}
-
 async function registerMarketer(){
   const name     = document.getElementById('m-name').value.trim();
   const email    = document.getElementById('m-email').value.trim();
@@ -532,8 +625,32 @@ function skipToStep2(){
   document.getElementById('modal-step-2').style.display='block';
 }
 
+let activeCampaignId  = null;
+let dashboardInterval = null;
+const TIER_COLORS = {AAA:'#c9a84c',AAB:'#f59e0b',ABB:'#10b981',BBB:'#3b82f6',BBC:'#8b5cf6',BCC:'#6b7280'};
+
+function toggleTier(tier){
+  const cb    = document.getElementById('tier-'+tier);
+  const label = document.getElementById('tier-'+tier+'-label');
+  cb.checked = !cb.checked;
+  if(cb.checked){
+    label.style.border = '1px solid rgba(201,168,76,0.5)';
+    label.style.background = 'rgba(201,168,76,0.1)';
+  } else {
+    label.style.border = '1px solid rgba(255,255,255,0.1)';
+    label.style.background = 'rgba(255,255,255,0.03)';
+  }
+  fetchEstimate();
+}
+
+function getSelectedTiers(){
+  return ['AAA','AAB','ABB','BBB','BBC','BCC']
+    .filter(t => document.getElementById('tier-'+t)?.checked)
+    .join(',');
+}
+
 document.addEventListener('DOMContentLoaded', ()=>{
-  ['m-budget','m-start','m-end'].forEach(id=>{
+  ['m-budget','m-start','m-end','m-age-min','m-age-max','m-country','m-gender'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.addEventListener('change', fetchEstimate);
   });
@@ -542,17 +659,34 @@ document.addEventListener('DOMContentLoaded', ()=>{
 async function fetchEstimate(){
   const budget = parseInt(document.getElementById('m-budget').value)||0;
   if(budget<10000) return;
-  const box = document.getElementById('estimate-box');
+  const box    = document.getElementById('estimate-box');
+  const tiers  = getSelectedTiers();
+  const country= document.getElementById('m-country')?.value||'CL';
+  const gender = document.getElementById('m-gender')?.value||'all';
+  const ageMin = parseInt(document.getElementById('m-age-min')?.value)||13;
+  const ageMax = parseInt(document.getElementById('m-age-max')?.value)||99;
   try {
     const res = await fetch(`${API}/marketer/estimate`, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({budget_clp: budget, communes:['Las Condes','Providencia','Ñuñoa','Santiago','Maipú']})
+      body: JSON.stringify({
+        advertiser_email:'preview@preview.com', advertiser_name:'Preview',
+        campaign_title:'Preview', budget_clp: budget,
+        target_country: country, target_se_tiers: tiers||'AAA,AAB,ABB,BBB,BBC,BCC',
+        target_gender: gender, target_age_min: ageMin, target_age_max: ageMax,
+        target_communes:'', target_income_min:0, target_income_max:9999,
+        excluded_categories:'', blocked_competitors:'',
+        start_date: new Date().toISOString(),
+        end_date:   new Date(Date.now()+30*86400000).toISOString(),
+      })
     });
     const data = await res.json();
+    if(data.error){ box.style.display='none'; return; }
     box.style.display='block';
-    box.innerHTML = `Estimated reach: <strong>${data.total_estimated_impressions.toLocaleString()}</strong> impressions · CLP ${COST_PER_VIEW}/view`;
-    const COST_PER_VIEW = data.cost_per_view_clp||20;
-    box.innerHTML = `Estimated reach: <strong>${data.total_estimated_impressions.toLocaleString()}</strong> voters · ${COST_PER_VIEW} CLP/view`;
+    box.innerHTML = `
+      Alcance estimado: <strong>${(data.total_contacts_est||0).toLocaleString()}</strong> personas ·
+      Costo por contacto: <strong>$${Math.round(data.cost_per_contact_clp||0).toLocaleString()} CLP</strong> ·
+      ${(data.total_communes||0)} comunas · CPM prom: $${data.cpm_promedio||0}
+    `;
   } catch(e){ box.style.display='none'; }
 }
 
@@ -560,42 +694,96 @@ async function launchCampaign(){
   const campaignTitle = document.getElementById('m-campaign-title').value.trim();
   const budget        = parseInt(document.getElementById('m-budget').value)||0;
   const gender        = document.getElementById('m-gender').value;
+  const country       = document.getElementById('m-country').value;
+  const ageMin        = parseInt(document.getElementById('m-age-min').value)||13;
+  const ageMax        = parseInt(document.getElementById('m-age-max').value)||99;
+  const tiers         = getSelectedTiers();
   const startDate     = document.getElementById('m-start').value;
   const endDate       = document.getElementById('m-end').value;
   const errEl         = document.getElementById('step2-error');
   const btn           = document.getElementById('step2-btn');
 
-  if(!campaignTitle){ errEl.textContent='Enter a campaign name.'; errEl.style.display='block'; return; }
-  if(budget<10000){ errEl.textContent='Minimum budget is $10,000 CLP.'; errEl.style.display='block'; return; }
-  if(!startDate||!endDate){ errEl.textContent='Select start and end dates.'; errEl.style.display='block'; return; }
+  if(!campaignTitle){ errEl.textContent='Ingresa el nombre de la campaña.'; errEl.style.display='block'; return; }
+  if(budget<10000){ errEl.textContent='Presupuesto mínimo: $10,000 CLP.'; errEl.style.display='block'; return; }
+  if(!tiers){ errEl.textContent='Selecciona al menos un nivel de ingreso.'; errEl.style.display='block'; return; }
+  if(!startDate||!endDate){ errEl.textContent='Selecciona fechas de inicio y término.'; errEl.style.display='block'; return; }
 
-  btn.textContent='Launching...'; btn.disabled=true; errEl.style.display='none';
+  btn.textContent='Lanzando...'; btn.disabled=true; errEl.style.display='none';
   const email = document.getElementById('m-email').value.trim();
   const name  = document.getElementById('m-name').value.trim();
   try {
     const res = await fetch(`${API}/marketer/campaigns`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         advertiser_email: email, advertiser_name: name,
-        campaign_title: campaignTitle, budget_clp: budget,
-        ad_type:'banner', target_country:'CL', target_gender: gender,
+        campaign_title: campaignTitle, budget_clp: budget, ad_type:'banner',
+        target_country: country, target_se_tiers: tiers,
+        target_gender: gender, target_age_min: ageMin, target_age_max: ageMax,
+        target_communes:'', target_income_min:0, target_income_max:9999,
         target_age_ranges:'', target_categories:'', excluded_categories:'', blocked_competitors:'',
         start_date: new Date(startDate).toISOString(),
         end_date:   new Date(endDate).toISOString(),
       })
     });
     const data = await res.json();
-    if(!res.ok) throw new Error(data.detail||'Failed to launch campaign');
+    if(!res.ok) throw new Error(data.detail||'Error al lanzar campaña');
+    activeCampaignId = data.campaign_id;
     document.getElementById('modal-step-2').style.display='none';
     document.getElementById('modal-success').style.display='block';
     document.getElementById('success-detail').textContent =
-      `Campaign ID #${data.campaign_id} · Budget: $${budget.toLocaleString()} CLP`;
+      `Campaña #${data.campaign_id} · Presupuesto: $${budget.toLocaleString()} CLP`;
+    // Iniciar dashboard con polling cada 30s
+    updateDashboard(budget);
+    dashboardInterval = setInterval(()=>updateDashboard(budget), 30000);
   } catch(e) {
     errEl.textContent=e.message; errEl.style.display='block';
   } finally {
-    btn.textContent='Launch campaign →'; btn.disabled=false;
+    btn.textContent='Lanzar campaña →'; btn.disabled=false;
   }
+}
+
+async function updateDashboard(totalBudget){
+  if(!activeCampaignId) return;
+  try {
+    const res  = await fetch(`${API}/marketer/campaigns/${activeCampaignId}/metrics`);
+    const data = await res.json();
+    if(!res.ok) return;
+
+    const spent   = data.spent_clp||0;
+    const balance = data.balance_clp||totalBudget;
+    const pct     = data.pct_budget_spent||0;
+    const contacts= data.impressions||0;
+    const cpc     = data.cost_per_contact_clp||0;
+
+    document.getElementById('dash-balance').textContent = '$'+Math.round(balance).toLocaleString();
+    document.getElementById('dash-spent').textContent   = '$'+Math.round(spent).toLocaleString();
+    document.getElementById('dash-progress-bar').style.width = Math.min(pct,100)+'%';
+    document.getElementById('dash-pct').textContent    = pct+'% consumido';
+    document.getElementById('dash-contacts').textContent = contacts.toLocaleString();
+    document.getElementById('dash-cpc').textContent    = cpc>0 ? '$'+Math.round(cpc).toLocaleString() : '$—';
+    document.getElementById('dash-in-target').textContent = (data.pct_in_target||0)+'%';
+
+    // Tabla de tiers
+    const tierData = data.by_se_tier||{};
+    const total    = Object.values(tierData).reduce((a,b)=>a+b,0)||1;
+    const rows     = Object.entries(tierData).map(([tier,n])=>`
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <span style="font-size:11px;font-weight:700;color:${TIER_COLORS[tier]||'#888'};width:36px;font-family:'DM Mono',monospace;">${tier}</span>
+        <div style="flex:1;background:rgba(255,255,255,0.06);border-radius:3px;height:6px;overflow:hidden;">
+          <div style="height:100%;background:${TIER_COLORS[tier]||'#888'};border-radius:3px;width:${Math.round(n/total*100)}%;"></div>
+        </div>
+        <span style="font-size:11px;color:#888;width:50px;text-align:right;">${n.toLocaleString()}</span>
+        <span style="font-size:10px;color:#666;width:36px;text-align:right;">${Math.round(n/total*100)}%</span>
+      </div>
+    `).join('');
+    document.getElementById('dash-tier-table').innerHTML = rows||'<div style="font-size:12px;color:#888;text-align:center;">Sin impresiones aún</div>';
+  } catch(e){}
+}
+
+function closeCampaignModal(){
+  document.getElementById('campaign-modal').style.display='none';
+  document.body.style.overflow='';
+  if(dashboardInterval){ clearInterval(dashboardInterval); dashboardInterval=null; }
 }
 </script>
 </body>
