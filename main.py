@@ -424,7 +424,8 @@ app.add_middleware(CORSMiddleware,
     allow_methods=['*'], allow_headers=['*'])
 
 SECRET = os.getenv('JWT_SECRET', 'preferendum-jwt-secret-2024')
-security = HTTPBearer()
+security          = HTTPBearer()
+security_optional = HTTPBearer(auto_error=False)  # no lanza error si no hay token
 
 # ══════════════════════════════════════════════════════════════
 # HELPERS
@@ -455,6 +456,20 @@ def get_current_user(
         raise HTTPException(401, 'Token expired')
     except Exception:
         raise HTTPException(401, 'Invalid token')
+
+def get_optional_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security_optional),
+    db: Session = Depends(get_db)
+):
+    """Igual que get_current_user pero devuelve None si no hay token — no lanza error."""
+    if not credentials:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET, algorithms=['HS256'])
+        user = db.query(User).filter(User.id == int(payload['sub'])).first()
+        return user
+    except Exception:
+        return None
 
 def get_verified_user(user: User = Depends(get_current_user)):
     if not user.email_verified:
@@ -1743,7 +1758,7 @@ def _match_campaigns(user, debate, db) -> list:
 
 @app.get('/debates/{debate_id}/opinions')
 def get_opinions(debate_id: int,
-                 user: User = Depends(get_current_user),
+                 user: User = Depends(get_optional_user),
                  db: Session = Depends(get_db)):
     opinions = db.query(Opinion).filter(
         Opinion.debate_id == debate_id
