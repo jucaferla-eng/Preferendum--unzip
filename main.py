@@ -74,7 +74,9 @@ class User(Base):
     name            = Column(String)
     password        = Column(String)
     country         = Column(String, default='CL')
-    county          = Column(String, default='')
+    county          = Column(String, default='')   # comuna declarada — nunca dirección exacta
+    se_tier         = Column(String, default='')   # AAA/AAB/ABB/BBB/BBC/BCC — asignado por CommuneMarketData
+    income_index    = Column(Float, default=0.0)   # índice de ingreso de su comuna
     gender          = Column(String, default='F')
     dob             = Column(String, default='')
     national_id     = Column(String, default='')
@@ -372,6 +374,15 @@ def _migrate():
                 conn.commit()
             except Exception:
                 pass
+        # users — se_tier e income_index para matching de ads
+        existing_user_cols = {c['name'] for c in inspector.get_columns('users')} if inspector.has_table('users') else set()
+        for col, defn in [('se_tier', "TEXT DEFAULT ''"), ('income_index', 'FLOAT DEFAULT 0.0')]:
+            if col not in existing_user_cols:
+                try:
+                    conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
+                    conn.commit()
+                except Exception:
+                    pass
         # ad_campaigns — nuevas columnas de targeting por ingreso
         existing_ad_cols = {c['name'] for c in inspector.get_columns('ad_campaigns')} if inspector.has_table('ad_campaigns') else set()
         for col, defn in [
@@ -1244,6 +1255,7 @@ def register(data: RegisterInput, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+    _assign_user_tier(user, db)
     code = gen_otp()
     db.add(OTPCode(
         user_id=user.id, email=user.email, code=code,
@@ -1339,6 +1351,25 @@ def confirm_phone(data: OTPInput, user: User = Depends(get_current_user), db: Se
     user.phone_verified = True
     update_verify_level(user, db)
     return {'verified': True, 'verify_level': user.verify_level}
+
+def _assign_user_tier(user, db):
+    """Asigna se_tier e income_index al usuario según su comuna declarada."""
+    if not user.county:
+        return
+    commune_data = db.query(CommuneMarketData).filter(
+        CommuneMarketData.commune.ilike(user.county.strip()),
+        CommuneMarketData.country == (user.country or 'CL')
+    ).first()
+    if not commune_data:
+        # Búsqueda parcial si no hay match exacto
+        commune_data = db.query(CommuneMarketData).filter(
+            CommuneMarketData.commune.ilike(f'%{user.county.strip()}%')
+        ).first()
+    if commune_data:
+        user.se_tier      = commune_data.se_tier
+        user.income_index = commune_data.income_index
+        db.commit()
+
 
 def _rekognition_client():
     return boto3.client(
@@ -1647,29 +1678,123 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
     db.refresh(debate)
     return {'debate': format_debate(debate), 'message': 'Consultation created'}
 
+def _get_age_group(dob: str) -> str:
+    if not dob:
+        return ''
+    try:
+        birth = datetime.fromisoformat(dob)
+        age = (datetime.utcnow() - birth).days // 365
+        if age < 25:  return '18-24'
+        if age < 35:  return '25-34'
+        if age < 45:  return '35-44'
+        if age < 55:  return '45-54'
+        return '55+'
+    except Exception:
+        return ''
+
+TIER_ORDER = ['AAA', 'AAB', 'ABB', 'BBB', 'BBC', 'BCC', 'A', 'B', 'C', 'D']
+
+def _tier_gte(user_tier: str, min_tier: str) -> bool:
+    """Devuelve True si user_tier >= min_tier en la escala de ingreso."""
+    try:
+        return TIER_ORDER.index(user_tier) <= TIER_ORDER.index(min_tier)
+    except ValueError:
+        return True
+
+def _match_campaigns(user, debate, db) -> list:
+    """
+    Encuentra campañas activas que hagan match con el perfil del votante.
+    Solo la comuna (tier) — nunca datos personales.
+    """
+    now = datetime.utcnow()
+    campaigns = db.query(AdCampaign).filter(
+        AdCampaign.is_active == True,
+        AdCampaign.start_date <= now,
+        AdCampaign.end_date >= now,
+    ).all()
+
+    matched = []
+    user_tier      = user.se_tier or 'BBB'
+    user_gender    = user.gender or 'all'
+    user_age_group = _get_age_group(user.dob)
+    user_country   = user.country or 'CL'
+    user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
+
+    for c in campaigns:
+        # País
+        if c.target_country and c.target_country != user_country:
+            continue
+        # Género
+        if c.target_gender and c.target_gender != 'all' and c.target_gender != user_gender:
+            continue
+        # Edad
+        age_min = getattr(c, 'target_age_min', 13) or 13
+        age_max = getattr(c, 'target_age_max', 99) or 99
+        if not (age_min <= user_age <= age_max):
+            continue
+        # Nivel de ingreso — el marketer dice "BBB o superior"
+        tiers = [t.strip() for t in (c.target_se_tiers or 'AAA,AAB,ABB,BBB,BBC,BCC').split(',')]
+        if user_tier and user_tier not in tiers:
+            continue
+        matched.append(c)
+
+    return matched
+
+
 @app.get('/debates/{debate_id}/opinions')
-def get_opinions(debate_id: int, db: Session = Depends(get_db)):
+def get_opinions(debate_id: int,
+                 user: User = Depends(get_current_user),
+                 db: Session = Depends(get_db)):
     opinions = db.query(Opinion).filter(
         Opinion.debate_id == debate_id
     ).order_by(Opinion.created_at.asc()).all()
-    ads = db.query(DebateAd).filter(DebateAd.debate_id == debate_id).all()
-    result = []
-    ad_idx = 0
+
+    debate    = db.query(Debate).filter(Debate.id == debate_id).first()
+    matched   = _match_campaigns(user, debate, db) if user else []
+    static_ads = db.query(DebateAd).filter(DebateAd.debate_id == debate_id).all()
+
+    result  = []
+    ad_idx  = 0
+    now     = datetime.utcnow()
+
     for i, op in enumerate(opinions):
-        if i > 0 and i % 5 == 0 and ads:
-            ad = ads[ad_idx % len(ads)]
-            ad.impressions += 1
-            result.append({'type': 'ad', 'ad': {
-                'brand': ad.brand, 'copy': ad.copy,
-                'cta': ad.cta, 'logo_color': ad.logo_color,
-            }})
+        if i > 0 and i % 5 == 0:
+            # Prioridad: campaña de marketer que hace match → ad estático del debate
+            if matched:
+                campaign = matched[ad_idx % len(matched)]
+                result.append({'type': 'ad', 'ad': {
+                    'brand':      campaign.advertiser_name,
+                    'copy':       campaign.title,
+                    'cta':        'Ver más',
+                    'logo_color': '#2563eb',
+                    'campaign_id': campaign.id,
+                }})
+                # Registrar impresión — solo datos anónimos, nunca identidad
+                db.add(AdImpressionLog(
+                    campaign_id = campaign.id,
+                    debate_id   = debate_id,
+                    gender      = user.gender or '',
+                    age_group   = _get_age_group(user.dob),
+                    county      = user.county or '',   # comuna, no dirección
+                    country     = user.country or '',
+                ))
+                campaign.spent_clp = (campaign.spent_clp or 0) + int(campaign.budget_clp / max(1, len(opinions) // 5))
+            elif static_ads:
+                ad = static_ads[ad_idx % len(static_ads)]
+                ad.impressions += 1
+                result.append({'type': 'ad', 'ad': {
+                    'brand': ad.brand, 'copy': ad.copy,
+                    'cta': ad.cta, 'logo_color': ad.logo_color,
+                }})
             ad_idx += 1
+
         result.append({'type': 'opinion', 'opinion': {
             'id': op.id, 'text': op.text,
             'knowledge_level': op.knowledge_level,
             'user_name': op.user_name,
             'created_at': op.created_at.isoformat(),
         }})
+
     db.commit()
     return {'items': result, 'total_opinions': len(opinions)}
 
