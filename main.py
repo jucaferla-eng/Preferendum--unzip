@@ -3357,3 +3357,70 @@ def get_communes(country: str = None, se_tier: str = None, db: Session = Depends
                      for r in rows],
         'source': 'database'
     }
+
+
+# ══════════════════════════════════════════════════════════════
+# AGENTE PREFERENDUM — endpoints de chat, moderación y operaciones
+# ══════════════════════════════════════════════════════════════
+
+class AgentChatInput(BaseModel):
+    message:  str
+    history:  list = []
+    language: str = 'es'
+
+@app.post('/agent/chat')
+def agent_chat(data: AgentChatInput):
+    """Soporte al usuario: explica el sistema, responde preguntas, ayuda con problemas."""
+    from preferendum_agent import run_agent, quick_faq_response
+    fast = quick_faq_response(data.message)
+    if fast:
+        return {'response': fast, 'source': 'faq', 'tool_calls': []}
+    result = run_agent(data.message, data.history or [])
+    return {'response': result['response'], 'source': 'agent', 'tool_calls': result['tool_calls']}
+
+@app.post('/agent/moderate')
+def agent_moderate(content_type: str, title: str = '', body: str = '', options: str = ''):
+    """Modera contenido: consultas, ads, perfiles."""
+    from preferendum_agent import run_agent
+    opts = [o.strip() for o in options.split(',') if o.strip()] if options else []
+    prompt = f"Modera este contenido de tipo '{content_type}':\nTítulo: {title}\nContenido: {body}\nOpciones: {opts}"
+    result = run_agent(prompt)
+    return {'response': result['response'], 'tool_calls': result['tool_calls']}
+
+@app.post('/agent/run-task')
+def agent_run_task(task_name: str, secret: str):
+    """Ejecuta una tarea programada del agente."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_scheduled_task
+    result = run_scheduled_task(task_name)
+    return result
+
+@app.get('/agent/pending-reviews')
+def admin_pending_reviews(secret: str, db: Session = Depends(get_db)):
+    """Lista organizadores pendientes y consultas en revisión para el agente."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    pending_orgs = db.query(OrganizerProfile).filter(OrganizerProfile.status == 'pending').all()
+    pending_debates = db.query(Debate).filter(Debate.status == 'draft').all()
+    return {
+        'organizers': [{'user_id': o.user_id, 'company': o.company_name,
+                        'cargo': o.cargo, 'created_at': o.created_at.isoformat()} for o in pending_orgs],
+        'consultations': [{'id': d.id, 'title': d.title,
+                           'creator_id': d.creator_id, 'created_at': d.created_at.isoformat()} for d in pending_debates],
+    }
+
+@app.post('/admin/organizer/{user_id}/status')
+def admin_set_organizer_status(user_id: int, secret: str, status: str, reason: str = '', db: Session = Depends(get_db)):
+    """El agente (o un admin) aprueba/rechaza/suspende un organizador."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user_id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil no encontrado')
+    profile.status           = status
+    profile.rejection_reason = reason
+    if status == 'approved':
+        profile.approved_at = datetime.utcnow()
+    db.commit()
+    return {'ok': True, 'user_id': user_id, 'status': status}
