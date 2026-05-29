@@ -26,9 +26,12 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 import requests as _requests
 
-ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
-BACKEND_URL       = os.getenv('BACKEND_URL', 'https://preferendum-unzip.onrender.com')
-ADMIN_SECRET      = os.getenv('ADMIN_SECRET', 'preferendum-admin-2024')
+BACKEND_URL  = os.getenv('BACKEND_URL', 'https://preferendum-unzip.onrender.com')
+ADMIN_SECRET = os.getenv('ADMIN_SECRET', 'preferendum-admin-2024')
+
+def get_api_key():
+    """Lee la key en tiempo de ejecución — no al importar el módulo."""
+    return os.getenv('ANTHROPIC_API_KEY', '').strip()
 
 # ══════════════════════════════════════════════════════════════
 # SEGURIDAD DEL AGENTE
@@ -432,6 +435,7 @@ def run_agent(user_message: str, conversation_history: list = None,
         log_interaction(ip, user_message[:100], 'MSG_TOO_LONG', risk_score=60, blocked=True)
         return {"response": "Mensaje demasiado largo. Máximo 2000 caracteres.", "blocked": True, "tool_calls": [], "history": []}
 
+    ANTHROPIC_API_KEY = get_api_key()
     if not ANTHROPIC_API_KEY:
         return {
             "response": "El agente no está configurado. Agrega ANTHROPIC_API_KEY en Render.",
