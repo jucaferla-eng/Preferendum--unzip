@@ -2593,28 +2593,90 @@ def get_campaign_metrics(campaign_id: int, db: Session = Depends(get_db)):
     campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(404, 'Campaign not found')
-    views = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == campaign_id).all()
-    total_imp = len(views)
-    spent = total_imp * COST_PER_VIEW
-    by_gender, by_age, by_commune = {}, {}, {}
+
+    views = db.query(AdImpressionLog).filter(
+        AdImpressionLog.campaign_id == campaign_id
+    ).all()
+
+    total_imp   = len(views)
+    spent_clp   = campaign.spent_clp or 0
+    balance_clp = max(0, campaign.budget_clp - spent_clp)
+    pct_spent   = round(spent_clp / campaign.budget_clp * 100, 1) if campaign.budget_clp > 0 else 0
+    cost_per_contact = round(spent_clp / total_imp, 0) if total_imp > 0 else 0
+
+    # Breakdowns
+    by_gender, by_age, by_commune, by_tier, by_debate, by_day = {}, {}, {}, {}, {}, {}
     for v in views:
-        by_gender[v.gender or 'N/A'] = by_gender.get(v.gender or 'N/A', 0) + 1
-        by_age[v.age_group or 'N/A'] = by_age.get(v.age_group or 'N/A', 0) + 1
-        by_commune[v.county or 'N/A'] = by_commune.get(v.county or 'N/A', 0) + 1
+        g  = v.gender    or 'N/A'
+        a  = v.age_group or 'N/A'
+        co = v.county    or 'N/A'
+        d  = str(v.debate_id) if v.debate_id else 'N/A'
+        day = v.created_at.strftime('%Y-%m-%d') if v.created_at else 'N/A'
+
+        by_gender[g]  = by_gender.get(g, 0)   + 1
+        by_age[a]     = by_age.get(a, 0)       + 1
+        by_commune[co]= by_commune.get(co, 0)  + 1
+        by_debate[d]  = by_debate.get(d, 0)    + 1
+        by_day[day]   = by_day.get(day, 0)     + 1
+
+        # SE tier desde CommuneMarketData
+        if co and co != 'N/A':
+            cm = db.query(CommuneMarketData).filter(
+                CommuneMarketData.commune.ilike(co)
+            ).first()
+            tier = cm.se_tier if cm else 'N/A'
+            by_tier[tier] = by_tier.get(tier, 0) + 1
+
+    # Target alcanzado vs estimado
+    target_tiers = [t.strip() for t in (campaign.target_se_tiers or '').split(',') if t.strip()]
+    in_target = sum(by_tier.get(t, 0) for t in target_tiers)
+    pct_in_target = round(in_target / total_imp * 100, 1) if total_imp > 0 else 0
+
+    # Desglose de comunas ordenado por impresiones
+    top_communes = sorted(by_commune.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    # Días ordenados cronológicamente
+    daily_trend = [{'date': d, 'impressions': n}
+                   for d, n in sorted(by_day.items())]
+
     return {
-        'campaign_id':      campaign_id,
-        'title':            campaign.title,
-        'advertiser':       campaign.advertiser_name,
-        'budget_clp':       campaign.budget_clp,
-        'impressions':      total_imp,
-        'voters_reached':   total_imp,
-        'spent_clp':        spent,
-        'balance_clp':      max(0, campaign.budget_clp - spent),
-        'cost_per_view_clp': COST_PER_VIEW,
-        'is_active':        campaign.is_active,
-        'by_gender':        by_gender,
-        'by_age':           by_age,
-        'by_commune':       by_commune,
+        # ── Resumen ejecutivo ──
+        'campaign_id':        campaign_id,
+        'title':              campaign.title,
+        'advertiser':         campaign.advertiser_name,
+        'is_active':          campaign.is_active,
+        'start_date':         campaign.start_date.isoformat() if campaign.start_date else None,
+        'end_date':           campaign.end_date.isoformat()   if campaign.end_date   else None,
+
+        # ── Presupuesto ──
+        'budget_clp':         campaign.budget_clp,
+        'spent_clp':          spent_clp,
+        'balance_clp':        balance_clp,
+        'pct_budget_spent':   pct_spent,
+
+        # ── Alcance ──
+        'impressions':        total_imp,
+        'cost_per_contact_clp': cost_per_contact,
+
+        # ── Calidad del targeting ──
+        'targeting': {
+            'country':      campaign.target_country or 'todos',
+            'se_tiers':     target_tiers,
+            'gender':       campaign.target_gender,
+            'age':          f'{campaign.target_age_min or 13}–{campaign.target_age_max or 99}',
+        },
+        'in_target_impressions': in_target,
+        'pct_in_target':         pct_in_target,
+
+        # ── Breakdowns ──
+        'by_se_tier':    dict(sorted(by_tier.items(),    key=lambda x: TIER_ORDER.index(x[0]) if x[0] in TIER_ORDER else 99)),
+        'by_gender':     by_gender,
+        'by_age':        by_age,
+        'top_communes':  [{'commune': c, 'impressions': n} for c, n in top_communes],
+        'by_debate':     by_debate,
+
+        # ── Evolución diaria ──
+        'daily_trend':   daily_trend,
     }
 
 @app.get('/admin/db-info')
