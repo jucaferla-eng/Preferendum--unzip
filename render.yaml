@@ -40,6 +40,20 @@ services:
         sync: false
       - key: SENDGRID_API_KEY
         sync: false
+      # ── IA y servicios externos ──
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: APIFY_API_TOKEN
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: "us-east-1"
+      - key: ADMIN_SECRET
+        value: "preferendum-admin-2024"
+      # ── Blockchain (pendiente deploy) ──
       - key: CONTRACT_ADDRESS
         value: ""
       - key: PREFERENDUM_WALLET_KEY
@@ -60,4 +74,18 @@ services:
         'https://preferendum-unzip.onrender.com/admin/run-market-agent/daily',
         params={'secret': 'preferendum-admin-2024'},
         timeout=600
+      )"
+
+  - type: cron
+    name: agent-daily-review
+    runtime: python
+    schedule: "0 9 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: >
+      python -c "
+      import requests;
+      requests.post(
+        'https://preferendum-unzip.onrender.com/agent/run-task',
+        params={'task_name': 'daily_review', 'secret': 'preferendum-admin-2024'},
+        timeout=120
       )"
