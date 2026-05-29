@@ -692,6 +692,47 @@ export default function PreferendumV8() {
   // SCREEN: VERIFY IDENTITY — 7 LAYERS
   // ══════════════════════════════════════════════════════════════
   if(screen==="verify-identity") {
+    // Usuario que ya se verificó antes — solo selfie rápida
+    if(currentUser?.selfie_verified) return (
+      <div style={phone}>
+        <div style={{background:T.deep,borderBottom:`1px solid ${T.rim}`,padding:"14px 18px",
+          display:"flex",alignItems:"center",gap:12}}>
+          <button onClick={()=>go("feed")} style={{background:"none",border:"none",color:T.snow,fontSize:22,cursor:"pointer"}}>←</button>
+          <div style={{fontSize:16,fontWeight:700,color:T.white}}>Confirmar identidad</div>
+        </div>
+        <div style={{padding:24}}>
+          <div style={{textAlign:"center",marginBottom:24}}>
+            <div style={{fontSize:48,marginBottom:8}}>🤳</div>
+            <div style={{fontSize:18,fontWeight:700,color:T.white,marginBottom:6}}>¡Hola de nuevo!</div>
+            <div style={{fontSize:13,color:T.fog}}>Solo necesitamos una selfie rápida para confirmar que eres tú</div>
+          </div>
+          <div style={{background:`${T.blue}18`,border:`1px solid ${T.blue}44`,borderRadius:12,
+            padding:16,marginBottom:20,textAlign:"center"}}>
+            <div style={{fontSize:12,color:T.fog,marginBottom:8}}>Cámara frontal · Sin carné necesario</div>
+            <div style={{fontSize:28}}>😊</div>
+          </div>
+          <div onClick={()=>document.getElementById("reauth-selfie").click()}
+            style={{border:`2px dashed ${T.blue}`,borderRadius:12,padding:24,
+              textAlign:"center",cursor:"pointer",background:T.deep,marginBottom:16}}>
+            <input id="reauth-selfie" type="file" accept="image/*" capture="user" style={{display:"none"}}
+              onChange={async e=>{
+                const f=e.target.files[0]; if(!f) return;
+                const form=new FormData(); form.append('file',f);
+                try {
+                  const r=await fetch(`${API}/verify/face`,{method:'POST',
+                    headers:{Authorization:`Bearer ${authToken}`},body:form});
+                  const d=await r.json().catch(()=>({}));
+                  if(!r.ok){alert(d.detail||'No pudimos verificar tu identidad.');return;}
+                } catch(e){}
+                go("feed");
+              }}/>
+            <div style={{fontSize:32,marginBottom:6}}>📷</div>
+            <div style={{fontSize:13,fontWeight:700,color:T.snow}}>Tomar selfie</div>
+          </div>
+        </div>
+      </div>
+    );
+
     const VF_STEPS = [
       {n:1,icon:"📧",title:"Email OTP",color:T.blue},
       {n:2,icon:"📱",title:"SMS",color:T.teal},

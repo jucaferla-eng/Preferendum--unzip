@@ -145,6 +145,7 @@ class SelfieLog(Base):
     selfie_hash = Column(String)
     match_score = Column(Float, default=0.0)
     verified    = Column(Boolean, default=False)
+    face_bytes  = Column(Text)   # cara de referencia para comparar en visitas futuras
     created_at  = Column(DateTime, default=datetime.utcnow)
 
 class VoteIdentityLock(Base):
@@ -339,11 +340,19 @@ def _migrate():
                 conn.commit()
             except Exception:
                 pass
-        # document_logs table — face_bytes para comparar con selfie via Rekognition
+        # document_logs — face_bytes para comparar con selfie via Rekognition
         existing_doc_cols = {c['name'] for c in inspector.get_columns('document_logs')} if inspector.has_table('document_logs') else set()
         if 'face_bytes' not in existing_doc_cols:
             try:
                 conn.execute(text("ALTER TABLE document_logs ADD COLUMN face_bytes TEXT"))
+                conn.commit()
+            except Exception:
+                pass
+        # selfie_logs — face_bytes como referencia para re-autenticación facial
+        existing_selfie_cols = {c['name'] for c in inspector.get_columns('selfie_logs')} if inspector.has_table('selfie_logs') else set()
+        if 'face_bytes' not in existing_selfie_cols:
+            try:
+                conn.execute(text("ALTER TABLE selfie_logs ADD COLUMN face_bytes TEXT"))
                 conn.commit()
             except Exception:
                 pass
@@ -1325,16 +1334,58 @@ async def verify_selfie(
         user_id=user.id,
         selfie_hash=hashlib.sha256(contents).hexdigest(),
         match_score=match_score,
-        verified=verified
+        verified=verified,
+        face_bytes=base64.b64encode(contents).decode() if verified else None
     ))
     if verified:
         user.selfie_verified = True
         update_verify_level(user, db)
-        # Borrar los bytes del documento — ya no se necesitan
         if doc_log:
-            doc_log.face_bytes = None
+            doc_log.face_bytes = None  # ya no se necesita
     db.commit()
     return {'verified': verified, 'match_score': round(match_score * 100), 'verify_level': user.verify_level}
+
+
+@app.post('/verify/face')
+async def verify_face_returning(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Para usuarios que ya se verificaron antes — solo selfie, sin carné."""
+    if not user.selfie_verified:
+        raise HTTPException(400, 'Primero debes completar la verificación completa con tu documento')
+
+    contents = await file.read()
+    if file.content_type not in ['image/jpeg', 'image/png', 'image/webp']:
+        raise HTTPException(400, 'Solo se aceptan imágenes JPG o PNG')
+
+    # Buscar la cara de referencia guardada
+    ref = db.query(SelfieLog).filter(
+        SelfieLog.user_id == user.id,
+        SelfieLog.verified == True,
+        SelfieLog.face_bytes != None
+    ).order_by(SelfieLog.created_at.desc()).first()
+
+    aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+    if aws_key and ref and ref.face_bytes:
+        try:
+            rek = _rekognition_client()
+            resp = rek.compare_faces(
+                SourceImage={'Bytes': base64.b64decode(ref.face_bytes)},
+                TargetImage={'Bytes': contents},
+                SimilarityThreshold=80.0
+            )
+            matches = resp.get('FaceMatches', [])
+            if not matches:
+                raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
+            score = matches[0]['Similarity'] / 100.0
+            if score < 0.90:
+                raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
+        except ClientError:
+            pass  # AWS falló: dejamos pasar
+
+    return {'verified': True, 'message': 'Identidad confirmada'}
 
 @app.post('/verify/location')
 def verify_location(data: GeoInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
