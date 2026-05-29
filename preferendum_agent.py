@@ -549,9 +549,12 @@ FAQ = {
 
 def quick_faq_response(message: str) -> str:
     """Respuesta rápida para preguntas frecuentes sin llamar a la API."""
-    msg_lower = message.lower()
+    import unicodedata
+    def normalize(s):
+        return unicodedata.normalize('NFD', s.lower()).encode('ascii', 'ignore').decode()
+    msg_norm = normalize(message)
     for keyword, response in FAQ.items():
-        if keyword in msg_lower:
+        if normalize(keyword) in msg_norm:
             return response
     return None
 
