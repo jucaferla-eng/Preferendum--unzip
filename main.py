@@ -339,6 +339,14 @@ def _migrate():
                 conn.commit()
             except Exception:
                 pass
+        # document_logs table — face_bytes para comparar con selfie via Rekognition
+        existing_doc_cols = {c['name'] for c in inspector.get_columns('document_logs')} if inspector.has_table('document_logs') else set()
+        if 'face_bytes' not in existing_doc_cols:
+            try:
+                conn.execute(text("ALTER TABLE document_logs ADD COLUMN face_bytes TEXT"))
+                conn.commit()
+            except Exception:
+                pass
 _migrate()
 
 # ══════════════════════════════════════════════════════════════
