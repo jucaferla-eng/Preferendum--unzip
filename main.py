@@ -322,6 +322,79 @@ class ClosedListEntry(Base):
     national_id_hash = Column(String, index=True)
     created_at       = Column(DateTime, default=datetime.utcnow)
 
+
+class OrganizerProfile(Base):
+    """
+    Perfil extendido del organizador — persona natural o representante de empresa.
+    Separado de User para no mezclar datos de votante con datos corporativos.
+    """
+    __tablename__ = 'organizer_profiles'
+    id                   = Column(Integer, primary_key=True)
+    user_id              = Column(Integer, index=True, unique=True)
+
+    # Tipo de organizador
+    org_type             = Column(String, default='person')  # person / company
+    is_supervisor        = Column(Boolean, default=False)    # puede autorizar empleados
+
+    # Datos corporativos
+    company_name         = Column(String, default='')
+    company_rut          = Column(String, default='')        # RUT empresa
+    company_web          = Column(String, default='')        # sitio web
+    company_email_domain = Column(String, default='')        # dominio del email corporativo
+    cargo                = Column(String, default='')        # cargo en la empresa
+
+    # Supervisor que lo autorizó (NULL si es supervisor)
+    supervisor_user_id   = Column(Integer, nullable=True)
+    supervisor_name      = Column(String, default='')
+    supervisor_email     = Column(String, default='')
+
+    # Verificaciones automáticas
+    rut_verified         = Column(Boolean, default=False)    # RUT empresa existe en SII
+    domain_verified      = Column(Boolean, default=False)    # dominio email corporativo válido
+    web_verified         = Column(Boolean, default=False)    # web empresa existe y es real
+    selfie_verified      = Column(Boolean, default=False)    # cara = carné (Rekognition)
+    doc_verified         = Column(Boolean, default=False)    # documento de cargo revisado
+
+    # Documento de cargo
+    cargo_doc_hash       = Column(String, default='')
+    cargo_doc_bytes      = Column(Text)                      # base64, se borra tras revisión
+
+    # Estado de la cuenta
+    status               = Column(String, default='pending') # pending/approved/suspended
+    rejection_reason     = Column(String, default='')
+    created_at           = Column(DateTime, default=datetime.utcnow)
+    approved_at          = Column(DateTime, nullable=True)
+
+
+class AuthorizationRequest(Base):
+    """
+    Solicitud de un empleado para que su jefe lo autorice a crear consultas.
+    El jefe recibe email con link único — entra una sola vez y aprueba.
+    """
+    __tablename__ = 'authorization_requests'
+    id                   = Column(Integer, primary_key=True)
+    employee_user_id     = Column(Integer, index=True)
+    employee_name        = Column(String)
+    employee_email       = Column(String)
+    supervisor_email     = Column(String, index=True)
+    supervisor_user_id   = Column(Integer, nullable=True)   # se llena cuando el jefe entra
+    token                = Column(String, unique=True)       # link único para el jefe
+    status               = Column(String, default='pending') # pending/approved/rejected
+    created_at           = Column(DateTime, default=datetime.utcnow)
+    resolved_at          = Column(DateTime, nullable=True)
+
+
+class ConsultationModerationLog(Base):
+    """Resultado del análisis de IA antes de publicar una consulta."""
+    __tablename__ = 'consultation_moderation_logs'
+    id            = Column(Integer, primary_key=True)
+    debate_id     = Column(Integer, index=True)
+    score         = Column(Integer, default=0)       # 0-100
+    decision      = Column(String, default='review') # approved/rejected/review
+    reason        = Column(Text, default='')
+    raw_response  = Column(Text, default='')
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
 class CommuneMarketData(Base):
     """Precio de arriendo por m² por comuna — actualizado mensualmente por el agente."""
     __tablename__ = 'commune_market_data'
@@ -1367,6 +1440,169 @@ def confirm_phone(data: OTPInput, user: User = Depends(get_current_user), db: Se
     update_verify_level(user, db)
     return {'verified': True, 'verify_level': user.verify_level}
 
+def _verify_company_rut(rut: str) -> dict:
+    """
+    Verifica RUT empresa contra el SII.
+    Devuelve {valid, razon_social, activo}
+    """
+    rut_clean = rut.replace('.', '').replace('-', '').strip().upper()
+    try:
+        resp = _requests.get(
+            f'https://zeus.sii.cl/cvc_cgi/stc/getstc?RUT={rut_clean}',
+            headers={'User-Agent': 'Mozilla/5.0'},
+            timeout=10,
+        )
+        if resp.status_code == 200 and 'razon_social' in resp.text.lower():
+            import re
+            match = re.search(r'<razon_social>(.*?)</razon_social>', resp.text, re.IGNORECASE)
+            razon = match.group(1).strip() if match else ''
+            return {'valid': True, 'razon_social': razon, 'activo': True}
+    except Exception:
+        pass
+    # Fallback: validar formato RUT chileno
+    try:
+        digits = rut_clean[:-1]
+        dv     = rut_clean[-1]
+        n = int(digits)
+        s, m = 0, 2
+        while n:
+            s += (n % 10) * m
+            n //= 10
+            m = 2 if m == 7 else m + 1
+        expected = str(11 - s % 11).replace('10', 'K').replace('11', '0')
+        return {'valid': dv == expected, 'razon_social': '', 'activo': None}
+    except Exception:
+        return {'valid': False, 'razon_social': '', 'activo': False}
+
+
+def _verify_email_domain(email: str) -> dict:
+    """
+    Verifica que el dominio del email corporativo existe y no es gratuito.
+    Rechaza gmail, hotmail, yahoo, outlook, etc.
+    """
+    FREE_DOMAINS = {'gmail.com','hotmail.com','yahoo.com','outlook.com',
+                    'icloud.com','live.com','msn.com','protonmail.com'}
+    try:
+        domain = email.split('@')[1].lower().strip()
+        if domain in FREE_DOMAINS:
+            return {'valid': False, 'domain': domain, 'reason': 'Email gratuito — usa tu email corporativo'}
+        import socket
+        socket.getaddrinfo(domain, None)
+        return {'valid': True, 'domain': domain}
+    except Exception:
+        return {'valid': False, 'domain': '', 'reason': 'Dominio no existe'}
+
+
+def _verify_company_web(web_url: str, company_name: str, company_rut: str) -> dict:
+    """
+    Verifica que el sitio web de la empresa existe y menciona la empresa.
+    """
+    if not web_url.startswith('http'):
+        web_url = 'https://' + web_url
+    try:
+        resp = _requests.get(web_url, headers={'User-Agent': 'Mozilla/5.0'},
+                             timeout=10, allow_redirects=True)
+        if resp.status_code != 200:
+            return {'valid': False, 'reason': f'Sitio no responde ({resp.status_code})'}
+        content = resp.text.lower()
+        rut_clean = company_rut.replace('.', '').replace('-', '').lower()
+        name_words = [w.lower() for w in company_name.split() if len(w) > 3]
+        name_found = any(w in content for w in name_words)
+        rut_found  = rut_clean[:6] in content  # primeros 6 dígitos del RUT
+        return {
+            'valid': name_found or rut_found,
+            'name_found': name_found,
+            'rut_found': rut_found,
+            'reason': '' if (name_found or rut_found) else 'No encontramos el nombre de la empresa en el sitio'
+        }
+    except Exception as e:
+        return {'valid': False, 'reason': f'No pudimos acceder al sitio: {str(e)[:60]}'}
+
+
+def _moderate_consultation(title: str, context: str, options: list) -> dict:
+    """
+    Analiza una consulta con IA antes de publicarla.
+    Score 0-100. Decisión: approved / review / rejected.
+    """
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key:
+        return {'score': 75, 'decision': 'approved', 'reason': 'Sin API key — modo demo'}
+
+    prompt = f"""Eres el moderador de Preferendum, plataforma de consultas ciudadanas verificadas.
+Analiza esta consulta y da un score de 0 a 100 basado en estos criterios:
+
+TÍTULO: {title}
+CONTEXTO: {context}
+OPCIONES: {', '.join(options)}
+
+CRITERIOS (suma puntos si cumple):
+- Es una pregunta legítima de decisión colectiva (+30)
+- Opciones equilibradas y no manipuladoras (+20)
+- Sin contenido obsceno ni violento (+20)
+- Sin ataques a personas específicas (+15)
+- Sin propaganda política disfrazada de consulta (+15)
+
+Responde SOLO en este formato JSON:
+{{"score": 85, "decision": "approved", "reason": "Consulta legítima sobre..."}}
+
+decision debe ser: "approved" (score>=80), "review" (score 50-79), "rejected" (score<50)"""
+
+    try:
+        resp = _requests.post(
+            'https://api.anthropic.com/v1/messages',
+            headers={'x-api-key': api_key, 'anthropic-version': '2023-06-01',
+                     'content-type': 'application/json'},
+            json={'model': 'claude-haiku-4-5-20251001', 'max_tokens': 200,
+                  'messages': [{'role': 'user', 'content': prompt}]},
+            timeout=15,
+        )
+        import re, json as _json
+        text = resp.json()['content'][0]['text']
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            result = _json.loads(match.group())
+            return result
+    except Exception as e:
+        print(f'[Moderation] Error: {e}')
+    return {'score': 60, 'decision': 'review', 'reason': 'Error en moderación — revisión manual'}
+
+
+def _send_supervisor_authorization_email(supervisor_email, employee_name, employee_email, company, cargo, token):
+    approve_url = f'https://preferendum-unzip.onrender.com/organizer/authorize/{token}'
+    html = (
+        f'<div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#07090f;color:#fff;border-radius:16px;overflow:hidden;">'
+        f'<div style="background:#0d1526;padding:28px 32px;border-bottom:1px solid #1e2d4a;">'
+        f'<h1 style="margin:0;font-size:22px;">prefer<span style="color:#fff">endum</span></h1></div>'
+        f'<div style="padding:32px;">'
+        f'<h2 style="margin:0 0 16px;font-size:18px;">Solicitud de autorización</h2>'
+        f'<p style="color:#94a3b8;font-size:14px;line-height:1.6;">'
+        f'<strong style="color:#fff">{employee_name}</strong> ({employee_email}) solicita autorización '
+        f'para crear consultas en Preferendum en nombre de <strong style="color:#fff">{company}</strong> '
+        f'con cargo <strong style="color:#fff">{cargo}</strong>.</p>'
+        f'<p style="color:#94a3b8;font-size:13px;">Al aprobar, usted asume responsabilidad solidaria '
+        f'por las consultas que publique este usuario.</p>'
+        f'<div style="display:flex;gap:12px;margin-top:24px;">'
+        f'<a href="{approve_url}?action=approved" style="flex:1;background:#10b981;color:#fff;text-decoration:none;'
+        f'padding:14px;border-radius:10px;text-align:center;font-weight:700;font-size:14px;">✓ Autorizar</a>'
+        f'<a href="{approve_url}?action=rejected" style="flex:1;background:#1e2d4a;color:#94a3b8;text-decoration:none;'
+        f'padding:14px;border-radius:10px;text-align:center;font-size:14px;">Rechazar</a>'
+        f'</div></div>'
+        f'<div style="padding:16px 32px;border-top:1px solid #1e2d4a;text-align:center;">'
+        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria de José Ignacio Fernández (1989–2024)</p>'
+        f'</div></div>'
+    )
+    resend_key = os.getenv('RESEND_API_KEY')
+    if resend_key:
+        try:
+            _requests.post('https://api.resend.com/emails',
+                json={'from':'Preferendum <noreply@preferendum.com>','to':[supervisor_email],
+                      'subject':f'Autorización solicitada por {employee_name} — Preferendum',
+                      'html':html},
+                headers={'Authorization':f'Bearer {resend_key}'}, timeout=10)
+        except Exception as e:
+            print(f'[SupervisorEmail] {e}')
+
+
 def _assign_user_tier(user, db):
     """Asigna se_tier e income_index al usuario según su comuna declarada."""
     if not user.county:
@@ -2244,38 +2480,244 @@ COMMUNE_CPM = {
 # ROUTES: ORGANIZER (v2 — /organizer/ prefix)
 # ══════════════════════════════════════════════════════════════
 
+class OrganizerRegisterFullInput(BaseModel):
+    # Cuenta
+    email:            str
+    password:         str
+    name:             str
+    phone:            str = ''
+    national_id:      str = ''
+    country:          str = 'CL'
+    # Tipo
+    org_type:         str = 'person'   # person / company
+    is_supervisor:    bool = True
+    # Datos empresa (solo si org_type=company)
+    company_name:     str = ''
+    company_rut:      str = ''
+    company_web:      str = ''
+    cargo:            str = ''
+    # Supervisor que lo autoriza (solo si is_supervisor=False)
+    supervisor_email: str = ''
+
+
 @app.post('/organizer/register')
-def organizer_register_v2(data: OrganizerRegisterInput, db: Session = Depends(get_db)):
+def organizer_register_v2(data: OrganizerRegisterFullInput, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == data.email).first():
-        raise HTTPException(400, 'Email already registered')
+        raise HTTPException(400, 'Email ya registrado')
+
+    # Verificar dominio email corporativo
+    if data.org_type == 'company':
+        domain_check = _verify_email_domain(data.email)
+        if not domain_check['valid']:
+            raise HTTPException(400, domain_check.get('reason', 'Email inválido'))
+
     hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
     user = User(
         email=data.email, name=data.name, password=hashed,
-        phone=data.phone, country=data.country, county=data.county,
-        role='organizer',
+        phone=data.phone, national_id=data.national_id,
+        country=data.country, role='organizer',
     )
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    # Verificar RUT empresa en SII
+    rut_ok  = False
+    web_ok  = False
+    rut_info = {}
+    if data.org_type == 'company' and data.company_rut:
+        rut_info = _verify_company_rut(data.company_rut)
+        rut_ok   = rut_info.get('valid', False)
+
+    # Verificar web empresa
+    if data.org_type == 'company' and data.company_web:
+        web_check = _verify_company_web(data.company_web, data.company_name, data.company_rut)
+        web_ok    = web_check.get('valid', False)
+
+    domain_ok = data.org_type == 'company' and _verify_email_domain(data.email)['valid']
+
+    profile = OrganizerProfile(
+        user_id              = user.id,
+        org_type             = data.org_type,
+        is_supervisor        = data.is_supervisor,
+        company_name         = data.company_name,
+        company_rut          = data.company_rut,
+        company_web          = data.company_web,
+        company_email_domain = data.email.split('@')[1] if '@' in data.email else '',
+        cargo                = data.cargo,
+        supervisor_email     = data.supervisor_email,
+        rut_verified         = rut_ok,
+        domain_verified      = domain_ok,
+        web_verified         = web_ok,
+        status               = 'pending',
+    )
+    db.add(profile)
+    db.commit()
+
+    # OTP email
     code = gen_otp()
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
                    expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
     send_email_otp(user.email, code, user.name)
+
+    # Si necesita autorización de supervisor → enviar email al jefe
+    if not data.is_supervisor and data.supervisor_email:
+        token = hashlib.sha256(f'{user.id}-{data.supervisor_email}-{datetime.utcnow()}'.encode()).hexdigest()[:32]
+        db.add(AuthorizationRequest(
+            employee_user_id = user.id,
+            employee_name    = user.name,
+            employee_email   = user.email,
+            supervisor_email = data.supervisor_email,
+            token            = token,
+        ))
+        db.commit()
+        _send_supervisor_authorization_email(
+            supervisor_email = data.supervisor_email,
+            employee_name    = user.name,
+            employee_email   = user.email,
+            company          = data.company_name,
+            cargo            = data.cargo,
+            token            = token,
+        )
+
+    verifications = {
+        'email_sent':   True,
+        'rut_verified': rut_ok,
+        'rut_name':     rut_info.get('razon_social', ''),
+        'domain_ok':    domain_ok,
+        'web_ok':       web_ok,
+        'needs_doc':    True,
+        'needs_selfie': True,
+        'status':       'pending',
+    }
     return {
         'token': make_token(user.id, 'organizer'),
-        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': 'organizer'},
-        'message': f'Verification code sent to {user.email}'
+        'user':  {'id': user.id, 'name': user.name, 'email': user.email, 'role': 'organizer'},
+        'verifications': verifications,
+        'message': 'Registro iniciado. Verifica tu email y sube tu documento de cargo.',
     }
+
 
 @app.post('/organizer/login')
 def organizer_login_v2(data: LoginInput, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == data.email, User.role == 'organizer').first()
+    user = db.query(User).filter(User.email == data.email).first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
         raise HTTPException(401, 'Credenciales inválidas')
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'No tienes cuenta de organizador')
+    profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
     return {
-        'token': make_token(user.id, user.role),
-        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+        'token':   make_token(user.id, user.role),
+        'user':    {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+        'profile': {
+            'status':       profile.status if profile else 'pending',
+            'org_type':     profile.org_type if profile else 'person',
+            'is_supervisor':profile.is_supervisor if profile else True,
+            'rut_verified': profile.rut_verified if profile else False,
+            'web_verified': profile.web_verified if profile else False,
+            'doc_verified': profile.doc_verified if profile else False,
+        } if profile else None,
+    }
+
+
+@app.post('/organizer/upload-cargo-doc')
+async def upload_cargo_doc(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Sube el documento que acredita el cargo (contrato, poder notarial, etc.)"""
+    contents = await file.read()
+    if file.content_type not in ['image/jpeg','image/png','image/webp','application/pdf']:
+        raise HTTPException(400, 'Solo JPG, PNG o PDF')
+    profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil de organizador no encontrado')
+    profile.cargo_doc_hash  = hashlib.sha256(contents).hexdigest()
+    profile.cargo_doc_bytes = base64.b64encode(contents).decode()
+    db.commit()
+    return {'ok': True, 'message': 'Documento recibido. Será revisado en 1-2 días hábiles.'}
+
+
+@app.get('/organizer/authorize/{token}')
+def supervisor_authorization_page(token: str, db: Session = Depends(get_db)):
+    """Link que recibe el jefe en su email — muestra quién quiere autorización."""
+    req = db.query(AuthorizationRequest).filter(
+        AuthorizationRequest.token == token,
+        AuthorizationRequest.status == 'pending'
+    ).first()
+    if not req:
+        raise HTTPException(404, 'Link de autorización inválido o ya usado')
+    return {
+        'employee_name':  req.employee_name,
+        'employee_email': req.employee_email,
+        'token':          token,
+        'message':        f'{req.employee_name} solicita autorización para crear consultas en Preferendum',
+    }
+
+
+@app.post('/organizer/authorize/{token}')
+def supervisor_approve(token: str, action: str, db: Session = Depends(get_db),
+                        user: User = Depends(get_current_user)):
+    """El jefe aprueba o rechaza al empleado desde su cuenta verificada."""
+    req = db.query(AuthorizationRequest).filter(
+        AuthorizationRequest.token == token,
+        AuthorizationRequest.status == 'pending'
+    ).first()
+    if not req:
+        raise HTTPException(404, 'Solicitud no encontrada')
+
+    sup_profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
+    if not sup_profile or not sup_profile.is_supervisor:
+        raise HTTPException(403, 'Solo supervisores verificados pueden autorizar')
+    if sup_profile.status != 'approved':
+        raise HTTPException(403, 'Tu cuenta debe estar aprobada para autorizar empleados')
+
+    req.status             = action  # approved / rejected
+    req.supervisor_user_id = user.id
+    req.resolved_at        = datetime.utcnow()
+
+    if action == 'approved':
+        emp_profile = db.query(OrganizerProfile).filter(
+            OrganizerProfile.user_id == req.employee_user_id
+        ).first()
+        if emp_profile:
+            emp_profile.supervisor_user_id = user.id
+            emp_profile.supervisor_name    = user.name
+            emp_profile.status             = 'approved'
+
+    db.commit()
+    return {'ok': True, 'action': action, 'employee': req.employee_name}
+
+
+@app.get('/organizer/status')
+def organizer_status(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Estado completo de verificación del organizador."""
+    profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil de organizador no encontrado')
+    pending_employees = db.query(AuthorizationRequest).filter(
+        AuthorizationRequest.supervisor_email == user.email,
+        AuthorizationRequest.status == 'pending'
+    ).count()
+    return {
+        'status':            profile.status,
+        'org_type':          profile.org_type,
+        'is_supervisor':     profile.is_supervisor,
+        'company_name':      profile.company_name,
+        'cargo':             profile.cargo,
+        'verifications': {
+            'email':   user.email_verified,
+            'phone':   user.phone_verified,
+            'selfie':  profile.selfie_verified,
+            'rut':     profile.rut_verified,
+            'domain':  profile.domain_verified,
+            'web':     profile.web_verified,
+            'doc':     profile.doc_verified,
+        },
+        'pending_authorization_requests': pending_employees,
+        'can_create_consultations': profile.status == 'approved',
     }
 
 @app.get('/organizer/consultations')
@@ -2289,14 +2731,32 @@ def list_organizer_consultations(user: User = Depends(get_current_user), db: Ses
 def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if user.role not in ('organizer', 'admin'):
         raise HTTPException(403, 'Organizer role required')
+
+    # Verificar que el organizador está aprobado
+    profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
+    if profile and profile.status == 'suspended':
+        raise HTTPException(403, 'Tu cuenta está suspendida')
+    if profile and profile.status == 'pending' and user.role != 'admin':
+        raise HTTPException(403, 'Tu cuenta está pendiente de aprobación')
+
     if len(data.options) < 2:
         raise HTTPException(400, 'At least 2 options required')
-    closes = datetime.fromisoformat(data.closes_at)
+
+    # Moderación de IA antes de publicar
+    moderation = _moderate_consultation(data.title, data.context, data.options)
+    if moderation['decision'] == 'rejected':
+        raise HTTPException(400, f'Consulta rechazada: {moderation["reason"]}')
+
+    closes        = datetime.fromisoformat(data.closes_at)
     verify_closes = closes + timedelta(days=data.verify_days)
+
+    # Consultas en revisión quedan como 'draft' hasta aprobación manual
+    status = 'live' if moderation['decision'] == 'approved' else 'draft'
+
     debate = Debate(
         title=data.title, context=data.context,
         options=json.dumps(data.options),
-        creator_id=user.id,
+        creator_id=user.id, status=status,
         creator_type=data.creator_type, inst_name=data.inst_name or user.name,
         debate_type=data.debate_type, scope=data.scope,
         scope_country=data.scope_country, scope_commune=data.scope_commune,
@@ -2311,7 +2771,18 @@ def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_c
     db.add(debate)
     db.commit()
     db.refresh(debate)
-    return {'consultation': format_debate(debate), 'message': 'Consultation created successfully'}
+
+    db.add(ConsultationModerationLog(
+        debate_id=debate.id, score=moderation['score'],
+        decision=moderation['decision'], reason=moderation['reason'],
+    ))
+    db.commit()
+
+    return {
+        'consultation': format_debate(debate),
+        'moderation': {'score': moderation['score'], 'decision': moderation['decision'], 'reason': moderation['reason']},
+        'message': 'Consulta publicada.' if status == 'live' else f'Consulta en revisión (score {moderation["score"]}/100). Se publicará tras revisión manual.',
+    }
 
 @app.post('/organizer/closed-list')
 async def upload_closed_list(
