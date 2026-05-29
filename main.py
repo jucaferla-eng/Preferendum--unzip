@@ -555,6 +555,58 @@ def send_email_otp(email, code, name=''):
         return False
 
 
+def send_welcome_certificate(email, name, user_id):
+    cert_url = f'https://preferendum-unzip.onrender.com/verify/status'
+    qr_url   = f'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={cert_url}&bgcolor=07090f&color=2563eb&format=png'
+    cert_id  = f'PRF-{user_id:06d}'
+    html = (
+        f'<div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#07090f;color:#fff;border-radius:16px;overflow:hidden;">'
+        f'<div style="background:#0d1526;padding:28px 32px;border-bottom:1px solid #1e2d4a;">'
+        f'<h1 style="margin:0;font-size:22px;">prefer<span style="color:#fff">endum</span></h1>'
+        f'<p style="margin:6px 0 0;color:#64748b;font-size:13px;">Plataforma de decisiones verificadas</p>'
+        f'</div>'
+        f'<div style="padding:32px;">'
+        f'<p style="color:#94a3b8;font-size:14px;margin:0 0 6px;">Hola {name},</p>'
+        f'<h2 style="margin:0 0 24px;font-size:20px;color:#fff;">Tu certificado de registro está listo</h2>'
+        f'<div style="background:#0d1526;border:1px solid #1e2d4a;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">'
+        f'<div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Certificado de Ciudadano Verificado</div>'
+        f'<img src="{qr_url}" width="160" height="160" style="border-radius:8px;margin-bottom:12px;" alt="QR Preferendum"/>'
+        f'<div style="font-size:13px;font-weight:700;color:#2563eb;letter-spacing:0.15em;">{cert_id}</div>'
+        f'<div style="font-size:11px;color:#64748b;margin-top:4px;">Tu número de registro Preferendum</div>'
+        f'</div>'
+        f'<p style="color:#94a3b8;font-size:13px;line-height:1.6;">'
+        f'Tu identidad será verificada con 7 capas de seguridad. '
+        f'Tus votos quedan anclados en blockchain y son auditables públicamente a través de tu código XXXX-XXXX-XXXX. '
+        f'Nadie — ni Preferendum — puede vincular tu voto a tu identidad.'
+        f'</p>'
+        f'<div style="background:#0f2040;border:1px solid #1e3a6e;border-radius:8px;padding:12px 16px;font-size:12px;color:#7ab4ff;margin-top:16px;">'
+        f'🔒 Bridge destruction activo · AES-256 · Polygon blockchain'
+        f'</div>'
+        f'</div>'
+        f'<div style="padding:16px 32px;border-top:1px solid #1e2d4a;text-align:center;">'
+        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria de José Ignacio Fernández (1989–2024)</p>'
+        f'</div>'
+        f'</div>'
+    )
+    resend_key = os.getenv('RESEND_API_KEY')
+    if resend_key:
+        try:
+            _requests.post(
+                'https://api.resend.com/emails',
+                json={
+                    'from': 'Preferendum <noreply@preferendum.com>',
+                    'to': [email],
+                    'subject': f'Tu Certificado de Registro en Preferendum — {cert_id}',
+                    'html': html,
+                    'text': f'Hola {name}, tu certificado de registro Preferendum es {cert_id}.',
+                },
+                headers={'Authorization': f'Bearer {resend_key}'},
+                timeout=10,
+            )
+        except Exception as e:
+            print(f'[Certificate Email Error] {e}')
+
+
 def send_sms_otp(phone, code):
     sid = os.getenv('TWILIO_ACCOUNT_SID')
     token = os.getenv('TWILIO_AUTH_TOKEN')
@@ -1150,6 +1202,7 @@ def register(data: RegisterInput, db: Session = Depends(get_db)):
     ))
     db.commit()
     send_email_otp(user.email, code, user.name)
+    send_welcome_certificate(user.email, user.name, user.id)
     return {
         'token': make_token(user.id),
         'user': {'id': user.id, 'name': user.name, 'email': user.email, 'verify_level': 0},
