@@ -72,7 +72,7 @@ def fetch_sii_avaluo_by_commune(region: str = 'RM') -> dict:
 
 
 def combine_indices(price_m2_index: float, sii_index: float,
-                    weight_price: float = 0.5, weight_sii: float = 0.5) -> float:
+                    weight_price: float = 0.4, weight_sii: float = 0.6) -> float:
     """
     Combina el índice de precio de arriendo con el índice de avalúo SII.
     Peso 50/50 por defecto — ajustable si un dato falta.
@@ -441,22 +441,23 @@ def get_fallback_table() -> list:
     return [
         # Chile RM — índice combinado: 50% precio arriendo m² + 50% avalúo SII
         # Lo Barnechea sube a AAA gracias al avalúo SII (casas grandes La Dehesa)
-        {'country':'CL','commune':'Lo Barnechea', 'income_index':205,'cpm_usd':14.20,'se_tier':'AAA'},
-        {'country':'CL','commune':'Vitacura',     'income_index':198,'cpm_usd':14.50,'se_tier':'AAA'},
-        {'country':'CL','commune':'Las Condes',   'income_index':162,'cpm_usd':11.40,'se_tier':'AAB'},
-        {'country':'CL','commune':'La Reina',     'income_index':158,'cpm_usd':11.10,'se_tier':'AAB'},
-        {'country':'CL','commune':'Providencia',  'income_index':130,'cpm_usd': 8.70,'se_tier':'ABB'},
-        {'country':'CL','commune':'Ñuñoa',        'income_index':120,'cpm_usd': 7.90,'se_tier':'ABB'},
-        {'country':'CL','commune':'Macul',        'income_index':112,'cpm_usd': 7.40,'se_tier':'ABB'},
-        {'country':'CL','commune':'San Miguel',   'income_index':108,'cpm_usd': 7.10,'se_tier':'ABB'},
-        {'country':'CL','commune':'La Florida',   'income_index': 98,'cpm_usd': 5.90,'se_tier':'BBB'},
-        {'country':'CL','commune':'Maipú',        'income_index': 90,'cpm_usd': 5.40,'se_tier':'BBB'},
-        {'country':'CL','commune':'Santiago',     'income_index': 86,'cpm_usd': 5.10,'se_tier':'BBC'},
-        {'country':'CL','commune':'Recoleta',     'income_index': 78,'cpm_usd': 4.50,'se_tier':'BBC'},
-        {'country':'CL','commune':'Cerrillos',    'income_index': 72,'cpm_usd': 4.20,'se_tier':'BBC'},
-        {'country':'CL','commune':'El Bosque',    'income_index': 52,'cpm_usd': 3.20,'se_tier':'BCC'},
-        {'country':'CL','commune':'La Pintana',   'income_index': 48,'cpm_usd': 3.00,'se_tier':'BCC'},
-        {'country':'CL','commune':'Cerro Navia',  'income_index': 44,'cpm_usd': 2.80,'se_tier':'BCC'},
+        # Ponderación 40% arriendo m² + 60% avalúo SII
+        {'country':'CL','commune':'Lo Barnechea', 'income_index':259,'cpm_usd':14.80,'se_tier':'AAA'},
+        {'country':'CL','commune':'Vitacura',     'income_index':201,'cpm_usd':14.50,'se_tier':'AAA'},
+        {'country':'CL','commune':'La Reina',     'income_index':206,'cpm_usd':14.20,'se_tier':'AAA'},
+        {'country':'CL','commune':'Las Condes',   'income_index':156,'cpm_usd':11.00,'se_tier':'AAB'},
+        {'country':'CL','commune':'Providencia',  'income_index':127,'cpm_usd': 8.40,'se_tier':'ABB'},
+        {'country':'CL','commune':'Ñuñoa',        'income_index': 99,'cpm_usd': 5.90,'se_tier':'BBB'},
+        {'country':'CL','commune':'Macul',        'income_index': 91,'cpm_usd': 5.40,'se_tier':'BBB'},
+        {'country':'CL','commune':'San Miguel',   'income_index': 85,'cpm_usd': 5.10,'se_tier':'BBC'},
+        {'country':'CL','commune':'La Florida',   'income_index': 97,'cpm_usd': 5.80,'se_tier':'BBB'},
+        {'country':'CL','commune':'Maipú',        'income_index': 96,'cpm_usd': 5.80,'se_tier':'BBB'},
+        {'country':'CL','commune':'Santiago',     'income_index': 93,'cpm_usd': 5.50,'se_tier':'BBB'},
+        {'country':'CL','commune':'Recoleta',     'income_index': 88,'cpm_usd': 5.20,'se_tier':'BBB'},
+        {'country':'CL','commune':'Cerrillos',    'income_index': 75,'cpm_usd': 4.30,'se_tier':'BBC'},
+        {'country':'CL','commune':'El Bosque',    'income_index': 59,'cpm_usd': 3.50,'se_tier':'BBC'},
+        {'country':'CL','commune':'La Pintana',   'income_index': 51,'cpm_usd': 3.10,'se_tier':'BCC'},
+        {'country':'CL','commune':'Cerro Navia',  'income_index': 51,'cpm_usd': 3.10,'se_tier':'BCC'},
         # USA
         {'country':'US','commune':'Beverly Hills',   'income_index':520,'cpm_usd':19.80,'se_tier':'A'},
         {'country':'US','commune':'Manhattan',       'income_index':480,'cpm_usd':19.20,'se_tier':'A'},
