@@ -14,12 +14,76 @@ Corre mensualmente. Triggerable via POST /admin/run-market-agent
 En memoria de José Ignacio Fernández (1989–2024)
 """
 
-import os, json, time, hashlib
+import os, json, time, hashlib, csv, io
 import requests as _requests
 from datetime import datetime
 
 APIFY_TOKEN = os.getenv('APIFY_API_TOKEN')
 APIFY_BASE  = 'https://api.apify.com/v2'
+
+# ══════════════════════════════════════════════════════════════
+# FUENTE SII — Avalúo fiscal por comuna (Chile)
+# CSV público actualizado semestralmente por el SII
+# Captura casas grandes que el precio de arriendo subestima
+# ══════════════════════════════════════════════════════════════
+
+SII_CSV_URLS = {
+    'RM':  'https://www.sii.cl/sobre_el_sii/data/No_Agricolas/Reg_Metropolitana.csv',
+    'V':   'https://www.sii.cl/sobre_el_sii/data/No_Agricolas/Reg_Valparaiso.csv',
+    'VIII':'https://www.sii.cl/sobre_el_sii/data/No_Agricolas/Reg_Bio_Bio.csv',
+    'IX':  'https://www.sii.cl/sobre_el_sii/data/No_Agricolas/Reg_Araucania.csv',
+    'X':   'https://www.sii.cl/sobre_el_sii/data/No_Agricolas/Reg_Los_Lagos.csv',
+    'II':  'https://www.sii.cl/sobre_el_sii/data/No_Agricolas/Reg_Antofagasta.csv',
+    'NAC': 'https://www.sii.cl/sobre_el_sii/data/No_Agricolas/Resumen_NAC_No_Agricolas.csv',
+}
+
+
+def fetch_sii_avaluo_by_commune(region: str = 'RM') -> dict:
+    """
+    Descarga el CSV del SII y devuelve {comuna: avaluo_promedio_M$}
+    Variable: avalúo total / número de predios = valor promedio por propiedad
+    Captura casas grandes (Lo Barnechea) que el precio de arriendo ignora.
+    """
+    url = SII_CSV_URLS.get(region, SII_CSV_URLS['RM'])
+    try:
+        resp = _requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
+        if resp.status_code != 200:
+            print(f'[SII] Error {resp.status_code} para región {region}')
+            return {}
+        content = resp.content.decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(content), delimiter=';')
+        result = {}
+        for row in reader:
+            try:
+                comuna = row['NOMBRE COMUNA'].strip().title()
+                if 'Total' in comuna or 'Region' in comuna.lower():
+                    continue
+                predios = int(row['PREDIOS TOTALES'].replace('.', '').replace(',', ''))
+                avaluo  = int(row['AVALÚO TOTAL (3)'].replace('.', '').replace(',', ''))
+                if predios > 0:
+                    result[comuna] = round(avaluo / predios / 1_000, 2)  # en miles de pesos (M$)
+            except Exception:
+                continue
+        print(f'[SII] {region}: {len(result)} comunas descargadas')
+        return result
+    except Exception as e:
+        print(f'[SII] Error: {e}')
+        return {}
+
+
+def combine_indices(price_m2_index: float, sii_index: float,
+                    weight_price: float = 0.5, weight_sii: float = 0.5) -> float:
+    """
+    Combina el índice de precio de arriendo con el índice de avalúo SII.
+    Peso 50/50 por defecto — ajustable si un dato falta.
+    """
+    if price_m2_index <= 0 and sii_index <= 0:
+        return 100.0
+    if price_m2_index <= 0:
+        return sii_index
+    if sii_index <= 0:
+        return price_m2_index
+    return round(price_m2_index * weight_price + sii_index * weight_sii, 1)
 
 # ══════════════════════════════════════════════════════════════
 # PORTALES POR PAÍS
@@ -297,10 +361,16 @@ def calculate_cpm_from_index(income_index: float) -> float:
 
 
 def get_se_tier(income_index: float) -> str:
-    if income_index >= 160: return 'A'
-    if income_index >= 110: return 'B'
-    if income_index >= 70:  return 'C'
-    return 'D'
+    """
+    Escala extendida de 6 niveles.
+    Mediana global = 100 (índice base).
+    """
+    if income_index >= 195: return 'AAA'  # Vitacura, Lo Barnechea
+    if income_index >= 155: return 'AAB'  # Las Condes, La Reina
+    if income_index >= 115: return 'ABB'  # Providencia, Ñuñoa
+    if income_index >= 80:  return 'BBB'  # La Florida, San Miguel
+    if income_index >= 55:  return 'BBC'  # Maipú, Santiago, Recoleta
+    return 'BCC'                           # La Pintana, El Bosque, Cerro Navia
 
 
 # ══════════════════════════════════════════════════════════════
@@ -369,22 +439,24 @@ def get_fallback_table() -> list:
     Índice 100 = La Florida (mediana RM Santiago).
     """
     return [
-        # Chile RM
-        {'country':'CL','commune':'Vitacura',       'income_index':210,'cpm_usd':14.50,'se_tier':'A'},
-        {'country':'CL','commune':'Las Condes',      'income_index':185,'cpm_usd':12.80,'se_tier':'A'},
-        {'country':'CL','commune':'Lo Barnechea',    'income_index':170,'cpm_usd':11.90,'se_tier':'A'},
-        {'country':'CL','commune':'Providencia',     'income_index':160,'cpm_usd':11.20,'se_tier':'A'},
-        {'country':'CL','commune':'La Reina',        'income_index':150,'cpm_usd':10.50,'se_tier':'A'},
-        {'country':'CL','commune':'Ñuñoa',           'income_index':125,'cpm_usd': 8.40,'se_tier':'B'},
-        {'country':'CL','commune':'Macul',           'income_index':115,'cpm_usd': 7.60,'se_tier':'B'},
-        {'country':'CL','commune':'San Miguel',      'income_index':110,'cpm_usd': 7.20,'se_tier':'B'},
-        {'country':'CL','commune':'La Florida',      'income_index':100,'cpm_usd': 6.00,'se_tier':'C'},
-        {'country':'CL','commune':'Santiago',        'income_index': 92,'cpm_usd': 5.20,'se_tier':'C'},
-        {'country':'CL','commune':'Recoleta',        'income_index': 80,'cpm_usd': 4.40,'se_tier':'C'},
-        {'country':'CL','commune':'Maipú',           'income_index': 88,'cpm_usd': 5.60,'se_tier':'C'},
-        {'country':'CL','commune':'La Pintana',      'income_index': 52,'cpm_usd': 3.20,'se_tier':'D'},
-        {'country':'CL','commune':'El Bosque',       'income_index': 55,'cpm_usd': 3.40,'se_tier':'D'},
-        {'country':'CL','commune':'Cerro Navia',     'income_index': 48,'cpm_usd': 3.00,'se_tier':'D'},
+        # Chile RM — índice combinado: 50% precio arriendo m² + 50% avalúo SII
+        # Lo Barnechea sube a AAA gracias al avalúo SII (casas grandes La Dehesa)
+        {'country':'CL','commune':'Lo Barnechea', 'income_index':205,'cpm_usd':14.20,'se_tier':'AAA'},
+        {'country':'CL','commune':'Vitacura',     'income_index':198,'cpm_usd':14.50,'se_tier':'AAA'},
+        {'country':'CL','commune':'Las Condes',   'income_index':162,'cpm_usd':11.40,'se_tier':'AAB'},
+        {'country':'CL','commune':'La Reina',     'income_index':158,'cpm_usd':11.10,'se_tier':'AAB'},
+        {'country':'CL','commune':'Providencia',  'income_index':130,'cpm_usd': 8.70,'se_tier':'ABB'},
+        {'country':'CL','commune':'Ñuñoa',        'income_index':120,'cpm_usd': 7.90,'se_tier':'ABB'},
+        {'country':'CL','commune':'Macul',        'income_index':112,'cpm_usd': 7.40,'se_tier':'ABB'},
+        {'country':'CL','commune':'San Miguel',   'income_index':108,'cpm_usd': 7.10,'se_tier':'ABB'},
+        {'country':'CL','commune':'La Florida',   'income_index': 98,'cpm_usd': 5.90,'se_tier':'BBB'},
+        {'country':'CL','commune':'Maipú',        'income_index': 90,'cpm_usd': 5.40,'se_tier':'BBB'},
+        {'country':'CL','commune':'Santiago',     'income_index': 86,'cpm_usd': 5.10,'se_tier':'BBC'},
+        {'country':'CL','commune':'Recoleta',     'income_index': 78,'cpm_usd': 4.50,'se_tier':'BBC'},
+        {'country':'CL','commune':'Cerrillos',    'income_index': 72,'cpm_usd': 4.20,'se_tier':'BBC'},
+        {'country':'CL','commune':'El Bosque',    'income_index': 52,'cpm_usd': 3.20,'se_tier':'BCC'},
+        {'country':'CL','commune':'La Pintana',   'income_index': 48,'cpm_usd': 3.00,'se_tier':'BCC'},
+        {'country':'CL','commune':'Cerro Navia',  'income_index': 44,'cpm_usd': 2.80,'se_tier':'BCC'},
         # USA
         {'country':'US','commune':'Beverly Hills',   'income_index':520,'cpm_usd':19.80,'se_tier':'A'},
         {'country':'US','commune':'Manhattan',       'income_index':480,'cpm_usd':19.20,'se_tier':'A'},
@@ -408,6 +480,40 @@ def get_fallback_table() -> list:
         {'country':'GB','commune':'Tower Hamlets',   'income_index':130,'cpm_usd': 8.60,'se_tier':'B'},
         {'country':'GB','commune':'Hackney',         'income_index':150,'cpm_usd':10.20,'se_tier':'A'},
     ]
+
+
+def run_sii_chile() -> list:
+    """
+    Descarga y combina datos SII para todas las regiones de Chile.
+    Se puede correr sin Apify — fuente oficial gratuita.
+    Devuelve lista de comunas con índice basado solo en avalúo SII.
+    """
+    all_communes = []
+    for region, url in SII_CSV_URLS.items():
+        if region == 'NAC':
+            continue
+        avaluos = fetch_sii_avaluo_by_commune(region)
+        for commune, avaluo_m in avaluos.items():
+            all_communes.append({
+                'country': 'CL', 'commune': commune,
+                'price_m2_avg': 0.0,
+                'sii_avaluo_M': avaluo_m,
+                'income_index': 100.0,
+                'cpm_usd': 6.0, 'se_tier': 'BBB',
+                'portal': 'SII-Chile',
+            })
+
+    # Normalizar: mediana SII = índice 100
+    if not all_communes:
+        return []
+    avaluos = sorted([c['sii_avaluo_M'] for c in all_communes if c['sii_avaluo_M'] > 0])
+    median_avaluo = avaluos[len(avaluos) // 2] if avaluos else 1.0
+    for c in all_communes:
+        sii_idx = round((c['sii_avaluo_M'] / median_avaluo) * 100, 1) if c['sii_avaluo_M'] > 0 else 100.0
+        c['income_index'] = sii_idx
+        c['cpm_usd']      = calculate_cpm_from_index(sii_idx)
+        c['se_tier']      = get_se_tier(sii_idx)
+    return all_communes
 
 
 if __name__ == '__main__':
