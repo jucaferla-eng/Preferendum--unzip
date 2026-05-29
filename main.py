@@ -311,6 +311,21 @@ class ClosedListEntry(Base):
     national_id_hash = Column(String, index=True)
     created_at       = Column(DateTime, default=datetime.utcnow)
 
+class CommuneMarketData(Base):
+    """Precio de arriendo por m² por comuna — actualizado mensualmente por el agente."""
+    __tablename__ = 'commune_market_data'
+    id           = Column(Integer, primary_key=True)
+    country      = Column(String, index=True)
+    commune      = Column(String, index=True)
+    price_m2_avg = Column(Float, default=0.0)
+    income_index = Column(Float, default=100.0)  # mediana global = 100
+    cpm_usd      = Column(Float, default=6.0)
+    se_tier      = Column(String, default='C')   # A / B / C / D
+    portal       = Column(String)
+    sample_count = Column(Integer, default=0)
+    scraped_at   = Column(DateTime)
+    updated_at   = Column(DateTime, default=datetime.utcnow)
+
 Base.metadata.create_all(bind=engine)
 
 # Column migrations — works for both SQLite and PostgreSQL
@@ -2385,3 +2400,71 @@ def admin_patch_debate(debate_id: int, secret: str, target_age_min: int = None, 
     db.commit()
     db.refresh(debate)
     return {'ok': True, 'debate': format_debate(debate)}
+
+
+# ══════════════════════════════════════════════════════════════
+# MARKET DATA AGENT — índice de ingreso por comuna
+# ══════════════════════════════════════════════════════════════
+
+@app.post('/admin/run-market-agent')
+def run_market_agent(secret: str, db: Session = Depends(get_db)):
+    """Corre el agente de datos inmobiliarios. Llamar mensualmente."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from market_data_agent import run_full_agent, get_fallback_table
+    result = run_full_agent()
+    communes = result['communes'] if result['total_communes'] > 0 else get_fallback_table()
+    saved = 0
+    for c in communes:
+        existing = db.query(CommuneMarketData).filter(
+            CommuneMarketData.country == c['country'],
+            CommuneMarketData.commune == c['commune']
+        ).first()
+        if existing:
+            existing.price_m2_avg = c.get('price_m2_avg', 0)
+            existing.income_index = c['income_index']
+            existing.cpm_usd      = c['cpm_usd']
+            existing.se_tier      = c['se_tier']
+            existing.updated_at   = datetime.utcnow()
+        else:
+            db.add(CommuneMarketData(
+                country      = c['country'],
+                commune      = c['commune'],
+                price_m2_avg = c.get('price_m2_avg', 0),
+                income_index = c['income_index'],
+                cpm_usd      = c['cpm_usd'],
+                se_tier      = c['se_tier'],
+                portal       = c.get('portal', 'fallback'),
+                sample_count = c.get('sample_count', 0),
+                scraped_at   = datetime.utcnow(),
+            ))
+        saved += 1
+    db.commit()
+    return {'ok': True, 'communes_saved': saved, 'countries': result.get('countries', []), 'errors': result.get('errors', [])}
+
+
+@app.get('/communes')
+def get_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
+    """Tabla de comunas con índice de ingreso y CPM. Usada por el motor de ads."""
+    from market_data_agent import get_fallback_table
+    q = db.query(CommuneMarketData)
+    if country:
+        q = q.filter(CommuneMarketData.country == country)
+    if se_tier:
+        q = q.filter(CommuneMarketData.se_tier == se_tier)
+    rows = q.order_by(CommuneMarketData.income_index.desc()).all()
+    if not rows:
+        # Sin datos en BD — usar fallback
+        data = get_fallback_table()
+        if country:
+            data = [c for c in data if c['country'] == country]
+        if se_tier:
+            data = [c for c in data if c['se_tier'] == se_tier]
+        return {'communes': data, 'source': 'fallback'}
+    return {
+        'communes': [{'country': r.country, 'commune': r.commune,
+                      'income_index': r.income_index, 'cpm_usd': r.cpm_usd,
+                      'se_tier': r.se_tier, 'updated_at': r.updated_at.isoformat() if r.updated_at else None}
+                     for r in rows],
+        'source': 'database'
+    }
