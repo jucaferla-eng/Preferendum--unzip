@@ -71,7 +71,7 @@ services:
       python -c "
       import requests;
       requests.post(
-        'https://preferendum-unzip.onrender.com/admin/run-market-agent/daily',
+        'https://preferendum-unzip-d2zd.onrender.com/admin/run-market-agent/daily',
         params={'secret': 'preferendum-admin-2024'},
         timeout=600
       )"
@@ -85,7 +85,7 @@ services:
       python -c "
       import requests;
       requests.post(
-        'https://preferendum-unzip.onrender.com/agent/run-task',
+        'https://preferendum-unzip-d2zd.onrender.com/agent/run-task',
         params={'task_name': 'daily_review', 'secret': 'preferendum-admin-2024'},
         timeout=120
       )"

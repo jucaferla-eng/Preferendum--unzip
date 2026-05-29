@@ -695,7 +695,7 @@ def send_email_otp(email, code, name=''):
 
 
 def send_welcome_certificate(email, name, user_id):
-    cert_url = f'https://preferendum-unzip.onrender.com/debates/feed'
+    cert_url = f'https://preferendum-unzip-d2zd.onrender.com/debates/feed'
     qr_url   = f'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={cert_url}&bgcolor=07090f&color=2563eb&format=png'
     cert_id  = f'PRF-{user_id:06d}'
     html = (
@@ -1568,7 +1568,7 @@ decision debe ser: "approved" (score>=80), "review" (score 50-79), "rejected" (s
 
 
 def _send_supervisor_authorization_email(supervisor_email, employee_name, employee_email, company, cargo, token):
-    approve_url = f'https://preferendum-unzip.onrender.com/organizer/authorize/{token}'
+    approve_url = f'https://preferendum-unzip-d2zd.onrender.com/organizer/authorize/{token}'
     html = (
         f'<div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#07090f;color:#fff;border-radius:16px;overflow:hidden;">'
         f'<div style="background:#0d1526;padding:28px 32px;border-bottom:1px solid #1e2d4a;">'
