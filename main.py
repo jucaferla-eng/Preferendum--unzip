@@ -1302,6 +1302,148 @@ def serve_app():
     except FileNotFoundError:
         return HTMLResponse(content='<html><body>App not found</body></html>', status_code=404)
 
+@app.get('/r/{debate_id}', response_class=HTMLResponse)
+def public_results_page(debate_id: int, db: Session = Depends(get_db)):
+    """Página pública de resultados — compartible por el organizador."""
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        return HTMLResponse('<html><body>Consulta no encontrada</body></html>', status_code=404)
+
+    opts    = json.loads(debate.options or '[]')
+    counts  = json.loads(debate.vote_counts or '{}')
+    total   = debate.total_votes or 0
+    ls      = round(debate.legitimacy_score or 0, 1)
+    status  = debate.status or 'live'
+    status_label = {'live': 'En curso', 'closed': 'Cerrada', 'draft': 'Borrador'}.get(status, status)
+    status_color = {'live': '#10B981', 'closed': '#2563EB', 'draft': '#F59E0B'}.get(status, '#64748B')
+    closes  = debate.closes_at.strftime('%d %b %Y') if debate.closes_at else ''
+    tx      = debate.created_at.strftime('%d %b %Y') if debate.created_at else ''
+
+    COLORS = ['#2563EB','#10B981','#F59E0B','#F43F5E','#8B5CF6','#06B6D4','#EC4899','#84CC16','#F97316','#6366F1']
+
+    bars_html = ''
+    winner_opt = ''
+    winner_count = 0
+    for i, opt in enumerate(opts):
+        cnt  = counts.get(opt, 0)
+        pct  = round(cnt / total * 100, 1) if total > 0 else 0
+        color = COLORS[i % len(COLORS)]
+        if cnt > winner_count:
+            winner_count = cnt
+            winner_opt   = opt
+        bars_html += f'''
+        <div style="margin-bottom:20px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:15px;color:#e8f0fc;font-weight:600;">{opt}</span>
+            <span style="font-size:15px;font-weight:800;color:{color};">{pct}%</span>
+          </div>
+          <div style="background:#1a2240;border-radius:8px;height:12px;overflow:hidden;">
+            <div style="height:100%;width:{pct}%;background:{color};border-radius:8px;transition:width 1s;"></div>
+          </div>
+          <div style="font-size:12px;color:#64748b;margin-top:4px;">{cnt:,} votos</div>
+        </div>'''
+
+    winner_html = ''
+    if status == 'closed' and winner_opt:
+        winner_html = f'''
+        <div style="background:linear-gradient(135deg,#10b98122,#2563eb22);border:1px solid #10b981;
+          border-radius:16px;padding:20px 24px;margin-bottom:28px;text-align:center;">
+          <div style="font-size:11px;color:#10b981;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Resultado verificado</div>
+          <div style="font-size:22px;font-weight:900;color:#f0f4ff;margin-bottom:4px;">🏆 {winner_opt}</div>
+          <div style="font-size:13px;color:#94a3b8;">{winner_count:,} votos · {round(winner_count/total*100,1) if total>0 else 0}%</div>
+        </div>'''
+
+    html = f'''<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta property="og:title" content="Resultados: {debate.title[:60]}"/>
+<meta property="og:description" content="{total:,} votos verificados · Legitimacy Score {ls}% · Preferendum"/>
+<meta property="og:type" content="website"/>
+<title>Resultados — {debate.title[:50]} | Preferendum</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box;}}
+body{{background:#090D18;color:#f0f4ff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;}}
+.wrap{{max-width:640px;margin:0 auto;padding:24px 20px 60px;}}
+.nav{{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;}}
+.logo{{font-size:20px;font-weight:900;color:#f0f4ff;letter-spacing:-0.5px;}}
+.logo span{{color:#2563EB;}}
+.badge{{font-size:11px;padding:4px 12px;border-radius:20px;font-weight:700;letter-spacing:0.5px;}}
+.card{{background:#0f1528;border:1px solid #1a2240;border-radius:20px;padding:24px;margin-bottom:20px;}}
+.inst{{font-size:13px;color:#64748b;font-weight:600;margin-bottom:6px;}}
+.title{{font-size:22px;font-weight:900;color:#f0f4ff;line-height:1.4;margin-bottom:16px;}}
+.context{{font-size:14px;color:#94a3b8;line-height:1.7;}}
+.stats{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px;}}
+.stat{{background:#0f1528;border:1px solid #1a2240;border-radius:14px;padding:16px;text-align:center;}}
+.stat-n{{font-size:26px;font-weight:900;color:#f0f4ff;}}
+.stat-l{{font-size:11px;color:#64748b;margin-top:4px;letter-spacing:0.5px;text-transform:uppercase;}}
+.chain{{background:#0f1528;border:1px solid #1a2240;border-radius:14px;padding:16px;margin-bottom:20px;
+  display:flex;align-items:center;gap:12px;}}
+.chain-icon{{font-size:24px;}}
+.chain-text{{font-size:11px;color:#64748b;}}
+.chain-hash{{font-family:monospace;font-size:11px;color:#2563eb;word-break:break-all;margin-top:2px;}}
+.footer{{text-align:center;margin-top:40px;padding-top:24px;border-top:1px solid #1a2240;}}
+.footer-logo{{font-size:18px;font-weight:900;margin-bottom:8px;}}
+.footer-logo span{{color:#2563eb;}}
+.footer-sub{{font-size:12px;color:#64748b;margin-bottom:4px;}}
+.footer-mem{{font-size:11px;color:#475569;font-style:italic;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="nav">
+    <div class="logo">prefer<span>endum</span></div>
+    <span class="badge" style="background:{status_color}22;color:{status_color};">{status_label}</span>
+  </div>
+
+  <div class="card">
+    <div class="inst">{debate.inst_name or 'Preferendum'}</div>
+    <div class="title">{debate.title}</div>
+    {f'<div class="context">{debate.context}</div>' if debate.context else ''}
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-n">{total:,}</div>
+      <div class="stat-l">Votos</div>
+    </div>
+    <div class="stat">
+      <div class="stat-n" style="color:#10b981;">{ls}%</div>
+      <div class="stat-l">Legitimacy</div>
+    </div>
+    <div class="stat">
+      <div class="stat-n" style="font-size:16px;color:#64748b;">{closes or '—'}</div>
+      <div class="stat-l">Cierre</div>
+    </div>
+  </div>
+
+  {winner_html}
+
+  <div class="card">
+    <div style="font-size:11px;color:#64748b;letter-spacing:2px;text-transform:uppercase;margin-bottom:20px;">Distribución de votos</div>
+    {bars_html if total > 0 else '<div style="text-align:center;color:#64748b;padding:20px;">Aún no hay votos</div>'}
+  </div>
+
+  <div class="chain">
+    <div class="chain-icon">⛓</div>
+    <div>
+      <div class="chain-text">Resultado anclado en Polygon blockchain</div>
+      <div class="chain-hash">{debate.tx_hash or 'Pendiente de anclaje blockchain'}</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="footer-logo">prefer<span>endum</span></div>
+    <div class="footer-sub">Plataforma de decisiones verificadas · preferendum.com</div>
+    <div class="footer-mem">En memoria del Fundador José Ignacio Fernández (1989–2024)</div>
+  </div>
+</div>
+</body>
+</html>'''
+    return HTMLResponse(content=html)
+
+
 @app.get('/privacy')
 def privacy():
     html = """<!DOCTYPE html>
