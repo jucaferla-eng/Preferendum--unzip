@@ -2445,7 +2445,36 @@ export default function PreferendumV8() {
             <Card>
               <Lbl>Información</Lbl>
               <Input label="Título de la pregunta" placeholder="¿Cuál es la prioridad para el presupuesto 2027?" value={ncTitle} onChange={setNcTitle}/>
-              <Input label="Descripción (opcional)" placeholder="Explica el contexto..." value={ncDesc} onChange={setNcDesc}/>
+              <Input label="Descripción (opcional)" placeholder="Explica el contexto de la consulta..." value={ncDesc} onChange={setNcDesc}/>
+
+              {/* ÁRBOL DE DECISIONES — justo después del contexto */}
+              <div style={{marginTop:16,padding:14,borderRadius:12,
+                background:ncBranching?`${T.blue}14`:`${T.rim}44`,
+                border:`1px solid ${ncBranching?T.blue:T.rim}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:14,fontWeight:700,color:ncBranching?T.white:T.fog,marginBottom:4}}>
+                      🌳 Árbol de decisiones
+                    </div>
+                    <div style={{fontSize:12,color:ncBranching?T.silver:T.fog,lineHeight:1.6}}>
+                      {ncBranching
+                        ? "Activado — cada respuesta lleva a una pregunta distinta. Construye tu árbol abajo."
+                        : "Activa esta opción para hacer preguntas en cascada: dependiendo de la respuesta del votante, el sistema le hace una siguiente pregunta diferente. Ideal para mapear preferencias en detalle sin limitar las opciones desde el inicio."
+                      }
+                    </div>
+                    {!ncBranching&&(
+                      <div style={{fontSize:11,color:T.fog,marginTop:6}}>
+                        Ejemplo: Pregunta 1 → "¿Prefieres A o B?" · Si elige A → Pregunta 2A · Si elige B → Pregunta 2B
+                      </div>
+                    )}
+                  </div>
+                  <div onClick={()=>setNcBranching(p=>!p)} style={{width:44,height:24,borderRadius:12,cursor:"pointer",
+                    background:ncBranching?T.blue:T.rim,position:"relative",transition:"background 0.2s",flexShrink:0,marginTop:2}}>
+                    <div style={{position:"absolute",top:3,left:ncBranching?21:3,width:18,height:18,borderRadius:9,
+                      background:"white",transition:"left 0.2s"}}/>
+                  </div>
+                </div>
+              </div>
             </Card>
             <Card>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -2577,19 +2606,14 @@ export default function PreferendumV8() {
                 </div>
               )}
             </Card>
+            {ncBranching&&(
             <Card>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:ncBranching?14:0}}>
-                <div>
-                  <Lbl style={{marginBottom:2}}>Árbol de preferencias</Lbl>
-                  <div style={{fontSize:11,color:T.fog}}>Q2 según respuesta a Q1, Q3 según Q2 — mapea el espacio entre extremos</div>
-                </div>
-                <div onClick={()=>setNcBranching(p=>!p)} style={{width:44,height:24,borderRadius:12,cursor:"pointer",
-                  background:ncBranching?T.blue:T.rim,position:"relative",transition:"background 0.2s",flexShrink:0}}>
-                  <div style={{position:"absolute",top:3,left:ncBranching?21:3,width:18,height:18,borderRadius:9,
-                    background:"white",transition:"left 0.2s"}}/>
-                </div>
+              <Lbl>🌳 Construye tu árbol de decisiones</Lbl>
+              <div style={{fontSize:12,color:T.fog,marginBottom:14,lineHeight:1.6}}>
+                Para cada opción de la pregunta principal, define qué pregunta de seguimiento aparece.
+                Puedes dejar en blanco las que no necesiten seguimiento.
               </div>
-              {ncBranching&&ncOpts.map((opt,i)=>{
+              {ncOpts.filter(Boolean).map((opt,i)=>{
                 if(!opt) return null;
                 const q2=ncQ2[i];
                 return (
@@ -2656,6 +2680,7 @@ export default function PreferendumV8() {
                 );
               })}
             </Card>
+            )}
             <Card>
               <Lbl>Cierre de votación</Lbl>
               <Input label="Fecha de cierre" type="date" value={ncCloses} onChange={setNcCloses}/>
