@@ -240,7 +240,7 @@ export default function PreferendumV8() {
   const [myDebateIds,setMyDebateIds] = useState([]); // IDs created in this session
   const [ncTitle,setNcTitle]     = useState('');
   const [ncDesc,setNcDesc]       = useState('');
-  const [ncOpts,setNcOpts]       = useState(['','','','']);
+  const [ncOpts,setNcOpts]       = useState(['','']);
   const [ncCloses,setNcCloses]   = useState('');
   const [ncLoading,setNcLoading] = useState(false);
   const [ncAudience,setNcAudience] = useState('all');
@@ -469,6 +469,21 @@ export default function PreferendumV8() {
       loadOpinions(selDebate.id);
       setNewOpinionText('');
       setOpinionError('');
+      // Verificar si ya votó en este debate (persiste entre sesiones)
+      if(authToken) {
+        apiFetch('GET', `/debates/${selDebate.id}/my-vote`)
+          .then(data => {
+            if(data.has_voted && !voted[selDebate.id]) {
+              setVoted(prev => ({...prev, [selDebate.id]: {
+                opt:    data.option,
+                code:   data.verify_code,
+                chain:  [],
+                reward: data.reward_code || '',
+              }}));
+            }
+          })
+          .catch(()=>{});
+      }
     }
   }, [screen, selDebate?.id]);
 
@@ -1372,9 +1387,15 @@ export default function PreferendumV8() {
           {/* Tab bar */}
           <div style={{display:"flex",gap:4}}>
             {[["debate","💬 Debate"],["vote","🗳 Votar"],["results","📊 Resultados"]].map(([id,lbl])=>(
-              <button key={id} onClick={()=>setDebateTab(id)} style={{
+              <button key={id} onClick={()=>{
+                if(id==="results"&&!hasVoted&&deb.status==="live"){
+                  alert("Vota primero para ver los resultados.");return;
+                }
+                setDebateTab(id);
+              }} style={{
                 flex:1,padding:"10px 6px",borderRadius:10,border:"none",cursor:"pointer",
                 background:debateTab===id?T.blue:`${T.blue}18`,
+                opacity:(id==="results"&&!hasVoted&&deb.status==="live")?0.4:1,
                 color:debateTab===id?"#fff":T.fog,
                 fontSize:14,fontWeight:debateTab===id?700:500}}>
                 {lbl}
@@ -2505,14 +2526,28 @@ export default function PreferendumV8() {
                 </>
               ):(
                 <>
-                  {["Opción 1","Opción 2","Opción 3","Opción 4"].map((p,i)=>(
-                    <input key={i} placeholder={p} value={ncOpts[i]}
-                      onChange={e=>{const o=[...ncOpts];o[i]=e.target.value;setNcOpts(o);}}
-                      style={{width:"100%",padding:"10px 14px",
-                        borderRadius:10,background:T.deep,border:`1.5px solid ${T.rim}`,
-                        color:T.snow,fontSize:14,outline:"none",fontFamily:"inherit",
-                        marginBottom:8,boxSizing:"border-box"}}/>
+                  {ncOpts.map((opt,i)=>(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+                      <input placeholder={`Opción ${i+1}`} value={ncOpts[i]}
+                        onChange={e=>{const o=[...ncOpts];o[i]=e.target.value;setNcOpts(o);}}
+                        style={{flex:1,padding:"10px 14px",
+                          borderRadius:10,background:T.deep,border:`1.5px solid ${ncOpts[i]?COLORS[i%COLORS.length]+'66':T.rim}`,
+                          color:T.snow,fontSize:14,outline:"none",fontFamily:"inherit",
+                          boxSizing:"border-box"}}/>
+                      {ncOpts.length>2&&(
+                        <button onClick={()=>setNcOpts(p=>p.filter((_,j)=>j!==i))}
+                          style={{background:"none",border:"none",color:T.coral,fontSize:18,cursor:"pointer",padding:"4px"}}>×</button>
+                      )}
+                    </div>
                   ))}
+                  {ncOpts.length<10&&(
+                    <button onClick={()=>setNcOpts(p=>[...p,''])}
+                      style={{width:"100%",padding:"10px",borderRadius:10,background:"transparent",
+                        border:`1.5px dashed ${T.teal}66`,color:T.teal,fontSize:13,fontWeight:700,
+                        cursor:"pointer",marginTop:4}}>
+                      + Agregar opción
+                    </button>
+                  )}
                 </>
               )}
             </Card>

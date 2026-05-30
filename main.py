@@ -2211,11 +2211,45 @@ def confirm_verification(
         'legitimacy_score': debate.legitimacy_score if debate else 0,
     }
 
+@app.get('/debates/{debate_id}/my-vote')
+def get_my_vote(debate_id: int,
+                user: User = Depends(get_optional_user),
+                db: Session = Depends(get_db)):
+    """Devuelve si el usuario ya votó en esta consulta y su código."""
+    if not user:
+        return {'has_voted': False, 'vote': None}
+    log = db.query(HasVotedLog).filter(
+        HasVotedLog.user_id == user.id,
+        HasVotedLog.debate_id == debate_id
+    ).first()
+    if not log:
+        return {'has_voted': False, 'vote': None}
+    vote = db.query(DebateVote).filter(
+        DebateVote.verify_code == log.verify_code
+    ).first()
+    return {
+        'has_voted': True,
+        'verify_code': log.verify_code,
+        'option': vote.option_text if vote else '',
+        'reward_code': vote.reward_code if vote and hasattr(vote, 'reward_code') else '',
+    }
+
+
 @app.get('/debates/{debate_id}/results')
-def get_results(debate_id: int, db: Session = Depends(get_db)):
+def get_results(debate_id: int,
+                user: User = Depends(get_optional_user),
+                db: Session = Depends(get_db)):
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
         raise HTTPException(404, 'Consultation not found')
+    # Resultados solo visibles si el usuario ya votó o la consulta está cerrada
+    if debate.status == 'live' and user:
+        log = db.query(HasVotedLog).filter(
+            HasVotedLog.user_id == user.id,
+            HasVotedLog.debate_id == debate_id
+        ).first()
+        if not log:
+            raise HTTPException(403, 'Debes votar primero para ver los resultados')
     return {
         'debate': format_debate(debate),
         'legitimacy_score': debate.legitimacy_score,
