@@ -13,7 +13,7 @@ Todos los módulos integrados en un solo archivo para Render:
   ✅ Privacy: /privacy
 
 Run: uvicorn main:app --host 0.0.0.0 --port 10000
-En memoria de José Ignacio Fernández (1989-2024)
+En memoria del Fundador José Ignacio Fernández (1989–2024)
 """
 
 from __future__ import annotations
@@ -489,7 +489,7 @@ _migrate()
 app = FastAPI(
     title='Preferendum API',
     version='3.0.0',
-    description='En memoria de Jose Ignacio Fernandez (1989-2024)'
+    description='En memoria del Fundador José Ignacio Fernández (1989–2024)'
 )
 
 app.add_middleware(CORSMiddleware,
@@ -643,7 +643,7 @@ def send_email_otp(email, code, name=''):
         f'<div style="background:#1e2a3d;padding:24px;text-align:center;border-radius:8px;">'
         f'<span style="font-size:40px;font-weight:bold;letter-spacing:10px;color:#2563eb;">{code}</span></div>'
         f'<p style="color:#94a3b8;">Válido por 10 minutos. No lo compartas con nadie.</p>'
-        f'<p style="color:#475569;font-size:12px;">En memoria de José Ignacio Fernández (1989-2024)</p>'
+        f'<p style="color:#475569;font-size:12px;">En memoria del Fundador José Ignacio Fernández (1989–2024)</p>'
         f'</div>'
     )
 
@@ -723,7 +723,7 @@ def send_welcome_certificate(email, name, user_id):
         f'</div>'
         f'</div>'
         f'<div style="padding:16px 32px;border-top:1px solid #1e2d4a;text-align:center;">'
-        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria de José Ignacio Fernández (1989–2024)</p>'
+        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria del Fundador José Ignacio Fernández (1989–2024)</p>'
         f'</div>'
         f'</div>'
     )
@@ -1281,7 +1281,7 @@ footer{border-top:1px solid var(--rim);padding:48px;
   </div>
   <div class="footer-memo">
     © 2026 Preferendum · CAIP Task Force · Santiago, Chile<br/>
-    <em>En memoria de José Ignacio Fernández (1989–2024)</em>
+    <em>En memoria del Fundador José Ignacio Fernández (1989–2024)</em>
   </div>
 </footer>
 
@@ -1332,7 +1332,7 @@ Ads are targeted using anonymous demographic data only.</p>
 <h2>Contact</h2>
 <p>privacy@preferendum.com — CAIP Task Force, Santiago, Chile</p>
 <p style="margin-top:48px;color:#4a5568;font-size:13px;font-style:italic;">
-In memory of Jose Ignacio Fernandez (1989-2024), who proved this was possible.</p>
+En memoria del Fundador José Ignacio Fernández (1989–2024), quien demostró que era posible.</p>
 </body></html>"""
     return HTMLResponse(content=html)
 
@@ -1598,7 +1598,7 @@ def _send_supervisor_authorization_email(supervisor_email, employee_name, employ
         f'padding:14px;border-radius:10px;text-align:center;font-size:14px;">Rechazar</a>'
         f'</div></div>'
         f'<div style="padding:16px 32px;border-top:1px solid #1e2d4a;text-align:center;">'
-        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria de José Ignacio Fernández (1989–2024)</p>'
+        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria del Fundador José Ignacio Fernández (1989–2024)</p>'
         f'</div></div>'
     )
     resend_key = os.getenv('RESEND_API_KEY')

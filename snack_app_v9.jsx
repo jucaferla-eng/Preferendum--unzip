@@ -555,7 +555,7 @@ export default function PreferendumV8() {
           Tu voz. Tu poder. Verificado en blockchain.
         </div>
         <div style={{fontSize:11,color:T.mist,fontStyle:"italic",marginBottom:48}}>
-          En memoria de José Ignacio Fernández (1989–2024)
+          En memoria del Fundador José Ignacio Fernández (1989–2024)
         </div>
         <div style={{width:"100%",maxWidth:320,display:"flex",flexDirection:"column",gap:12}}>
           <button onClick={()=>{setUserType("voter");go("register");}} style={{
