@@ -1292,6 +1292,16 @@ footer{border-top:1px solid var(--rim);padding:48px;
 def health():
     return {'status': 'ok', 'timestamp': datetime.utcnow().isoformat()}
 
+@app.get('/app', response_class=HTMLResponse)
+def serve_app():
+    """Sirve la app web directamente desde el servidor.
+    La app móvil la carga aquí — cambios se ven sin rebuild de la app."""
+    try:
+        with open('assets/app.html', 'r', encoding='utf-8') as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content='<html><body>App not found</body></html>', status_code=404)
+
 @app.get('/privacy')
 def privacy():
     html = """<!DOCTYPE html>

@@ -5,8 +5,8 @@ import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
 
-const BG      = '#090D18';
-const API_URL = 'https://preferendum-unzip.onrender.com';
+const BG       = '#090D18';
+const APP_URL  = 'https://preferendum-unzip-d2zd.onrender.com/app';
 
 export default function App() {
   const [html,  setHtml]  = useState(null);
@@ -16,38 +16,39 @@ export default function App() {
 
   async function loadHtml() {
     try {
-      // fromModule is synchronous; downloadAsync copies the bundled asset to disk
+      // Intentar cargar desde el servidor (cambios instantáneos sin rebuild)
+      const resp = await fetch(APP_URL, { timeout: 10000 });
+      if (resp.ok) {
+        const content = await resp.text();
+        if (content && content.length > 500) {
+          setHtml(content);
+          return;
+        }
+      }
+    } catch (e) {
+      console.log('Server not available, falling back to local bundle');
+    }
+
+    // Fallback: bundle local (funciona sin internet)
+    try {
       const asset = Asset.fromModule(require('./assets/app.html'));
       await asset.downloadAsync();
-
-      if (!asset.localUri) {
-        throw new Error('asset.localUri is null — asset not cached on device');
-      }
-
+      if (!asset.localUri) throw new Error('asset.localUri is null');
       const content = await FileSystem.readAsStringAsync(asset.localUri);
-
-      if (!content || content.length < 500) {
-        throw new Error(`HTML too short (${content?.length ?? 0} chars) — bundle may be corrupt`);
-      }
-
+      if (!content || content.length < 500) throw new Error(`HTML too short (${content?.length ?? 0} chars)`);
       setHtml(content);
     } catch (e) {
-      // Surface the error visibly so we can diagnose in TestFlight
       setError(String(e));
     }
   }
 
-  // Visible error — never a silent infinite spinner
   if (error) {
     return (
       <View style={[styles.loading, { padding: 32 }]}>
         <Text style={{ color: '#f43f5e', fontSize: 13, textAlign: 'center', lineHeight: 20 }}>
           {error}
         </Text>
-        <Text
-          onPress={loadHtml}
-          style={{ color: '#2563eb', fontSize: 14, marginTop: 20, fontWeight: '700' }}
-        >
+        <Text onPress={loadHtml} style={{ color: '#2563eb', fontSize: 14, marginTop: 20, fontWeight: '700' }}>
           Retry
         </Text>
       </View>
@@ -67,9 +68,7 @@ export default function App() {
       <StatusBar style="light" backgroundColor={BG} />
       <WebView
         style={styles.webview}
-        // inline html + baseUrl makes fetch() calls go to the right origin
-        // avoiding CORS issues. This is the reliable approach for local HTML on iOS.
-        source={{ html, baseUrl: API_URL }}
+        source={{ html, baseUrl: APP_URL }}
         originWhitelist={['*']}
         javaScriptEnabled
         domStorageEnabled
