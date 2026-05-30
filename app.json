@@ -36,6 +36,11 @@
       }
     },
     "owner": "jifg749090",
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/icon.png"
+    },
     "plugins": [
       "expo-font",
       "expo-secure-store",
