@@ -1048,8 +1048,8 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
     <em>Any issue.</em>
   </h1>
   <p class="nuance">
-    <strong>When everyone expresses their preference,<br/>the nuance appears.</strong><br/>
-    More voices. More nuance. Better decisions.
+    <strong>Global decisions. Define your path.</strong><br/>
+    When everyone expresses their preference, the nuance appears.
   </p>
   <button class="enter-btn" onclick="showPage2()">
     Enter →
