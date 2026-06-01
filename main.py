@@ -1041,7 +1041,7 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
 
 <!-- PAGE 1: CONCEPT -->
 <div id="page1">
-  <div class="brand">preferendum</div>
+  <div class="brand">prefer<span style="color:#2563EB">endum</span></div>
   <h1 class="headline">
     Anyone.<br/>
     Anywhere.<br/>
@@ -1059,7 +1059,7 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
 
 <!-- PAGE 2: ROLE SELECTION -->
 <div id="page2">
-  <div class="p2-logo">preferendum</div>
+  <div class="p2-logo">prefer<span style="color:#2563EB">endum</span></div>
   <h2 class="p2-title">Who are you?</h2>
   <p class="p2-sub">
     <strong>Every decision begins with a preference.</strong><br/>
@@ -1073,7 +1073,7 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
     </a>
     <a href="/organizers" class="role-card">
       <span class="role-arrow">→</span>
-      <div class="role-name">I'm an Institution</div>
+      <div class="role-name">I want to run a consultation</div>
       <div class="role-phrase">"Turn preferences into decisions your stakeholders trust."</div>
     </a>
     <a href="/marketers" class="role-card">
