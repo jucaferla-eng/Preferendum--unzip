@@ -1079,7 +1079,7 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
     <a href="/marketers" class="role-card">
       <span class="role-arrow">→</span>
       <div class="role-name">I'm an Advertiser</div>
-      <div class="role-phrase">"Reach people who are actively deciding."</div>
+      <div class="role-phrase">"Benefit from reaching people who are actively deciding."</div>
     </a>
   </div>
   <button class="back-btn" onclick="showPage1()">← Back</button>
