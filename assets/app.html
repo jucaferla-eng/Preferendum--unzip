@@ -14,6 +14,128 @@
 <script type="text/babel" data-presets="react">
 const { useState, useRef, useEffect } = React;
 
+// ══ i18n — 10-LANGUAGE MATRIX ══════════════════════════════
+// Columns: en · es · de · ja · ar · pt · fr · id · it · zh
+const SUPPORTED_LANGS = ['en','es','de','ja','ar','pt','fr','id','it','zh'];
+const LANG_NAMES = {en:'English',es:'Español',de:'Deutsch',ja:'日本語',ar:'العربية',pt:'Português',fr:'Français',id:'Bahasa Indonesia',it:'Italiano',zh:'中文'};
+const LANG_FLAGS = {en:'🇬🇧',es:'🇪🇸',de:'🇩🇪',ja:'🇯🇵',ar:'🇸🇦',pt:'🇧🇷',fr:'🇫🇷',id:'🇮🇩',it:'🇮🇹',zh:'🇨🇳'};
+const RTL = ['ar'];
+
+const TR = {
+// ── LANGUAGE SELECTOR ────────────────────────────────────────
+'lang.title':    {en:'Choose your language',es:'Elige tu idioma',de:'Sprache wählen',ja:'言語を選択',ar:'اختر لغتك',pt:'Escolha seu idioma',fr:'Choisissez votre langue',id:'Pilih bahasa',it:'Scegli la lingua',zh:'选择语言'},
+'lang.subtitle': {en:'You can change this anytime in your profile.',es:'Puedes cambiarlo en tu perfil.',de:'Änderbar im Profil.',ja:'プロフィールで変更できます。',ar:'يمكنك تغييرها في ملفك.',pt:'Você pode mudar no perfil.',fr:'Modifiable dans votre profil.',id:'Bisa diubah di profil.',it:'Modificabile nel profilo.',zh:'可在个人资料中更改。'},
+'lang.continue': {en:'Continue',es:'Continuar',de:'Weiter',ja:'続ける',ar:'متابعة',pt:'Continuar',fr:'Continuer',id:'Lanjutkan',it:'Continua',zh:'继续'},
+'lang.change':   {en:'🌐 Language',es:'🌐 Idioma',de:'🌐 Sprache',ja:'🌐 言語',ar:'🌐 اللغة',pt:'🌐 Idioma',fr:'🌐 Langue',id:'🌐 Bahasa',it:'🌐 Lingua',zh:'🌐 语言'},
+// ── STATUS ────────────────────────────────────────────────────
+'status.live':      {en:'🟢 Live',es:'🟢 En vivo',de:'🟢 Live',ja:'🟢 ライブ',ar:'🟢 مباشر',pt:'🟢 Ao vivo',fr:'🟢 En direct',id:'🟢 Langsung',it:'🟢 Dal vivo',zh:'🟢 进行中'},
+'status.closed':    {en:'🔴 Closed',es:'🔴 Cerrado',de:'🔴 Geschlossen',ja:'🔴 終了',ar:'🔴 مغلق',pt:'🔴 Encerrado',fr:'🔴 Fermé',id:'🔴 Ditutup',it:'🔴 Chiuso',zh:'🔴 已关闭'},
+'status.verifying': {en:'🔍 Verifying',es:'🔍 En verificación',de:'🔍 In Prüfung',ja:'🔍 確認中',ar:'🔍 جارٍ التحقق',pt:'🔍 Verificando',fr:'🔍 En vérification',id:'🔍 Memverifikasi',it:'🔍 In verifica',zh:'🔍 验证中'},
+'status.verified':  {en:'✅ Verified',es:'✅ Verificado',de:'✅ Verifiziert',ja:'✅ 確認済み',ar:'✅ موثّق',pt:'✅ Verificado',fr:'✅ Vérifié',id:'✅ Terverifikasi',it:'✅ Verificato',zh:'✅ 已验证'},
+// ── TABS ─────────────────────────────────────────────────────
+'tab.debates':   {en:'Debates',es:'Debates',de:'Debatten',ja:'討論',ar:'نقاشات',pt:'Debates',fr:'Débats',id:'Debat',it:'Dibattiti',zh:'讨论'},
+'tab.results':   {en:'Results',es:'Resultados',de:'Ergebnisse',ja:'結果',ar:'النتائج',pt:'Resultados',fr:'Résultats',id:'Hasil',it:'Risultati',zh:'结果'},
+'tab.verify':    {en:'Verify',es:'Verificar',de:'Prüfen',ja:'確認',ar:'تحقق',pt:'Verificar',fr:'Vérifier',id:'Verifikasi',it:'Verifica',zh:'验证'},
+'tab.profile':   {en:'Profile',es:'Perfil',de:'Profil',ja:'プロフィール',ar:'الملف',pt:'Perfil',fr:'Profil',id:'Profil',it:'Profilo',zh:'我的'},
+'tab.dashboard': {en:'Dashboard',es:'Dashboard',de:'Dashboard',ja:'ダッシュボード',ar:'لوحة التحكم',pt:'Dashboard',fr:'Tableau de bord',id:'Dasbor',it:'Dashboard',zh:'控制台'},
+'tab.create':    {en:'Create',es:'Crear',de:'Erstellen',ja:'作成',ar:'إنشاء',pt:'Criar',fr:'Créer',id:'Buat',it:'Crea',zh:'创建'},
+'tab.ads':       {en:'Ads',es:'Publicidad',de:'Werbung',ja:'広告',ar:'إعلانات',pt:'Anúncios',fr:'Publicité',id:'Iklan',it:'Pubblicità',zh:'广告'},
+// ── LAUNCH ───────────────────────────────────────────────────
+'launch.tagline':    {en:'Your voice. Your power. Verified on blockchain.',es:'Tu voz. Tu poder. Verificado en blockchain.',de:'Deine Stimme. Deine Macht. Blockchain-verifiziert.',ja:'あなたの声。あなたの力。ブロックチェーンで検証済み。',ar:'صوتك. قوتك. موثّق على البلوك تشين.',pt:'Sua voz. Seu poder. Verificado na blockchain.',fr:'Ta voix. Ton pouvoir. Vérifié sur blockchain.',id:'Suaramu. Kekuatanmu. Diverifikasi di blockchain.',it:'La tua voce. Il tuo potere. Verificato su blockchain.',zh:'你的声音。你的力量。区块链验证。'},
+'launch.memorial':   {en:'In memory of Founder José Ignacio Fernández (1989–2024)',es:'En memoria del Fundador José Ignacio Fernández (1989–2024)',de:'In Erinnerung an Gründer José Ignacio Fernández (1989–2024)',ja:'創設者ホセ・イグナシオ・フェルナンデス（1989–2024）を偲んで',ar:'إحياءً لذكرى المؤسس خوسيه إيغناسيو فيرنانديس (1989–2024)',pt:'Em memória do Fundador José Ignacio Fernández (1989–2024)',fr:'À la mémoire du Fondateur José Ignacio Fernández (1989–2024)',id:'Mengenang Pendiri José Ignacio Fernández (1989–2024)',it:'In memoria del Fondatore José Ignacio Fernández (1989–2024)',zh:'纪念创始人何塞·伊格纳西奥·费尔南德斯（1989–2024）'},
+'launch.voter':      {en:'🙋 I\'m a voter',es:'🙋 Soy votante',de:'🙋 Ich bin Wähler·in',ja:'🙋 私は参加者です',ar:'🙋 أنا مشارك',pt:'🙋 Sou participante',fr:'🙋 Je suis électeur·rice',id:'🙋 Saya peserta',it:'🙋 Sono un elettore',zh:'🙋 我是参与者'},
+'launch.institution':{en:'🏛 I\'m an institution',es:'🏛 Soy institución',de:'🏛 Ich bin Institution',ja:'🏛 私は機関です',ar:'🏛 أنا مؤسسة',pt:'🏛 Sou instituição',fr:'🏛 Je suis institution',id:'🏛 Saya institusi',it:'🏛 Sono un\'istituzione',zh:'🏛 我是机构'},
+'launch.marketer':   {en:'📢 I\'m an advertiser',es:'📢 Soy anunciante / marketer',de:'📢 Ich bin Werbetreibende·r',ja:'📢 私は広告主です',ar:'📢 أنا معلن',pt:'📢 Sou anunciante',fr:'📢 Je suis annonceur·se',id:'📢 Saya pengiklan',it:'📢 Sono un inserzionista',zh:'📢 我是广告主'},
+// ── REGISTER ─────────────────────────────────────────────────
+'reg.title':      {en:'Voter registration',es:'Registro de votante',de:'Registrierung',ja:'参加登録',ar:'تسجيل المشارك',pt:'Cadastro',fr:'Inscription',id:'Pendaftaran',it:'Registrazione',zh:'注册'},
+'reg.heading':    {en:'Create your account',es:'Crea tu cuenta',de:'Konto erstellen',ja:'アカウント作成',ar:'أنشئ حسابك',pt:'Crie sua conta',fr:'Créer votre compte',id:'Buat akun',it:'Crea il tuo account',zh:'创建账户'},
+'reg.subtitle':   {en:'Your identity is verified with 7 layers. Never linked to your vote.',es:'Tu identidad se verifica con 7 capas. Nunca se vincula a tu voto.',de:'Deine Identität wird mit 7 Schichten verifiziert. Niemals mit deiner Stimme verknüpft.',ja:'あなたの身元は7層で検証されます。選択に紐付けられることはありません。',ar:'هويتك تُتحقق بـ7 طبقات. لا تُربط أبدًا بصوتك.',pt:'Sua identidade é verificada com 7 camadas. Nunca vinculada à sua escolha.',fr:'Votre identité est vérifiée en 7 couches. Jamais liée à votre vote.',id:'Identitas Anda diverifikasi dengan 7 lapisan. Tidak pernah dihubungkan ke pilihan Anda.',it:'La tua identità è verificata con 7 livelli. Mai collegata alla tua scelta.',zh:'您的身份经7层验证。从不与您的选择关联。'},
+'reg.layers':     {en:'7 verification layers — start after registration',es:'7 capas de verificación — empiezan tras el registro',de:'7 Verifizierungsschichten — starten nach Registrierung',ja:'7層の認証 — 登録後に開始',ar:'7 طبقات تحقق — تبدأ بعد التسجيل',pt:'7 camadas de verificação — começam após o cadastro',fr:'7 couches de vérification — démarrent après inscription',id:'7 lapisan verifikasi — dimulai setelah pendaftaran',it:'7 livelli di verifica — partono dopo la registrazione',zh:'7层验证 — 注册后开始'},
+'reg.personal':   {en:'Personal data',es:'Datos personales',de:'Persönliche Daten',ja:'個人情報',ar:'البيانات الشخصية',pt:'Dados pessoais',fr:'Données personnelles',id:'Data pribadi',it:'Dati personali',zh:'个人信息'},
+'reg.fullname':   {en:'Full name',es:'Nombre completo',de:'Vollständiger Name',ja:'氏名',ar:'الاسم الكامل',pt:'Nome completo',fr:'Nom complet',id:'Nama lengkap',it:'Nome completo',zh:'姓名'},
+'reg.phone':      {en:'Phone (with country code)',es:'Teléfono (con código de país)',de:'Telefon (mit Vorwahl)',ja:'電話番号（国コード付き）',ar:'الهاتف (مع رمز الدولة)',pt:'Telefone (com código do país)',fr:'Téléphone (avec indicatif)',id:'Telepon (dengan kode negara)',it:'Telefono (con prefisso paese)',zh:'电话（含国家代码）'},
+'reg.natid':      {en:'National ID / Passport',es:'RUT / DNI / Documento nacional',de:'Personalausweis / Pass',ja:'国民ID / パスポート',ar:'الهوية الوطنية / جواز السفر',pt:'CPF / RG / Documento',fr:'CNI / Passeport',id:'KTP / Paspor',it:'Carta d\'identità / Passaporto',zh:'身份证 / 护照'},
+'reg.gender':     {en:'Gender',es:'Género',de:'Geschlecht',ja:'性別',ar:'الجنس',pt:'Gênero',fr:'Genre',id:'Jenis kelamin',it:'Genere',zh:'性别'},
+'reg.female':     {en:'♀ Female',es:'♀ Femenino',de:'♀ Weiblich',ja:'♀ 女性',ar:'♀ أنثى',pt:'♀ Feminino',fr:'♀ Féminin',id:'♀ Perempuan',it:'♀ Femmina',zh:'♀ 女'},
+'reg.male':       {en:'♂ Male',es:'♂ Masculino',de:'♂ Männlich',ja:'♂ 男性',ar:'♂ ذكر',pt:'♂ Masculino',fr:'♂ Masculin',id:'♂ Laki-laki',it:'♂ Maschio',zh:'♂ 男'},
+'reg.other':      {en:'Other',es:'Otro',de:'Andere',ja:'その他',ar:'آخر',pt:'Outro',fr:'Autre',id:'Lainnya',it:'Altro',zh:'其他'},
+'reg.dob':        {en:'Date of birth',es:'Fecha de nacimiento',de:'Geburtsdatum',ja:'生年月日',ar:'تاريخ الميلاد',pt:'Data de nascimento',fr:'Date de naissance',id:'Tanggal lahir',it:'Data di nascita',zh:'出生日期'},
+'reg.country':    {en:'Country',es:'País',de:'Land',ja:'国',ar:'الدولة',pt:'País',fr:'Pays',id:'Negara',it:'Paese',zh:'国家'},
+'reg.city':       {en:'City / Region',es:'Ciudad / Comuna',de:'Stadt / Region',ja:'市区町村',ar:'المدينة / المنطقة',pt:'Cidade / Município',fr:'Ville / Commune',id:'Kota / Kecamatan',it:'Città / Comune',zh:'城市 / 地区'},
+'reg.security':   {en:'Security',es:'Seguridad',de:'Sicherheit',ja:'セキュリティ',ar:'الأمان',pt:'Segurança',fr:'Sécurité',id:'Keamanan',it:'Sicurezza',zh:'安全'},
+'reg.password':   {en:'Password',es:'Contraseña',de:'Passwort',ja:'パスワード',ar:'كلمة المرور',pt:'Senha',fr:'Mot de passe',id:'Kata sandi',it:'Password',zh:'密码'},
+'reg.pw_hint':    {en:'Minimum 8 characters',es:'Mínimo 8 caracteres',de:'Mindestens 8 Zeichen',ja:'最低8文字',ar:'8 أحرف على الأقل',pt:'Mínimo 8 caracteres',fr:'Minimum 8 caractères',id:'Minimal 8 karakter',it:'Minimo 8 caratteri',zh:'最少8个字符'},
+'reg.confirm_pw': {en:'Confirm password',es:'Confirmar contraseña',de:'Passwort bestätigen',ja:'パスワード確認',ar:'تأكيد كلمة المرور',pt:'Confirmar senha',fr:'Confirmer le mot de passe',id:'Konfirmasi kata sandi',it:'Conferma password',zh:'确认密码'},
+'reg.confirm_hint':{en:'Repeat your password',es:'Repite tu contraseña',de:'Passwort wiederholen',ja:'パスワードを繰り返す',ar:'أعد إدخال كلمة المرور',pt:'Repita sua senha',fr:'Répétez votre mot de passe',id:'Ulangi kata sandi',it:'Ripeti la password',zh:'重复密码'},
+'reg.verify_info': {en:'🔒 After registering we verify: 1·Email OTP · 2·SMS · 3·Document · 4·Selfie · 5·IMEI · 6·Geolocation · 7·Blockchain',es:'🔒 Tras registrarte verificaremos: {t("reg.verify_info")}',de:'🔒 Nach Registrierung prüfen wir: 1·E-Mail OTP · 2·SMS · 3·Dokument · 4·Selfie · 5·IMEI · 6·Geolokation · 7·Blockchain',ja:'🔒 登録後に確認: 1·メールOTP · 2·SMS · 3·書類 · 4·自撮り · 5·IMEI · 6·位置情報 · 7·ブロックチェーン',ar:'🔒 بعد التسجيل نتحقق: 1·OTP · 2·رسالة · 3·وثيقة · 4·صورة · 5·IMEI · 6·موقع · 7·بلوكتشين',pt:'🔒 Após cadastro verificamos: 1·Email OTP · 2·SMS · 3·Documento · 4·Selfie · 5·IMEI · 6·Geolocalização · 7·Blockchain',fr:'🔒 Après inscription nous vérifions: 1·Email OTP · 2·SMS · 3·Document · 4·Selfie · 5·IMEI · 6·Géolocalisation · 7·Blockchain',id:'🔒 Setelah daftar kami verifikasi: 1·OTP · 2·SMS · 3·Dokumen · 4·Selfie · 5·IMEI · 6·Geolokasi · 7·Blockchain',it:'🔒 Dopo la registrazione verifichiamo: 1·Email OTP · 2·SMS · 3·Documento · 4·Selfie · 5·IMEI · 6·Geolocalizzazione · 7·Blockchain',zh:'🔒 注册后我们验证：1·邮件OTP · 2·短信 · 3·证件 · 4·自拍 · 5·IMEI · 6·地理位置 · 7·区块链'},
+'reg.submit':     {en:'Create account →',es:'Crear cuenta →',de:'Konto erstellen →',ja:'アカウント作成 →',ar:'إنشاء الحساب →',pt:'Criar conta →',fr:'Créer le compte →',id:'Buat akun →',it:'Crea account →',zh:'创建账户 →'},
+'reg.loading':    {en:'Creating account...',es:'Creando cuenta...',de:'Konto wird erstellt...',ja:'作成中...',ar:'جارٍ الإنشاء...',pt:'Criando conta...',fr:'Création du compte...',id:'Membuat akun...',it:'Creazione account...',zh:'创建中...'},
+'reg.already':    {en:'Already have an account? Sign in',es:'¿Ya tienes cuenta? Inicia sesión',de:'Hast du ein Konto? Anmelden',ja:'アカウントをお持ちですか？ログイン',ar:'لديك حساب؟ تسجيل الدخول',pt:'Já tem conta? Entre',fr:"Vous avez un compte? Connectez-vous",id:'Sudah punya akun? Masuk',it:'Hai già un account? Accedi',zh:'已有账户？登录'},
+'reg.pw_error':   {en:'Passwords do not match',es:'Las contraseñas no coinciden',de:'Passwörter stimmen nicht überein',ja:'パスワードが一致しません',ar:'كلمات المرور غير متطابقة',pt:'As senhas não coincidem',fr:'Les mots de passe ne correspondent pas',id:'Kata sandi tidak cocok',it:'Le password non corrispondono',zh:'密码不匹配'},
+// ── LOGIN ─────────────────────────────────────────────────────
+'login.title':    {en:'Sign in',es:'Iniciar sesión',de:'Anmelden',ja:'ログイン',ar:'تسجيل الدخول',pt:'Entrar',fr:'Se connecter',id:'Masuk',it:'Accedi',zh:'登录'},
+'login.heading':  {en:'Welcome back',es:'Bienvenido de vuelta',de:'Willkommen zurück',ja:'おかえりなさい',ar:'مرحباً بعودتك',pt:'Bem-vindo de volta',fr:'Bienvenue de retour',id:'Selamat datang kembali',it:'Bentornato',zh:'欢迎回来'},
+'login.ph_email': {en:'you@email.com',es:'tu@correo.cl',de:'du@email.de',ja:'メールアドレス',ar:'you@email.com',pt:'voce@email.com',fr:'toi@email.fr',id:'kamu@email.com',it:'tu@email.it',zh:'你的邮箱'},
+'login.submit':   {en:'Sign in →',es:'Entrar →',de:'Anmelden →',ja:'ログイン →',ar:'دخول →',pt:'Entrar →',fr:'Connexion →',id:'Masuk →',it:'Accedi →',zh:'登录 →'},
+'login.loading':  {en:'Signing in...',es:'Entrando...',de:'Anmeldung...',ja:'ログイン中...',ar:'جارٍ الدخول...',pt:'Entrando...',fr:'Connexion...',id:'Sedang masuk...',it:'Accesso in corso...',zh:'登录中...'},
+'login.no_acct':  {en:"Don't have an account? Sign up",es:'¿No tienes cuenta? Regístrate',de:'Kein Konto? Registrieren',ja:'未登録？アカウント作成',ar:'ليس لديك حساب؟ سجّل',pt:'Não tem conta? Cadastre-se',fr:"Pas de compte? S'inscrire",id:'Belum punya akun? Daftar',it:"Non hai un account? Registrati",zh:'没有账户？注册'},
+// ── FEED ─────────────────────────────────────────────────────
+'feed.loading':   {en:'⏳ Loading...',es:'⏳ Cargando debates...',de:'⏳ Laden...',ja:'⏳ 読み込み中...',ar:'⏳ جارٍ التحميل...',pt:'⏳ Carregando...',fr:'⏳ Chargement...',id:'⏳ Memuat...',it:'⏳ Caricamento...',zh:'⏳ 加载中...'},
+'feed.voted':     {en:'✓ Already voted',es:'✓ Ya votaste',de:'✓ Bereits gewählt',ja:'✓ 選択済み',ar:'✓ شاركت بالفعل',pt:'✓ Já participou',fr:'✓ Déjà voté',id:'✓ Sudah memilih',it:'✓ Già votato',zh:'✓ 已参与'},
+'feed.votes':     {en:'votes',es:'votos',de:'Stimmen',ja:'票',ar:'مشارك',pt:'votos',fr:'votes',id:'suara',it:'voti',zh:'票'},
+'feed.open':      {en:'Open →',es:'Abrir →',de:'Öffnen →',ja:'開く →',ar:'فتح →',pt:'Abrir →',fr:'Ouvrir →',id:'Buka →',it:'Apri →',zh:'打开 →'},
+'feed.verify_p':  {en:'Verify →',es:'Verifica →',de:'Prüfen →',ja:'確認 →',ar:'تحقق →',pt:'Verificar →',fr:'Vérifier →',id:'Verifikasi →',it:'Verifica →',zh:'验证 →'},
+'feed.ad':        {en:'Advertising',es:'Publicidad',de:'Werbung',ja:'広告',ar:'إعلان',pt:'Publicidade',fr:'Publicité',id:'Iklan',it:'Pubblicità',zh:'广告'},
+// ── VOTED SUCCESS ─────────────────────────────────────────────
+'voted.title':    {en:'Vote registered!',es:'¡Voto registrado!',de:'Stimme registriert!',ja:'選択が登録されました！',ar:'تم تسجيل اختيارك!',pt:'Voto registrado!',fr:'Vote enregistré!',id:'Suara terdaftar!',it:'Voto registrato!',zh:'选择已登记！'},
+'voted.sub':      {en:'Your vote was encrypted with AES-256, hashed with SHA-256 and anchored on Polygon blockchain.',es:'Tu voto fue cifrado con AES-256, hasheado con SHA-256 y anclado en blockchain Polygon.',de:'Deine Stimme wurde mit AES-256 verschlüsselt und auf der Polygon-Blockchain verankert.',ja:'あなたの選択はAES-256で暗号化され、PolygonブロックチェーンにアンカーされましたI。',ar:'تم تشفير اختيارك بـAES-256 وتثبيته على بلوكتشين Polygon.',pt:'Sua escolha foi criptografada com AES-256 e ancorada na blockchain Polygon.',fr:'Votre vote a été chiffré avec AES-256 et ancré sur la blockchain Polygon.',id:'Pilihan Anda dienkripsi dengan AES-256 dan ditanam di blockchain Polygon.',it:'Il tuo voto è stato cifrato con AES-256 e ancorato sulla blockchain Polygon.',zh:'您的选择已用AES-256加密，并锚定在Polygon区块链上。'},
+'voted.code_lbl': {en:'Your verification code',es:'Tu código de verificación',de:'Dein Verifizierungscode',ja:'確認コード',ar:'رمز التحقق',pt:'Seu código de verificação',fr:'Votre code de vérification',id:'Kode verifikasi',it:'Il tuo codice di verifica',zh:'您的验证码'},
+'voted.code_inf': {en:'Save this code. Verification opens when the vote closes.',es:'Guarda este código. La verificación abrirá cuando la votación cierre.',de:'Bewahre diesen Code. Verifizierung öffnet nach Abstimmungsende.',ja:'このコードを保存してください。投票終了後に検証が開始されます。',ar:'احتفظ بهذا الرمز. التحقق يفتح عند إغلاق التصويت.',pt:'Salve este código. A verificação abre quando a votação fechar.',fr:"Sauvegardez ce code. La vérification s'ouvre quand le vote se ferme.",id:'Simpan kode ini. Verifikasi dibuka saat pemungutan suara ditutup.',it:'Salva questo codice. La verifica si apre quando il voto si chiude.',zh:'保存此代码。投票结束后验证将开放。'},
+'voted.warn':     {en:'⚠️ Verification is NOT available during active voting',es:'⚠️ La verificación NO está disponible durante la votación activa',de:'⚠️ Verifizierung während Abstimmung NICHT verfügbar',ja:'⚠️ 投票中は確認を利用できません',ar:'⚠️ التحقق غير متاح أثناء التصويت النشط',pt:'⚠️ A verificação NÃO está disponível durante a votação ativa',fr:"⚠️ La vérification n'est PAS disponible pendant le vote actif",id:'⚠️ Verifikasi TIDAK tersedia selama pemungutan suara aktif',it:'⚠️ La verifica NON è disponibile durante la votazione attiva',zh:'⚠️ 投票进行中验证不可用'},
+'voted.back':     {en:'Back to feed →',es:'Volver al feed →',de:'Zurück zum Feed →',ja:'フィードに戻る →',ar:'عودة إلى الخلاصة →',pt:'Voltar ao feed →',fr:'Retour au fil →',id:'Kembali ke feed →',it:'Torna al feed →',zh:'返回列表 →'},
+// ── RESULTS ───────────────────────────────────────────────────
+'res.realtime':   {en:'Real time',es:'En tiempo real',de:'Echtzeit',ja:'リアルタイム',ar:'في الوقت الفعلي',pt:'Tempo real',fr:'Temps réel',id:'Waktu nyata',it:'Tempo reale',zh:'实时'},
+'res.title':      {en:'Results Zone',es:'Zona de Resultados',de:'Ergebniszone',ja:'結果ゾーン',ar:'منطقة النتائج',pt:'Zona de Resultados',fr:'Zone des Résultats',id:'Zona Hasil',it:'Zona Risultati',zh:'结果区'},
+'res.empty_t':    {en:"You haven't voted yet",es:'Aún no has votado',de:'Noch nicht gewählt',ja:'まだ参加していません',ar:'لم تشارك بعد',pt:'Você ainda não votou',fr:"Vous n'avez pas encore voté",id:'Anda belum memilih',it:'Non hai ancora votato',zh:'您还未参与'},
+'res.empty_s':    {en:'Participate in a debate and see real-time results here.',es:'Participa en un debate y aquí verás los resultados en tiempo real de tus temas.',de:'Nimm an einer Debatte teil und sieh hier Echtzeitergebnisse.',ja:'討論に参加すると、リアルタイム結果がここに表示されます。',ar:'شارك في نقاش وستظهر هنا النتائج الفورية.',pt:'Participe de um debate e veja resultados em tempo real aqui.',fr:'Participez à un débat et voyez les résultats en temps réel ici.',id:'Ikuti debat dan lihat hasil waktu nyata di sini.',it:'Partecipa a un dibattito e vedi i risultati in tempo reale qui.',zh:'参与讨论后，在此查看实时结果。'},
+'res.see_deb':    {en:'See debates →',es:'Ver debates →',de:'Debatten ansehen →',ja:'討論を見る →',ar:'عرض النقاشات →',pt:'Ver debates →',fr:'Voir les débats →',id:'Lihat debat →',it:'Vedi dibattiti →',zh:'查看讨论 →'},
+'res.your_vote':  {en:'✓ Your choice:',es:'✓ Tu voto:',de:'✓ Deine Wahl:',ja:'✓ あなたの選択:',ar:'✓ اختيارك:',pt:'✓ Sua escolha:',fr:'✓ Votre choix:',id:'✓ Pilihan Anda:',it:'✓ La tua scelta:',zh:'✓ 您的选择：'},
+'res.reward':     {en:'Your reward',es:'Tu recompensa',de:'Deine Belohnung',ja:'あなたの報酬',ar:'مكافأتك',pt:'Sua recompensa',fr:'Votre récompense',id:'Hadiah Anda',it:'Il tuo premio',zh:'您的奖励'},
+'res.code':       {en:'Code:',es:'Código:',de:'Code:',ja:'コード:',ar:'الرمز:',pt:'Código:',fr:'Code:',id:'Kode:',it:'Codice:',zh:'代码：'},
+'res.verified':   {en:'verified',es:'verificado',de:'verifiziert',ja:'確認済み',ar:'موثّق',pt:'verificado',fr:'vérifié',id:'terverifikasi',it:'verificato',zh:'已验证'},
+// ── VERIFY ────────────────────────────────────────────────────
+'ver.title':      {en:'Verify my vote',es:'Verificar mi voto',de:'Stimme verifizieren',ja:'選択を確認する',ar:'التحقق من اختياري',pt:'Verificar minha escolha',fr:'Vérifier mon vote',id:'Verifikasi pilihan saya',it:'Verifica il mio voto',zh:'验证我的选择'},
+'ver.warn':       {en:'⚠️ Verification is only available after the vote closes.',es:'⚠️ La verificación solo está disponible después de que la votación cierra.',de:'⚠️ Verifizierung nur nach Ende der Abstimmung verfügbar.',ja:'⚠️ 確認は投票終了後にのみ利用可能です。',ar:'⚠️ التحقق متاح فقط بعد إغلاق التصويت.',pt:'⚠️ A verificação só está disponível após o fechamento da votação.',fr:"⚠️ La vérification est uniquement disponible après la fermeture du vote.",id:'⚠️ Verifikasi hanya tersedia setelah pemungutan suara ditutup.',it:'⚠️ La verifica è disponibile solo dopo la chiusura della votazione.',zh:'⚠️ 验证仅在投票结束后可用。'},
+'ver.phase':      {en:'🔍 Debates in verification phase',es:'🔍 Debates en fase de verificación',de:'🔍 Debatten in der Prüfungsphase',ja:'🔍 検証フェーズの討論',ar:'🔍 نقاشات في مرحلة التحقق',pt:'🔍 Debates na fase de verificação',fr:'🔍 Débats en phase de vérification',id:'🔍 Debat dalam fase verifikasi',it:'🔍 Dibattiti in fase di verifica',zh:'🔍 验证阶段的讨论'},
+'ver.input':      {en:'Enter your verification code',es:'Ingresa tu código de verificación',de:'Verifizierungscode eingeben',ja:'確認コードを入力',ar:'أدخل رمز التحقق',pt:'Digite seu código de verificação',fr:'Entrez votre code de vérification',id:'Masukkan kode verifikasi',it:'Inserisci il tuo codice di verifica',zh:'输入您的验证码'},
+'ver.until':      {en:'Verification until:',es:'Verificación hasta:',de:'Verifizierung bis:',ja:'確認期限:',ar:'التحقق حتى:',pt:'Verificação até:',fr:"Vérification jusqu'au:",id:'Verifikasi hingga:',it:'Verifica fino al:',zh:'验证截止：'},
+'ver.participated':{en:'✓ Participated · Code:',es:'✓ Participaste · Código:',de:'✓ Teilgenommen · Code:',ja:'✓ 参加済み · コード:',ar:'✓ شاركت · الرمز:',pt:'✓ Participou · Código:',fr:'✓ Participé · Code:',id:'✓ Berpartisipasi · Kode:',it:'✓ Partecipato · Codice:',zh:'✓ 已参与 · 代码：'},
+// ── PROFILE ───────────────────────────────────────────────────
+'prof.title':     {en:'My profile',es:'Mi perfil',de:'Mein Profil',ja:'マイプロフィール',ar:'ملفي الشخصي',pt:'Meu perfil',fr:'Mon profil',id:'Profil saya',it:'Il mio profilo',zh:'我的资料'},
+'prof.verified':  {en:'✓ Verified 7 layers',es:t('prof.verified'),de:'✓ Verifiziert 7 Sch.',ja:'✓ 7層認証済み',ar:'✓ موثّق بـ7 طبقات',pt:'✓ Verificado 7 camadas',fr:'✓ Vérifié 7 couches',id:'✓ Terverifikasi 7 lapisan',it:'✓ Verificato 7 livelli',zh:'✓ 7层验证完成'},
+'prof.my_votes':  {en:'My choices and codes',es:'Mis votos y códigos',de:'Meine Wahlen & Codes',ja:'私の選択とコード',ar:'اختياراتي ورموزي',pt:'Minhas escolhas e códigos',fr:'Mes choix et codes',id:'Pilihan dan kode saya',it:'Le mie scelte e codici',zh:'我的选择和代码'},
+'prof.no_votes':  {en:"You haven't participated in any debate yet.",es:t('prof.no_votes'),de:'Noch an keiner Debatte teilgenommen.',ja:'まだどの討論にも参加していません。',ar:'لم تشارك في أي نقاش بعد.',pt:'Você ainda não participou de nenhum debate.',fr:"Vous n'avez pas encore participé à un débat.",id:'Anda belum berpartisipasi dalam debat apapun.',it:'Non hai ancora partecipato a nessun dibattito.',zh:'您还未参与任何讨论。'},
+'prof.verify_now':{en:'🔍 Verify now →',es:'🔍 Verificar ahora →',de:'🔍 Jetzt prüfen →',ja:'🔍 今すぐ確認 →',ar:'🔍 تحقق الآن →',pt:'🔍 Verificar agora →',fr:'🔍 Vérifier maintenant →',id:'🔍 Verifikasi sekarang →',it:'🔍 Verifica ora →',zh:'🔍 立即验证 →'},
+'prof.logout':    {en:'Sign out',es:'Cerrar sesión',de:'Abmelden',ja:'サインアウト',ar:'تسجيل الخروج',pt:'Sair',fr:'Se déconnecter',id:'Keluar',it:'Disconnetti',zh:'退出登录'},
+// ── MISC ──────────────────────────────────────────────────────
+'back':           {en:'← Back',es:'← Volver',de:'← Zurück',ja:'← 戻る',ar:'→ عودة',pt:'← Voltar',fr:'← Retour',id:'← Kembali',it:'← Indietro',zh:'← 返回'},
+'confirm.identity':{en:'Confirm identity',es:'Confirmar identidad',de:'Identität bestätigen',ja:'身元を確認',ar:'تأكيد الهوية',pt:'Confirmar identidade',fr:'Confirmer l\'identité',id:'Konfirmasi identitas',it:'Conferma identità',zh:'确认身份'},
+};
+
+// ── Language bootstrap (module-level so all components can use t()) ──
+let __lang = (() => {
+  try {
+    const s = localStorage.getItem('pref_lang');
+    if (s && SUPPORTED_LANGS.includes(s)) return s;
+  } catch(e) {}
+  const nav = (navigator.language || 'en').toLowerCase().split(/[-_]/)[0];
+  return SUPPORTED_LANGS.includes(nav) && nav !== 'en' ? nav : 'en';
+})();
+
+function t(key) { return TR[key]?.[__lang] ?? TR[key]?.en ?? key; }
+function isRTL() { return RTL.includes(__lang); }
+
+
 // ══ DESIGN TOKENS ══════════════════════════════════════════════
 const T = {
   bg:     "#090c13",   // deep civic navy
@@ -43,10 +165,10 @@ const BAR_WIN       = 'linear-gradient(90deg,#2563EB,#93C5FD)';  // barra ganado
 
 // ══ DEBATE STATUS ═══════════════════════════════════════════════
 const STATUS = {
-  live:      { label:"🟢 En vivo",        color:T.green,  bg:"#22c55e22" },
-  closed:    { label:"🔴 Cerrado",         color:T.coral,  bg:"#ff4d6a22" },
-  verifying: { label:"🔍 En verificación", color:T.gold,   bg:"#f5c03022" },
-  verified:  { label:"✅ Verificado",      color:T.teal,   bg:"#00d4b422" },
+  live:      { label:"status.live",      color:T.green,  bg:"#22c55e22" },
+  closed:    { label:"status.closed",    color:T.coral,  bg:"#ff4d6a22" },
+  verifying: { label:"status.verifying", color:T.gold,   bg:"#f5c03022" },
+  verified:  { label:"status.verified",  color:T.teal,   bg:"#00d4b422" },
 };
 
 // ══ DATA ════════════════════════════════════════════════════════
@@ -337,6 +459,39 @@ function PreferendumV8() {
 
   const API = 'https://preferendum-unzip-d2zd.onrender.com';
 
+  // Route first-time visitors to language selector
+  useEffect(() => {
+    if (!localStorage.getItem('pref_lang') && !localStorage.getItem('pref_lang_skip')) {
+      go('lang-select');
+    }
+  }, []);
+
+
+
+  // ── Language state ─────────────────────────────────────────
+  const [appLang, setAppLang] = useState(__lang);
+  const updateLang = (lang) => {
+    __lang = lang;
+    try { localStorage.setItem('pref_lang', lang); } catch(e) {}
+    setAppLang(lang);
+  };
+
+  // ── IP geolocation on first launch (if no saved lang) ──────
+  useEffect(() => {
+    if (localStorage.getItem('pref_lang')) return; // already chosen
+    fetch('https://ipapi.co/json/')
+      .then(r => r.json())
+      .then(d => {
+        const cc = (d.country_code || '').toLowerCase();
+        const map = {es:['es','mx','ar','co','pe','ve','cl','ec','gt','cu','bo','do','hn','py','sv','ni','cr','pa','uy','pr'],
+                     de:['de','at','ch','li'],ja:['jp'],ar:['sa','eg','ae','kw','qa','iq','dz','sd','ma','ye','sy','tn','jo','ly','lb','om','bh'],
+                     pt:['br','pt','ao','mz'],fr:['fr','be','ch','cd','ci','cm','mg','sn'],id:['id'],it:['it'],zh:['cn','tw','hk','sg']};
+        for (const [lang, countries] of Object.entries(map)) {
+          if (countries.includes(cc)) { updateLang(lang); return; }
+        }
+      }).catch(()=>{});
+  }, []);
+
   const [authToken, setAuthToken]   = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [apiDebates, setApiDebates] = useState([]);
@@ -527,8 +682,8 @@ function PreferendumV8() {
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",
         width:"100%",maxWidth:420,background:T.deep,borderTop:`1px solid ${T.rim}`,
         display:"flex",padding:"8px 0 14px",zIndex:99}}>
-        {[["feed","🗳","Debates"],["results","📊","Resultados"],
-          ["verify","🔍","Verificar"],["profile","👤","Perfil"]].map(([id,icon,lbl])=>(
+        {[["feed","🗳",t("tab.debates")],["results","📊",t("tab.results")],
+          ["verify","🔍",t("tab.verify")],["profile","👤",t("tab.profile")]].map(([id,icon,lbl])=>(
           <button key={id} onClick={()=>go(id)} style={{flex:1,background:"none",
             border:"none",cursor:"pointer",display:"flex",flexDirection:"column",
             alignItems:"center",gap:2}}>
@@ -546,8 +701,8 @@ function PreferendumV8() {
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",
         width:"100%",maxWidth:420,background:T.deep,borderTop:`1px solid ${T.rim}`,
         display:"flex",padding:"8px 0 14px",zIndex:99}}>
-        {[["debates","🗳","Debates"],["dashboard","📊","Dashboard"],
-          ["create","➕","Crear"],["ads","📢","Publicidad"]].map(([id,icon,lbl])=>(
+        {[["debates","🗳",t("tab.debates")],["dashboard","📊",t("tab.dashboard")],
+          ["create","➕",t("tab.create")],["ads","📢",t("tab.ads")]].map(([id,icon,lbl])=>(
           <button key={id} onClick={()=>setInstTab(id)} style={{flex:1,background:"none",
             border:"none",cursor:"pointer",display:"flex",flexDirection:"column",
             alignItems:"center",gap:2}}>
@@ -562,6 +717,46 @@ function PreferendumV8() {
   // ══════════════════════════════════════════════════════════════
   // SCREEN: LAUNCH
   // ══════════════════════════════════════════════════════════════
+
+  // ══ SCREEN: LANGUAGE SELECT ══════════════════════════════════
+  if (screen === "lang-select") {
+    const detected = appLang !== 'en' ? appLang : null;
+    return (
+      <div style={{...phone, direction: isRTL() ? 'rtl' : 'ltr'}}>
+        <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",
+          alignItems:"center",justifyContent:"center",padding:32,textAlign:"center",
+          background:`radial-gradient(ellipse at 50% 30%, #1a3a6b 0%, ${T.bg} 70%)`}}>
+          <div style={{fontSize:48,marginBottom:16}}>🌐</div>
+          <div style={{fontSize:26,fontWeight:900,color:T.white,marginBottom:8}}>
+            prefer<span style={{color:T.blue}}>endum</span>
+          </div>
+          <div style={{fontSize:15,color:T.fog,marginBottom:32}}>{t('lang.title')}</div>
+          <div style={{width:"100%",maxWidth:320,display:"flex",flexDirection:"column",gap:10}}>
+            {SUPPORTED_LANGS.map(lang => (
+              <button key={lang} onClick={() => { updateLang(lang); go('launch'); }}
+                style={{padding:"14px 16px",borderRadius:14,cursor:"pointer",
+                  display:"flex",alignItems:"center",gap:12,
+                  background: appLang===lang ? `${T.blue}33` : "transparent",
+                  border: `1.5px solid ${appLang===lang ? T.blue : T.rim}`,
+                  color: appLang===lang ? T.white : T.fog,
+                  fontSize:15,fontWeight:appLang===lang?700:500}}>
+                <span style={{fontSize:22}}>{LANG_FLAGS[lang]}</span>
+                <span>{LANG_NAMES[lang]}</span>
+                {appLang===lang && <span style={{marginLeft:"auto",color:T.blue}}>✓</span>}
+              </button>
+            ))}
+          </div>
+          <div style={{marginTop:24}}>
+            <button onClick={() => go('launch')}
+              style={{background:"none",border:"none",color:T.mist,fontSize:13,cursor:"pointer"}}>
+              {t('lang.continue')} →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if(screen==="launch") return (
     <div style={phone}>
       <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",
@@ -572,28 +767,29 @@ function PreferendumV8() {
           prefer<span style={{color:T.blue}}>endum</span>
         </div>
         <div style={{fontSize:14,color:T.fog,lineHeight:1.7,marginBottom:8,maxWidth:280}}>
-          Tu voz. Tu poder. Verificado en blockchain.
+          {t('launch.tagline')}
         </div>
         <div style={{fontSize:11,color:T.mist,fontStyle:"italic",marginBottom:48}}>
-          En memoria del Fundador José Ignacio Fernández (1989–2024)
+          {t('launch.memorial')}
         </div>
+        <button onClick={()=>go('lang-select')} style={{background:'transparent',border:`1px solid ${T.rim}`,borderRadius:20,padding:'6px 14px',color:T.fog,fontSize:12,cursor:'pointer',marginBottom:16}}>{t('lang.change')} · {LANG_NAMES[appLang]}</button>
         <div style={{width:"100%",maxWidth:320,display:"flex",flexDirection:"column",gap:12}}>
           <button onClick={()=>{setUserType("voter");go("register");}} style={{
             padding:16,borderRadius:14,background:T.blue,border:"none",
             color:"#fff",fontSize:16,fontWeight:700,cursor:"pointer"}}>
-            🙋 Soy votante
+            {t('launch.voter')}
           </button>
           <button onClick={()=>{setUserType("inst");go("org-splash");}} style={{
             padding:16,borderRadius:14,background:"transparent",
             border:`1.5px solid ${T.teal}`,color:T.teal,
             fontSize:16,fontWeight:700,cursor:"pointer"}}>
-            🏛 Soy institución
+            {t('launch.institution')}
           </button>
           <button onClick={()=>{setUserType("marketer");go("marketer");}} style={{
             padding:16,borderRadius:14,background:"transparent",
             border:`1.5px solid ${T.gold}`,color:T.gold,
             fontSize:16,fontWeight:700,cursor:"pointer"}}>
-            📢 Soy anunciante / marketer
+            {t('launch.marketer')}
           </button>
         </div>
       </div>
@@ -606,7 +802,7 @@ function PreferendumV8() {
   // ── REGISTER SCREEN ────────────────────────────────────────
   if(screen==="register") return (
     <div style={phone}>
-      <TopBar title="Registro de votante" back="launch"/>
+      <TopBar title={t("reg.title")} back="launch"/>
       <div style={{padding:"16px 16px 80px"}}>
         <div style={{padding:"8px 0 16px"}}>
           <div style={{fontSize:22,fontWeight:900,color:T.white,marginBottom:4}}>Crea tu cuenta</div>
@@ -623,16 +819,16 @@ function PreferendumV8() {
           <div style={{fontSize:10,color:T.fog}}>7 capas de verificación — empiezan tras el registro</div>
         </div>
         <Card>
-          <Lbl>Datos personales</Lbl>
-          <Input label="Nombre completo" placeholder="María González" value={vfName} onChange={setVfName}/>
-          <Input label="Email" placeholder="maria@correo.cl" type="email" value={vfEmail} onChange={setVfEmail}/>
-          <Input label="Teléfono (con código de país)" placeholder="+56912345678" value={vfPhone} onChange={setVfPhone}/>
-          <Input label="RUT / DNI / Documento nacional" placeholder="12.345.678-9" value={vfNatId} onChange={setVfNatId}/>
+          <Lbl>{t("reg.personal")}</Lbl>
+          <Input label={t("reg.fullname")} placeholder="María González" value={vfName} onChange={setVfName}/>
+          <Input label={t("login.ph_email").includes("@") ? "Email" : "Email"} placeholder="maria@correo.cl" type="email" value={vfEmail} onChange={setVfEmail}/>
+          <Input label={t("reg.phone")} placeholder="+56912345678" value={vfPhone} onChange={setVfPhone}/>
+          <Input label={t("reg.natid")} placeholder="12.345.678-9" value={vfNatId} onChange={setVfNatId}/>
           <div style={{marginBottom:14}}>
             <div style={{fontSize:10,color:T.fog,textTransform:"uppercase",
               letterSpacing:"0.08em",fontWeight:700,marginBottom:8}}>Género</div>
             <div style={{display:"flex",gap:8}}>
-              {[["F","♀ Femenino"],["M","♂ Masculino"],["O","Otro"]].map(([v,l])=>(
+              {[["F",t("reg.female")],["M",t("reg.male")],["O",t("reg.other")]].map(([v,l])=>(
                 <button key={v} onClick={()=>setVfGender(v)} style={{flex:1,padding:"9px 4px",
                   borderRadius:10,border:`1.5px solid ${vfGender===v?T.blue:T.rim}`,
                   background:vfGender===v?`${T.blue}22`:"transparent",
@@ -642,27 +838,27 @@ function PreferendumV8() {
               ))}
             </div>
           </div>
-          <Input label="Fecha de nacimiento" type="date" value={vfDob} onChange={setVfDob}/>
-          <Input label="País" placeholder="Chile" value={vfCountry} onChange={setVfCountry}/>
-          <Input label="Ciudad / Comuna" placeholder="Las Condes" value={vfCounty} onChange={setVfCounty}/>
+          <Input label={t("reg.dob")} type="date" value={vfDob} onChange={setVfDob}/>
+          <Input label={t("reg.country")} placeholder="Chile" value={vfCountry} onChange={setVfCountry}/>
+          <Input label={t("reg.city")} placeholder="Las Condes" value={vfCounty} onChange={setVfCounty}/>
         </Card>
         <Card>
-          <Lbl>Seguridad</Lbl>
-          <Input label="Contraseña" placeholder="Mínimo 8 caracteres" type="password" value={vfPw} onChange={setVfPw}/>
-          <Input label="Confirmar contraseña" placeholder="Repite tu contraseña" type="password" value={vfPw2} onChange={setVfPw2}/>
+          <Lbl>{t("reg.security")}</Lbl>
+          <Input label={t("reg.password")} placeholder={t("reg.pw_hint")} type="password" value={vfPw} onChange={setVfPw}/>
+          <Input label={t("reg.confirm_pw")} placeholder={t("reg.confirm_hint")} type="password" value={vfPw2} onChange={setVfPw2}/>
         </Card>
         <div style={{background:`${T.blue}18`,border:`1px solid ${T.blue}44`,
           borderRadius:10,padding:"12px 14px",fontSize:12,color:"#7ab4ff",
           marginBottom:14,lineHeight:1.8}}>
-          🔒 Tras registrarte verificaremos:<br/>
+          
           1·Email OTP · 2·SMS · 3·Documento · 4·Selfie · 5·IMEI · 6·Geolocalización · 7·Blockchain
         </div>
         {vfError?<div style={{background:`${T.coral}22`,border:`1px solid ${T.coral}44`,
           borderRadius:8,padding:"10px 12px",fontSize:12,color:T.coral,marginBottom:12}}>{vfError}</div>:null}
-        <Btn label={vfLoading?"Creando cuenta...":"Crear cuenta →"} full
+        <Btn label={vfLoading?t("reg.loading"):t("reg.submit")} full
           disabled={!vfName||!vfEmail||!vfPhone||!vfPw||vfPw!==vfPw2||vfLoading}
           onPress={async()=>{
-            if(vfPw!==vfPw2){setVfError("Las contraseñas no coinciden");return;}
+            if(vfPw!==vfPw2){setVfError(t("reg.pw_error"));return;}
             setVfError(""); setVfLoading(true);
             try {
               const data = await apiFetch('POST','/auth/register',{
@@ -691,18 +887,18 @@ function PreferendumV8() {
   // ══════════════════════════════════════════════════════════════
   if(screen==="login") return (
     <div style={phone}>
-      <TopBar title="Iniciar sesión" back="launch"/>
+      <TopBar title={t("login.title")} back="launch"/>
       <div style={{padding:"16px 16px 80px"}}>
         <div style={{textAlign:"center",padding:"24px 0 20px"}}>
           <div style={{fontSize:48,marginBottom:12}}>🗳</div>
           <div style={{fontSize:24,fontWeight:900,color:T.white,marginBottom:4}}>Bienvenido de vuelta</div>
         </div>
         <Card>
-          <Input label="Email" placeholder="tu@correo.cl" type="email" value={email} onChange={setEmail}/>
+          <Input label="Email" placeholder={t("login.ph_email")} type="email" value={email} onChange={setEmail}/>
           <Input label="Contraseña" placeholder="••••••••" type="password" value={pw} onChange={setPw}/>
           {vfError&&<div style={{background:`${T.coral}22`,border:`1px solid ${T.coral}44`,
             borderRadius:8,padding:"10px 12px",fontSize:12,color:T.coral,marginBottom:8}}>{vfError}</div>}
-          <Btn label={vfLoading?"Entrando...":"Entrar →"} full disabled={vfLoading}
+          <Btn label={vfLoading?t("login.loading"):t("login.submit")} full disabled={vfLoading}
             onPress={async()=>{
               setVfLoading(true); setVfError("");
               try {
@@ -1245,7 +1441,7 @@ function PreferendumV8() {
                     {deb.type==="gov"?"🏛":"🏢"} {deb.inst}
                   </span>
                   <StatusBadge status={deb.status}/>
-                  {hasVoted&&<span style={{fontSize:12,color:T.green,fontWeight:700}}>✓ Ya votaste</span>}
+                  {hasVoted&&<span style={{fontSize:12,color:T.green,fontWeight:700}}>{t("feed.voted")}</span>}
                 </div>
 
                 {/* Row 2: title — the most important thing */}
@@ -1291,11 +1487,11 @@ function PreferendumV8() {
                 {/* Row 3: footer stats */}
                 <div style={{display:"flex",gap:14,fontSize:13,color:T.fog,alignItems:"center",
                   borderTop:`1px solid ${T.rim}`,paddingTop:12,marginTop:4}}>
-                  <span>🗳 {deb.votes} votos</span>
+                  <span>🗳 {deb.votes} {t("feed.votes")}</span>
                   {deb.comments>0&&<span>💬 {deb.comments}</span>}
                   {deb.status==="verifying"&&hasVoted&&
-                    <span style={{color:T.gold,fontWeight:700}}>Verifica →</span>}
-                  <span style={{marginLeft:"auto",color:T.blue,fontWeight:700,fontSize:14}}>Abrir →</span>
+                    <span style={{color:T.gold,fontWeight:700}}>{t("feed.verify_p")}</span>}
+                  <span style={{marginLeft:"auto",color:T.blue,fontWeight:700,fontSize:14}}>{t("feed.open")}</span>
                 </div>
               </div>
             </div>
@@ -1730,7 +1926,7 @@ function PreferendumV8() {
               <div style={{background:`${T.green}18`,border:`1px solid ${T.green}44`,borderRadius:12,padding:"12px 16px",marginBottom:12,fontSize:14,color:T.green}}>
                 ✅ <strong>Ganador: {deb.opts[deb.vals.indexOf(Math.max(...deb.vals))]}</strong>
                 {" — "}{Math.round(Math.max(...deb.vals)/total*100)}%
-                {deb.status==="verified"&&` · ✓ ${deb.accuracy||0}% verificado`}
+                {deb.status==="verified"&&` · ✓ ${deb.accuracy||0}% ${t("res.verified")}`}
               </div>
             )}
             {/* Legitimacy Score */}
@@ -1763,7 +1959,7 @@ function PreferendumV8() {
             Tu voto fue cifrado con AES-256, hasheado con SHA-256 y anclado en blockchain Polygon.
           </div>
           <Card style={{width:"100%",maxWidth:320,textAlign:"center"}}>
-            <Lbl>Tu código de verificación</Lbl>
+            <Lbl>{t("voted.code_lbl")}</Lbl>
             <div style={{fontFamily:"monospace",fontSize:24,fontWeight:900,
               color:T.blue,letterSpacing:"0.15em",marginBottom:8}}>{vc}</div>
             <div style={{fontSize:11,color:T.fog,lineHeight:1.6,marginBottom:4}}>
@@ -1774,7 +1970,7 @@ function PreferendumV8() {
             </div>
           </Card>
           <div style={{display:"flex",gap:10,flexDirection:"column",width:"100%",maxWidth:320,marginTop:14}}>
-            <Btn label="Volver al feed →" full onPress={()=>go("feed")}/>
+            <Btn label={t("voted.back")} full onPress={()=>go("feed")}/>
           </div>
         </div>
       </div>
@@ -1834,7 +2030,7 @@ function PreferendumV8() {
                 <div style={{background:"#eff6ff",border:"1px solid #bfdbfe",
                   borderRadius:8,padding:"7px 11px",fontSize:12,color:"#1d4ed8",
                   marginBottom:myVote?.reward?8:12,display:"flex",alignItems:"center",gap:6}}>
-                  ✓ Tu voto: <strong>{myVote.opt}</strong>
+                  {t("res.your_vote")} <strong>{myVote.opt}</strong>
                 </div>
               )}
               {myVote?.reward&&(
@@ -1881,7 +2077,7 @@ function PreferendumV8() {
               )}
               {myVote?.code&&(
                 <div style={{marginTop:10,fontSize:11,color:"#94a3b8",
-                  fontFamily:"monospace"}}>Código: {myVote.code}</div>
+                  fontFamily:"monospace"}}>{t("res.code")} {myVote.code}</div>
               )}
             </div>
           );
@@ -1938,25 +2134,25 @@ function PreferendumV8() {
 
     return (
       <div style={phone}>
-        <TopBar title="Verificar mi voto"/>
+        <TopBar title={t("ver.title")}/>
         <div style={{padding:"12px 16px 80px"}}>
           <div style={{background:`${T.gold}18`,border:`1px solid ${T.gold}44`,
             borderRadius:12,padding:"12px 14px",marginBottom:14,fontSize:12,
             color:T.gold,lineHeight:1.7}}>
-            ⚠️ <strong>La verificación solo está disponible después de que la votación cierra.</strong>
+            ⚠️ <strong>{t("ver.warn")}</strong>
           </div>
 
           {verifyingDebates.length>0&&(
             <Card>
-              <Lbl>🔍 Debates en fase de verificación</Lbl>
+              <Lbl>{t("ver.phase")}</Lbl>
               {verifyingDebates.map(d=>(
                 <div key={d.id} style={{padding:"8px 0",borderBottom:`1px solid ${T.rim}`}}>
                   <div style={{fontSize:13,fontWeight:700,color:T.white,marginBottom:2}}>{d.title}</div>
                   <div style={{fontSize:11,color:T.fog}}>{d.inst}</div>
-                  <div style={{fontSize:10,color:T.gold,marginTop:3}}>Verificación hasta: {d.verify_closes}</div>
+                  <div style={{fontSize:10,color:T.gold,marginTop:3}}>{t("ver.until")} {d.verify_closes}</div>
                   {voted[d.id]&&(
                     <div style={{fontSize:10,color:T.green,marginTop:2}}>
-                      ✓ Participaste · Código: {voted[d.id].code}
+                      {t("ver.participated")} {voted[d.id].code}
                     </div>
                   )}
                 </div>
@@ -1966,7 +2162,7 @@ function PreferendumV8() {
 
           {vStep==="enter"&&(
             <Card>
-              <Lbl>Ingresa tu código de verificación</Lbl>
+              <Lbl>{t("ver.input")}</Lbl>
               <input value={codeInput} onChange={e=>setCode(e.target.value.toUpperCase())}
                 placeholder="XXXX-XXXX-XXXX" maxLength={14}
                 style={{width:"100%",padding:"14px",borderRadius:10,
@@ -2145,7 +2341,7 @@ function PreferendumV8() {
   // ══════════════════════════════════════════════════════════════
   if(screen==="profile") return (
     <div style={phone}>
-      <TopBar title="Mi perfil"/>
+      <TopBar title={t("prof.title")}/>
       <div style={{padding:"12px 16px 80px"}}>
         <div style={{textAlign:"center",padding:"16px 0 20px"}}>
           <div style={{width:72,height:72,borderRadius:"50%",background:T.blue,
@@ -2161,7 +2357,7 @@ function PreferendumV8() {
           </div>
         </div>
         <Card>
-          <Lbl>Mis votos y códigos</Lbl>
+          <Lbl>{t("prof.my_votes")}</Lbl>
           {Object.keys(voted).length===0?(
             <div style={{fontSize:13,color:T.fog}}>Aún no has votado en ningún debate.</div>
           ):Object.entries(voted).map(([id,v])=>{
@@ -2184,7 +2380,7 @@ function PreferendumV8() {
             );
           })}
         </Card>
-        <Btn label="Cerrar sesión" full outline color={T.coral} onPress={()=>go("launch")}/>
+        <Btn label={t("prof.logout")} full outline color={T.coral} onPress={()=>go("launch")}/>
       </div>
       <VoterTabs/>
     </div>
@@ -2967,7 +3163,7 @@ function PreferendumV8() {
             <Lbl>Resumen</Lbl>
             {[["Marca",brandName],["Tipo",AD_TYPES.find(t=>t.k===adType)?.name||"—"],
               ["País",country+(region?` · ${region}`:"")],
-              ["Género",[sexF?"♀":null,sexM?"♂":null].filter(Boolean).join("+")],
+              [{t("reg.gender")},[sexF?"♀":null,sexM?"♂":null].filter(Boolean).join("+")],
               ["Presupuesto","CLP "+parseInt(budget||0).toLocaleString()],
               ["Modelo",payModel+" · 20 CLP/imp."],
               ["Imp. estimadas","~"+estImp],
