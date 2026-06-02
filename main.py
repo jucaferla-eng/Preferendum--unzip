@@ -1106,7 +1106,27 @@ def health():
 
 @app.get('/ping-test', response_class=HTMLResponse)
 def ping_test():
-    return HTMLResponse(content='<html><body style="background:#090D18;color:white;font-size:40px;text-align:center;padding:100px">✅ PREFERENDUM<br/>Server working</body></html>')
+    return HTMLResponse(content='''<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+<body style="background:#090D18;color:white;font-family:sans-serif;text-align:center;padding:60px 20px">
+<div id="root"><p>Loading React...</p></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+try {
+  var el = React.createElement;
+  var root = ReactDOM.createRoot(document.getElementById("root"));
+  root.render(el("div",null,
+    el("div",{style:{fontSize:60,marginBottom:20}},"✅"),
+    el("div",{style:{fontSize:28,fontWeight:900,color:"#fff",marginBottom:10}},
+      "prefer",el("span",{style:{color:"#4d8aff"}},"endum")),
+    el("div",{style:{fontSize:16,color:"#90b8d8"}},"React working on this device")
+  ));
+} catch(e) {
+  document.getElementById("root").innerHTML = "<p style=color:red>Error: "+e.message+"</p>";
+}
+</script>
+</body></html>''')
 
 @app.get('/app', response_class=HTMLResponse)
 def serve_app():
