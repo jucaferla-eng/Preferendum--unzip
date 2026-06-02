@@ -15,21 +15,7 @@ export default function App() {
   useEffect(() => { loadHtml(); }, []);
 
   async function loadHtml() {
-    try {
-      // Intentar cargar desde el servidor (cambios instantáneos sin rebuild)
-      const resp = await fetch(`${APP_URL}?v=${Date.now()}`, { timeout: 10000 });
-      if (resp.ok) {
-        const content = await resp.text();
-        if (content && content.length > 500) {
-          setHtml(content);
-          return;
-        }
-      }
-    } catch (e) {
-      console.log('Server not available, falling back to local bundle');
-    }
-
-    // Fallback: bundle local (funciona sin internet)
+    // Load local bundle first — instant, no network needed
     try {
       const asset = Asset.fromModule(require('./assets/app.html'));
       await asset.downloadAsync();
@@ -39,6 +25,21 @@ export default function App() {
       setHtml(content);
     } catch (e) {
       setError(String(e));
+      return;
+    }
+
+    // Background check: quietly fetch server update (won't block launch)
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4000);
+      const resp = await fetch(`${APP_URL}?v=${Date.now()}`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (resp.ok) {
+        const content = await resp.text();
+        if (content && content.length > 500) setHtml(content);
+      }
+    } catch (_) {
+      // server unavailable — local bundle already shown, nothing to do
     }
   }
 
