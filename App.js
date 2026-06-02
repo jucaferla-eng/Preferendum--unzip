@@ -17,7 +17,7 @@ export default function App() {
   async function loadHtml() {
     try {
       // Intentar cargar desde el servidor (cambios instantáneos sin rebuild)
-      const resp = await fetch(APP_URL, { timeout: 10000 });
+      const resp = await fetch(`${APP_URL}?v=${Date.now()}`, { timeout: 10000 });
       if (resp.ok) {
         const content = await resp.text();
         if (content && content.length > 500) {

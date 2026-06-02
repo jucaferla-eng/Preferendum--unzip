@@ -1110,7 +1110,12 @@ def serve_app():
     La app móvil la carga aquí — cambios se ven sin rebuild de la app."""
     try:
         with open('assets/app.html', 'r', encoding='utf-8') as f:
-            return HTMLResponse(content=f.read())
+            content = f.read()
+        return HTMLResponse(content=content, headers={
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+        })
     except FileNotFoundError:
         return HTMLResponse(content='<html><body>App not found</body></html>', status_code=404)
 
