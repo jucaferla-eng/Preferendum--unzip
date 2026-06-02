@@ -1104,6 +1104,10 @@ function showPage1(){
 def health():
     return {'status': 'ok', 'timestamp': datetime.utcnow().isoformat()}
 
+@app.get('/ping-test', response_class=HTMLResponse)
+def ping_test():
+    return HTMLResponse(content='<html><body style="background:#090D18;color:white;font-size:40px;text-align:center;padding:100px">✅ PREFERENDUM<br/>Server working</body></html>')
+
 @app.get('/app', response_class=HTMLResponse)
 def serve_app():
     """Sirve la app web directamente desde el servidor.
