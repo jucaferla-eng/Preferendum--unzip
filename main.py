@@ -1104,13 +1104,42 @@ function showPage1(){
 def health():
     return {'status': 'ok', 'timestamp': datetime.utcnow().isoformat()}
 
+@app.get('/ping-test', response_class=HTMLResponse)
+def ping_test():
+    return HTMLResponse(content='''<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+<body style="background:#090D18;color:white;font-family:sans-serif;text-align:center;padding:60px 20px">
+<div id="root"><p>Loading React...</p></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+try {
+  var el = React.createElement;
+  var root = ReactDOM.createRoot(document.getElementById("root"));
+  root.render(el("div",null,
+    el("div",{style:{fontSize:60,marginBottom:20}},"✅"),
+    el("div",{style:{fontSize:28,fontWeight:900,color:"#fff",marginBottom:10}},
+      "prefer",el("span",{style:{color:"#4d8aff"}},"endum")),
+    el("div",{style:{fontSize:16,color:"#90b8d8"}},"React working on this device")
+  ));
+} catch(e) {
+  document.getElementById("root").innerHTML = "<p style=color:red>Error: "+e.message+"</p>";
+}
+</script>
+</body></html>''')
+
 @app.get('/app', response_class=HTMLResponse)
 def serve_app():
     """Sirve la app web directamente desde el servidor.
     La app móvil la carga aquí — cambios se ven sin rebuild de la app."""
     try:
         with open('assets/app.html', 'r', encoding='utf-8') as f:
-            return HTMLResponse(content=f.read())
+            content = f.read()
+        return HTMLResponse(content=content, headers={
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+        })
     except FileNotFoundError:
         return HTMLResponse(content='<html><body>App not found</body></html>', status_code=404)
 
@@ -3027,6 +3056,43 @@ def estimate_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
         db=db,
     )
     return result
+
+
+class SocialSponsorInput(BaseModel):
+    advertiser_email: str
+    platforms:        list  # ["instagram", "x", "tiktok", "facebook"]
+    weeks:            int = 4
+    tagline:          str = ''
+    total_usd:        float = 0.0
+
+PLATFORM_PRICES_USD = {'instagram': 290, 'x': 240, 'tiktok': 320, 'facebook': 210}
+
+@app.post('/marketer/social-sponsors')
+def create_social_sponsor(data: SocialSponsorInput, db: Session = Depends(get_db)):
+    """Registra un patrocinio de amplificación social. Usa el targeting existente de la cuenta."""
+    user = db.query(User).filter(User.email == data.advertiser_email, User.role.in_(['marketer','admin'])).first()
+    if not user:
+        raise HTTPException(404, 'Cuenta marketer no encontrada. Crea tu campaña primero.')
+    total = sum(PLATFORM_PRICES_USD.get(p, 0) for p in data.platforms) * data.weeks
+    import secrets as _secrets
+    token = 'SS-' + _secrets.token_hex(12).upper()
+    return {
+        'token':     token,
+        'platforms': data.platforms,
+        'weeks':     data.weeks,
+        'total_usd': total,
+        'tagline':   data.tagline,
+        'advertiser': user.name,
+        'message':   f'Patrocinio social activado en {len(data.platforms)} plataformas por {data.weeks} semanas.',
+    }
+
+@app.get('/marketer/social-sponsors')
+def list_social_sponsors(email: str, db: Session = Depends(get_db)):
+    """Lista patrocinios sociales de un marketer (placeholder — se persiste cuando haya modelo DB)."""
+    user = db.query(User).filter(User.email == email, User.role.in_(['marketer','admin'])).first()
+    if not user:
+        raise HTTPException(404, 'Cuenta marketer no encontrada.')
+    return {'sponsors': [], 'note': 'Persistencia completa disponible en próxima versión.'}
 
 
 @app.post('/marketer/campaigns')
