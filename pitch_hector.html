@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preferendum — Resumen Ejecutivo</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Mono:wght@300;400;500&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:   #060810;
+    --paper: #f5f3ee;
+    --gold:  #c49a2a;
+    --gold2: #e8b830;
+    --blue:  #1a3a8f;
+    --blue2: #2952c4;
+    --green: #10b981;
+    --coral: #f43f5e;
+    --muted: rgba(245,243,238,0.5);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background: var(--ink); color: var(--paper); font-family: 'Manrope', sans-serif; line-height: 1.6; }
+
+  @media print {
+    body { background: white; color: #111; }
+    .no-print { display: none !important; }
+    .page { page-break-after: always; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+
+  .page { max-width: 960px; margin: 0 auto; padding: 60px 48px; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; }
+  .topbar { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 16px 48px; background: rgba(6,8,16,0.92); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255,255,255,0.06); z-index: 100; }
+  .logo { font-family: 'Playfair Display', serif; font-size: 18px; color: var(--paper); }
+  .logo span { color: var(--gold2); }
+  .print-btn { background: var(--gold); color: var(--ink); border: none; padding: 8px 20px; border-radius: 4px; font-family: 'Manrope', sans-serif; font-size: 12px; font-weight: 700; cursor: pointer; }
+
+  .tag { font-family: 'DM Mono', monospace; font-size: 10px; color: var(--gold); letter-spacing: 3px; text-transform: uppercase; margin-bottom: 16px; display: block; }
+  .tag-green { color: var(--green); }
+  .tag-blue  { color: #60a5fa; }
+
+  h1 { font-family: 'Playfair Display', serif; font-size: clamp(36px,5vw,68px); line-height: 1.05; letter-spacing: -2px; }
+  h2 { font-family: 'Playfair Display', serif; font-size: clamp(26px,3vw,42px); line-height: 1.1; letter-spacing: -1px; }
+  h3 { font-family: 'Playfair Display', serif; font-size: 20px; line-height: 1.2; }
+  em { color: var(--gold2); font-style: italic; }
+  p  { font-size: 15px; color: var(--muted); line-height: 1.75; }
+
+  .divider { border: none; border-top: 1px solid rgba(255,255,255,0.07); margin: 40px 0; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; }
+
+  .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 28px; }
+  .card-gold  { background: rgba(196,154,42,0.07); border: 1px solid rgba(196,154,42,0.25); }
+  .card-green { background: rgba(16,185,129,0.07); border: 1px solid rgba(16,185,129,0.25); }
+  .card-blue  { background: rgba(41,82,196,0.1);   border: 1px solid rgba(41,82,196,0.3); }
+
+  .big-num { font-family: 'Playfair Display', serif; font-size: 48px; color: var(--gold2); line-height: 1; margin-bottom: 6px; }
+  .big-num-label { font-family: 'DM Mono', monospace; font-size: 10px; color: rgba(245,243,238,0.4); letter-spacing: 1px; text-transform: uppercase; }
+
+  .flywheel { display: flex; align-items: center; justify-content: center; gap: 0; }
+  .fw-step { text-align: center; padding: 18px 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; flex: 1; }
+  .fw-step .icon  { font-size: 22px; margin-bottom: 8px; }
+  .fw-step .label { font-size: 11px; color: var(--paper); font-weight: 600; line-height: 1.4; }
+  .fw-step .sub   { font-size: 10px; color: var(--muted); margin-top: 4px; }
+  .fw-arrow { color: var(--gold); font-size: 18px; padding: 0 6px; flex-shrink: 0; }
+
+  .comp-row { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .comp-name { font-family: 'Playfair Display', serif; font-size: 17px; width: 110px; }
+  .comp-type { font-size: 12px; color: var(--muted); flex: 1; }
+  .comp-weakness { font-size: 11px; color: rgba(244,63,94,0.8); width: 170px; text-align: right; }
+
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-family: 'DM Mono', monospace; font-size: 10px; }
+  .badge-green { background: rgba(16,185,129,0.15); color: var(--green); border: 1px solid rgba(16,185,129,0.3); }
+
+  .check-list { list-style: none; }
+  .check-list li { display: flex; gap: 10px; margin-bottom: 9px; font-size: 13px; color: var(--paper); }
+  .check-list li::before { content: '✓'; color: var(--green); font-weight: 700; flex-shrink: 0; }
+
+  .memorial { font-family: 'Playfair Display', serif; font-style: italic; font-size: 12px; color: rgba(245,243,238,0.25); text-align: center; margin-top: 40px; }
+</style>
+</head>
+<body>
+
+<div class="topbar no-print">
+  <div class="logo">prefer<span>endum</span></div>
+  <button class="print-btn" onclick="window.print()">Imprimir / PDF →</button>
+</div>
+
+<div style="padding-top:72px;">
+
+<!-- PÁGINA 1 — PORTADA -->
+<div class="page">
+  <span class="tag">Resumen ejecutivo — Confidencial</span>
+  <h1>La plataforma que compite<br>con <em>Meta, Google, Amazon,<br>Alibaba y X</em><br>por los $500B del mobile.</h1>
+
+  <p style="margin-top:28px;max-width:580px;font-size:17px;color:rgba(245,243,238,0.75);">
+    Preferendum es la única plataforma que vende atención en contexto de <strong style="color:var(--paper)">decisión activa verificada</strong> — no scrolling pasivo. Cada impresión está anclada en blockchain. Los cinco grandes no pueden replicarlo.
+  </p>
+
+  <hr class="divider">
+
+  <div class="grid-4">
+    <div><div class="big-num">$500B</div><div class="big-num-label">Mercado mobile ads 2026</div></div>
+    <div><div class="big-num">5</div><div class="big-num-label">Competidores directos</div></div>
+    <div><div class="big-num">3</div><div class="big-num-label">Flujos de ingreso</div></div>
+    <div><div class="big-num">$0</div><div class="big-num-label">Capital para crecer</div></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="grid-2">
+    <div class="card card-gold">
+      <span class="tag">La tesis</span>
+      <h3>Una persona que está <em>decidiendo algo</em> vale 10 veces más que una que está <em>scrolleando.</em></h3>
+      <p style="margin-top:14px;">Meta, Google y Amazon capturan intención de búsqueda o compra. Nadie captura la intención más profunda: la decisión colectiva verificada.</p>
+    </div>
+    <div class="card">
+      <span class="tag">El activo único</span>
+      <h3>Audiencias verificadas en contexto de decisión activa.</h3>
+      <ul class="check-list" style="margin-top:14px;">
+        <li>Identidad verificada en 5 capas</li>
+        <li>Voto cifrado AES-256 + bridge destruction</li>
+        <li>Resultado anclado en blockchain Polygon</li>
+        <li>Legitimacy Score público e inmutable</li>
+        <li>Sin datos personales — solo geografía + ingreso proxy</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- PÁGINA 2 — MODELO DE NEGOCIO -->
+<div class="page">
+  <span class="tag">Modelo de negocio</span>
+  <h2>Tres fuentes de ingreso.<br><em>Un solo setup por cliente.</em></h2>
+
+  <div class="grid-3" style="margin-top:32px;">
+    <div class="card card-blue">
+      <span class="tag tag-blue">Ingreso 1</span>
+      <h3>Ads dentro del debate</h3>
+      <p style="margin-top:10px;">El marketer define su matriz una vez — países y tier de ingreso. El sistema asigna automáticamente los ads a los debates correctos, cada 5 opiniones.</p>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.08);">
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(245,243,238,0.4);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">CPM por tier de ingreso</div>
+        <div style="font-size:13px;color:var(--paper);">AAA (Vitacura, Beverly Hills): $14–15</div>
+        <div style="font-size:13px;color:rgba(245,243,238,0.6);">ABB (Providencia, Miraflores): $8–11</div>
+        <div style="font-size:13px;color:rgba(245,243,238,0.4);">BCC (periferia, volumen): $3–5</div>
+      </div>
+    </div>
+
+    <div class="card card-gold">
+      <span class="tag">Ingreso 2 — nuevo</span>
+      <h3>Social Sponsor</h3>
+      <p style="margin-top:10px;">El marketer paga para que su marca aparezca en los posts de Preferendum en redes sociales. Usa la misma matriz — sin setup adicional.</p>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid rgba(196,154,42,0.2);">
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(245,243,238,0.4);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Tarifa / semana</div>
+        <div style="font-size:13px;color:var(--paper);">Instagram: $290 · TikTok: $320</div>
+        <div style="font-size:13px;color:rgba(245,243,238,0.6);">X: $240 · Facebook: $210</div>
+        <div style="font-size:13px;color:var(--gold2);margin-top:4px;font-weight:700;">4 plataformas = $1,060 / semana</div>
+      </div>
+    </div>
+
+    <div class="card card-green">
+      <span class="tag tag-green">Ingreso 3</span>
+      <h3>Suscripción organizador</h3>
+      <p style="margin-top:10px;">Empresas, municipios y universidades pagan para crear consultas verificadas con sus stakeholders. Legitimacy Score y blockchain incluidos.</p>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid rgba(16,185,129,0.2);">
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:rgba(245,243,238,0.4);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Modelo</div>
+        <div style="font-size:13px;color:var(--paper);">SaaS mensual / anual</div>
+        <div style="font-size:13px;color:rgba(245,243,238,0.6);">Por número de votantes</div>
+        <div style="font-size:13px;color:var(--green);margin-top:4px;font-weight:700;">Piloto: PUC Chile</div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <span class="tag">El motor de crecimiento sin capital</span>
+  <h2 style="margin-bottom:28px;">El <em>flywheel</em> que se financia solo.</h2>
+
+  <div class="flywheel">
+    <div class="fw-step">
+      <div class="icon">💰</div>
+      <div class="label">Marketer paga Social Sponsor</div>
+      <div class="sub">IG · X · TikTok · FB</div>
+    </div>
+    <div class="fw-arrow">→</div>
+    <div class="fw-step" style="border-color:rgba(196,154,42,0.3);background:rgba(196,154,42,0.06);">
+      <div class="icon">📣</div>
+      <div class="label">Preferendum publica en redes</div>
+      <div class="sub">"Patrocinado por [marca]"</div>
+    </div>
+    <div class="fw-arrow">→</div>
+    <div class="fw-step">
+      <div class="icon">👥</div>
+      <div class="label">Nuevos usuarios entran</div>
+      <div class="sub">Sin costo de adquisición</div>
+    </div>
+    <div class="fw-arrow">→</div>
+    <div class="fw-step" style="border-color:rgba(16,185,129,0.3);background:rgba(16,185,129,0.06);">
+      <div class="icon">📈</div>
+      <div class="label">Más debates · más inventario</div>
+      <div class="sub">Mayor valor para el marketer</div>
+    </div>
+    <div class="fw-arrow">→</div>
+    <div class="fw-step" style="border-color:rgba(196,154,42,0.3);background:rgba(196,154,42,0.06);">
+      <div class="icon">🔁</div>
+      <div class="label">Precio sube · ciclo se repite</div>
+      <div class="sub">Sin inversión de capital</div>
+    </div>
+  </div>
+
+  <p style="margin-top:18px;text-align:center;font-size:13px;">
+    El marketer financia el crecimiento de Preferendum. <strong style="color:var(--gold2);">Es el único modelo donde el anunciante es también el motor de adquisición de usuarios.</strong>
+  </p>
+</div>
+
+<!-- PÁGINA 3 — COMPETIDORES Y VENTAJA -->
+<div class="page">
+  <span class="tag">Posicionamiento competitivo</span>
+  <h2>Los 5 grandes venden atención.<br><em>Nosotros vendemos decisión.</em></h2>
+
+  <div style="margin-top:32px;">
+    <div class="comp-row" style="border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:16px;margin-bottom:4px;">
+      <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);width:110px;letter-spacing:1px;">COMPETIDOR</div>
+      <div style="font-size:10px;color:var(--muted);flex:1;font-family:'DM Mono',monospace;letter-spacing:1px;">CONTEXTO DE ATENCIÓN</div>
+      <div style="font-size:10px;color:var(--muted);width:170px;text-align:right;font-family:'DM Mono',monospace;letter-spacing:1px;">LIMITACIÓN</div>
+    </div>
+    <div class="comp-row"><div class="comp-name">Meta</div><div class="comp-type">Scrolling pasivo en feed. Atención promedio: 1.7 segundos.</div><div class="comp-weakness">Sin decisión · Sin verificación</div></div>
+    <div class="comp-row"><div class="comp-name">Google</div><div class="comp-type">Intención de búsqueda. Alta pero individual y efímera.</div><div class="comp-weakness">Sin contexto colectivo</div></div>
+    <div class="comp-row"><div class="comp-name">Amazon</div><div class="comp-type">Intención de compra. La más valiosa del e-commerce.</div><div class="comp-weakness">Solo compra · No decisión cívica</div></div>
+    <div class="comp-row"><div class="comp-name">X</div><div class="comp-type">Conversación en tiempo real. Opinión pero sin verificación.</div><div class="comp-weakness">Sin identidad verificada</div></div>
+    <div class="comp-row" style="border-bottom:none;"><div class="comp-name">Alibaba</div><div class="comp-type">Marketplace + social. Masivo pero sin profundidad decisional.</div><div class="comp-weakness">Sin blockchain · Sin privacidad</div></div>
+    <div class="comp-row" style="border-top:2px solid rgba(196,154,42,0.4);margin-top:10px;padding-top:18px;border-bottom:none;">
+      <div class="comp-name" style="color:var(--gold2);">Preferendum</div>
+      <div class="comp-type" style="color:var(--paper);"><strong>Decisión activa verificada.</strong> 4+ minutos de atención enfocada. Identidad verificada en 5 capas. Resultado inmutable en blockchain Polygon.</div>
+      <div style="width:170px;text-align:right;"><span class="badge badge-green">Activo ⛓</span></div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="grid-2">
+    <div>
+      <span class="tag tag-green">La métrica que nadie más tiene</span>
+      <h3>"Costo por votante <em>verificado</em> alcanzado."</h3>
+      <p style="margin-top:12px;">Ningún competidor puede garantizar que la persona (1) vio el ad, (2) estaba en estado de decisión activa, y (3) es una persona real verificada. Nosotros sí — con respaldo blockchain inmutable.</p>
+    </div>
+    <div>
+      <span class="tag">Privacidad by design</span>
+      <h3>Targeting por ingreso <em>sin datos personales.</em></h3>
+      <p style="margin-top:12px;">Usamos precio de arriendo m² como proxy de ingreso — fuente pública, no datos del usuario. El marketer sabe a quién llega sin que Preferendum venda información privada. GDPR-compliant por arquitectura.</p>
+    </div>
+  </div>
+</div>
+
+<!-- PÁGINA 4 — ESTADO ACTUAL -->
+<div class="page">
+  <span class="tag">Estado actual</span>
+  <h2>Plataforma viva.<br><em>Lista para escalar.</em></h2>
+
+  <div class="grid-2" style="margin-top:32px;">
+    <div class="card card-green">
+      <span class="tag tag-green">Listo hoy</span>
+      <ul class="check-list">
+        <li>App iOS en TestFlight + Android en revisión Play Store</li>
+        <li>Backend FastAPI + PostgreSQL en producción</li>
+        <li>Registro y flujo completo de 3 tipos de usuario</li>
+        <li>Motor de ads con matriz de targeting activa</li>
+        <li>Verificación de identidad con Amazon Rekognition</li>
+        <li>Voto AES-256 + bridge destruction + código XXXX-XXXX-XXXX</li>
+        <li>Dashboard marketer con métricas blockchain en tiempo real</li>
+        <li>Social Sponsor — nuevo producto activo</li>
+        <li>Agente Claude Haiku — moderación y soporte 24/7</li>
+      </ul>
+    </div>
+
+    <div>
+      <div class="card" style="margin-bottom:16px;">
+        <span class="tag">Próximo paso — piloto</span>
+        <h3>PUC Chile</h3>
+        <p style="margin-top:8px;font-size:13px;">Pontificia Universidad Católica. Primera consulta verificada con estudiantes. Valida el modelo ante inversores y medios.</p>
+      </div>
+      <div class="card">
+        <span class="tag">Escala objetivo</span>
+        <h3>Consulta nacional Chile</h3>
+        <p style="margin-top:8px;font-size:13px;">6–13 millones de votantes. 7 días abierta. Contratos gobierno y sector privado. Réplica en Latinoamérica, España, USA.</p>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="grid-3" style="text-align:center;">
+    <div>
+      <div class="big-num">3</div>
+      <div class="big-num-label">Tipos de usuario activos</div>
+      <p style="margin-top:6px;font-size:12px;">Votante · Organizador · Marketer</p>
+    </div>
+    <div>
+      <div class="big-num">5</div>
+      <div class="big-num-label">Capas de verificación</div>
+      <p style="margin-top:6px;font-size:12px;">Email · SMS · DNI · Rekognition · IMEI</p>
+    </div>
+    <div>
+      <div class="big-num">2</div>
+      <div class="big-num-label">Productos publicitarios</div>
+      <p style="margin-top:6px;font-size:12px;">In-debate CPM · Social Sponsor</p>
+    </div>
+  </div>
+
+  <hr class="divider" style="margin:28px 0;">
+
+  <div style="text-align:center;padding:32px;background:rgba(196,154,42,0.06);border:1px solid rgba(196,154,42,0.2);border-radius:16px;">
+    <span class="tag" style="display:block;margin-bottom:14px;">La oportunidad</span>
+    <h2 style="font-size:28px;">El mercado mundial de publicidad mobile<br>no tiene un jugador con <em>audiencias verificadas.</em><br>Hasta ahora.</h2>
+  </div>
+
+  <div class="memorial">
+    En memoria de José Ignacio Fernández (1989–2024)<br>
+    Socio Fundador · quien probó el concepto con campañas cívicas reales.
+  </div>
+</div>
+
+</div>
+</body>
+</html>
