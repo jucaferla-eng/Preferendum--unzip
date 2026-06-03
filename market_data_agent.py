@@ -1,7 +1,7 @@
 """
 market_data_agent.py — Preferendum
 ====================================
-Agente mensual que recopila precio de arriendo por m² por comuna/barrio
+Agente semestral que recopila precio de arriendo por m² por comuna/barrio
 desde portales inmobiliarios de cada país via Apify.
 
 Construye el índice de ingreso relativo:
@@ -9,7 +9,7 @@ Construye el índice de ingreso relativo:
   - Commune más cara > 100, más barata < 100
   - Mismo resultado que FB/Instagram pero sin datos personales — solo geo
 
-Corre mensualmente. Triggerable via POST /admin/run-market-agent
+Corre cada 6 meses (precios m² cambian lento). Triggerable via POST /admin/run-market-agent
 
 En memoria de José Ignacio Fernández (1989–2024)
 """

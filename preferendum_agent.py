@@ -509,9 +509,9 @@ def run_agent(user_message: str, conversation_history: list = None,
 
 SCHEDULED_TASKS = [
     {
-        "name":     "daily_apify",
-        "schedule": "0 6 * * *",      # 6am UTC todos los días
-        "prompt":   "Ejecuta el agente Apify para actualizar los datos de comunas del día. Confirma qué país se procesó.",
+        "name":     "semestral_apify",
+        "schedule": "0 6 1 1,7 *",    # 1 enero y 1 julio a las 6am UTC (cada 6 meses)
+        "prompt":   "Ejecuta el agente Apify para actualizar los datos de comunas semestrales. Confirma qué países se procesaron y el total de comunas actualizadas.",
     },
     {
         "name":     "daily_review",
