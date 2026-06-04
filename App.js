@@ -4,32 +4,35 @@ import { SafeAreaView, StyleSheet, ActivityIndicator, View, Text } from 'react-n
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as SecureStore from 'expo-secure-store';
 
-const BG       = '#090D18';
-const APP_URL  = 'https://preferendum-unzip-d2zd.onrender.com/app';
+const BG      = '#090D18';
+const APP_URL = 'https://preferendum-unzip-d2zd.onrender.com/app';
+
+async function getOrCreateDeviceId() {
+  try {
+    let id = await SecureStore.getItemAsync('pref_device_id');
+    if (!id) {
+      id = 'dev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+      await SecureStore.setItemAsync('pref_device_id', id);
+    }
+    return id;
+  } catch (_) {
+    return 'dev-' + Math.random().toString(36).slice(2, 18);
+  }
+}
 
 export default function App() {
-  const [html,  setHtml]  = useState(null);
-  const [error, setError] = useState(null);
+  const [html,     setHtml]     = useState(null);
+  const [error,    setError]    = useState(null);
+  const [deviceId, setDeviceId] = useState(null);
 
-  useEffect(() => { loadHtml(); }, []);
+  useEffect(() => {
+    getOrCreateDeviceId().then(setDeviceId);
+    loadHtml();
+  }, []);
 
   async function loadHtml() {
-    try {
-      // Intentar cargar desde el servidor (cambios instantáneos sin rebuild)
-      const resp = await fetch(APP_URL, { timeout: 10000 });
-      if (resp.ok) {
-        const content = await resp.text();
-        if (content && content.length > 500) {
-          setHtml(content);
-          return;
-        }
-      }
-    } catch (e) {
-      console.log('Server not available, falling back to local bundle');
-    }
-
-    // Fallback: bundle local (funciona sin internet)
     try {
       const asset = Asset.fromModule(require('./assets/app.html'));
       await asset.downloadAsync();
@@ -39,29 +42,39 @@ export default function App() {
       setHtml(content);
     } catch (e) {
       setError(String(e));
+      return;
     }
+
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 4000);
+      const resp = await fetch(`${APP_URL}?v=${Date.now()}`, { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (resp.ok) {
+        const content = await resp.text();
+        if (content && content.length > 500) setHtml(content);
+      }
+    } catch (_) {}
   }
 
   if (error) {
     return (
       <View style={[styles.loading, { padding: 32 }]}>
-        <Text style={{ color: '#f43f5e', fontSize: 13, textAlign: 'center', lineHeight: 20 }}>
-          {error}
-        </Text>
-        <Text onPress={loadHtml} style={{ color: '#2563eb', fontSize: 14, marginTop: 20, fontWeight: '700' }}>
-          Retry
-        </Text>
+        <Text style={{ color: '#f43f5e', fontSize: 13, textAlign: 'center', lineHeight: 20 }}>{error}</Text>
+        <Text onPress={loadHtml} style={{ color: '#2563eb', fontSize: 14, marginTop: 20, fontWeight: '700' }}>Retry</Text>
       </View>
     );
   }
 
-  if (!html) {
+  if (!html || !deviceId) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color="#2563eb" />
       </View>
     );
   }
+
+  const injected = `window.DEVICE_ID=${JSON.stringify(deviceId)};window.DEVICE_MODEL="mobile";true;`;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -74,6 +87,7 @@ export default function App() {
         domStorageEnabled
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
+        injectedJavaScriptBeforeContentLoaded={injected}
         onError={e => setError('WebView: ' + (e.nativeEvent.description || e.nativeEvent.code))}
       />
     </SafeAreaView>
