@@ -17,7 +17,7 @@ En memoria del Fundador José Ignacio Fernández (1989–2024)
 """
 
 from __future__ import annotations
-import os, json, hashlib, random, string, re, base64
+import os, json, hashlib, random, string, re, base64, uuid
 import urllib.request, urllib.error, smtplib
 import requests as _requests
 import boto3
@@ -1823,33 +1823,54 @@ def verify_status(user: User = Depends(get_current_user)):
 @app.post('/upload/image')
 async def upload_image(
     file: UploadFile = File(...),
-    user: User = Depends(get_current_user)
 ):
-    cld_url = os.getenv('CLOUDINARY_URL')
-    if not cld_url:
-        raise HTTPException(503, 'Image upload not configured. Set CLOUDINARY_URL in environment variables.')
-    try:
-        import cloudinary
-        import cloudinary.uploader
-    except ImportError:
-        raise HTTPException(503, 'cloudinary package not installed')
     if not (file.content_type or '').startswith('image/'):
         raise HTTPException(400, 'Only image files allowed')
     contents = await file.read()
     if len(contents) > 10 * 1024 * 1024:
         raise HTTPException(400, 'Image too large — max 10 MB')
+    aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+    aws_secret = os.getenv('AWS_SECRET_ACCESS_KEY')
+    aws_region = os.getenv('AWS_REGION', 'us-east-1')
+    bucket = os.getenv('AWS_S3_BUCKET', 'preferendum-images')
+    if not aws_key or not aws_secret:
+        raise HTTPException(503, 'Image upload not configured')
     try:
-        result = cloudinary.uploader.upload(
-            contents,
-            folder='preferendum/products',
-            resource_type='image',
-            transformation=[
-                {'width': 900, 'height': 900, 'crop': 'limit'},
-                {'quality': 'auto:good'},
-                {'fetch_format': 'auto'},
-            ]
+        ext = (file.filename or 'img.jpg').rsplit('.', 1)[-1].lower()
+        if ext not in ('jpg','jpeg','png','gif','webp'):
+            ext = 'jpg'
+        key = f"products/{uuid.uuid4().hex}.{ext}"
+        s3 = boto3.client('s3',
+            region_name=aws_region,
+            aws_access_key_id=aws_key,
+            aws_secret_access_key=aws_secret,
         )
-        return {'url': result['secure_url']}
+        # Create bucket if it doesn't exist
+        try:
+            s3.head_bucket(Bucket=bucket)
+        except ClientError as e:
+            if e.response['Error']['Code'] in ('404', 'NoSuchBucket'):
+                if aws_region == 'us-east-1':
+                    s3.create_bucket(Bucket=bucket)
+                else:
+                    s3.create_bucket(Bucket=bucket,
+                        CreateBucketConfiguration={'LocationConstraint': aws_region})
+                s3.put_public_access_block(Bucket=bucket,
+                    PublicAccessBlockConfiguration={
+                        'BlockPublicAcls': False,
+                        'IgnorePublicAcls': False,
+                        'BlockPublicPolicy': False,
+                        'RestrictPublicBuckets': False,
+                    })
+        s3.put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=contents,
+            ContentType=file.content_type or 'image/jpeg',
+            ACL='public-read',
+        )
+        url = f"https://{bucket}.s3.{aws_region}.amazonaws.com/{key}"
+        return {'url': url}
     except Exception as e:
         raise HTTPException(500, f'Upload failed: {str(e)}')
 
