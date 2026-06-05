@@ -2140,6 +2140,7 @@ function PreferendumV8() {
 
   // Opinions state
   const [debateOpinions, setDebateOpinions] = useState([]);
+  const [debateAdSlots, setDebateAdSlots] = useState({});
   const [opinionsLoading, setOpinionsLoading] = useState(false);
   const [newOpinionText, setNewOpinionText] = useState('');
   const [knowledgeLevel, setKnowledgeLevel] = useState('familiar');
@@ -2267,7 +2268,10 @@ function PreferendumV8() {
     setDebateOpinions([]);
     try {
       const data = await apiFetch('GET', `/debates/${debateId}/opinions`);
-      setDebateOpinions((data.items || []).filter(it => it.type === 'opinion').map(it => it.opinion));
+      const allItems = data.items || [];
+      const ops = []; const slots = {};
+      allItems.forEach(it => { if (it.type === 'opinion') ops.push(it.opinion); else if (it.type === 'ad') slots[ops.length] = it.ad; });
+      setDebateOpinions(ops); setDebateAdSlots(slots);
     } catch (e) {/* silently fail */} finally {
       setOpinionsLoading(false);
     }
@@ -2663,7 +2667,7 @@ function PreferendumV8() {
       }, "\u00bfC\u00f3mo quieres participar?"),
       /*#__PURE__*/React.createElement("div", {
         style: {fontSize: 14, color: T.fog, marginBottom: 24, textAlign: "center"}
-      }, "Elige tu rol en la plataforma"),
+      }, "Cada decisión comienza eligiendo c\xF3mo quieres participar"),
       /*#__PURE__*/React.createElement("button", {
         onClick: () => {setUserType("voter"); go("register");},
         style: {width: "100%", maxWidth: 320, padding: "20px 22px", borderRadius: 14, background: T.blue, border: "none", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left", lineHeight: 1.5, boxShadow: "0 4px 32px rgba(37,99,235,0.3)"}
@@ -4924,29 +4928,19 @@ function PreferendumV8() {
       }
     }, "Comparte tu perspectiva sobre este tema.")), debateOpinions.map((op, i) => /*#__PURE__*/React.createElement("div", {
       key: op.id || i
-    }, i > 0 && i % 5 === 0 && /*#__PURE__*/React.createElement("div", {
-      style: {
-        background: "#fff7ed",
-        margin: "4px 12px",
-        borderRadius: 12,
-        padding: "10px 14px",
-        border: "1px solid #fed7aa"
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 9,
-        color: "#c2410c",
-        textTransform: "uppercase",
-        letterSpacing: "0.08em",
-        marginBottom: 4
-      }
-    }, "Publicidad"), /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontSize: 13,
-        fontWeight: 700,
-        color: "#1c1917"
-      }
-    }, "Patrocinado por la consulta")), /*#__PURE__*/React.createElement("div", {
+    }, debateAdSlots[i] && /*#__PURE__*/React.createElement("div", {
+      style: {background: "#fff", margin: "4px 12px 8px", borderRadius: 14, padding: "14px 16px", boxShadow: "0 1px 4px rgba(0,0,0,0.08)", border: "1px solid #e2e8f0"}
+    }, /*#__PURE__*/React.createElement("div", {style: {fontSize: 9, color: "#c2410c", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8}}, "Publicidad"),
+    /*#__PURE__*/React.createElement("div", {style: {display: "flex", gap: 12, alignItems: "center"}},
+      debateAdSlots[i].logo_url
+        ? /*#__PURE__*/React.createElement("img", {src: debateAdSlots[i].logo_url, style: {width: 44, height: 44, borderRadius: 8, objectFit: "contain", background: "#f8fafc", border: "1px solid #e2e8f0"}})
+        : /*#__PURE__*/React.createElement("div", {style: {width: 44, height: 44, borderRadius: 8, background: debateAdSlots[i].logo_color || "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "#fff", fontWeight: 900, flexShrink: 0}}, (debateAdSlots[i].brand || "A")[0]),
+      /*#__PURE__*/React.createElement("div", {style: {flex: 1}},
+        /*#__PURE__*/React.createElement("div", {style: {fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 2}}, debateAdSlots[i].brand),
+        /*#__PURE__*/React.createElement("div", {style: {fontSize: 12, color: "#475569", lineHeight: 1.5}}, debateAdSlots[i].copy)
+      ),
+      /*#__PURE__*/React.createElement("div", {style: {background: debateAdSlots[i].logo_color || "#2563eb", color: "#fff", borderRadius: 8, padding: "7px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0}}, debateAdSlots[i].cta || "Ver m\xE1s")
+    )), /*#__PURE__*/React.createElement("div", {
       style: {
         background: "#fff",
         margin: "4px 12px",
@@ -6213,7 +6207,7 @@ function PreferendumV8() {
         color: T.silver,
         lineHeight: 1.6
       }
-    }, "Tu confirmaci\xF3n fue registrada en blockchain. Eres parte de la auditor\xEDa democr\xE1tica.")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(Lbl, null, "\uD83D\uDCCA Precisi\xF3n global del sistema"), /*#__PURE__*/React.createElement("div", {
+    }, "Tu confirmaci\xF3n fue registrada en blockchain. Eres parte de la auditor\xEDa democr\xE1tica.")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(Lbl, null, "\uD83D\uDCCA Precisi\xF3n verificada de Preferendum"), /*#__PURE__*/React.createElement("div", {
       style: {
         background: T.deep,
         borderRadius: 10,
@@ -6232,7 +6226,7 @@ function PreferendumV8() {
         color: T.fog,
         marginTop: 4
       }
-    }, "Precisi\xF3n global del sistema"), /*#__PURE__*/React.createElement("div", {
+    }, "Precisi\xF3n verificada de Preferendum"), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 10,
         color: T.mist,
@@ -7073,7 +7067,7 @@ function PreferendumV8() {
       color: ncBranching ? T.silver : T.fog,
       lineHeight: 1.6
     }
-  }, ncBranching ? "Activado — cada respuesta lleva a una pregunta distinta. Construye tu árbol abajo." : "Activa esta opción para hacer preguntas en cascada: dependiendo de la respuesta del votante, el sistema le hace una siguiente pregunta diferente. Ideal para mapear preferencias en detalle sin limitar las opciones desde el inicio."), !ncBranching && /*#__PURE__*/React.createElement("div", {
+  }, ncBranching ? "Activado — cada respuesta lleva a una pregunta distinta. Construye tu árbol abajo." : "Activa esta opción para hacer preguntas en cascada: dependiendo de la respuesta del votante, Preferendum le hace una siguiente pregunta diferente. Ideal para mapear preferencias en detalle sin limitar las opciones desde el inicio."), !ncBranching && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: T.fog,
@@ -9482,6 +9476,9 @@ function PreferendumV8() {
             target_age_max: 99,
             start_date: startDate || today,
             end_date: endDate || today,
+            logo_url: logoPrev || '',
+            ad_copy: adHeadline || adBody || '',
+            ad_image_url: imgPrev || '',
           });
         } catch(_) {}
         setLaunched(true);

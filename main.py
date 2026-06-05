@@ -303,6 +303,9 @@ class AdCampaign(Base):
     end_date            = Column(DateTime, nullable=True)
     is_active           = Column(Boolean, default=True)
     created_at          = Column(DateTime, default=datetime.utcnow)
+    logo_url            = Column(String, default='')   # data URI o URL pública del logo
+    ad_copy             = Column(String, default='')   # texto del anuncio
+    ad_image_url        = Column(String, default='')   # imagen principal del anuncio
 
 class AdImpressionLog(Base):
     __tablename__ = 'ad_impression_logs'
@@ -853,6 +856,9 @@ class CampaignCreate(BaseModel):
     blocked_competitors: str = ''
     start_date:          str
     end_date:            str
+    logo_url:            str = ''
+    ad_copy:             str = ''
+    ad_image_url:        str = ''
 
 class AdViewInput(BaseModel):
     campaign_id: int
@@ -2022,10 +2028,12 @@ def get_opinions(debate_id: int,
             if matched:
                 campaign = matched[ad_idx % len(matched)]
                 result.append({'type': 'ad', 'ad': {
-                    'brand':      campaign.advertiser_name,
-                    'copy':       campaign.title,
-                    'cta':        'Ver más',
-                    'logo_color': '#2563eb',
+                    'brand':       campaign.advertiser_name,
+                    'copy':        campaign.ad_copy or campaign.title,
+                    'cta':         'Ver más',
+                    'logo_color':  '#2563eb',
+                    'logo_url':    campaign.logo_url or '',
+                    'image_url':   campaign.ad_image_url or '',
                     'campaign_id': campaign.id,
                 }})
                 # Registrar impresión — solo datos anónimos, nunca identidad
@@ -3146,6 +3154,9 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         start_date          = datetime.fromisoformat(data.start_date),
         end_date            = datetime.fromisoformat(data.end_date),
         is_active           = True,
+        logo_url            = data.logo_url or '',
+        ad_copy             = data.ad_copy or '',
+        ad_image_url        = data.ad_image_url or '',
     )
     db.add(campaign)
     db.commit()
