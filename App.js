@@ -92,6 +92,8 @@ export default function App() {
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
         injectedJavaScriptBeforeContentLoaded={injected}
+        allowsLinkPreview={false}
+        textInteractionEnabled={false}
         onError={e => setError("WebView: " + (e.nativeEvent.description || e.nativeEvent.code))}
       />
     </SafeAreaView>
