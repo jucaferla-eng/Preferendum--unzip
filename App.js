@@ -46,19 +46,7 @@ export default function App() {
       return;
     }
 
-    // Background check: quietly fetch server update (won t block launch)
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 4000);
-      const resp = await fetch(`${APP_URL}?v=${Date.now()}`, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (resp.ok) {
-        const content = await resp.text();
-        if (content && content.length > 500) setHtml(content);
-      }
-    } catch (_) {
-      // server unavailable — local bundle already shown, nothing to do
-    }
+    // Local bundle is always current — no server fetch needed
   }
 
   if (error) {

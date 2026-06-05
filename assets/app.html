@@ -4,7 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
 <title>Preferendum</title>
-<style>*{margin:0;padding:0;box-sizing:border-box;-webkit-touch-callout:none;}html,body{height:100%;background:#090c13;}#root{height:100%;display:flex;align-items:flex-start;justify-content:center;}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box;-webkit-touch-callout:none;}html,body{height:100%;background:#090c13;}#root{height:100%;display:flex;align-items:flex-start;justify-content:center;}input,textarea,select{-webkit-touch-callout:default;-webkit-user-select:text;user-select:text;touch-action:auto;}</style>
 </head>
 <body>
 
@@ -1739,7 +1739,10 @@ function Input({
       outline: "none",
       fontFamily: mono ? "monospace" : "inherit",
       letterSpacing: mono ? "0.1em" : "normal",
-      boxSizing: "border-box"
+      boxSizing: "border-box",
+      WebkitUserSelect: "text",
+      userSelect: "text",
+      WebkitTouchCallout: "default"
     }
   }));
 }
@@ -2666,7 +2669,7 @@ function PreferendumV8() {
         style: {width: "100%", maxWidth: 320, padding: "20px 22px", borderRadius: 14, background: T.blue, border: "none", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left", lineHeight: 1.5, boxShadow: "0 4px 32px rgba(37,99,235,0.3)"}
       }, "\uD83D\uDE4B\u200D\u2642\uFE0F  \u00bfQuieres expresar tus preferencias y votar en un tema?"),
       /*#__PURE__*/React.createElement("button", {
-        onClick: () => {setUserType("organizer"); go("organizer");},
+        onClick: () => {setUserType("organizer"); go("inst-login");},
         style: {width: "100%", maxWidth: 320, padding: "20px 22px", borderRadius: 14, background: "#1E40AF", border: "none", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left", lineHeight: 1.5, boxShadow: "0 4px 32px rgba(30,64,175,0.35)"}
       }, "\uD83C\uDFDB\uFE0F  \u00bfQuieres hacer una consulta y que quienes t\u00fa definas voten en ella?"),
       /*#__PURE__*/React.createElement("button", {
@@ -6669,7 +6672,7 @@ function PreferendumV8() {
     style: phone
   }, /*#__PURE__*/React.createElement(TopBar, {
     title: "Portal Institucional",
-    back: "feed"
+    back: "choose-type"
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "16px 16px 80px"
@@ -7993,7 +7996,7 @@ function PreferendumV8() {
       padding: "0 4px"
     }
   }, "\u2190"), userType !== "inst" && /*#__PURE__*/React.createElement("button", {
-    onClick: () => go("launch"),
+    onClick: () => go("choose-type"),
     style: {
       background: "none",
       border: "none",
@@ -8482,6 +8485,12 @@ function PreferendumV8() {
       placeholder: "Ej. Nike Chile, Municipalidad Las Condes",
       value: brandName,
       onChange: setBrand
+    }), /*#__PURE__*/React.createElement(Input, {
+      label: "Email de contacto",
+      placeholder: "campanas@tumarca.cl",
+      type: "email",
+      value: email,
+      onChange: setEmail
     }), /*#__PURE__*/React.createElement("div", {
       style: {
         marginBottom: 14
@@ -9458,7 +9467,25 @@ function PreferendumV8() {
         color: T.teal
       }
     }, /*#__PURE__*/React.createElement("strong", null, "Opci\xF3n ", i + 1, ":"), " ", o.text)))), /*#__PURE__*/React.createElement("button", {
-      onClick: () => setLaunched(true),
+      onClick: async () => {
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          await apiFetch('POST', '/marketer/campaigns', {
+            advertiser_email: email || (brandName||'anunciante').toLowerCase().replace(/\s+/g,'.')+('@demo.cl'),
+            advertiser_name: brandName || 'Anunciante',
+            campaign_title: (brandName || 'Campa\u00F1a') + ' \u00B7 Preferendum',
+            budget_clp: parseInt(budget) || 10000,
+            ad_type: adType || 'banner',
+            target_country: 'CL',
+            target_gender: sexF && sexM ? 'all' : sexF ? 'female' : 'male',
+            target_age_min: 13,
+            target_age_max: 99,
+            start_date: startDate || today,
+            end_date: endDate || today,
+          });
+        } catch(_) {}
+        setLaunched(true);
+      },
       style: {
         width: "100%",
         padding: 16,
