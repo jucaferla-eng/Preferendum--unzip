@@ -1827,52 +1827,46 @@ async def upload_image(
     if not (file.content_type or '').startswith('image/'):
         raise HTTPException(400, 'Only image files allowed')
     contents = await file.read()
-    if len(contents) > 10 * 1024 * 1024:
-        raise HTTPException(400, 'Image too large — max 10 MB')
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(400, 'Image too grande — máximo 5 MB')
+    # Try S3 if credentials available, otherwise return base64 data URI
     aws_key = os.getenv('AWS_ACCESS_KEY_ID')
     aws_secret = os.getenv('AWS_SECRET_ACCESS_KEY')
-    aws_region = os.getenv('AWS_REGION', 'us-east-1')
-    bucket = os.getenv('AWS_S3_BUCKET', 'preferendum-images')
-    if not aws_key or not aws_secret:
-        raise HTTPException(503, 'Image upload not configured')
-    try:
-        ext = (file.filename or 'img.jpg').rsplit('.', 1)[-1].lower()
-        if ext not in ('jpg','jpeg','png','gif','webp'):
-            ext = 'jpg'
-        key = f"products/{uuid.uuid4().hex}.{ext}"
-        s3 = boto3.client('s3',
-            region_name=aws_region,
-            aws_access_key_id=aws_key,
-            aws_secret_access_key=aws_secret,
-        )
-        # Create bucket if it doesn't exist
+    if aws_key and aws_secret:
         try:
-            s3.head_bucket(Bucket=bucket)
-        except ClientError as e:
-            if e.response['Error']['Code'] in ('404', 'NoSuchBucket'):
-                if aws_region == 'us-east-1':
-                    s3.create_bucket(Bucket=bucket)
-                else:
-                    s3.create_bucket(Bucket=bucket,
-                        CreateBucketConfiguration={'LocationConstraint': aws_region})
-                s3.put_public_access_block(Bucket=bucket,
-                    PublicAccessBlockConfiguration={
-                        'BlockPublicAcls': False,
-                        'IgnorePublicAcls': False,
-                        'BlockPublicPolicy': False,
-                        'RestrictPublicBuckets': False,
-                    })
-        s3.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=contents,
-            ContentType=file.content_type or 'image/jpeg',
-            ACL='public-read',
-        )
-        url = f"https://{bucket}.s3.{aws_region}.amazonaws.com/{key}"
-        return {'url': url}
-    except Exception as e:
-        raise HTTPException(500, f'Upload failed: {str(e)}')
+            aws_region = os.getenv('AWS_REGION', 'us-east-1')
+            bucket = os.getenv('AWS_S3_BUCKET', 'preferendum-images')
+            ext = (file.filename or 'img.jpg').rsplit('.', 1)[-1].lower()
+            if ext not in ('jpg','jpeg','png','gif','webp'):
+                ext = 'jpg'
+            key = f"products/{uuid.uuid4().hex}.{ext}"
+            s3 = boto3.client('s3',
+                region_name=aws_region,
+                aws_access_key_id=aws_key,
+                aws_secret_access_key=aws_secret,
+            )
+            try:
+                s3.head_bucket(Bucket=bucket)
+            except ClientError as e:
+                if e.response['Error']['Code'] in ('404', 'NoSuchBucket'):
+                    if aws_region == 'us-east-1':
+                        s3.create_bucket(Bucket=bucket)
+                    else:
+                        s3.create_bucket(Bucket=bucket,
+                            CreateBucketConfiguration={'LocationConstraint': aws_region})
+                    s3.put_public_access_block(Bucket=bucket,
+                        PublicAccessBlockConfiguration={
+                            'BlockPublicAcls': False, 'IgnorePublicAcls': False,
+                            'BlockPublicPolicy': False, 'RestrictPublicBuckets': False,
+                        })
+            s3.put_object(Bucket=bucket, Key=key, Body=contents,
+                ContentType=file.content_type or 'image/jpeg', ACL='public-read')
+            return {'url': f"https://{bucket}.s3.{aws_region}.amazonaws.com/{key}"}
+        except Exception:
+            pass  # fall through to base64
+    mime = file.content_type or 'image/jpeg'
+    data_uri = f"data:{mime};base64,{base64.b64encode(contents).decode()}"
+    return {'url': data_uri}
 
 # ══════════════════════════════════════════════════════════════
 # ROUTES: DEBATES
