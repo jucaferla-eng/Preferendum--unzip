@@ -2004,12 +2004,12 @@ function PreferendumV8() {
   const [ncVisual, setNcVisual] = useState(false);
   const [ncOptImages, setNcOptImages] = useState(Array(10).fill(''));
   const [ncBranching, setNcBranching] = useState(false);
-  const [ncQ2, setNcQ2] = useState(Array(4).fill(null).map(() => ({
+  const [ncQ2, setNcQ2] = useState(Array(10).fill(null).map(() => ({
     on: false,
     title: '',
     opts: ['', '', '']
   })));
-  const [ncQ3, setNcQ3] = useState(Array(4).fill(null).map(() => Array(3).fill(null).map(() => ({
+  const [ncQ3, setNcQ3] = useState(Array(10).fill(null).map(() => Array(10).fill(null).map(() => ({
     on: false,
     title: '',
     opts: ['', '']
@@ -7831,7 +7831,7 @@ function PreferendumV8() {
       const options = ncOpts.filter(Boolean);
       // Build follow_up_questions tree
       const followUpBranches = ncBranching ? ncOpts.map((opt, i) => {
-        if (!opt || !ncQ2[i].on || !ncQ2[i].title) return null;
+        const q2i = ncQ2[i]; if (!opt || !q2i || !q2i.on || !q2i.title) return null;
         const q2Opts = ncQ2[i].opts.filter(Boolean);
         if (q2Opts.length < 2) return null;
         return {
