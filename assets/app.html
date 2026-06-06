@@ -4731,6 +4731,7 @@ function PreferendumV8() {
           return;
         }
         setDebateTab(id);
+        window.scrollTo && window.scrollTo({top: 0, behavior: 'smooth'});
       },
       style: {
         flex: 1,
@@ -7096,7 +7097,14 @@ function PreferendumV8() {
       marginTop: 6
     }
   }, "Ejemplo: Pregunta 1 \u2192 \"\xBFPrefieres A o B?\" \xB7 Si elige A \u2192 Pregunta 2A \xB7 Si elige B \u2192 Pregunta 2B")), /*#__PURE__*/React.createElement("div", {
-    onClick: () => setNcBranching(p => !p),
+    onClick: () => {
+        const next = !ncBranching;
+        setNcBranching(next);
+        if (next) {
+          // Auto-enable Q2 for all options that have content
+          setNcQ2(prev => prev.map((q, i) => ncOpts[i] ? {...q, opts: [...q.opts], on: true} : q));
+        }
+      },
     style: {
       width: 44,
       height: 24,
