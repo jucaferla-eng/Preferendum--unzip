@@ -468,6 +468,10 @@ def _migrate():
             ('target_income_max', 'FLOAT DEFAULT 9999.0'),
             ('target_age_min',    'INTEGER DEFAULT 13'),
             ('target_age_max',    'INTEGER DEFAULT 99'),
+            ('logo_url',          "TEXT DEFAULT ''"),
+            ('ad_copy',           "TEXT DEFAULT ''"),
+            ('ad_image_url',      "TEXT DEFAULT ''"),
+            ('created_at',        'TIMESTAMP DEFAULT NOW()'),
         ]:
             if col not in existing_ad_cols:
                 try:
@@ -2539,7 +2543,9 @@ def _format_campaign(c: AdCampaign) -> dict:
         'start_date':         c.start_date.isoformat() if c.start_date else None,
         'end_date':           c.end_date.isoformat() if c.end_date else None,
         'is_active':          c.is_active,
-        'created_at':         c.created_at.isoformat(),
+        'target_se_tiers':    c.target_se_tiers or '',
+        'impressions':        0,
+        'created_at':         c.created_at.isoformat() if c.created_at else None,
     }
 
 # ══════════════════════════════════════════════════════════════

@@ -5100,6 +5100,7 @@ function PreferendumV8() {
         if (nextQ && nextQ.title) {
           setVBranchPath(newPath);
           setVBranchQ(nextQ);
+          setTimeout(() => { window.scrollTo && window.scrollTo({top: 0, behavior: 'smooth'}); }, 50);
         } else {
           const q1Idx = vBranchPath.length > 0 ? vBranchPath[0].option_index : i;
           await submitVote(q1Idx, newPath);
@@ -5245,9 +5246,21 @@ function PreferendumV8() {
       }), /*#__PURE__*/React.createElement("span", {
         style: {
           color: T.white,
-          lineHeight: 1.4
+          lineHeight: 1.4,
+          flex: 1
         }
-      }, opt))), !isQ1 && /*#__PURE__*/React.createElement("button", {
+      }, opt), currentQ.branches && currentQ.branches[i] ? /*#__PURE__*/React.createElement("span", {
+        style: {
+          fontSize: 9,
+          color: T.blue,
+          background: T.blue + '22',
+          borderRadius: 6,
+          padding: '2px 6px',
+          flexShrink: 0,
+          fontWeight: 600,
+          letterSpacing: '0.02em'
+        }
+      }, "→ +info") : null)), !isQ1 && /*#__PURE__*/React.createElement("button", {
         onClick: () => {
           setVBranchQ(null);
           setVBranchPath([]);
