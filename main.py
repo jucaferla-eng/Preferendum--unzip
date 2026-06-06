@@ -3580,3 +3580,58 @@ def admin_set_organizer_status(user_id: int, secret: str, status: str, reason: s
         profile.approved_at = datetime.utcnow()
     db.commit()
     return {'ok': True, 'user_id': user_id, 'status': status}
+
+
+@app.post('/admin/seed-opinions')
+def seed_opinions(secret: str, debate_id: int, count: int = 8, db: Session = Depends(get_db)):
+    """Agrega opiniones de prueba a un debate para que aparezcan los ads (necesita ≥6)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+    sample_opinions = [
+        ("Esta consulta me parece fundamental para nuestra comunidad. Hay que considerar todos los ángulos antes de decidir.", "Expert"),
+        ("He estudiado el tema en profundidad y creo que la evidencia apunta en una dirección clara. Los datos son contundentes.", "Expert"),
+        ("Tengo experiencia directa con este tipo de decisiones y puedo aportar perspectiva práctica sobre las consecuencias.", "Good"),
+        ("La ciudadanía merece participar en decisiones que afectan directamente su vida cotidiana. Esto es democracia real.", "Familiar"),
+        ("Desde mi punto de vista como afectado directo, considero que hay factores que no se han tomado en cuenta suficientemente.", "Good"),
+        ("La transparencia en el proceso es fundamental. Cada voto debe quedar registrado y verificable por todos.", "Expert"),
+        ("He consultado con expertos en el área y la conclusión es que necesitamos más información antes de decidir.", "Good"),
+        ("El impacto de esta decisión va más allá de lo inmediato. Hay que pensar en las generaciones futuras también.", "Familiar"),
+        ("Apoyo firmemente esta iniciativa porque responde a necesidades reales que hemos visto en nuestra comunidad.", "Low"),
+        ("Las estadísticas disponibles muestran claramente cuál es la opción más beneficiosa para el bien común.", "Expert"),
+    ]
+    added = 0
+    for i in range(min(count, 20)):
+        text, level = sample_opinions[i % len(sample_opinions)]
+        op = Opinion(debate_id=debate_id, user_id=0, user_name='Ciudadano',
+                     text=text, knowledge_level=level)
+        db.add(op)
+        added += 1
+    db.commit()
+    return {'ok': True, 'debate_id': debate_id, 'opinions_added': added}
+
+
+@app.get('/admin/campaigns')
+def admin_list_campaigns(secret: str, db: Session = Depends(get_db)):
+    """Lista todas las campañas con su estado."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    campaigns = db.query(AdCampaign).order_by(AdCampaign.id.desc()).all()
+    return {'campaigns': [_format_campaign(c) for c in campaigns]}
+
+
+@app.patch('/admin/campaigns/{campaign_id}/activate')
+def admin_activate_campaign(campaign_id: int, secret: str, days: int = 30, db: Session = Depends(get_db)):
+    """Reactiva una campaña expirada y extiende su fecha de fin."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(404, 'Campaign not found')
+    c.is_active = True
+    c.end_date = datetime.utcnow() + timedelta(days=days)
+    c.start_date = min(c.start_date or datetime.utcnow(), datetime.utcnow())
+    db.commit()
+    return {'ok': True, 'campaign_id': campaign_id, 'end_date': c.end_date.isoformat()}
