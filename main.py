@@ -1833,8 +1833,26 @@ async def upload_image(
     if not (file.content_type or '').startswith('image/'):
         raise HTTPException(400, 'Only image files allowed')
     contents = await file.read()
-    if len(contents) > 5 * 1024 * 1024:
-        raise HTTPException(400, 'Image too grande — máximo 5 MB')
+    if len(contents) > 8 * 1024 * 1024:
+        raise HTTPException(400, 'Image too grande — máximo 8 MB')
+
+    # Compress image with Pillow to keep base64 small (max 800px, JPEG q70)
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(contents))
+        img = img.convert('RGB')
+        max_dim = 800
+        w, h = img.size
+        if w > max_dim or h > max_dim:
+            ratio = min(max_dim / w, max_dim / h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format='JPEG', quality=70, optimize=True)
+        contents = buf.getvalue()
+    except Exception:
+        pass  # if Pillow fails, use original
+
     # Try S3 if credentials available, otherwise return base64 data URI
     aws_key = os.getenv('AWS_ACCESS_KEY_ID')
     aws_secret = os.getenv('AWS_SECRET_ACCESS_KEY')
@@ -1842,10 +1860,7 @@ async def upload_image(
         try:
             aws_region = os.getenv('AWS_REGION', 'us-east-1')
             bucket = os.getenv('AWS_S3_BUCKET', 'preferendum-images')
-            ext = (file.filename or 'img.jpg').rsplit('.', 1)[-1].lower()
-            if ext not in ('jpg','jpeg','png','gif','webp'):
-                ext = 'jpg'
-            key = f"products/{uuid.uuid4().hex}.{ext}"
+            key = f"products/{uuid.uuid4().hex}.jpg"
             s3 = boto3.client('s3',
                 region_name=aws_region,
                 aws_access_key_id=aws_key,
@@ -1866,12 +1881,11 @@ async def upload_image(
                             'BlockPublicPolicy': False, 'RestrictPublicBuckets': False,
                         })
             s3.put_object(Bucket=bucket, Key=key, Body=contents,
-                ContentType=file.content_type or 'image/jpeg', ACL='public-read')
+                ContentType='image/jpeg', ACL='public-read')
             return {'url': f"https://{bucket}.s3.{aws_region}.amazonaws.com/{key}"}
         except Exception:
             pass  # fall through to base64
-    mime = file.content_type or 'image/jpeg'
-    data_uri = f"data:{mime};base64,{base64.b64encode(contents).decode()}"
+    data_uri = f"data:image/jpeg;base64,{base64.b64encode(contents).decode()}"
     return {'url': data_uri}
 
 # ══════════════════════════════════════════════════════════════
@@ -1966,16 +1980,29 @@ def _tier_gte(user_tier: str, min_tier: str) -> bool:
     except ValueError:
         return True
 
+def _tier_matches(user_tier: str, target_tiers_str: str) -> bool:
+    """Handles both 'AAA,BBB' and abbreviated 'A,B,C,D' tier formats."""
+    tiers = [t.strip() for t in target_tiers_str.split(',') if t.strip()]
+    if not tiers:
+        return True
+    if user_tier in tiers:
+        return True
+    # Abbreviated format: first letter of user_tier (e.g. 'BBB' → 'B')
+    first = user_tier[0] if user_tier else ''
+    if first and first in tiers:
+        return True
+    return False
+
 def _match_campaigns(user, debate, db) -> list:
     """
     Encuentra campañas activas que hagan match con el perfil del votante.
     Solo la comuna (tier) — nunca datos personales.
     """
     now = datetime.utcnow()
+    # Include campaigns whose end_date is today or later (allow same-day)
     campaigns = db.query(AdCampaign).filter(
         AdCampaign.is_active == True,
         AdCampaign.start_date <= now,
-        AdCampaign.end_date >= now,
     ).all()
 
     matched = []
@@ -1986,6 +2013,9 @@ def _match_campaigns(user, debate, db) -> list:
     user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
 
     for c in campaigns:
+        # Check expiry with 24h grace period
+        if c.end_date and c.end_date < (now - timedelta(hours=24)):
+            continue
         # País
         if c.target_country and c.target_country != user_country:
             continue
@@ -1997,9 +2027,9 @@ def _match_campaigns(user, debate, db) -> list:
         age_max = getattr(c, 'target_age_max', 99) or 99
         if not (age_min <= user_age <= age_max):
             continue
-        # Nivel de ingreso — el marketer dice "BBB o superior"
-        tiers = [t.strip() for t in (c.target_se_tiers or 'AAA,AAB,ABB,BBB,BBC,BCC').split(',')]
-        if user_tier and user_tier not in tiers:
+        # Nivel de ingreso — acepta 'A,B,C,D' y 'AAA,ABB,BBB' formats
+        target_tiers = c.target_se_tiers or 'AAA,AAB,ABB,BBB,BBC,BCC'
+        if user_tier and not _tier_matches(user_tier, target_tiers):
             continue
         matched.append(c)
 
@@ -2027,13 +2057,18 @@ def get_opinions(debate_id: int,
             # Prioridad: campaña de marketer que hace match → ad estático del debate
             if matched:
                 campaign = matched[ad_idx % len(matched)]
+                # Cap base64 images to avoid memory exhaustion (Render free tier)
+                def _safe_url(url, limit=200_000):
+                    if url and url.startswith('data:') and len(url) > limit:
+                        return ''
+                    return url or ''
                 result.append({'type': 'ad', 'ad': {
                     'brand':       campaign.advertiser_name,
                     'copy':        campaign.ad_copy or campaign.title,
                     'cta':         'Ver más',
                     'logo_color':  '#2563eb',
-                    'logo_url':    campaign.logo_url or '',
-                    'image_url':   campaign.ad_image_url or '',
+                    'logo_url':    _safe_url(campaign.logo_url),
+                    'image_url':   _safe_url(campaign.ad_image_url),
                     'campaign_id': campaign.id,
                 }})
                 # Registrar impresión — solo datos anónimos, nunca identidad

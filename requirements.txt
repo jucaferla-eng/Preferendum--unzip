@@ -20,3 +20,4 @@ requests
 psycopg2-binary
 cloudinary
 boto3
+Pillow

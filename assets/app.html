@@ -1409,13 +1409,13 @@ function isRTL() {
 
 // ══ DESIGN TOKENS ══════════════════════════════════════════════
 const T = {
-  bg: "#090c13",
+  bg: "#0d1623",
   // deep civic navy
-  deep: "#0e1322",
+  deep: "#121e32",
   // header / top bar
-  panel: "#161e30",
+  panel: "#1a243d",
   // card bg — distinct from bg
-  card: "#1c2640",
+  card: "#20304d",
   // raised card
   rim: "#2c3e5c",
   // borders
@@ -2146,6 +2146,7 @@ function PreferendumV8() {
   const [knowledgeLevel, setKnowledgeLevel] = useState('familiar');
   const [postingOpinion, setPostingOpinion] = useState(false);
   const [opinionError, setOpinionError] = useState('');
+  const [opinionSuccess, setOpinionSuccess] = useState(false);
   const markDone = step => {
     setVfDone(prev => ({
       ...prev,
@@ -2265,7 +2266,6 @@ function PreferendumV8() {
   }, [screen]);
   const loadOpinions = async debateId => {
     setOpinionsLoading(true);
-    setDebateOpinions([]);
     try {
       const data = await apiFetch('GET', `/debates/${debateId}/opinions`);
       const allItems = data.items || [];
@@ -2289,7 +2289,10 @@ function PreferendumV8() {
         knowledge_level: knowledgeLevel
       });
       setNewOpinionText('');
+      setOpinionSuccess(true);
+      setTimeout(() => setOpinionSuccess(false), 4000);
       loadOpinions(debateId);
+      setTimeout(() => { const el = document.getElementById('opinions-list-end'); if (el) el.scrollIntoView({behavior:'smooth'}); }, 700);
     } catch (e) {
       setOpinionError(e.message || 'Error al publicar.');
     } finally {
@@ -2905,11 +2908,6 @@ function PreferendumV8() {
       padding: "24px 0 20px"
     }
   }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 48,
-      marginBottom: 12
-    }
-  }, "\uD83D\uDDF3"), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 24,
       fontWeight: 900,
@@ -4892,7 +4890,7 @@ function PreferendumV8() {
         fontWeight: 700,
         opacity: postingOpinion ? 0.6 : 1
       }
-    }, postingOpinion ? "Enviando…" : "Publicar")), opinionError && /*#__PURE__*/React.createElement("div", {
+    }, postingOpinion ? "Enviando…" : "Publicar")), /*#__PURE__*/React.createElement("div", {id: "opinions-list-end"}), opinionSuccess && /*#__PURE__*/React.createElement("div", {style: {background: "#22c55e22", border: "1px solid #22c55e", borderRadius: 10, padding: "12px 16px", margin: "8px 0", color: "#22c55e", fontWeight: 700, textAlign: "center", fontSize: 15}}, "\u2713 Tu opini\u00F3n fue publicada"), opinionError && /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 12,
         color: "#ef4444",
@@ -9474,8 +9472,9 @@ function PreferendumV8() {
             target_gender: sexF && sexM ? 'all' : sexF ? 'female' : 'male',
             target_age_min: 13,
             target_age_max: 99,
+            target_se_tiers: 'AAA,AAB,ABB,BBB,BBC,BCC',
             start_date: startDate || today,
-            end_date: endDate || today,
+            end_date: endDate || (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().split('T')[0]; })(),
             logo_url: logoPrev || '',
             ad_copy: adHeadline || adBody || '',
             ad_image_url: imgPrev || '',
