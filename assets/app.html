@@ -4524,7 +4524,7 @@ function PreferendumV8() {
     if (!myKnowledge) return /*#__PURE__*/React.createElement("div", {
       style: phone
     }, /*#__PURE__*/React.createElement(TopBar, {
-      title: "DEBATE",
+      title: debateTab === "results" ? "Resultados" : debateTab === "vote" ? "Votar" : (deb.inst || "Debate"),
       back: "feed",
       right: /*#__PURE__*/React.createElement(StatusBadge, {
         status: deb.status
@@ -5472,7 +5472,18 @@ function PreferendumV8() {
         fontSize: 14,
         color: T.green
       }
-    }, "\u2705 ", /*#__PURE__*/React.createElement("strong", null, "Ganador: ", deb.opts[deb.vals.indexOf(Math.max(...deb.vals))]), " — ", Math.round(Math.max(...deb.vals) / total * 100), "%", deb.status === "verified" && ` · ✓ ${deb.accuracy || 0}% ${t("res.verified")}`), /*#__PURE__*/React.createElement("div", {
+    }, "\u2705 ", /*#__PURE__*/React.createElement("strong", null, "Ganador: ", deb.opts[deb.vals.indexOf(Math.max(...deb.vals))]), " — ", Math.round(Math.max(...deb.vals) / total * 100), "%", deb.status === "verified" && ` · ✓ ${deb.accuracy || 0}% ${t("res.verified")}`), voted[deb.id]?.chain && voted[deb.id].chain.length > 1 && /*#__PURE__*/React.createElement("div", {
+      style: {marginBottom: 14}
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {fontSize: 11, fontWeight: 700, color: T.mist, textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 10, paddingLeft: 2}
+    }, "Preguntas de profundidad"), voted[deb.id].chain.slice(1).map((step, i) => /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {border: `1px solid ${T.rim}`, borderRadius: 12, padding: "12px 14px", marginBottom: 8, background: T.panel}
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {fontSize: 12, color: T.fog, marginBottom: 4}
+    }, "Pregunta " + (i + 2) + (step.question ? (": " + step.question) : "")), /*#__PURE__*/React.createElement("div", {
+      style: {fontSize: 14, fontWeight: 700, color: T.blue}
+    }, "\u25B6 " + step.option_text)))), /*#__PURE__*/React.createElement("div", {
       style: {
         background: `${T.teal}18`,
         border: `1px solid ${T.teal}44`,
@@ -6823,7 +6834,7 @@ function PreferendumV8() {
         color: T.white,
         flex: 1
       }
-    }, myDebateIds.length > 0 ? `Mis consultas (${myDebs.length})` : 'Consultas'), /*#__PURE__*/React.createElement("button", {
+    }, myDebateIds.length > 0 ? `Mis debates (${myDebs.length})` : 'Panel de decisiones'), /*#__PURE__*/React.createElement("button", {
       onClick: () => setInstTab("create"),
       style: {
         padding: "6px 14px",
