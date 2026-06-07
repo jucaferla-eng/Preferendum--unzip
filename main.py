@@ -1612,7 +1612,7 @@ def _assign_user_tier(user, db):
         return
     commune_data = db.query(CommuneMarketData).filter(
         CommuneMarketData.commune.ilike(user.county.strip()),
-        CommuneMarketData.country == (user.country or 'CL')
+        CommuneMarketData.country == _country_code(user.country)
     ).first()
     if not commune_data:
         # Búsqueda parcial si no hay match exacto
@@ -1961,6 +1961,23 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
     db.refresh(debate)
     return {'debate': format_debate(debate), 'message': 'Consultation created'}
 
+_COUNTRY_CODES = {
+    'chile': 'CL', 'argentina': 'AR', 'brasil': 'BR', 'brazil': 'BR',
+    'méxico': 'MX', 'mexico': 'MX', 'colombia': 'CO', 'perú': 'PE', 'peru': 'PE',
+    'españa': 'ES', 'spain': 'ES', 'usa': 'US', 'estados unidos': 'US',
+    'todos': 'ALL', 'all': 'ALL',
+}
+
+def _country_code(name: str) -> str:
+    """Normaliza nombres de país ('Chile') y códigos ISO ('CL') a un código común.
+    El registro guarda nombres completos ('Chile') pero campañas/CommuneMarketData usan códigos ISO ('CL')."""
+    if not name:
+        return 'CL'
+    s = name.strip()
+    if len(s) <= 3:
+        return s.upper()
+    return _COUNTRY_CODES.get(s.lower(), s.upper())
+
 def _get_age_group(dob: str) -> str:
     if not dob:
         return ''
@@ -2013,15 +2030,15 @@ def _match_campaigns(user, debate, db) -> list:
     user_tier      = user.se_tier or 'BBB'
     user_gender    = user.gender or 'all'
     user_age_group = _get_age_group(user.dob)
-    user_country   = user.country or 'CL'
+    user_country   = _country_code(user.country)
     user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
 
     for c in campaigns:
         # Check expiry with 24h grace period
         if c.end_date and c.end_date < (now - timedelta(hours=24)):
             continue
-        # País
-        if c.target_country and c.target_country != user_country:
+        # País — normaliza ambos lados ('Chile' vs 'CL') antes de comparar
+        if c.target_country and _country_code(c.target_country) != user_country:
             continue
         # Género
         if c.target_gender and c.target_gender != 'all' and c.target_gender != user_gender:
@@ -3586,6 +3603,22 @@ def admin_set_organizer_status(user_id: int, secret: str, status: str, reason: s
         profile.approved_at = datetime.utcnow()
     db.commit()
     return {'ok': True, 'user_id': user_id, 'status': status}
+
+
+@app.post('/admin/reassign-tiers')
+def admin_reassign_tiers(secret: str, db: Session = Depends(get_db)):
+    """Re-corre _assign_user_tier para usuarios con se_tier vacío (cuentas creadas antes
+    del fix de normalización país 'Chile' vs 'CL')."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    users = db.query(User).filter((User.se_tier == None) | (User.se_tier == '')).all()
+    updated = []
+    for u in users:
+        before = u.se_tier
+        _assign_user_tier(u, db)
+        if u.se_tier != before:
+            updated.append({'id': u.id, 'email': u.email, 'county': u.county, 'new_tier': u.se_tier})
+    return {'checked': len(users), 'updated': updated}
 
 
 @app.post('/admin/seed-opinions')
