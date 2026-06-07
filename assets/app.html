@@ -1986,6 +1986,7 @@ function PreferendumV8() {
   const [instTab, setInstTab] = useState("debates");
   const [instLoading, setInstLoading] = useState(false);
   const [instOrgType, setInstOrgType] = useState('person');
+  const [orgConsultations, setOrgConsultations] = useState(null); // null = aún no cargadas (no inventamos números)
   const [ncInstName, setNcInstName] = useState('');
   const [myDebateIds, setMyDebateIds] = useState([]); // IDs created in this session
   const [ncTitle, setNcTitle] = useState('');
@@ -2302,6 +2303,20 @@ function PreferendumV8() {
     })();
     return () => { cancelled = true; };
   }, [screen, myCampaignIds]);
+  // Carga las consultas REALES del organizador autenticado — el "Dashboard en
+  // vivo" antes mostraba números de ejemplo (245 votos, 86% participación...)
+  // sin importar qué cuenta hubiera entrado. Ahora refleja su cuenta real.
+  useEffect(() => {
+    if (screen !== 'inst-home' || !authToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiFetch('GET', '/organizer/consultations');
+        if (!cancelled) setOrgConsultations(data.consultations || []);
+      } catch (e) {/* si falla, dejamos orgConsultations como está — sin inventar datos */}
+    })();
+    return () => { cancelled = true; };
+  }, [screen, instTab, authToken]);
   const loadOpinions = async debateId => {
     setOpinionsLoading(true);
     try {
@@ -7152,7 +7167,15 @@ function PreferendumV8() {
       gap: 10,
       marginBottom: 14
     }
-  }, [["245", "Votos totales", T.blue], ["86%", "Participación", T.green], ["3", "Debates activos", T.teal], ["1", "En verificación", T.gold]].map(([n, l, c]) => /*#__PURE__*/React.createElement("div", {
+  }, (orgConsultations === null ? [
+      ["—", "Votos totales", T.blue], ["—", "Consultas", T.green],
+      ["—", "Activas", T.teal], ["—", "En verificación", T.gold],
+    ] : [
+      [String(orgConsultations.reduce((s, c) => s + (c.total_votes || 0), 0)), "Votos totales (reales)", T.blue],
+      [String(orgConsultations.length), "Consultas", T.green],
+      [String(orgConsultations.filter(c => c.status === 'live').length), "Activas", T.teal],
+      [String(orgConsultations.filter(c => c.status === 'verifying').length), "En verificación", T.gold],
+    ]).map(([n, l, c]) => /*#__PURE__*/React.createElement("div", {
     key: l,
     style: {
       background: T.panel,
@@ -7174,8 +7197,15 @@ function PreferendumV8() {
       color: T.fog,
       marginTop: 2
     }
-  }, l)))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(Lbl, null, "Integridad del sistema"), [["Presupuesto 2027", 98], ["Plan movilidad", 97], ["Global", 97.5]].map(([d, p]) => /*#__PURE__*/React.createElement("div", {
-    key: d,
+  }, l)))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(Lbl, null, "Legitimacy Score por consulta (público, real)"), (orgConsultations === null ? /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 12, color: T.fog, padding: "8px 0" }
+  }, "Cargando tus consultas…") : orgConsultations.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 12, color: T.fog, padding: "8px 0" }
+  }, "Aún no has publicado ninguna consulta. Cuando publiques una, su Legitimacy Score real aparecerá aquí.") : orgConsultations.slice(0, 6).map(c => {
+    const score = typeof c.legitimacy_score === 'number' ? c.legitimacy_score : null;
+    const pct = score != null ? Math.round(score * 10) / 10 : 0;
+    return /*#__PURE__*/React.createElement("div", {
+    key: c.id,
     style: {
       marginBottom: 10
     }
@@ -7190,12 +7220,12 @@ function PreferendumV8() {
     style: {
       color: T.silver
     }
-  }, d), /*#__PURE__*/React.createElement("span", {
+  }, c.title), /*#__PURE__*/React.createElement("span", {
     style: {
       fontWeight: 900,
       color: T.green
     }
-  }, p, "%")), /*#__PURE__*/React.createElement("div", {
+  }, score != null ? `${pct}%` : "Sin votos verificados aún")), /*#__PURE__*/React.createElement("div", {
     style: {
       background: T.deep,
       borderRadius: 4,
@@ -7205,11 +7235,12 @@ function PreferendumV8() {
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       height: "100%",
-      width: p + "%",
+      width: pct + "%",
       background: T.green,
       borderRadius: 4
     }
-  })))))), instTab === "create" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+  })));
+  })))), instTab === "create" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "4px 0 14px"
     }
