@@ -3700,7 +3700,7 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
         user_tier      = user.se_tier or 'BBB'
         user_gender    = user.gender or 'all'
         user_age_group = _get_age_group(user.dob)
-        user_country   = user.country or 'CL'
+        user_country   = _country_code(user.country)
         user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
         user_info = {
             'id': user.id, 'email': user.email, 'county': user.county,
@@ -3723,7 +3723,7 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
                 r['verdict'] = 'SKIP'; r['reason'] = f'start_date {c.start_date.isoformat()} > now {now.isoformat()}'
             elif c.end_date and c.end_date < (now - timedelta(hours=24)):
                 r['verdict'] = 'SKIP'; r['reason'] = f'end_date {c.end_date.isoformat()} expired'
-            elif c.target_country and c.target_country != user_country:
+            elif c.target_country and _country_code(c.target_country) != user_country:
                 r['verdict'] = 'SKIP'; r['reason'] = f'country mismatch: target={c.target_country} user={user_country}'
             elif c.target_gender and c.target_gender != 'all' and c.target_gender != user_gender:
                 r['verdict'] = 'SKIP'; r['reason'] = f'gender mismatch: target={c.target_gender} user={user_gender}'
@@ -3740,6 +3740,7 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
     else:
         now_iso = datetime.utcnow().isoformat()
 
+    real_match_ids = [c.id for c in _match_campaigns(user, debate, db)] if user else []
     return {
         'now_utc': now_iso,
         'debate_id': debate_id,
@@ -3747,5 +3748,6 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
         'ads_would_show_at_indices': [i for i in range(len(opinions)) if i > 0 and i % 5 == 0],
         'user': user_info,
         'matched_campaign_ids': matched_ids,
+        'real_match_campaigns_result': real_match_ids,
         'campaigns': reasons,
     }
