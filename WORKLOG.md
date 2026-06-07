@@ -288,3 +288,132 @@ flows (voter, organizer, marketer) live, then build and upload the new
 TestFlight version (these `app.html` changes are live on the web `/app`
 route now, but `App.js` bundles a local copy for mobile, so they won't
 reach iOS/Android until a fresh build is submitted).
+
+---
+
+## 2026-06-07 (continued III) — automated integrity-test suite, running unattended after every deploy
+
+**Branch:** `working-copy-2026-06-06` (fast-forwarded to `main`, deployed)
+**Commits:** `91f0b64c` (suite + ad-frequency + opinion polling), `d5948e84` (CI deploy-race fix)
+
+**What changed:**
+1. Added `tests/test_vote_integrity.py` — a pytest suite that runs against
+   the LIVE production server (no mocks, no local server) with fresh
+   disposable accounts and a disposable consultation it creates and closes
+   itself. It proves, end to end, the five things the founder asked an
+   unattended system to verify after every deploy:
+   - **An account can't vote twice** in the same consultation (409 "Ya
+     votaste en esta consulta").
+   - **A device can't be used to vote twice** — proven via the *actual*
+     mechanism (`/verify/imei` permanently binds an IMEI hash to one
+     account, 409 "Device already registered to another account" the
+     instant a second account tries), not just the `cast_vote` backstop
+     check, because the backstop can never be reached through the normal
+     registration flow — the front door is the one that's locked.
+   - **A national ID (RUT/DNI) can't vote twice**, even from a totally
+     different account and device (409 "Este documento de identidad ya
+     votó en esta consulta").
+   - **Bridge destruction is real** — `voter_id` is `None` on the live
+     vote row the instant the vote is recorded, checked directly against
+     the database via a new admin-gated proof endpoint, not inferred.
+   - **Verification codes are unique and valid** — `XXXX-XXXX-XXXX` shape,
+     distinct across two independent votes, and each one resolves to the
+     correct chosen option through the public `/debates/{id}/verify` route.
+2. Added two `ADMIN_SECRET`-gated test-support endpoints to `main.py`
+   (same pattern as the existing `/admin/*` routes):
+   - `GET /admin/test-otp` — returns the current pending OTP for an
+     account+channel, so CI can finish email verification despite the
+     known-broken email pipeline (Gmail 535 / Resend pending DNS — see
+     "EMAIL VERIFICATION FIX" above) without reading a real inbox.
+   - `GET /admin/test-vote-bridge` — returns the literal `voter_id` and a
+     computed `bridge_destroyed` boolean for a given verify_code+debate.
+     Dual-purpose: CI proof, and a tool independent auditors can use to
+     check this core privacy claim against the live database themselves.
+3. Added `.github/workflows/integrity-tests.yml` — runs the suite
+   automatically on every push to `main` (i.e. after every deploy, since
+   Render watches `main`), daily at a quiet hour, and on demand
+   (`workflow_dispatch`). Reports PASS/FAIL with zero human involvement,
+   exactly as requested: *"Los test deben correr solos, sin intervención
+   humana, y reportar Pass o Fail."*
+4. Set `AD_EVERY_N_OPINIONS = 2` (was a hardcoded `5`) — a temporary,
+   founder-requested change to speed up testing the ad/campaign-metrics
+   cycle before Wednesday's investor lunch. Documented inline in `main.py`
+   with an explicit note to revert to `5` (the documented production value)
+   once testing is done.
+5. Added 20-second opinion-list polling to the debate room in `app.html` —
+   while a user is in a single-topic debate, they now see other people's
+   opinions appear as they're posted in real time, matching the founder's
+   description: *"verá quienes pasaron antes y dieron su opinión o la
+   están dando en ese momento simultáneamente."* No invented activity —
+   it's the real `GET /debates/{id}/opinions` response, refreshed.
+
+**A real bug found and fixed mid-stream — the deploy-race condition:**
+
+The very first CI run failed with **404 Not Found** on the brand-new admin
+endpoints — alarming at first glance, but the diagnosis was simple: GitHub
+Actions starts running the instant you `git push`, while Render takes
+**~10-15 minutes** to actually finish deploying that push. The workflow was
+testing the *previous* live deploy — which, correctly, didn't have this
+commit's new routes yet. Not a test bug, not a backend bug — a race between
+two independent systems that needed an explicit handshake.
+
+**Fix (`d5948e84`):** `/health` now reports `git_commit` (Render sets
+`RENDER_GIT_COMMIT` automatically on every deploy). The workflow gained a
+"wait for this commit to actually be live" step that polls `/health` until
+`git_commit` matches `github.sha` — the exact commit that triggered the
+run — before running a single test. Job timeout raised to 60 minutes to
+give both that wait (~15 min) and the slow, separately-disclosed
+email-bound registration flow (~3-4 min per account) real headroom, so
+neither shows up as a false "FAIL" on the thing actually being tested.
+
+**How it was proven (not claimed):**
+- Ran `tests/test_vote_integrity.py` directly against the live production
+  server at `preferendum-unzip-d2zd.onrender.com` with `pytest -v`:
+  ```
+  tests/test_vote_integrity.py::test_same_account_cannot_vote_twice PASSED
+  tests/test_vote_integrity.py::test_same_device_cannot_vote_twice_across_accounts PASSED
+  tests/test_vote_integrity.py::test_same_national_id_cannot_vote_twice_across_accounts PASSED
+  tests/test_vote_integrity.py::test_bridge_destruction_and_unique_valid_code PASSED
+  ================== 4 passed, 1 warning in 1114.71s (0:18:34) ===================
+  ```
+  **4/4 — every one of the five requested checks confirmed live**, with
+  real accounts, a real consultation, real votes, real verification codes,
+  and a direct read of the live database row proving `voter_id is None`.
+  (It's slow — ~18 minutes — entirely because each disposable test account
+  has to wait through the same broken email-OTP path real users hit; the
+  `/admin/test-otp` endpoint works around *reading* it, not the backend's
+  send-and-commit latency, which is honest and correct.)
+- Confirmed the deploy of `91f0b64c` went live by polling `/admin/debug-ads`
+  and seeing `ads_would_show_at_indices` step by 2 instead of 5, and by
+  calling the two new admin endpoints directly and getting real "User not
+  found" / "Vote not found" responses (proving the routes exist and the
+  `ADMIN_SECRET` gate works) instead of generic 404s.
+- Confirmed the GitHub Actions run that failed was run `27101966390`,
+  created at `2026-06-07T19:06:29Z` — within seconds of the `91f0b64c`
+  push and ~3 minutes before the deploy actually finished propagating
+  (confirmed live at ~19:09 UTC by the same `/admin/debug-ads` probe) —
+  which is exactly the race window the fix now closes.
+
+**Known gaps — still real, not yet fixed:**
+- `AD_EVERY_N_OPINIONS = 2` is a temporary testing value — **must be
+  reverted to `5`** (the documented production value in `CLAUDE.md`) once
+  the pre-lunch testing window closes. It's commented inline so this isn't
+  forgotten.
+- The integrity suite is slow (~18 min/run) purely because of the broken
+  email pipeline — once Resend's DNS verification completes and
+  `send_email_otp` switches over (see "EMAIL VERIFICATION FIX"), real
+  registration (and this suite) should get dramatically faster. Not a
+  suite problem; a downstream-dependency problem, disclosed and tracked.
+- This was pushed from the local machine because the CI fix needed to be
+  proven against the live system before trusting CI to prove itself — a
+  bit of a bootstrapping problem inherent to "writing the thing that
+  checks your work." The *next* CI run (auto-triggered by this push, or
+  manually triggered via GitHub's Actions tab → "integrity-tests" →
+  "Run workflow") is the first one that should go green on its own, with
+  the deploy-wait step doing its job. Worth checking once it runs.
+
+**Where to resume:** verify the next CI run goes green (auto on push, or
+trigger manually from the Actions tab — `gh` CLI isn't installed locally
+and the dispatch API needs auth we don't have). Then back to Tuesday's
+plan: full regression pass + TestFlight rebuild. Also remember to revert
+`AD_EVERY_N_OPINIONS` to `5` before the investor lunch.
