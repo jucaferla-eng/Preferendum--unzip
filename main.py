@@ -3605,6 +3605,17 @@ def admin_set_organizer_status(user_id: int, secret: str, status: str, reason: s
     return {'ok': True, 'user_id': user_id, 'status': status}
 
 
+@app.get('/admin/mint-token')
+def admin_mint_token(secret: str, user_id: int, db: Session = Depends(get_db)):
+    """Genera un JWT para un usuario existente — solo para pruebas E2E del admin."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, 'User not found')
+    return {'token': make_token(user.id, user.role), 'user_id': user.id, 'email': user.email}
+
+
 @app.post('/admin/reassign-tiers')
 def admin_reassign_tiers(secret: str, db: Session = Depends(get_db)):
     """Re-corre _assign_user_tier para usuarios con se_tier vacío (cuentas creadas antes
