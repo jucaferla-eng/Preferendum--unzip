@@ -123,3 +123,78 @@ stay untouched and safe until a change is proven and ready to be merged forward.
 endpoints (`GET /organizer/consultations`, `GET /organizer/consultations/{id}/results`,
 `/marketer/estimate`, `/marketer/communes`) into their real screens, and put real
 authentication behind consultation/campaign creation.
+
+---
+
+## 2026-06-07 (continued) — organizer/marketer panels now run on real accounts and real numbers
+
+**Branch:** `working-copy-2026-06-06`
+**Commits:** `6b9beca9`, `c2ad14fa`, `42aff69c` (fast-forwarded to `main`, deployed)
+
+**What changed:**
+1. The institutional "Entrar al portal" button used to do nothing real — now it
+   calls `/organizer/login`, and if that account doesn't exist yet, it registers
+   one via `/organizer/register` and logs straight in. Person-type accounts are
+   now auto-approved on the backend (a one-person account has no company/RUT
+   for a reviewer to check, so there's nothing to gate on); company accounts
+   still go to manual review, matching what the portal already promised.
+2. "Publicar consulta" used to call a generic `/debates` endpoint without the
+   organizer's auth token and read a response key (`data.debate`) the real
+   endpoint never returns. Now it requires login, calls the real
+   `/organizer/consultations`, and reads `data.consultation`.
+3. The marketer "Lanzar campaña" button used to swallow every error silently
+   (`catch (_) {}`) and always show "¡Campaña lanzada!" even when the server
+   rejected it — a textbook fake-success facade. It now shows the real campaign
+   ID the server assigned, or a real error message when the launch fails.
+4. The marketer dashboard showed made-up totals for "Impresiones", "Gasto" and
+   "% en público objetivo" no matter who was logged in. It now aggregates real
+   numbers from `GET /marketer/campaigns/{id}/metrics` for the campaigns this
+   account actually launched, and shows "—" honestly while loading / before any
+   campaign exists.
+5. The organizer "Dashboard en vivo" stats grid showed the same hardcoded
+   "245 votos / 86% participación / 3 debates / 1 en verificación" for every
+   account. It now aggregates real totals from `GET /organizer/consultations`
+   (votes, count, live, verifying) — or "—" while loading.
+6. The "Integridad del sistema" card listed three made-up consultations with
+   made-up Legitimacy Scores ("Presupuesto 2027: 98%", "Plan movilidad: 97%",
+   "Global: 97.5%") — the exact kind of fabricated number that would sink this
+   project's credibility if an auditor noticed it didn't match anything in the
+   database. It now lists the organizer's real consultations with their real,
+   server-computed `legitimacy_score`, and shows an honest "Sin votos
+   verificados aún" / empty state for consultations or accounts with no data.
+7. Added a small backend endpoint, `PATCH /admin/debates/{id}?status=`, so test
+   consultations created while proving this work can be closed/hidden cleanly
+   afterward (modeled on the existing `/admin/campaigns/{id}/deactivate`).
+
+**How it was proven:**
+- Wrote `/tmp/e2e_proof_2026-06-07.py` — a script that runs against the live
+  production server (not local, not mocked): registers a real organizer
+  account, confirms it's auto-approved, creates a real consultation through the
+  authenticated route, confirms it shows up in "mis consultas", registers a
+  real marketer account, launches a real campaign, reads its real metrics
+  (confirming budget and zero fabricated impressions), then cleans up both
+  the test consultation and campaign via admin endpoints. **15/15 checks
+  passed** against the live server at preferendum-unzip-d2zd.onrender.com.
+- After the dashboard rewrite, extracted the live script block from the
+  deployed `/app` page and parsed it with `acorn` (`ecmaVersion: 2020`) — caught
+  and fixed a missing closing parenthesis (the new conditional rendering added
+  one extra nesting level that the old hardcoded array didn't have) before it
+  ever reached a user. Confirmed `LIVE_PARSE_OK` against the deployed page
+  after the fix, and confirmed by string search that the fabricated numbers
+  ("Presupuesto 2027", "Plan movilidad… 97", "Global… 97.5") are gone from the
+  live bundle and the real "Legitimacy Score por consulta (público, real)" card
+  is present.
+
+**Known gaps — still real, not yet fixed:**
+- `GET /organizer/consultations/{id}/results` (results detail view),
+  `/marketer/estimate` (budget allocation), and `/marketer/communes`
+  (CPM-by-commune table) are real, working backend endpoints that no screen
+  calls yet. That's tomorrow's (Tuesday's) work, alongside the TestFlight
+  rebuild — `App.js` loads `assets/app.html` from a bundled local file, so
+  these `app.html` changes are already live on the web `/app` route but won't
+  reach the mobile app until a new build is uploaded.
+
+**Where to resume:** wire `GET /organizer/consultations/{id}/results`,
+`/marketer/estimate`, `/marketer/communes` into their screens, then do a full
+regression pass on all three flows (voter, organizer, marketer) before building
+and uploading the new TestFlight version.
