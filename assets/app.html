@@ -1984,6 +1984,8 @@ function PreferendumV8() {
 
   // Institution state
   const [instTab, setInstTab] = useState("debates");
+  const [instLoading, setInstLoading] = useState(false);
+  const [instOrgType, setInstOrgType] = useState('person');
   const [ncInstName, setNcInstName] = useState('');
   const [myDebateIds, setMyDebateIds] = useState([]); // IDs created in this session
   const [ncTitle, setNcTitle] = useState('');
@@ -2059,6 +2061,10 @@ function PreferendumV8() {
   const [startDate, setStart] = useState("");
   const [endDate, setEnd] = useState("");
   const [launched, setLaunched] = useState(false);
+  const [launchedCampaignId, setLaunchedCampaignId] = useState(null);
+  const [launchLoading, setLaunchLoading] = useState(false);
+  const [myCampaignIds, setMyCampaignIds] = useState([]);
+  const [mktStats, setMktStats] = useState(null); // null = sin campañas todavía (no inventamos números)
 
   // Verification state
   const [vfStep, setVfStep] = useState(1); // 1-7
@@ -2270,6 +2276,32 @@ function PreferendumV8() {
   useEffect(() => {
     if (screen === 'feed' || screen === 'inst-home') loadDebates();
   }, [screen]);
+  // Agrega métricas REALES de las campañas creadas en esta sesión —
+  // nunca mostramos números de ejemplo en el panel del anunciante.
+  useEffect(() => {
+    if (screen !== 'marketer' || myCampaignIds.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const results = await Promise.all(myCampaignIds.map(id =>
+          apiFetch('GET', `/marketer/campaigns/${id}/metrics`).catch(() => null)
+        ));
+        if (cancelled) return;
+        const ok = results.filter(Boolean);
+        const totalImp = ok.reduce((s, m) => s + (m.total_impressions ?? m.impressions ?? 0), 0);
+        const totalSpent = ok.reduce((s, m) => s + (m.spent_clp ?? 0), 0);
+        const pctTargetVals = ok.map(m => m.pct_in_target).filter(v => typeof v === 'number');
+        const avgPctTarget = pctTargetVals.length ? Math.round(pctTargetVals.reduce((a, b) => a + b, 0) / pctTargetVals.length * 10) / 10 : null;
+        setMktStats({
+          impressions: totalImp,
+          spentClp: totalSpent,
+          activeCampaigns: myCampaignIds.length,
+          pctInTarget: avgPctTarget,
+        });
+      } catch (e) {/* si falla, dejamos mktStats como está — nunca mostramos un número inventado */}
+    })();
+    return () => { cancelled = true; };
+  }, [screen, myCampaignIds]);
   const loadOpinions = async debateId => {
     setOpinionsLoading(true);
     try {
@@ -6827,14 +6859,14 @@ function PreferendumV8() {
       gap: 8,
       marginBottom: 16
     }
-  }, [["🏢", "Empresa", T.blue], ["🤝", "Asociación profesional", T.teal], ["🌾", "Asociación productiva", T.green], ["🎓", "Universidad", T.gold], ["🏛", "Municipio", T.teal], ["🌐", "Entidad de representación ciudadana", T.coral], ["👤", "Cualquier persona", T.fog]].map(([i, l, c]) => /*#__PURE__*/React.createElement("div", {
+  }, [["🏢", "Empresa", T.blue, "company"], ["🤝", "Asociación profesional", T.teal, "person"], ["🌾", "Asociación productiva", T.green, "person"], ["🎓", "Universidad", T.gold, "person"], ["🏛", "Municipio", T.teal, "person"], ["🌐", "Entidad de representación ciudadana", T.coral, "person"], ["👤", "Cualquier persona", T.fog, "person"]].map(([i, l, c, v]) => /*#__PURE__*/React.createElement("div", {
     key: l,
-    onClick: () => go("inst-home"),
+    onClick: () => setInstOrgType(v),
     style: {
       padding: 12,
       borderRadius: 10,
-      border: `1.5px solid ${c}44`,
-      background: `${c}11`,
+      border: instOrgType === v ? `1.5px solid ${c}` : `1.5px solid ${c}44`,
+      background: instOrgType === v ? `${c}22` : `${c}11`,
       textAlign: "center",
       cursor: "pointer"
     }
@@ -6865,10 +6897,45 @@ function PreferendumV8() {
     type: "password",
     value: pw,
     onChange: setPw
-  }), /*#__PURE__*/React.createElement(Btn, {
+  }), instLoading ? /*#__PURE__*/React.createElement("div", {
+    style: { textAlign: "center", padding: 12, color: T.fog, fontSize: 13 }
+  }, "\u23f3 Conectando con el portal...") : /*#__PURE__*/React.createElement(Btn, {
     label: "Entrar al portal \u2192",
     full: true,
-    onPress: () => go("inst-home")
+    onPress: async () => {
+      const orgEmail = (email || '').trim();
+      const orgPw = pw || '';
+      if (!orgEmail || !orgPw) {
+        alert('Ingresa tu email y contrase\u00f1a institucional.');
+        return;
+      }
+      setInstLoading(true);
+      try {
+        const data = await apiFetch('POST', '/organizer/login', { email: orgEmail, password: orgPw });
+        setAuthToken(data.token);
+        setCurrentUser(data.user);
+        setInstLoading(false);
+        go("inst-home");
+      } catch (loginErr) {
+        try {
+          const reg = await apiFetch('POST', '/organizer/register', {
+            email: orgEmail,
+            password: orgPw,
+            name: ncInstName || orgEmail.split('@')[0],
+            org_type: instOrgType,
+            company_name: instOrgType === 'company' ? ncInstName : '',
+          });
+          setAuthToken(reg.token);
+          setCurrentUser(reg.user);
+          setInstLoading(false);
+          alert(reg.message || 'Cuenta creada. Ya puedes entrar al portal.');
+          go("inst-home");
+        } catch (regErr) {
+          setInstLoading(false);
+          alert(regErr.message || 'No pudimos iniciar sesi\u00f3n ni crear tu cuenta. Revisa tu email y contrase\u00f1a.');
+        }
+      }
+    }
   }))));
 
   // ══════════════════════════════════════════════════════════════
@@ -7954,9 +8021,14 @@ function PreferendumV8() {
         };
       }) : null;
       const optImages = ncVisual ? ncOptImages.slice(0, options.length) : [];
+      if (!authToken) {
+        alert('Tu sesión institucional expiró. Vuelve a entrar al portal para publicar.');
+        go("inst-login");
+        return;
+      }
       setNcLoading(true);
       try {
-        const data = await apiFetch('POST', '/debates', {
+        const data = await apiFetch('POST', '/organizer/consultations', {
           title: ncTitle,
           context: ncDesc,
           options,
@@ -7975,7 +8047,7 @@ function PreferendumV8() {
           target_age_max: parseInt(ncAgeMax) || 99,
           follow_up_questions: followUpBranches ? JSON.stringify(followUpBranches) : ''
         });
-        const newDeb = data.debate;
+        const newDeb = data.consultation;
         if (newDeb) {
           setApiDebates(prev => [transformDebate(newDeb), ...prev]);
           setMyDebateIds(prev => [newDeb.id, ...prev]);
@@ -8182,7 +8254,15 @@ function PreferendumV8() {
       gap: 10,
       marginBottom: 20
     }
-  }, [["775", "Impresiones", T.blue], ["CLP 15.5K", "Gasto total", T.gold], ["2", "Campañas activas", T.teal], ["97.4%", "Precisión sistema", T.green]].map(([n, l, c]) => /*#__PURE__*/React.createElement("div", {
+  }, (mktStats ? [
+      [String(mktStats.impressions), "Impresiones reales", T.blue],
+      ["CLP " + mktStats.spentClp.toLocaleString(), "Gasto real", T.gold],
+      [String(mktStats.activeCampaigns), "Campañas (esta sesión)", T.teal],
+      [mktStats.pctInTarget != null ? mktStats.pctInTarget + "%" : "—", "% en público objetivo", T.green],
+    ] : [
+      ["—", "Impresiones", T.blue], ["—", "Gasto total", T.gold],
+      ["0", "Campañas (esta sesión)", T.teal], ["—", "% en público objetivo", T.green],
+    ]).map(([n, l, c]) => /*#__PURE__*/React.createElement("div", {
     key: l,
     style: {
       background: T.panel,
@@ -8410,7 +8490,7 @@ function PreferendumV8() {
         maxWidth: 320,
         textAlign: "left"
       }
-    }, /*#__PURE__*/React.createElement(Lbl, null, "Resumen"), [["Marca", brandName], ["Tipo", AD_TYPES.find(t => t.k === adType)?.name || "—"], ["País", country + (region ? ` · ${region}` : "")], [t("reg.gender"), [sexF ? "♀" : null, sexM ? "♂" : null].filter(Boolean).join("+")], ["Presupuesto", "CLP " + parseInt(budget || 0).toLocaleString()], ["Modelo", payModel + " · 20 CLP/imp."], ["Imp. estimadas", "~" + estImp]].map(([l, v]) => /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement(Lbl, null, "Resumen"), [["ID de campaña (servidor)", launchedCampaignId ? '#' + launchedCampaignId : '—'], ["Marca", brandName], ["Tipo", AD_TYPES.find(t => t.k === adType)?.name || "—"], ["País", country + (region ? ` · ${region}` : "")], [t("reg.gender"), [sexF ? "♀" : null, sexM ? "♂" : null].filter(Boolean).join("+")], ["Presupuesto", "CLP " + parseInt(budget || 0).toLocaleString()], ["Modelo", payModel + " · 20 CLP/imp."], ["Imp. estimadas", "~" + estImp]].map(([l, v]) => /*#__PURE__*/React.createElement("div", {
       key: l,
       style: {
         display: "flex",
@@ -9595,10 +9675,12 @@ function PreferendumV8() {
         color: T.teal
       }
     }, /*#__PURE__*/React.createElement("strong", null, "Opci\xF3n ", i + 1, ":"), " ", o.text)))), /*#__PURE__*/React.createElement("button", {
+      disabled: launchLoading,
       onClick: async () => {
+        setLaunchLoading(true);
         try {
           const today = new Date().toISOString().split('T')[0];
-          await apiFetch('POST', '/marketer/campaigns', {
+          const resp = await apiFetch('POST', '/marketer/campaigns', {
             advertiser_email: email || (brandName||'anunciante').toLowerCase().replace(/\s+/g,'.')+('@demo.cl'),
             advertiser_name: brandName || 'Anunciante',
             campaign_title: (brandName || 'Campa\u00F1a') + ' \u00B7 Preferendum',
@@ -9615,22 +9697,28 @@ function PreferendumV8() {
             ad_copy: adHeadline || adBody || '',
             ad_image_url: imgPrev || '',
           });
-        } catch(_) {}
-        setLaunched(true);
+          setLaunchedCampaignId(resp.campaign_id || null);
+          if (resp.campaign_id) setMyCampaignIds(prev => [resp.campaign_id, ...prev]);
+          setLaunchLoading(false);
+          setLaunched(true);
+        } catch (e) {
+          setLaunchLoading(false);
+          alert(e.message || 'No pudimos lanzar la campa\u00F1a. Revisa los datos e intenta de nuevo.');
+        }
       },
       style: {
         width: "100%",
         padding: 16,
         borderRadius: 14,
-        background: T.green,
+        background: launchLoading ? T.mist : T.green,
         border: "none",
         color: "#fff",
         fontSize: 16,
         fontWeight: 700,
-        cursor: "pointer",
+        cursor: launchLoading ? "default" : "pointer",
         marginBottom: 10
       }
-    }, "\uD83D\uDE80 Lanzar campa\xF1a"), /*#__PURE__*/React.createElement(Btn, {
+    }, launchLoading ? "\u23F3 Lanzando..." : "\uD83D\uDE80 Lanzar campa\xF1a"), /*#__PURE__*/React.createElement(Btn, {
       label: "\u2190 Editar",
       full: true,
       outline: true,

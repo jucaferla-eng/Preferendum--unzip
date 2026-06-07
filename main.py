@@ -2691,10 +2691,18 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, db: Session = Depend
         rut_verified         = rut_ok,
         domain_verified      = domain_ok,
         web_verified         = web_ok,
-        status               = 'pending',
+        # Las personas naturales no tienen RUT/dominio de empresa que verificar —
+        # no hay nada que un revisor manual pudiera aprobar o rechazar, así que
+        # entran activas de inmediato (consistente con "Cualquier persona puede
+        # crear una consulta" en el portal). Las cuentas de empresa sí requieren
+        # revisión manual porque afirman representar una organización real.
+        status               = 'approved' if data.org_type == 'person' else 'pending',
     )
     db.add(profile)
     db.commit()
+    if profile.status == 'approved':
+        profile.approved_at = datetime.utcnow()
+        db.commit()
 
     # OTP email
     code = gen_otp()
