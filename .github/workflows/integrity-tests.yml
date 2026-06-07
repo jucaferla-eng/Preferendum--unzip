@@ -98,4 +98,29 @@ jobs:
           # Strip empty env vars so the script's own defaults apply.
           [ -z "$PREFERENDUM_BASE_URL" ] && unset PREFERENDUM_BASE_URL
           [ -z "$PREFERENDUM_ADMIN_SECRET" ] && unset PREFERENDUM_ADMIN_SECRET
-          pytest tests/test_vote_integrity.py -v --tb=short
+
+          # Raw job logs require admin rights on this repo to download —
+          # which makes failures undiagnosable for anyone without that
+          # access (including Claude, working through this autonomously).
+          # Writing the FULL pytest output to the job summary instead puts
+          # it on a page anyone can read with zero special permissions —
+          # "reportar Pass o Fail" should mean a human-readable result is
+          # actually reachable, not just a green/red dot.
+          set +e
+          pytest tests/test_vote_integrity.py -v --tb=long 2>&1 | tee /tmp/pytest_output.txt
+          EXIT=${PIPESTATUS[0]}
+          set -e
+
+          {
+            if [ "$EXIT" -eq 0 ]; then
+              echo "## ✅ Vote integrity suite — ALL CHECKS PASSED"
+            else
+              echo "## ❌ Vote integrity suite — FAILED (exit $EXIT)"
+            fi
+            echo ""
+            echo '```'
+            cat /tmp/pytest_output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$EXIT"
