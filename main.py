@@ -3312,6 +3312,38 @@ def list_social_sponsors(email: str, db: Session = Depends(get_db)):
 @app.post('/marketer/campaigns')
 def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
     """Crea la campaña y devuelve la optimización de asignación."""
+    # Guard against accidental duplicate submissions (e.g. a slow response
+    # tempting a double-click, or a flaky connection causing a silent retry):
+    # if the same advertiser just created an identical campaign in the last
+    # 10 seconds, return that one instead of minting a near-identical twin.
+    dup_cutoff = datetime.utcnow() - timedelta(seconds=10)
+    existing = (
+        db.query(AdCampaign)
+        .filter(
+            AdCampaign.advertiser_email == data.advertiser_email,
+            AdCampaign.title == data.campaign_title,
+            AdCampaign.budget_clp == data.budget_clp,
+            AdCampaign.created_at >= dup_cutoff,
+        )
+        .order_by(AdCampaign.created_at.desc())
+        .first()
+    )
+    if existing:
+        optimization = _optimize_campaign(
+            budget_clp=existing.budget_clp,
+            target_country=existing.target_country,
+            target_communes=existing.target_communes,
+            target_se_tiers=existing.target_se_tiers,
+            target_income_min=existing.target_income_min,
+            target_income_max=existing.target_income_max,
+            target_gender=existing.target_gender,
+            target_age_min=existing.target_age_min,
+            target_age_max=existing.target_age_max,
+            db=db,
+        )
+        return {'message': 'Campaign created', 'campaign_id': existing.id,
+                'optimization': optimization, 'campaign': _format_campaign(existing)}
+
     optimization = _optimize_campaign(
         budget_clp=data.budget_clp,
         target_country=data.target_country,
