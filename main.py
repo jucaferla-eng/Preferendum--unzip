@@ -3905,6 +3905,38 @@ def admin_deactivate_campaign(campaign_id: int, secret: str, db: Session = Depen
     return {'ok': True, 'campaign_id': campaign_id, 'is_active': c.is_active}
 
 
+@app.post('/admin/campaigns/{campaign_id}/recompute-spend')
+def admin_recompute_campaign_spend(campaign_id: int, secret: str, db: Session = Depends(get_db)):
+    """Recalculates spent_clp from the campaign's REAL impression count
+    (AdImpressionLog rows — never inferred or invented) using today's
+    correct CPM-based per-impression cost.
+
+    Exists to repair the handful of campaigns whose spent_clp was
+    corrupted by the old `budget_clp / max(1, len(opinions)//5)` formula
+    — e.g. campaign #7 logged 3 real impressions but had spent_clp at
+    249,999,999 of a 250,000,000 budget (99.9999...% in two days). The
+    real number, recomputed honestly from its 3 logged impressions, is
+    the only thing that should ever be shown to an investor.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(404, 'Campaign not found')
+    real_impressions = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == campaign_id).count()
+    cost_each = _cost_per_impression_clp(c, db)
+    before = c.spent_clp
+    c.spent_clp = min(c.budget_clp, real_impressions * cost_each)
+    db.commit()
+    return {
+        'ok': True, 'campaign_id': campaign_id,
+        'real_impressions': real_impressions,
+        'cost_per_impression_clp': cost_each,
+        'spent_clp_before': before,
+        'spent_clp_after': c.spent_clp,
+    }
+
+
 @app.get('/admin/debug-ads')
 def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session = Depends(get_db)):
     """Diagnóstico: por qué un usuario no ve ads en un debate. Devuelve user, opiniones, campañas activas y por qué cada una matchea o no."""
