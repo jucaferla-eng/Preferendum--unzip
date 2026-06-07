@@ -490,6 +490,23 @@ def _migrate():
                 conn.commit()
             except Exception:
                 pass
+        # Backfill link_url on demo ad rows that existed before this column —
+        # the seed block only runs once at first DB init, so rows created
+        # earlier kept link_url=''  ("Ver más" had nowhere to go). One-time,
+        # idempotent (only touches rows that are still empty).
+        try:
+            for brand, url in [
+                ('BancoEstado',  'https://www.bancoestado.cl/'),
+                ('Toyota Chile', 'https://www.toyota.cl/'),
+                ('Samsung',      'https://www.samsung.com/cl/'),
+            ]:
+                conn.execute(
+                    text("UPDATE debate_ads SET link_url = :url WHERE brand = :brand AND (link_url IS NULL OR link_url = '')"),
+                    {'url': url, 'brand': brand}
+                )
+            conn.commit()
+        except Exception:
+            pass
         # selfie_logs — face_bytes como referencia para re-autenticación facial
         existing_selfie_cols = {c['name'] for c in inspector.get_columns('selfie_logs')} if inspector.has_table('selfie_logs') else set()
         if 'face_bytes' not in existing_selfie_cols:
