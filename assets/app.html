@@ -8101,8 +8101,20 @@ function PreferendumV8() {
     disabled: ncLoading || !ncTitle || ncOpts.filter(Boolean).length < 2 || !ncCloses,
     onPress: async () => {
       const options = ncOpts.filter(Boolean);
-      // Build follow_up_questions tree
-      const followUpBranches = ncBranching ? ncOpts.map((opt, i) => {
+      // Build follow_up_questions tree — MUST align 1:1 with `options` above.
+      // ncOpts can have blank slots (e.g. ['Comfort','','Design','Price']);
+      // `options` drops them via filter(Boolean), so voters see
+      // ['Comfort','Design','Price'] at indices 0,1,2. Mapping straight over
+      // ncOpts here would instead produce a 4-entry tree whose index 1 holds
+      // the blank slot's (empty) follow-up and whose indices 2-3 are shifted
+      // one past the option they were authored for — so picking "Design"
+      // would show the follow-up authored for "Comfort"'s neighbour, "Price"'s
+      // would never appear, etc. Walking the same non-blank indices, in the
+      // same order, as `options` keeps follow-up[k] pinned to options[k].
+      const ncOptIdx = [];
+      ncOpts.forEach((opt, i) => { if (opt) ncOptIdx.push(i); });
+      const followUpBranches = ncBranching ? ncOptIdx.map((i) => {
+        const opt = ncOpts[i];
         const q2i = ncQ2[i]; if (!opt || !q2i || !q2i.on || !q2i.title) return null;
         const q2Opts = ncQ2[i].opts.filter(Boolean);
         if (q2Opts.length < 2) return null;
@@ -8121,7 +8133,9 @@ function PreferendumV8() {
           })
         };
       }) : null;
-      const optImages = ncVisual ? ncOptImages.slice(0, options.length) : [];
+      // Same blank-slot alignment issue as followUpBranches above:
+      // ncOptImages[i] belongs to ncOpts[i], not to options[k] by position.
+      const optImages = ncVisual ? ncOptIdx.map(i => ncOptImages[i] || '') : [];
       if (!authToken) {
         alert('Tu sesión institucional expiró. Vuelve a entrar al portal para publicar.');
         go("inst-login");
