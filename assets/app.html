@@ -1441,7 +1441,7 @@ const T = {
 const COLORS = ['#2563EB', '#3B82F6', '#60A5FA', '#93C5FD', '#BFDBFE', '#1D4ED8', '#1E40AF', '#DBEAFE', '#EFF6FF', '#172554'];
 const NEUTRAL_OPT = 'rgba(255,255,255,0.05)'; // tarjeta opción en reposo
 const NEUTRAL_BORDER = 'rgba(255,255,255,0.09)'; // borde en reposo
-const BAR_GRADIENT = 'linear-gradient(90deg,#1D4ED8,#60A5FA)'; // barras resultados
+const BAR_GRADIENT = 'linear-gradient(90deg,#3B82F6,#93C5FD)'; // barras resultados
 const BAR_WIN = 'linear-gradient(90deg,#2563EB,#93C5FD)'; // barra ganadora
 
 // ══ DEBATE STATUS ═══════════════════════════════════════════════
@@ -2135,6 +2135,12 @@ function PreferendumV8() {
   }, []);
   const [authToken, setAuthToken] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
+
+  useEffect(() => {
+    if (vfStep === 2 && !vfDone[2] && authToken) {
+      apiFetch('POST', '/verify/phone/send').catch(() => {});
+    }
+  }, [vfStep, authToken]);
   const [apiDebates, setApiDebates] = useState([]);
   const [debatesLoading, setDebatesLoading] = useState(false);
 
@@ -2677,11 +2683,11 @@ function PreferendumV8() {
       }, "\uD83D\uDE4B\u200D\u2642\uFE0F  \u00bfQuieres expresar tus preferencias y votar en un tema?"),
       /*#__PURE__*/React.createElement("button", {
         onClick: () => {setUserType("organizer"); go("inst-login");},
-        style: {width: "100%", maxWidth: 320, padding: "20px 22px", borderRadius: 14, background: "#1E40AF", border: "none", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left", lineHeight: 1.5, boxShadow: "0 4px 32px rgba(30,64,175,0.35)"}
+        style: {width: "100%", maxWidth: 320, padding: "20px 22px", borderRadius: 14, background: "#3B82F6", border: "none", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left", lineHeight: 1.5, boxShadow: "0 4px 32px rgba(59,130,246,0.35)"}
       }, "\uD83C\uDFDB\uFE0F  \u00bfQuieres hacer una consulta y que quienes t\u00fa definas voten en ella?"),
       /*#__PURE__*/React.createElement("button", {
         onClick: () => {setUserType("marketer"); go("marketer");},
-        style: {width: "100%", maxWidth: 320, padding: "20px 22px", borderRadius: 14, background: "#0369A1", border: "none", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left", lineHeight: 1.5, boxShadow: "0 4px 32px rgba(3,105,161,0.35)"}
+        style: {width: "100%", maxWidth: 320, padding: "20px 22px", borderRadius: 14, background: "#0EA5E9", border: "none", color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", textAlign: "left", lineHeight: 1.5, boxShadow: "0 4px 32px rgba(14,165,233,0.35)"}
       }, "\uD83D\uDCE2  \u00bfQuieres asignar, de acuerdo a tus preferencias, tu presupuesto de publicidad al mercado objetivo que t\u00fa vas a definir ac\u00e1, y que se mostrar\u00e1 en el debate de un tema a la vez?")
     )
   );
@@ -2865,6 +2871,18 @@ function PreferendumV8() {
         });
         setAuthToken(data.token);
         setCurrentUser(data.user);
+        try {
+          await fetch(`${API}/verify/imei`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.token}` },
+            body: JSON.stringify({
+              imei: window.DEVICE_ID || ('web-' + (data.token || '').slice(-24)),
+              phone: vfPhone,
+              device_model: window.DEVICE_MODEL || 'web',
+              os_version: 'web'
+            })
+          });
+        } catch (e) {/* candado de aparato: registro silencioso, no bloquea onboarding */}
       } catch (e) {
         setVfError(e.message);
         setVfLoading(false);
@@ -2950,6 +2968,18 @@ function PreferendumV8() {
         });
         setAuthToken(data.token);
         setCurrentUser(data.user);
+        if (data.user && data.user.phone) {
+          fetch(`${API}/verify/imei`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.token}` },
+            body: JSON.stringify({
+              imei: window.DEVICE_ID || ('web-' + (data.token || '').slice(-24)),
+              phone: data.user.phone,
+              device_model: window.DEVICE_MODEL || 'web',
+              os_version: 'web'
+            })
+          }).catch(() => {});
+        }
         setVfLoading(false);
         go("debates-splash");
         setTimeout(() => {
@@ -3403,11 +3433,7 @@ function PreferendumV8() {
             ...p,
             1: true
           }));
-          go("debates-splash");
-          setTimeout(() => {
-            setScreen("feed");
-            setTab("feed");
-          }, 2200);
+          setVfStep(2);
         } catch (e) {
           alert('Código incorrecto o expirado. Intenta de nuevo.');
         } finally {
@@ -3499,18 +3525,35 @@ function PreferendumV8() {
       label: "Confirmar SMS \u2192",
       full: true,
       disabled: smsCode.length < 6,
-      onPress: () => {
+      onPress: async () => {
         setVfLoading(true);
-        setTimeout(() => {
+        try {
+          await apiFetch('POST', '/verify/phone/confirm', { code: smsCode, channel: 'sms' });
+        } catch (e) {
+          alert(e.message || 'C\u00F3digo incorrecto o expirado.');
           setVfLoading(false);
-          setVfDone(p => ({
-            ...p,
-            2: true
-          }));
-          setVfStep(3);
-        }, 1800);
+          return;
+        }
+        setVfLoading(false);
+        setVfDone(p => ({
+          ...p,
+          2: true
+        }));
+        setVfStep(3);
       }
-    })), vfStep === 3 && !vfDone[3] && /*#__PURE__*/React.createElement(Card, {
+    }), /*#__PURE__*/React.createElement("div", {
+      style: { textAlign: "center", marginTop: 10 }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: async () => {
+        try {
+          await apiFetch('POST', '/verify/phone/send');
+          alert('C\u00F3digo reenviado a ' + vfPhone);
+        } catch (e) {
+          alert('Error al reenviar. Intenta m\u00E1s tarde.');
+        }
+      },
+      style: { background: "none", border: "none", color: T.fog, fontSize: 12, cursor: "pointer" }
+    }, "No recib\xED el c\xF3digo \u2014 reenviar"))), vfStep === 3 && !vfDone[3] && /*#__PURE__*/React.createElement(Card, {
       style: {
         border: `1px solid ${T.gold}44`
       }
@@ -3620,16 +3663,32 @@ function PreferendumV8() {
       label: "Enviar documento \u2192",
       full: true,
       disabled: !docFile,
-      onPress: () => {
+      onPress: async () => {
         setVfLoading(true);
-        setTimeout(() => {
-          setVfLoading(false);
-          setVfDone(p => ({
-            ...p,
-            3: true
-          }));
-          setVfStep(4);
-        }, 2200);
+        try {
+          const form = new FormData();
+          form.append('file', docFile);
+          form.append('doc_type', 'national_id');
+          const r = await fetch(`${API}/verify/document`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${authToken}`
+            },
+            body: form
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) {
+            alert(d.detail || 'No pudimos verificar tu documento. Aseg\u00FArate de fotografiar el lado con tu foto, con buena iluminaci\u00F3n.');
+            setVfLoading(false);
+            return;
+          }
+        } catch (e) {/* sin backend: modo demo */}
+        setVfLoading(false);
+        setVfDone(p => ({
+          ...p,
+          3: true
+        }));
+        setVfStep(4);
       }
     })), vfStep === 4 && !vfDone[4] && /*#__PURE__*/React.createElement(Card, {
       style: {
@@ -3955,20 +4014,26 @@ function PreferendumV8() {
       onPress: async () => {
         setVfLoading(true);
         try {
-          const r = await fetch(`${API_URL}/verify/imei`, {
+          const r = await fetch(`${API}/verify/imei`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${authToken}`
             },
             body: JSON.stringify({
-              imei: 'web-client',
+              imei: window.DEVICE_ID || ('web-' + (authToken || '').slice(-24)),
               phone: vfPhone,
-              device_model: 'web',
+              device_model: window.DEVICE_MODEL || 'web',
               os_version: 'web'
             })
           });
-          if (!r.ok && r.status !== 409) throw new Error('Error registrando SIM');
+          if (!r.ok && r.status === 409) {
+            const d409 = await r.json().catch(() => ({}));
+            alert(d409.detail || 'Este aparato o número ya está vinculado a otra cuenta. Cada chip y cada aparato solo puede usarse con una cuenta.');
+            setVfLoading(false);
+            return;
+          }
+          if (!r.ok) throw new Error('Error registrando SIM');
         } catch (e) {/* si ya está registrado (409) dejamos pasar */}
         setVfLoading(false);
         setVfDone(p => ({
@@ -4003,7 +4068,7 @@ function PreferendumV8() {
         fontSize: 12,
         color: T.fog
       }
-    }, "Confirmamos que est\xE1s en ", vfCountry || "tu país")), /*#__PURE__*/React.createElement("div", {
+    }, "Confirma tu ubicaci\xF3n real para continuar")), /*#__PURE__*/React.createElement("div", {
       style: {
         background: T.deep,
         borderRadius: 10,
@@ -4022,13 +4087,13 @@ function PreferendumV8() {
         fontWeight: 700,
         color: T.green
       }
-    }, vfCountry || "Chile", " detectado"), /*#__PURE__*/React.createElement("div", {
+    }, "Pa\xEDs registrado: ", vfCountry || "Chile"), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 11,
         color: T.fog,
         marginTop: 4
       }
-    }, "Ubicaci\xF3n confirmada")), /*#__PURE__*/React.createElement("div", {
+    }, "Pulsa el bot\xF3n para confirmar tu ubicaci\xF3n real")), /*#__PURE__*/React.createElement("div", {
       style: {
         background: `${T.green}18`,
         border: `1px solid ${T.green}44`,
@@ -4050,14 +4115,32 @@ function PreferendumV8() {
       full: true,
       onPress: () => {
         setVfLoading(true);
-        setTimeout(() => {
+        if (!navigator.geolocation) {
           setVfLoading(false);
-          setVfDone(p => ({
-            ...p,
-            6: true
-          }));
-          setVfStep(7);
-        }, 1800);
+          alert('Tu navegador no soporta geolocalizaci\xF3n. Intenta desde la app m\xF3vil.');
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(async pos => {
+          try {
+            const r = await apiFetch('POST', '/verify/location', {
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude
+            });
+            setVfLoading(false);
+            if (r.verified) {
+              setVfDone(p => ({...p, 6: true}));
+              setVfStep(7);
+            } else {
+              alert('No pudimos verificar tu ubicaci\xF3n. Intenta de nuevo.');
+            }
+          } catch (e) {
+            setVfLoading(false);
+            alert(e.message || 'Error verificando ubicaci\xF3n.');
+          }
+        }, () => {
+          setVfLoading(false);
+          alert('No pudimos obtener tu ubicaci\xF3n. Revisa los permisos de geolocalizaci\xF3n e intenta de nuevo.');
+        }, { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 });
       }
     })), vfStep === 7 && !vfDone[7] && /*#__PURE__*/React.createElement(Card, {
       style: {
@@ -4096,12 +4179,30 @@ function PreferendumV8() {
         marginBottom: 14,
         lineHeight: 1.6
       }
-    }, "\uD83D\uDCA1 Si tienes wallet (MetaMask, etc.) con\xE9ctala. Si no, creamos una autom\xE1ticamente."), /*#__PURE__*/React.createElement(Input, {
-      label: "Wallet address (opcional)",
-      placeholder: "0x... o dejar vac\xEDo",
+    }, "\uD83D\uDCA1 Ingresa la direcci\xF3n p\xFAblica (0x...) de tu wallet (MetaMask u otra). La necesitamos para vincular tu identidad verificada a la cadena."), /*#__PURE__*/React.createElement(Input, {
+      label: "Wallet address",
+      placeholder: "0x1234...abcd (40 caracteres hexadecimales)",
       value: walletAddr,
       onChange: setWalletAddr
-    }), vfLoading ? /*#__PURE__*/React.createElement("div", {
+    }), typeof window !== 'undefined' && window.ethereum && /*#__PURE__*/React.createElement("button", {
+      onClick: async () => {
+        try {
+          const accts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+          if (accts && accts[0]) setWalletAddr(accts[0]);
+        } catch (e) {/* usuario rechaz\xF3 la conexi\xF3n */}
+      },
+      style: {
+        background: "none",
+        border: `1px solid ${T.gold}44`,
+        borderRadius: 10,
+        padding: "8px 16px",
+        color: T.gold,
+        fontSize: 12,
+        cursor: "pointer",
+        fontWeight: 600,
+        marginBottom: 14
+      }
+    }, "Conectar con MetaMask"), vfLoading ? /*#__PURE__*/React.createElement("div", {
       style: {
         textAlign: "center",
         padding: 12
@@ -4109,27 +4210,30 @@ function PreferendumV8() {
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 13,
-        color: T.fog,
-        marginBottom: 6
+        color: T.fog
       }
-    }, "\u23F3 Anclando en Polygon..."), /*#__PURE__*/React.createElement("div", {
-      style: {
-        fontFamily: "monospace",
-        fontSize: 10,
-        color: T.gold
-      }
-    }, "TX: 0x7212c52de19...")) : /*#__PURE__*/React.createElement(Btn, {
+    }, "\u23F3 Verificando direcci\xF3n con la red...")) : /*#__PURE__*/React.createElement(Btn, {
       label: "\uD83D\uDE80 Completar verificaci\xF3n \u2192",
       full: true,
-      onPress: () => {
+      onPress: async () => {
+        const addr = (walletAddr || '').trim();
+        if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+          alert('Ingresa una direcci\xF3n de wallet v\xE1lida (0x seguido de 40 caracteres hexadecimales).');
+          return;
+        }
         setVfLoading(true);
-        setTimeout(() => {
+        try {
+          const r = await apiFetch('POST', '/verify/wallet', { wallet_address: addr });
           setVfLoading(false);
-          setVfDone(p => ({
-            ...p,
-            7: true
-          }));
-        }, 2800);
+          if (r.verified) {
+            setVfDone(p => ({...p, 7: true}));
+          } else {
+            alert('No pudimos verificar esa direcci\xF3n. Revisa que est\xE9 bien escrita.');
+          }
+        } catch (e) {
+          setVfLoading(false);
+          alert(e.message || 'Error verificando wallet.');
+        }
       }
     })), /*#__PURE__*/React.createElement("div", {
       style: {
