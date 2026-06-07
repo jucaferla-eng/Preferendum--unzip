@@ -36,12 +36,14 @@ jobs:
   integrity:
     name: Run vote integrity suite against production
     runs-on: ubuntu-latest
-    # Registration is slow right now because email delivery is a known,
-    # disclosed problem (see CLAUDE.md "EMAIL VERIFICATION FIX") — Resend
-    # is pending DNS verification and the Gmail SMTP fallback can hang.
-    # Give the whole job real headroom so a slow dependency doesn't read
-    # as a false "FAIL" on the thing we're actually testing.
-    timeout-minutes: 30
+    # Two slow, disclosed dependencies stack here: Render deploys lag
+    # ~10-15 min behind the push that triggers them (see the "Wait for
+    # this commit" step), and registration is slow because email delivery
+    # is a known problem (see CLAUDE.md "EMAIL VERIFICATION FIX" — Resend
+    # is pending DNS verification and the Gmail SMTP fallback can hang).
+    # Give the whole job real headroom so neither reads as a false "FAIL"
+    # on the thing we're actually testing.
+    timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -53,6 +55,33 @@ jobs:
 
       - name: Install test dependencies
         run: pip install -r tests/requirements.txt
+
+      - name: Wait for this commit to actually be live (Render deploys lag ~10-15min)
+        # A push to main triggers BOTH this workflow and a Render deploy —
+        # but Render takes 10-15 minutes to go live, so "just pushed" and
+        # "live" are different moments. Running the suite immediately would
+        # test the OLD deploy and could report false failures (e.g. brand
+        # new endpoints this very commit adds would still 404). /health now
+        # reports RENDER_GIT_COMMIT — wait until it matches the commit that
+        # triggered this run, so "after each deploy" means what it says.
+        # Skips the wait cleanly on manual/scheduled runs (no fixed target SHA).
+        if: github.event_name == 'push'
+        env:
+          BASE_URL: ${{ secrets.PREFERENDUM_BASE_URL || 'https://preferendum-unzip-d2zd.onrender.com' }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          echo "Waiting for $BASE_URL to report git_commit == $TARGET_SHA ..."
+          for i in $(seq 1 60); do
+            LIVE_SHA=$(curl -s --max-time 30 "$BASE_URL/health" | python3 -c "import sys,json; print(json.load(sys.stdin).get('git_commit',''))" 2>/dev/null || echo "")
+            echo "  attempt $i: live=$LIVE_SHA target=$TARGET_SHA"
+            if [ -n "$LIVE_SHA" ] && [ "$LIVE_SHA" = "$TARGET_SHA" ]; then
+              echo "Deploy is live — proceeding with tests."
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "Timed out waiting ~30min for the deploy to go live. Failing loudly rather than testing stale code."
+          exit 1
 
       - name: Run vote integrity suite (live production)
         env:

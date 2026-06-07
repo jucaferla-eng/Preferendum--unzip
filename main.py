@@ -1112,7 +1112,16 @@ function showPage1(){
 
 @app.get('/health')
 def health():
-    return {'status': 'ok', 'timestamp': datetime.utcnow().isoformat()}
+    # RENDER_GIT_COMMIT is set automatically by Render for every deploy —
+    # exposing it lets CI know it's actually talking to the NEW deploy
+    # before running post-deploy tests against it (Render pushes go live
+    # ~10-15 min after the git push that triggers them, so "just pushed"
+    # and "live" are different moments — this closes that gap honestly).
+    return {
+        'status': 'ok',
+        'timestamp': datetime.utcnow().isoformat(),
+        'git_commit': os.getenv('RENDER_GIT_COMMIT', ''),
+    }
 
 @app.get('/ping-test', response_class=HTMLResponse)
 def ping_test():
