@@ -1987,6 +1987,8 @@ function PreferendumV8() {
   const [instLoading, setInstLoading] = useState(false);
   const [instOrgType, setInstOrgType] = useState('person');
   const [orgConsultations, setOrgConsultations] = useState(null); // null = aún no cargadas (no inventamos números)
+  const [resultsOpenId, setResultsOpenId] = useState(null); // id de la consulta cuyo detalle está expandido
+  const [resultsById, setResultsById] = useState({}); // cache: id -> {loading|error|data real de /organizer/consultations/{id}/results}
   const [ncInstName, setNcInstName] = useState('');
   const [myDebateIds, setMyDebateIds] = useState([]); // IDs created in this session
   const [ncTitle, setNcTitle] = useState('');
@@ -2066,6 +2068,14 @@ function PreferendumV8() {
   const [launchLoading, setLaunchLoading] = useState(false);
   const [myCampaignIds, setMyCampaignIds] = useState([]);
   const [mktStats, setMktStats] = useState(null); // null = sin campañas todavía (no inventamos números)
+  const [myCampaignsDetail, setMyCampaignsDetail] = useState([]); // detalle real por campaña, para "Campañas activas"
+  const [estimateData, setEstimateData] = useState(null); // resultado real de POST /marketer/estimate
+  const [estimateLoading, setEstimateLoading] = useState(false);
+  const [estimateError, setEstimateError] = useState('');
+  const [communesOpen, setCommunesOpen] = useState(false);
+  const [communesData, setCommunesData] = useState(null); // tabla real de GET /marketer/communes
+  const [communesLoading, setCommunesLoading] = useState(false);
+  const [communesError, setCommunesError] = useState('');
 
   // Verification state
   const [vfStep, setVfStep] = useState(1); // 1-7
@@ -2207,7 +2217,6 @@ function PreferendumV8() {
     r.onload = e => res(e.target.result);
     r.readAsDataURL(file);
   });
-  const estImp = budget ? Math.round(parseInt(budget) / 4.8).toLocaleString() : "—";
   const phone = {
     background: T.bg,
     height: "100vh",
@@ -2299,6 +2308,7 @@ function PreferendumV8() {
           activeCampaigns: myCampaignIds.length,
           pctInTarget: avgPctTarget,
         });
+        setMyCampaignsDetail(ok);
       } catch (e) {/* si falla, dejamos mktStats como está — nunca mostramos un número inventado */}
     })();
     return () => { cancelled = true; };
@@ -2317,6 +2327,21 @@ function PreferendumV8() {
     })();
     return () => { cancelled = true; };
   }, [screen, instTab, authToken]);
+  // Trae el detalle real de una consulta (legitimacy score, verificaciones,
+  // demografía) desde GET /organizer/consultations/{id}/results — antes este
+  // botón no existía y no había forma de ver más que el score resumido.
+  const toggleConsultationResults = async consultationId => {
+    if (resultsOpenId === consultationId) { setResultsOpenId(null); return; }
+    setResultsOpenId(consultationId);
+    if (resultsById[consultationId] && resultsById[consultationId].status !== 'error') return;
+    setResultsById(p => ({ ...p, [consultationId]: { status: 'loading' } }));
+    try {
+      const data = await apiFetch('GET', `/organizer/consultations/${consultationId}/results`);
+      setResultsById(p => ({ ...p, [consultationId]: { status: 'ok', data } }));
+    } catch (e) {
+      setResultsById(p => ({ ...p, [consultationId]: { status: 'error', message: e.message || 'No pudimos cargar los resultados.' } }));
+    }
+  };
   const loadOpinions = async debateId => {
     setOpinionsLoading(true);
     try {
@@ -7204,10 +7229,33 @@ function PreferendumV8() {
   }, "Aún no has publicado ninguna consulta. Cuando publiques una, su Legitimacy Score real aparecerá aquí.") : orgConsultations.slice(0, 6).map(c => {
     const score = typeof c.legitimacy_score === 'number' ? c.legitimacy_score : null;
     const pct = score != null ? Math.round(score * 10) / 10 : 0;
+    const r = resultsById[c.id];
+    const isOpen = resultsOpenId === c.id;
+    let panel = null;
+    if (isOpen) {
+      if (!r || r.status === 'loading') {
+        panel = /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: T.fog, padding: "8px 0" } }, "Cargando resultados reales…");
+      } else if (r.status === 'error') {
+        panel = /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: T.coral, padding: "8px 0" } }, r.message);
+      } else {
+        const d = r.data;
+        const byGender = (d.demographics && d.demographics.by_gender) || {};
+        const byAge = (d.demographics && d.demographics.by_age) || {};
+        const hasDemo = Object.keys(byGender).length > 0 || Object.keys(byAge).length > 0;
+        panel = /*#__PURE__*/React.createElement("div", { style: { marginTop: 8, padding: 10, borderRadius: 8, background: `${T.deep}88` } },
+          /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: T.fog, marginBottom: 4 } }, `Verificaciones reales: ${d.verifications.confirmed}/${d.verifications.total} confirmadas \xB7 ${d.consultation.total_votes} votos totales`),
+          Object.keys(byGender).length > 0 && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: T.silver, marginBottom: 2 } }, "Por g\xE9nero (real): " + Object.entries(byGender).map(([k, v]) => `${k}: ${v}`).join(' \xB7 ')),
+          Object.keys(byAge).length > 0 && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: T.silver } }, "Por edad (real): " + Object.entries(byAge).map(([k, v]) => `${k}: ${v}`).join(' \xB7 ')),
+          !hasDemo && /*#__PURE__*/React.createElement("div", { style: { fontSize: 11, color: T.fog } }, "A\xFAn no hay votos verificados para mostrar demograf\xEDa real.")
+        );
+      }
+    }
     return /*#__PURE__*/React.createElement("div", {
     key: c.id,
     style: {
-      marginBottom: 10
+      marginBottom: 14,
+      paddingBottom: 10,
+      borderBottom: `1px solid ${T.rim}33`
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -7239,7 +7287,19 @@ function PreferendumV8() {
       background: T.green,
       borderRadius: 4
     }
-  })));
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: () => toggleConsultationResults(c.id),
+    style: {
+      marginTop: 8,
+      background: "none",
+      border: "none",
+      color: T.blue,
+      fontSize: 11,
+      fontWeight: 700,
+      cursor: "pointer",
+      padding: 0
+    }
+  }, isOpen ? "Ocultar resultados ▲" : "Ver resultados reales →"), panel);
   })))), instTab === "create" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "4px 0 14px"
@@ -8133,9 +8193,16 @@ function PreferendumV8() {
     style: {
       fontSize: 20,
       fontWeight: 900,
-      color: T.white
+      color: T.white,
+      marginBottom: 4
     }
-  }, "Publicidad")), [{
+  }, "Publicidad"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: T.fog,
+      lineHeight: 1.5
+    }
+  }, "Así luce una campaña dentro de Preferendum (ejemplo ilustrativo, no son campañas reales en curso):")), [{
     name: "Samsung Galaxy",
     target: "Todos · CL",
     imp: 510,
@@ -8167,10 +8234,10 @@ function PreferendumV8() {
       fontWeight: 700,
       padding: "2px 8px",
       borderRadius: 10,
-      background: `${T.green}22`,
-      color: T.green
+      background: `${T.fog}22`,
+      color: T.fog
     }
-  }, "\u25CF En vivo")), /*#__PURE__*/React.createElement("div", {
+  }, "Ejemplo")), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: T.fog,
@@ -8413,20 +8480,23 @@ function PreferendumV8() {
       color: T.white,
       marginBottom: 8
     }
-  }, "Campa\xF1as activas"), [{
-    name: "Samsung Galaxy",
-    target: "Todos · CL",
-    imp: 510,
-    spent: 10200,
-    c: T.blue
-  }, {
-    name: "L'Oréal Paris",
-    target: "Mujeres · CL",
-    imp: 265,
-    spent: 5300,
-    c: T.coral
-  }].map(ad => /*#__PURE__*/React.createElement("div", {
-    key: ad.name,
+  }, "Campa\xF1as activas"), myCampaignsDetail.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: T.fog,
+      padding: "6px 0 2px",
+      lineHeight: 1.5
+    }
+  }, "Aún no has lanzado ninguna campaña. Cuando lances una desde \"Crear campaña publicitaria\", aparecerá aquí con sus métricas reales — no mostramos campañas de ejemplo.") : myCampaignsDetail.map((m, i) => ({
+    id: m.campaign_id,
+    name: m.title || ("Campaña #" + m.campaign_id),
+    target: [(!m.targeting || !m.targeting.gender || m.targeting.gender === "all") ? "Todos" : (m.targeting.gender === "female" ? "Mujeres" : "Hombres"), m.targeting && m.targeting.country ? m.targeting.country : null].filter(Boolean).join(" · "),
+    imp: m.impressions || 0,
+    spent: m.spent_clp || 0,
+    active: !!m.is_active,
+    c: [T.blue, T.coral, T.teal, T.gold][i % 4]
+  })).map(ad => /*#__PURE__*/React.createElement("div", {
+    key: ad.id,
     style: {
       padding: "10px 0",
       borderBottom: `1px solid ${T.rim}`
@@ -8449,10 +8519,10 @@ function PreferendumV8() {
       fontWeight: 700,
       padding: "2px 7px",
       borderRadius: 8,
-      background: `${T.green}22`,
-      color: T.green
+      background: ad.active ? `${T.green}22` : `${T.fog}22`,
+      color: ad.active ? T.green : T.fog
     }
-  }, "\u25CF En vivo")), /*#__PURE__*/React.createElement("div", {
+  }, ad.active ? "\u25CF En vivo" : "Pausada")), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       color: T.fog,
@@ -8521,7 +8591,7 @@ function PreferendumV8() {
         maxWidth: 320,
         textAlign: "left"
       }
-    }, /*#__PURE__*/React.createElement(Lbl, null, "Resumen"), [["ID de campaña (servidor)", launchedCampaignId ? '#' + launchedCampaignId : '—'], ["Marca", brandName], ["Tipo", AD_TYPES.find(t => t.k === adType)?.name || "—"], ["País", country + (region ? ` · ${region}` : "")], [t("reg.gender"), [sexF ? "♀" : null, sexM ? "♂" : null].filter(Boolean).join("+")], ["Presupuesto", "CLP " + parseInt(budget || 0).toLocaleString()], ["Modelo", payModel + " · 20 CLP/imp."], ["Imp. estimadas", "~" + estImp]].map(([l, v]) => /*#__PURE__*/React.createElement("div", {
+    }, /*#__PURE__*/React.createElement(Lbl, null, "Resumen"), [["ID de campaña (servidor)", launchedCampaignId ? '#' + launchedCampaignId : '—'], ["Marca", brandName], ["Tipo", AD_TYPES.find(t => t.k === adType)?.name || "—"], ["País", country + (region ? ` · ${region}` : "")], [t("reg.gender"), [sexF ? "♀" : null, sexM ? "♂" : null].filter(Boolean).join("+")], ["Presupuesto", "CLP " + parseInt(budget || 0).toLocaleString()], ["Modelo", payModel + " · 20 CLP/imp."]].map(([l, v]) => /*#__PURE__*/React.createElement("div", {
       key: l,
       style: {
         display: "flex",
@@ -9577,7 +9647,7 @@ function PreferendumV8() {
         padding: 14,
         marginBottom: 14
       }
-    }, [["Costo unitario", payModel === "CPM" ? "$ 4,800 CLP / 1K imp." : payModel === "CPC" ? "$ 320 CLP / clic" : "$ 1,200,000 CLP / sem.", null], ["Impresiones estimadas", "~" + estImp, T.green]].map(([l, v, c]) => /*#__PURE__*/React.createElement("div", {
+    }, [["Costo unitario", payModel === "CPM" ? "$ 4,800 CLP / 1K imp." : payModel === "CPC" ? "$ 320 CLP / clic" : "$ 1,200,000 CLP / sem.", null]].map(([l, v, c]) => /*#__PURE__*/React.createElement("div", {
       key: l,
       style: {
         display: "flex",
@@ -9601,7 +9671,89 @@ function PreferendumV8() {
       type: "number",
       value: budget,
       onChange: setBudget
-    })), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(Lbl, null, "Per\xEDodo"), /*#__PURE__*/React.createElement(Input, {
+    })), /*#__PURE__*/React.createElement(Card, {
+      style: {
+        border: `1px solid ${T.gold}44`
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: communesOpen ? 10 : 0
+      }
+    }, /*#__PURE__*/React.createElement(Lbl, null, "Tabla CPM real por comuna"), /*#__PURE__*/React.createElement("button", {
+      disabled: communesLoading,
+      onClick: async () => {
+        if (communesOpen) { setCommunesOpen(false); return; }
+        setCommunesOpen(true);
+        if (communesData || communesLoading) return;
+        setCommunesError('');
+        setCommunesLoading(true);
+        try {
+          const data = await apiFetch('GET', '/marketer/communes');
+          setCommunesData(data);
+          setCommunesLoading(false);
+        } catch (e) {
+          setCommunesLoading(false);
+          setCommunesError(e.message || 'No pudimos cargar la tabla de comunas.');
+        }
+      },
+      style: {
+        background: "none",
+        border: "none",
+        color: T.gold,
+        fontSize: 12,
+        fontWeight: 700,
+        cursor: communesLoading ? "default" : "pointer"
+      }
+    }, communesLoading ? "⏳ Cargando..." : communesOpen ? "Ocultar ▲" : "Ver tabla real (servidor) →")), !communesOpen ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: T.fog,
+        lineHeight: 1.5
+      }
+    }, "El CPM (costo por mil impresiones) varía por comuna según el índice de ingreso (proxy: m² de vivienda) — nunca por datos personales. Aquí puedes ver la tabla real que el servidor usa para repartir tu presupuesto.") : communesError ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: T.coral
+      }
+    }, communesError) : !communesData ? null : /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 10,
+        color: T.fog,
+        marginBottom: 8
+      }
+    }, communesData.source === 'database' ? "Fuente: base de datos del agente de comunas (en vivo)" : "Fuente: tabla de respaldo (el agente de comunas aún no ha corrido en esta región)"), (communesData.communes || []).slice(0, 12).map((c, i) => /*#__PURE__*/React.createElement("div", {
+      key: c.country + '-' + c.commune + '-' + i,
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        padding: "5px 0",
+        borderBottom: `1px solid ${T.rim}`,
+        fontSize: 12
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: T.snow
+      }
+    }, c.commune, " ", /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: T.fog,
+        fontSize: 10
+      }
+    }, "· ", c.se_tier)), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: T.gold,
+        fontWeight: 700
+      }
+    }, "USD ", (c.cpm_usd || 0).toFixed(2), " CPM"))), (communesData.communes || []).length === 0 ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: T.fog,
+        padding: "6px 0"
+      }
+    }, "No hay datos de comunas para este país todavía.") : null)), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(Lbl, null, "Per\xEDodo"), /*#__PURE__*/React.createElement(Input, {
       label: "Fecha de inicio",
       type: "date",
       value: startDate,
@@ -9641,7 +9793,7 @@ function PreferendumV8() {
         color: T.white,
         marginBottom: 4
       }
-    }, "Revisa y lanza")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(Lbl, null, "Resumen completo"), [["Tipo", AD_TYPES.find(t => t.k === adType)?.name || "—"], ["Marca", brandName], ["País", country + (region ? ` · ${region}` : "")], ["Género", [sexF ? "♀ Femenino" : null, sexM ? "♂ Masculino" : null].filter(Boolean).join(" + ")], ["Edades", agesSel.length ? agesSel.join(", ") : "Todas"], ["Aparece en", appear.length ? appear.join(", ") : "Todas las categorías"], ["Excluye", exclude.length ? exclude.join(", ") : "Nada"], ["Competidores bloqueados", comps.filter(Boolean).join(", ") || "Ninguno"], ["Presupuesto", "CLP " + parseInt(budget || 0).toLocaleString()], ["Modelo", payModel + " · 20 CLP/impresión"], ["Período", `${startDate || "—"} → ${endDate || "—"}`], ["Imp. estimadas", "~" + estImp]].map(([l, v]) => /*#__PURE__*/React.createElement("div", {
+    }, "Revisa y lanza")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(Lbl, null, "Resumen completo"), [["Tipo", AD_TYPES.find(t => t.k === adType)?.name || "—"], ["Marca", brandName], ["País", country + (region ? ` · ${region}` : "")], ["Género", [sexF ? "♀ Femenino" : null, sexM ? "♂ Masculino" : null].filter(Boolean).join(" + ")], ["Edades", agesSel.length ? agesSel.join(", ") : "Todas"], ["Aparece en", appear.length ? appear.join(", ") : "Todas las categorías"], ["Excluye", exclude.length ? exclude.join(", ") : "Nada"], ["Competidores bloqueados", comps.filter(Boolean).join(", ") || "Ninguno"], ["Presupuesto", "CLP " + parseInt(budget || 0).toLocaleString()], ["Modelo", payModel + " · 20 CLP/impresión"], ["Período", `${startDate || "—"} → ${endDate || "—"}`]].map(([l, v]) => /*#__PURE__*/React.createElement("div", {
       key: l,
       style: {
         display: "flex",
@@ -9661,7 +9813,105 @@ function PreferendumV8() {
         maxWidth: "55%",
         textAlign: "right"
       }
-    }, v)))), adType === "question" && /*#__PURE__*/React.createElement(Card, {
+    }, v)))), /*#__PURE__*/React.createElement(Card, {
+      style: {
+        border: `1px solid ${T.blue}44`
+      }
+    }, /*#__PURE__*/React.createElement(Lbl, null, "Estimación real del servidor"), !estimateData ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: T.fog,
+        marginBottom: 10,
+        lineHeight: 1.5
+      }
+    }, "Antes de lanzar, pídele al servidor que calcule el alcance real según tu presupuesto y segmentación — es el mismo motor que reparte el gasto por comuna cuando lanzas la campaña, no un cálculo del teléfono.") : /*#__PURE__*/React.createElement("div", null, [["Impresiones estimadas", (estimateData.total_impressions || 0).toLocaleString()], ["Contactos estimados", (estimateData.total_contacts_est || 0).toLocaleString()], ["Costo por contacto", "CLP " + Math.round(estimateData.cost_per_contact_clp || 0).toLocaleString()], ["CPM promedio", "USD " + (estimateData.cpm_promedio || 0).toFixed(2)], ["Comunas incluidas", String(estimateData.total_communes || 0)]].map(([l, v2]) => /*#__PURE__*/React.createElement("div", {
+      key: l,
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        padding: "6px 0",
+        borderBottom: `1px solid ${T.rim}`,
+        fontSize: 12
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: T.fog
+      }
+    }, l), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: T.snow,
+        fontWeight: 700
+      }
+    }, v2))), estimateData.allocation && estimateData.allocation.length ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginTop: 10
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 11,
+        color: T.fog,
+        marginBottom: 6
+      }
+    }, "Top comunas por presupuesto asignado"), estimateData.allocation.slice(0, 5).map((a, i) => /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        display: "flex",
+        justifyContent: "space-between",
+        fontSize: 11,
+        padding: "4px 0",
+        color: T.fog
+      }
+    }, /*#__PURE__*/React.createElement("span", null, a.commune + " · " + a.se_tier), /*#__PURE__*/React.createElement("span", {
+      style: {
+        color: T.snow
+      }
+    }, (a.budget_pct || 0).toFixed(1) + "% · " + (a.impressions || 0).toLocaleString() + " impr.")))) : null), estimateError ? /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: T.coral,
+        marginTop: 8
+      }
+    }, estimateError) : null, /*#__PURE__*/React.createElement("button", {
+      disabled: estimateLoading,
+      onClick: async () => {
+        setEstimateError('');
+        setEstimateLoading(true);
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          const data = await apiFetch('POST', '/marketer/estimate', {
+            advertiser_email: email || (brandName || 'anunciante').toLowerCase().replace(/\s+/g, '.') + '@demo.cl',
+            advertiser_name: brandName || 'Anunciante',
+            campaign_title: (brandName || 'Campaña') + ' · Preferendum',
+            budget_clp: parseInt(budget) || 10000,
+            ad_type: adType || 'banner',
+            target_country: 'CL',
+            target_gender: sexF && sexM ? 'all' : sexF ? 'female' : 'male',
+            target_age_min: 13,
+            target_age_max: 99,
+            target_se_tiers: 'AAA,AAB,ABB,BBB,BBC,BCC',
+            start_date: startDate || today,
+            end_date: endDate || (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().split('T')[0]; })()
+          });
+          setEstimateData(data);
+          setEstimateLoading(false);
+        } catch (e) {
+          setEstimateLoading(false);
+          setEstimateError(e.message || 'No pudimos calcular la estimación real. Intenta de nuevo.');
+        }
+      },
+      style: {
+        width: "100%",
+        padding: 12,
+        borderRadius: 12,
+        background: estimateLoading ? T.mist : "transparent",
+        border: `1px solid ${T.blue}`,
+        color: estimateLoading ? T.fog : T.blue,
+        fontSize: 13,
+        fontWeight: 700,
+        cursor: estimateLoading ? "default" : "pointer",
+        marginTop: 10
+      }
+    }, estimateLoading ? "⏳ Calculando..." : estimateData ? "🔄 Recalcular estimación real" : "📊 Pedir estimación real al servidor")), adType === "question" && /*#__PURE__*/React.createElement(Card, {
       style: {
         border: `1px solid ${T.teal}44`
       }
