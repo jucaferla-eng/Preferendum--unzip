@@ -198,3 +198,93 @@ authentication behind consultation/campaign creation.
 `/marketer/estimate`, `/marketer/communes` into their screens, then do a full
 regression pass on all three flows (voter, organizer, marketer) before building
 and uploading the new TestFlight version.
+
+---
+
+## 2026-06-07 (continued II) — closed all three remaining unused-endpoint gaps, found and fixed two more fabrications
+
+**Branch:** `working-copy-2026-06-06` (fast-forwarded to `main`, deployed)
+**Commit:** `3097b8fe`
+
+**What changed:**
+1. "Integridad del sistema" (organizer): each consultation card now has a
+   "Ver resultados reales →" toggle that expands a real panel calling
+   `GET /organizer/consultations/{id}/results` — shows the real
+   `verifications.confirmed/total` count and real gender/age demographics
+   from actual votes, with an honest "aún no hay votos verificados para
+   mostrar demografía real" empty state. No invented numbers.
+2. Marketer "Revisa y lanza" step: added an "Estimación real del servidor"
+   card with a button that calls `POST /marketer/estimate` — the same CPM
+   optimization engine the backend uses to actually allocate the campaign's
+   budget — and shows real `total_impressions`, `total_contacts_est`,
+   `cost_per_contact_clp`, `cpm_promedio`, and the top 5 commune allocations
+   by budget share. This **replaced a fabrication**: `estImp` was a pure
+   client-side guess (`budget / 4.8`, no relation to the real CPM table)
+   that was being shown as "Impresiones estimadas" in three different
+   screens (budget step, review step, post-launch summary). All three are
+   now gone — removed entirely rather than leaving a fake number next to a
+   real one.
+3. Marketer "Presupuesto" step: added a "Tabla CPM real por comuna" card
+   that calls `GET /marketer/communes` and lists the live CPM-by-commune
+   table (with SE tier and source: "database" vs "fallback") — the actual
+   data the optimization engine reads when it allocates a budget.
+4. **Found and fixed two more fabrications while working through this list**
+   (not in the original known-gaps list — caught by reading the surrounding
+   code while wiring the real features in):
+   - Marketer hub "Campañas activas" was hardcoded to **always** show two
+     fake campaigns ("Samsung Galaxy" and "L'Oréal Paris" with invented
+     impressions and spend — 510/CLP 10,200 and 265/CLP 5,300) regardless
+     of which account was logged in or whether it had ever launched
+     anything. Replaced with the account's real launched campaigns
+     (aggregated from `GET /marketer/campaigns/{id}/metrics`, the same data
+     source `mktStats` already used), each showing its real title,
+     targeting, impressions, spend, and a real "● En vivo / Pausada" badge
+     driven by the campaign's actual `is_active` flag — plus an honest
+     "aún no has lanzado ninguna campaña" empty state.
+   - The institutional "Publicidad" preview tab showed the *same two fake
+     campaigns* with an unconditional "● En vivo" badge — i.e. presented as
+     real live platform activity to every organizer account. There is no
+     public endpoint suitable for listing genuinely live campaigns on this
+     screen, so rather than inventing one under time pressure, the honest
+     fix was to relabel it: badge now reads "Ejemplo" (neutral grey, not
+     green) and the heading gained a one-line caption — "Así luce una
+     campaña dentro de Preferendum (ejemplo ilustrativo, no son campañas
+     reales en curso)". A clearly-labeled illustrative mockup is not a
+     fabrication; presenting invented numbers as live activity is — this
+     fix draws that line correctly.
+
+**How it was proven:**
+- Wrote `/tmp/e2e_marketer_estimate_communes.py` and ran it against the
+  live production server: `GET /marketer/communes` returned 34 real rows
+  (source=database) with the correct shape, and `POST /marketer/estimate`
+  — sent the *exact* payload shape the new UI button now sends — returned
+  a real allocation across 16 communes with real impressions/CPM math
+  (e.g. La Pintana: CPM $3.10, 9.8% of budget, 16,566 impressions). Both
+  ✅. Script deleted after the run (its purpose was proof, not a fixture).
+- Extracted the live script block from `assets/app.html` after every single
+  edit and ran both `node --check` and `acorn.parse(..., {ecmaVersion: 2020})`
+  — every edit passed clean on the first or corrected attempt before moving
+  to the next. Zero syntax errors reached the commit.
+- After deploying, pulled the live `/app` page and grepped it directly:
+  confirmed `estImp` appears **zero** times (the fabrication is gone from
+  production, not just from the source), confirmed the real-data hooks
+  (`myCampaignsDetail`, `Estimación real del servidor`, `Tabla CPM real por
+  comuna`, the empty-state copy) are present in the deployed bundle, and
+  confirmed the "● En vivo" badge is now driven by `ad.active ? ... : ...`
+  (a real boolean) rather than being a hardcoded string, with the
+  illustrative-example badge correctly relabeled "Ejemplo".
+
+**Known gaps — still real, not yet fixed:**
+- None of the four originally-listed unused organizer/marketer endpoints
+  remain unused — this closes that list completely.
+- The institutional "Publicidad" tab still shows an illustrative example
+  rather than real live campaign data, because no public endpoint exists to
+  list genuinely-live campaigns for that screen. This is now honestly
+  labeled rather than hidden — a real (smaller) feature for a future pass
+  if organizers need to see real live ads on the platform, not a blocker.
+
+**Where to resume:** Tuesday's plan — full regression pass on all three
+flows (voter, organizer, marketer) live, then build and upload the new
+TestFlight version (these `app.html` changes are live on the web `/app`
+route now, but `App.js` bundles a local copy for mobile, so they won't
+reach iOS/Android until a fresh build is submitted).
