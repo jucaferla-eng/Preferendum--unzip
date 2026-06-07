@@ -2014,6 +2014,37 @@ def _tier_matches(user_tier: str, target_tiers_str: str) -> bool:
         return True
     return False
 
+def _campaign_matches_debate(c, debate) -> bool:
+    """
+    Cruza la matriz de targeting de la campaña (país, comunas, género, edad)
+    contra la matriz de alcance/targeting de la consulta. Evita que campañas
+    hiper-locales aparezcan en consultas fuera de su zona, y que consultas con
+    audiencia acotada (género/edad/comuna) muestren campañas fuera de ese rango.
+    """
+    if not debate:
+        return True
+    # País — 'ALL'/vacío en cualquiera de los dos lados = sin restricción
+    c_country = _country_code(c.target_country) if c.target_country else ''
+    d_country = _country_code(debate.scope_country) if debate.scope_country else ''
+    if c_country and c_country != 'ALL' and d_country and d_country != 'ALL' and c_country != d_country:
+        return False
+    # Comuna — si la campaña apunta a comunas específicas y la consulta tiene
+    # alcance comunal definido, la comuna de la consulta debe estar en la lista
+    target_communes = [x.strip() for x in (c.target_communes or '').split(',') if x.strip()]
+    if target_communes and debate.scope_commune and debate.scope_commune not in target_communes:
+        return False
+    # Género — incompatible solo si ambas matrices especifican géneros distintos
+    c_gender = (c.target_gender or 'all').lower()
+    d_gender = (debate.target_gender or 'all').lower()
+    if c_gender != 'all' and d_gender != 'all' and c_gender != d_gender:
+        return False
+    # Edad — los rangos de ambas matrices deben solaparse
+    c_min, c_max = c.target_age_min or 13, c.target_age_max or 99
+    d_min, d_max = debate.target_age_min or 13, debate.target_age_max or 99
+    if c_max < d_min or d_max < c_min:
+        return False
+    return True
+
 def _match_campaigns(user, debate, db) -> list:
     """
     Encuentra campañas activas que hagan match con el perfil del votante.
@@ -2036,6 +2067,9 @@ def _match_campaigns(user, debate, db) -> list:
     for c in campaigns:
         # Check expiry with 24h grace period
         if c.end_date and c.end_date < (now - timedelta(hours=24)):
+            continue
+        # Matriz campaña vs. matriz de la consulta — país/comuna/género/edad
+        if not _campaign_matches_debate(c, debate):
             continue
         # País — normaliza ambos lados ('Chile' vs 'CL') antes de comparar
         if c.target_country and _country_code(c.target_country) != user_country:
