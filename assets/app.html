@@ -2398,6 +2398,11 @@ function PreferendumV8() {
           }
         }).catch(() => {});
       }
+      // Refresca opiniones reales del servidor cada 20s mientras se está
+      // en la sala — así se ven las opiniones de otros participantes que
+      // están escribiendo "en este momento", sin inventar actividad falsa.
+      const pollId = setInterval(() => loadOpinions(selDebate.id), 20000);
+      return () => clearInterval(pollId);
     }
   }, [screen, selDebate?.id]);
 

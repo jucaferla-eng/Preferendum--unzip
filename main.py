@@ -2091,6 +2091,15 @@ def _match_campaigns(user, debate, db) -> list:
     return matched
 
 
+# Cada cuántas opiniones aparece un anuncio en la sala de debate.
+# Valor de prueba temporal pedido por el fundador (2026-06-07) — el valor
+# de producción documentado en CLAUDE.md es 5; se bajó a 2 para poder
+# probar el ciclo de impresiones/métricas de campañas más rápido durante
+# las 84 horas previas al almuerzo con el inversionista. Revertir a 5
+# cuando termine la prueba.
+AD_EVERY_N_OPINIONS = 2
+
+
 @app.get('/debates/{debate_id}/opinions')
 def get_opinions(debate_id: int,
                  user: User = Depends(get_optional_user),
@@ -2108,7 +2117,7 @@ def get_opinions(debate_id: int,
     now     = datetime.utcnow()
 
     for i, op in enumerate(opinions):
-        if i > 0 and i % 5 == 0:
+        if i > 0 and i % AD_EVERY_N_OPINIONS == 0:
             # Prioridad: campaña de marketer que hace match → ad estático del debate
             if matched:
                 campaign = matched[ad_idx % len(matched)]
@@ -3404,6 +3413,56 @@ def test_email_send(to: str, secret: str):
         result = {'from': from_addr, 'ok': False, 'error': str(e)}
     return {'to': to, 'result': result}
 
+# ── ADMIN: fetch a pending OTP for automated end-to-end testing ──
+# Real email/SMS delivery can fail for reasons unrelated to the voting
+# system itself (DNS propagation, SMTP credentials, carrier issues — see
+# CLAUDE.md "EMAIL VERIFICATION FIX"). Automated integrity tests (e.g. the
+# GitHub Actions suite in .github/workflows/integrity-tests.yml) need a way
+# to complete email verification without a human reading an inbox. This
+# endpoint exposes the *current* OTP for one account, gated by the same
+# ADMIN_SECRET as every other /admin route — it cannot be used to read
+# someone else's code without that secret, and test accounts are disposable
+# (created and discarded by the test run itself).
+@app.get('/admin/test-otp')
+def get_test_otp(email: str, secret: str, channel: str = 'email', db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(404, 'User not found')
+    otp = db.query(OTPCode).filter(
+        OTPCode.user_id == user.id, OTPCode.channel == channel,
+        OTPCode.used == False, OTPCode.expires_at > datetime.utcnow()
+    ).order_by(OTPCode.id.desc()).first()
+    if not otp:
+        raise HTTPException(404, 'No active OTP for this user/channel')
+    return {'email': email, 'channel': channel, 'code': otp.code, 'expires_at': otp.expires_at.isoformat()}
+
+# ── ADMIN: prove bridge destruction for a specific vote ──────────
+# "Bridge destruction" means voter_id is set to None the instant a vote is
+# recorded — the database itself never holds a link between a voter's
+# identity and their vote (see CLAUDE.md "Privacy architecture"). This
+# endpoint lets anyone with the admin secret check that field directly for
+# a given verify_code — not a description of the claim, the claim checked
+# against the live row. Used by the automated integrity tests, and usable
+# by independent auditors who want to confirm this themselves.
+@app.get('/admin/test-vote-bridge')
+def test_vote_bridge(code: str, debate_id: int, secret: str, db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    vote = db.query(DebateVote).filter(
+        DebateVote.verify_code == code.upper().strip(),
+        DebateVote.debate_id == debate_id
+    ).first()
+    if not vote:
+        raise HTTPException(404, 'Vote not found')
+    return {
+        'verify_code': vote.verify_code,
+        'debate_id': vote.debate_id,
+        'voter_id': vote.voter_id,
+        'bridge_destroyed': vote.voter_id is None,
+    }
+
 @app.patch('/admin/debates/{debate_id}')
 def admin_patch_debate(debate_id: int, secret: str, target_age_min: int = None, target_age_max: int = None, scope_country: str = None, status: str = None, db: Session = Depends(get_db)):
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
@@ -3803,7 +3862,7 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
         'now_utc': now_iso,
         'debate_id': debate_id,
         'opinions_count': len(opinions),
-        'ads_would_show_at_indices': [i for i in range(len(opinions)) if i > 0 and i % 5 == 0],
+        'ads_would_show_at_indices': [i for i in range(len(opinions)) if i > 0 and i % AD_EVERY_N_OPINIONS == 0],
         'user': user_info,
         'matched_campaign_ids': matched_ids,
         'real_match_campaigns_result': real_match_ids,

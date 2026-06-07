@@ -1,0 +1,72 @@
+name: Vote integrity tests
+
+# Runs the automated suite in tests/test_vote_integrity.py against the LIVE
+# production server — no mocks, no local server, the real thing — and
+# reports PASS or FAIL with no human in the loop, per the founder's
+# instruction: "Los test deben correr solos, sin intervención humana, y
+# reportar Pass o Fail."
+#
+# It proves, on every run, with fresh disposable accounts and a fresh
+# disposable consultation that it cleans up afterward:
+#   1. A user cannot vote twice in the same consultation.
+#   2. A physical device (IMEI) cannot be bound to two accounts — the
+#      mechanism that makes "one device, one vote" possible.
+#   3. A national ID (RUT/DNI) cannot vote twice, even from a different
+#      account and a different device.
+#   4. Bridge destruction — voter_id is None on the vote row the instant
+#      the vote is recorded.
+#   5. The verification code is unique per vote, has the right shape
+#      (XXXX-XXXX-XXXX), and resolves to the correct option.
+#
+# Triggers:
+#   - After every push to main (i.e. after every deploy, since Render
+#     watches main and auto-deploys on push)
+#   - On a daily schedule, so a silent regression can't hide over a
+#     quiet week
+#   - On demand (workflow_dispatch), so anyone with repo access can run
+#     it themselves right now and watch it go green or red
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 9 * * *'   # ~06:17 Chile time (UTC-3) — quiet hours, off the demo path
+  workflow_dispatch: {}
+
+jobs:
+  integrity:
+    name: Run vote integrity suite against production
+    runs-on: ubuntu-latest
+    # Registration is slow right now because email delivery is a known,
+    # disclosed problem (see CLAUDE.md "EMAIL VERIFICATION FIX") — Resend
+    # is pending DNS verification and the Gmail SMTP fallback can hang.
+    # Give the whole job real headroom so a slow dependency doesn't read
+    # as a false "FAIL" on the thing we're actually testing.
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: pip install -r tests/requirements.txt
+
+      - name: Run vote integrity suite (live production)
+        env:
+          # Both vars fall back to the values already baked into the test
+          # script (which match the server's current defaults) when no repo
+          # secret is configured — so this works out of the box today, and
+          # can be overridden later without touching this file if Render's
+          # ADMIN_SECRET or URL ever change. (Passing an unset secret as an
+          # env var would set it to "" and break the fallback, so we only
+          # forward it when it's actually been configured.)
+          PREFERENDUM_BASE_URL: ${{ secrets.PREFERENDUM_BASE_URL && secrets.PREFERENDUM_BASE_URL || '' }}
+          PREFERENDUM_ADMIN_SECRET: ${{ secrets.PREFERENDUM_ADMIN_SECRET && secrets.PREFERENDUM_ADMIN_SECRET || '' }}
+        run: |
+          # Strip empty env vars so the script's own defaults apply.
+          [ -z "$PREFERENDUM_BASE_URL" ] && unset PREFERENDUM_BASE_URL
+          [ -z "$PREFERENDUM_ADMIN_SECRET" ] && unset PREFERENDUM_ADMIN_SECRET
+          pytest tests/test_vote_integrity.py -v --tb=short
