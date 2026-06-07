@@ -3641,3 +3641,78 @@ def admin_activate_campaign(campaign_id: int, secret: str, days: int = 30, db: S
     c.start_date = min(c.start_date or datetime.utcnow(), datetime.utcnow())
     db.commit()
     return {'ok': True, 'campaign_id': campaign_id, 'end_date': c.end_date.isoformat()}
+
+
+@app.get('/admin/debug-ads')
+def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session = Depends(get_db)):
+    """Diagnóstico: por qué un usuario no ve ads en un debate. Devuelve user, opiniones, campañas activas y por qué cada una matchea o no."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+    opinions = db.query(Opinion).filter(Opinion.debate_id == debate_id).all()
+
+    user = None
+    if user_id:
+        user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        user = db.query(User).order_by(User.id.desc()).first()
+
+    user_info = None
+    reasons = []
+    matched_ids = []
+    if user:
+        now = datetime.utcnow()
+        user_tier      = user.se_tier or 'BBB'
+        user_gender    = user.gender or 'all'
+        user_age_group = _get_age_group(user.dob)
+        user_country   = user.country or 'CL'
+        user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
+        user_info = {
+            'id': user.id, 'email': user.email, 'county': user.county,
+            'se_tier': user.se_tier, 'computed_tier': user_tier,
+            'gender': user.gender, 'dob': user.dob, 'computed_age': user_age,
+            'country': user.country, 'computed_country': user_country,
+        }
+        all_campaigns = db.query(AdCampaign).all()
+        for c in all_campaigns:
+            r = {'id': c.id, 'advertiser': c.advertiser_name, 'is_active': c.is_active,
+                 'start_date': c.start_date.isoformat() if c.start_date else None,
+                 'end_date': c.end_date.isoformat() if c.end_date else None,
+                 'target_se_tiers': c.target_se_tiers, 'target_country': c.target_country,
+                 'target_gender': c.target_gender,
+                 'target_age_min': c.target_age_min, 'target_age_max': c.target_age_max,
+                 'verdict': 'MATCH', 'reason': ''}
+            if not c.is_active:
+                r['verdict'] = 'SKIP'; r['reason'] = 'is_active=False'
+            elif c.start_date and c.start_date > now:
+                r['verdict'] = 'SKIP'; r['reason'] = f'start_date {c.start_date.isoformat()} > now {now.isoformat()}'
+            elif c.end_date and c.end_date < (now - timedelta(hours=24)):
+                r['verdict'] = 'SKIP'; r['reason'] = f'end_date {c.end_date.isoformat()} expired'
+            elif c.target_country and c.target_country != user_country:
+                r['verdict'] = 'SKIP'; r['reason'] = f'country mismatch: target={c.target_country} user={user_country}'
+            elif c.target_gender and c.target_gender != 'all' and c.target_gender != user_gender:
+                r['verdict'] = 'SKIP'; r['reason'] = f'gender mismatch: target={c.target_gender} user={user_gender}'
+            elif not ((c.target_age_min or 13) <= user_age <= (c.target_age_max or 99)):
+                r['verdict'] = 'SKIP'; r['reason'] = f'age mismatch: range=[{c.target_age_min},{c.target_age_max}] user_age={user_age}'
+            else:
+                target_tiers = c.target_se_tiers or 'AAA,AAB,ABB,BBB,BBC,BCC'
+                if user_tier and not _tier_matches(user_tier, target_tiers):
+                    r['verdict'] = 'SKIP'; r['reason'] = f'tier mismatch: target={target_tiers} user={user_tier}'
+            if r['verdict'] == 'MATCH':
+                matched_ids.append(c.id)
+            reasons.append(r)
+        now_iso = now.isoformat()
+    else:
+        now_iso = datetime.utcnow().isoformat()
+
+    return {
+        'now_utc': now_iso,
+        'debate_id': debate_id,
+        'opinions_count': len(opinions),
+        'ads_would_show_at_indices': [i for i in range(len(opinions)) if i > 0 and i % 5 == 0],
+        'user': user_info,
+        'matched_campaign_ids': matched_ids,
+        'campaigns': reasons,
+    }
