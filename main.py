@@ -263,6 +263,7 @@ class DebateAd(Base):
     copy        = Column(String)
     cta         = Column(String, default='Ver más')
     logo_color  = Column(String, default='#3b82f6')
+    link_url    = Column(String, default='')   # destino al hacer clic en "Ver más"
     impressions = Column(Integer, default=0)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
@@ -306,6 +307,7 @@ class AdCampaign(Base):
     logo_url            = Column(String, default='')   # data URI o URL pública del logo
     ad_copy             = Column(String, default='')   # texto del anuncio
     ad_image_url        = Column(String, default='')   # imagen principal del anuncio
+    link_url            = Column(String, default='')   # destino al hacer clic en "Ver más"
 
 class AdImpressionLog(Base):
     __tablename__ = 'ad_impression_logs'
@@ -472,6 +474,7 @@ def _migrate():
             ('ad_copy',           "TEXT DEFAULT ''"),
             ('ad_image_url',      "TEXT DEFAULT ''"),
             ('created_at',        'TIMESTAMP DEFAULT NOW()'),
+            ('link_url',          "TEXT DEFAULT ''"),
         ]:
             if col not in existing_ad_cols:
                 try:
@@ -479,6 +482,14 @@ def _migrate():
                     conn.commit()
                 except Exception:
                     pass
+        # debate_ads — link_url para que "Ver más" tenga un destino real
+        existing_debate_ad_cols = {c['name'] for c in inspector.get_columns('debate_ads')} if inspector.has_table('debate_ads') else set()
+        if 'link_url' not in existing_debate_ad_cols:
+            try:
+                conn.execute(text("ALTER TABLE debate_ads ADD COLUMN link_url TEXT DEFAULT ''"))
+                conn.commit()
+            except Exception:
+                pass
         # selfie_logs — face_bytes como referencia para re-autenticación facial
         existing_selfie_cols = {c['name'] for c in inspector.get_columns('selfie_logs')} if inspector.has_table('selfie_logs') else set()
         if 'face_bytes' not in existing_selfie_cols:
@@ -863,6 +874,7 @@ class CampaignCreate(BaseModel):
     logo_url:            str = ''
     ad_copy:             str = ''
     ad_image_url:        str = ''
+    link_url:            str = ''
 
 class AdViewInput(BaseModel):
     campaign_id: int
@@ -956,9 +968,9 @@ def seed_demo_data():
             db.add(op)
 
         ads = [
-            DebateAd(debate_id=1, brand='BancoEstado', copy='Cuenta RUT sin costo para todos los chilenos', cta='Abrir cuenta', logo_color='#10b981'),
-            DebateAd(debate_id=1, brand='Toyota Chile', copy='Corolla Cross Hybrid — Eficiencia para el Chile real', cta='Ver modelos', logo_color='#ef4444'),
-            DebateAd(debate_id=2, brand='Samsung', copy='Galaxy S26 Ultra — La camara que lo cambia todo', cta='Descubrir', logo_color='#3b82f6'),
+            DebateAd(debate_id=1, brand='BancoEstado', copy='Cuenta RUT sin costo para todos los chilenos', cta='Abrir cuenta', logo_color='#10b981', link_url='https://www.bancoestado.cl/'),
+            DebateAd(debate_id=1, brand='Toyota Chile', copy='Corolla Cross Hybrid — Eficiencia para el Chile real', cta='Ver modelos', logo_color='#ef4444', link_url='https://www.toyota.cl/'),
+            DebateAd(debate_id=2, brand='Samsung', copy='Galaxy S26 Ultra — La camara que lo cambia todo', cta='Descubrir', logo_color='#3b82f6', link_url='https://www.samsung.com/cl/'),
         ]
         for ad in ads:
             db.add(ad)
@@ -2100,6 +2112,39 @@ def _match_campaigns(user, debate, db) -> list:
     return matched
 
 
+def _cost_per_impression_clp(campaign, db) -> int:
+    """What one served impression actually costs against the campaign's budget.
+
+    CPM means "cost per *mille*" — cost per 1000 impressions — so one
+    impression costs cpm_usd/1000 (converted to CLP). This derives that
+    rate from the same live CommuneMarketData table /marketer/estimate
+    reads (real backend numbers, never invented), averaged over whichever
+    communes the campaign actually targets — falling back to the full
+    table average for broad/untargeted campaigns.
+
+    Replaces the previous formula
+    `budget_clp / max(1, len(opinions) // 5)`, which divided the WHOLE
+    budget by a tiny denominator (e.g. 3 for a 15-opinion debate) and
+    could exhaust a 250-million-CLP flight in 3 impressions — a
+    catastrophic overspend that would have wrecked the advertising
+    revenue story for investors.
+    """
+    q = db.query(CommuneMarketData)
+    if campaign.target_country:
+        q = q.filter(CommuneMarketData.country == campaign.target_country)
+    if campaign.target_communes:
+        names = [c.strip() for c in campaign.target_communes.split(',') if c.strip()]
+        if names:
+            q = q.filter(CommuneMarketData.commune.in_(names))
+    rows = q.all()
+    if not rows:
+        rows = db.query(CommuneMarketData).all()
+
+    cpm_usd_avg = (sum(r.cpm_usd for r in rows) / len(rows)) if rows else 6.0
+    cost = (cpm_usd_avg * USD_TO_CLP) / 1000.0
+    return max(1, int(round(cost)))
+
+
 # Cada cuántas opiniones aparece un anuncio en la sala de debate.
 # Valor de prueba temporal pedido por el fundador (2026-06-07) — el valor
 # de producción documentado en CLAUDE.md es 5; se bajó a 2 para poder
@@ -2107,6 +2152,13 @@ def _match_campaigns(user, debate, db) -> list:
 # las 84 horas previas al almuerzo con el inversionista. Revertir a 5
 # cuando termine la prueba.
 AD_EVERY_N_OPINIONS = 2
+
+# Tipo de cambio usado para traducir CPM (USD por mil impresiones, tabla de
+# comunas) a CLP. Vive aquí — no dentro de _optimize_campaign — porque tanto
+# la simulación de presupuesto (/marketer/estimate) como el cobro real por
+# impresión servida (/debates/{id}/opinions) deben usar el mismo número o
+# "presupuesto estimado" y "gasto real" divergen.
+USD_TO_CLP = 950
 
 
 @app.get('/debates/{debate_id}/opinions')
@@ -2142,6 +2194,7 @@ def get_opinions(debate_id: int,
                     'logo_color':  '#2563eb',
                     'logo_url':    _safe_url(campaign.logo_url),
                     'image_url':   _safe_url(campaign.ad_image_url),
+                    'link_url':    campaign.link_url or '',
                     'campaign_id': campaign.id,
                 }})
                 # Registrar impresión — solo datos anónimos, nunca identidad
@@ -2153,13 +2206,17 @@ def get_opinions(debate_id: int,
                     county      = user.county or '',   # comuna, no dirección
                     country     = user.country or '',
                 ))
-                campaign.spent_clp = (campaign.spent_clp or 0) + int(campaign.budget_clp / max(1, len(opinions) // 5))
+                campaign.spent_clp = min(
+                    campaign.budget_clp,
+                    (campaign.spent_clp or 0) + _cost_per_impression_clp(campaign, db),
+                )
             elif static_ads:
                 ad = static_ads[ad_idx % len(static_ads)]
                 ad.impressions += 1
                 result.append({'type': 'ad', 'ad': {
                     'brand': ad.brand, 'copy': ad.copy,
                     'cta': ad.cta, 'logo_color': ad.logo_color,
+                    'link_url': ad.link_url or '',
                 }})
             ad_idx += 1
 
@@ -3093,7 +3150,6 @@ def _optimize_campaign(budget_clp: float, target_country: str, target_communes: 
     priorizando comunas con mayor densidad del target y menor CPM relativo.
     """
     from market_data_agent import get_fallback_table
-    USD_TO_CLP = 950
 
     # 1. Obtener comunas disponibles
     rows = db.query(CommuneMarketData)
@@ -3275,6 +3331,7 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         logo_url            = data.logo_url or '',
         ad_copy             = data.ad_copy or '',
         ad_image_url        = data.ad_image_url or '',
+        link_url            = data.link_url or '',
     )
     db.add(campaign)
     db.commit()
@@ -3486,9 +3543,55 @@ def admin_patch_debate(debate_id: int, secret: str, target_age_min: int = None, 
         if status not in ('live', 'draft', 'closed'):
             raise HTTPException(400, "status must be one of: live, draft, closed")
         debate.status = status
+        # get_debate_status() (the function every public endpoint actually
+        # calls) is purely date-driven and never reads debate.status — so
+        # writing the column alone is a silent no-op for anything a voter
+        # sees. Move the dates that drive it so "force closed/live" really
+        # changes what the public status computes to.
+        now = datetime.utcnow()
+        if status == 'closed':
+            debate.closes_at = now
+            debate.verify_closes_at = now
+        elif status == 'live':
+            debate.closes_at = now + timedelta(days=30)
+            debate.verify_closes_at = debate.closes_at + timedelta(days=7)
     db.commit()
     db.refresh(debate)
     return {'ok': True, 'debate': format_debate(debate)}
+
+
+@app.delete('/admin/debates/{debate_id}')
+def admin_delete_debate(debate_id: int, secret: str, db: Session = Depends(get_db)):
+    """Permanently purges a debate and every row that references it.
+
+    There are no SQL ForeignKey constraints on debate_id columns, so a
+    plain DELETE on the debate row would leave orphaned opinions, votes,
+    anti-fraud logs, ads and impression logs behind forever — exactly
+    what produced the 7 "ghost" [E2E-PROOF] debates that kept reappearing
+    in the live feed (admin_patch_debate's old status='closed' no-op
+    couldn't remove them, since /debates never filters by status either —
+    the only real fix is deleting the rows).
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+
+    purged = {}
+    for model in (
+        VoteIdentityLock, Opinion, DebateVote, HasVotedLog, SimVoteLog,
+        NationalIdVoteLog, ImeiVoteLog, DebateAd, DebateRewardCode,
+        AdImpressionLog, ClosedListEntry, ConsultationModerationLog,
+    ):
+        n = db.query(model).filter(model.debate_id == debate_id).delete(synchronize_session=False)
+        if n:
+            purged[model.__tablename__] = n
+
+    title = debate.title
+    db.delete(debate)
+    db.commit()
+    return {'ok': True, 'deleted_debate_id': debate_id, 'title': title, 'purged_rows': purged}
 
 
 # ══════════════════════════════════════════════════════════════

@@ -5119,7 +5119,12 @@ function PreferendumV8() {
         /*#__PURE__*/React.createElement("div", {style: {fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 2}}, debateAdSlots[i].brand),
         /*#__PURE__*/React.createElement("div", {style: {fontSize: 12, color: "#475569", lineHeight: 1.5}}, debateAdSlots[i].copy)
       ),
-      /*#__PURE__*/React.createElement("div", {style: {background: debateAdSlots[i].logo_color || "#2563eb", color: "#fff", borderRadius: 8, padding: "7px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0}}, debateAdSlots[i].cta || "Ver m\xE1s")
+      /*#__PURE__*/React.createElement("div", {style: {background: debateAdSlots[i].logo_color || "#2563eb", color: "#fff", borderRadius: 8, padding: "7px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0},
+        onClick: () => {
+          const dest = debateAdSlots[i].link_url || ("https://www.google.com/search?q=" + encodeURIComponent(debateAdSlots[i].brand || ""));
+          window.open(dest, "_blank", "noopener,noreferrer");
+        }
+      }, debateAdSlots[i].cta || "Ver m\xE1s")
     )), /*#__PURE__*/React.createElement("div", {
       style: {
         background: "#fff",
