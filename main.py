@@ -3405,7 +3405,7 @@ def test_email_send(to: str, secret: str):
     return {'to': to, 'result': result}
 
 @app.patch('/admin/debates/{debate_id}')
-def admin_patch_debate(debate_id: int, secret: str, target_age_min: int = None, target_age_max: int = None, scope_country: str = None, db: Session = Depends(get_db)):
+def admin_patch_debate(debate_id: int, secret: str, target_age_min: int = None, target_age_max: int = None, scope_country: str = None, status: str = None, db: Session = Depends(get_db)):
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
@@ -3414,6 +3414,10 @@ def admin_patch_debate(debate_id: int, secret: str, target_age_min: int = None, 
     if target_age_min is not None: debate.target_age_min = target_age_min
     if target_age_max is not None: debate.target_age_max = target_age_max
     if scope_country is not None: debate.scope_country = scope_country
+    if status is not None:
+        if status not in ('live', 'draft', 'closed'):
+            raise HTTPException(400, "status must be one of: live, draft, closed")
+        debate.status = status
     db.commit()
     db.refresh(debate)
     return {'ok': True, 'debate': format_debate(debate)}
