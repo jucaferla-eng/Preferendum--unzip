@@ -417,3 +417,106 @@ trigger manually from the Actions tab — `gh` CLI isn't installed locally
 and the dispatch API needs auth we don't have). Then back to Tuesday's
 plan: full regression pass + TestFlight rebuild. Also remember to revert
 `AD_EVERY_N_OPINIONS` to `5` before the investor lunch.
+
+## 2026-06-07 (continued IV) — fixed all three founder-reported bugs (ghost debates, dead "Ver más" links, corrupted cascading questions)
+
+The founder reported, in his own words, three concrete problems found while
+using the live app: a debate repeated 7 times in the feed, "Ver más" buttons
+on ads that did nothing when tapped, and cascading-question consultations
+where voting through a level didn't surface the right follow-up question.
+All three are now fixed, deployed, and verified live — no fabrication, every
+claim below backed by a real API call against production.
+
+**1. Seven duplicate "[E2E-PROOF] ¿Prefieres más áreas verdes...]" debates in
+the feed (ids 13-21).** Root cause: `get_debate_status()` only looks at
+`closes_at`/`verify_closes_at` dates — it ignores the `debate.status` column
+entirely — and `admin_patch_debate` was setting `status` without moving
+those dates, making it a silent no-op. Old CI runs that crashed mid-test
+left their disposable debates stranded "live" forever, and `/debates` /
+`/debates/feed` have no status filter, so every stranded test debate stayed
+visible to real users. **Fix (`4c01fa23`):** made `admin_patch_debate`
+actually move `closes_at`/`verify_closes_at` when status changes, and added
+a real cascade-purge `DELETE /admin/debates/{id}` endpoint (removes
+VoteIdentityLock, Opinion, DebateVote, HasVotedLog, SimVoteLog,
+NationalIdVoteLog, ImeiVoteLog, DebateAd, DebateRewardCode, AdImpressionLog,
+ClosedListEntry, ConsultationModerationLog, then the Debate row itself —
+there are no FK constraints, so a partial purge would leave orphans).
+Deleted ids 13-21. **Verified live just now:** `GET /debates` returns
+exactly 12 real debates (ids 1-12), zero "[E2E-PROOF]" ghosts. Also rewired
+the integrity-test teardown (`c4513a83`) to call this new DELETE instead of
+the broken PATCH-status — confirmed debates 23/24 (mid-flight when last
+checked) self-cleaned: `GET /debates/23` and `/24` now both return
+`{"detail":"Consultation not found"}`.
+
+**2. "Ver más" on ads did nothing.** There was no click handler AND no
+`link_url` field anywhere in the data model — the button was decorative.
+**Fix (`4c01fa23` + `2cfb94c5`):** added a `link_url` column to `DebateAd`
+and `AdCampaign`, threaded it through campaign creation and ad serialization,
+wired an `onClick` on the "Ver más" button that opens `link_url` in a new
+tab (falling back to a Google search for the brand name if a campaign never
+set one), seeded the three demo ads with their real company URLs
+(BancoEstado, Toyota Chile, Samsung), and backfilled the same URLs onto the
+pre-existing demo-ad rows that were created before the column existed.
+**Verified live:** `curl .../debates/1/opinions` now returns
+`link_url: "https://www.bancoestado.cl/"` etc. on every ad slot.
+
+(Side discovery while in this code: the campaign-spend formula was
+`budget / (opinions_so_far // 5)`, which could burn an entire 250M-CLP
+budget in 3 impressions — campaigns 1-7 were already showing 100-200%
+spent, which would have been a brutal thing for an investor to notice.
+Replaced it with a real CPM-derived cost-per-impression
+[`_cost_per_impression_clp`, commit `4c01fa23`], added
+`POST /admin/campaigns/{id}/recompute-spend` [`7399324d`] to repair the
+historical corruption, and ran it on all 7 affected campaigns — e.g.
+campaign #7 went from `spent_clp: 249,999,999` (100%) to `spent_clp: 21`
+(0.0%) for its real 3 logged impressions at 7 CLP each.)
+
+**3. Cascading questions "no se ha resuelto" — voting through a level didn't
+surface the matching follow-up.** This took the most digging because the
+underlying vote *mechanism* tested perfectly: live-browser-tested debate #6
+through both a 2-level and a full 3-level path, both produced correct
+`vote_chain`s and real verification codes (`RAAD-X929-JE3L`,
+`D0DK-KX26-W73G`). The bug wasn't in voting — it was in *authoring*.
+Inspecting the founder's own "zapatillas" consultation (debate #10) showed
+its `follow_up_questions` JSON semantically scrambled: e.g. its first
+top-level option, "Mimaus/comodidad todo el día" (all-day comfort), was
+wired to a follow-up titled "Que te gusta más de las zapatillas de
+verano" (summer shoe colors) — nonsense. Traced to
+`assets/app.html` ~line 8103-8138 in the "Nueva consulta" creation form:
+
+```js
+const options = ncOpts.filter(Boolean);                       // COMPACTED
+const followUpBranches = ncBranching ? ncOpts.map((opt, i) => {  // UNCOMPACTED — bug
+```
+
+`options` drops blank slots an organizer leaves while typing (a completely
+normal authoring pattern — type four ideas, delete one, end up with a gap),
+but `followUpBranches`/`optImages` were built by mapping over the raw
+*uncompacted* arrays — so the moment there's a gap, `followUpBranches[k]`
+no longer corresponds to `options[k]`. **Fix (`680a8e0a`):** build
+`ncOptIdx`, the ordered list of original indices where `ncOpts[i]` is
+truthy, and map both `followUpBranches` and `optImages` over *that* —
+guaranteeing 1:1 correspondence with `options`. **Confirmed live**:
+re-fetched debate #10's `follow_up_questions` after the deploy and the
+mismatch is still there in its *existing* data (expected — the fix stops
+new corruption, it doesn't retroactively repair old rows; debate #10 will
+need to be re-authored or manually patched before the lunch if it's part
+of the demo path).
+
+**Deploy verification (same pattern as every other fix this session):**
+pushed `680a8e0a` to `main`, polled `/health` until `git_commit` reported
+`680a8e0a` (2 polls, ~30s), then re-queried the live API for every claim
+above rather than trusting the diff.
+
+**Still open / carried forward:**
+- Debate #10's *existing* `follow_up_questions` data is corrupted and needs
+  manual repair or re-authoring through the now-fixed creation form before
+  it's shown to anyone — the code fix only protects future consultations.
+  Worth spot-checking debates #5 and #8 too (anything authored with gapped
+  options before today).
+- The origin of the 6 duplicate "Altrix · Preferendum" marketer campaigns
+  (ids 2-7) was never tracked down — their corrupted `spent_clp` was
+  repaired, but why there are six near-identical campaigns is still unknown.
+- `AD_EVERY_N_OPINIONS = 2` is still the live testing value — **must be
+  reverted to `5`** before the investor lunch (documented in `CLAUDE.md`,
+  flagged inline in `main.py`).
