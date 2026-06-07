@@ -3709,6 +3709,18 @@ def admin_activate_campaign(campaign_id: int, secret: str, days: int = 30, db: S
     db.commit()
     return {'ok': True, 'campaign_id': campaign_id, 'end_date': c.end_date.isoformat()}
 
+@app.patch('/admin/campaigns/{campaign_id}/deactivate')
+def admin_deactivate_campaign(campaign_id: int, secret: str, db: Session = Depends(get_db)):
+    """Desactiva una campaña (p.ej. campañas de prueba/QA) sin borrar su historial."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(404, 'Campaign not found')
+    c.is_active = False
+    db.commit()
+    return {'ok': True, 'campaign_id': campaign_id, 'is_active': c.is_active}
+
 
 @app.get('/admin/debug-ads')
 def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session = Depends(get_db)):
