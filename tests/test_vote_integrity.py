@@ -76,6 +76,11 @@ def _get(path, token=None, params=None):
     return requests.get(f"{BASE}{path}", headers=headers, params=params, timeout=TIMEOUT)
 
 
+def _delete(path, params=None, token=None):
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return requests.delete(f"{BASE}{path}", params=params, headers=headers, timeout=TIMEOUT)
+
+
 def _confirm_email(email, token):
     """Real registration sends a real OTP by email. Email delivery is a
     known-fragile dependency unrelated to vote integrity (see CLAUDE.md
@@ -180,8 +185,16 @@ def live_consultation():
 
     yield debate_id
 
-    r = _patch(f"/admin/debates/{debate_id}", params={"secret": ADMIN_SECRET, "status": "closed"})
-    assert r.status_code == 200, f"cleanup force-close failed: {r.status_code} {r.text}"
+    # Force-closing via PATCH status used to be a silent no-op — and even
+    # fixed, a "closed" debate still lingers forever in /debates (which
+    # has no status filter at all). That's exactly what produced the 7
+    # "[E2E-PROOF] ... repetido 7 veces" ghost debates the founder hit
+    # while live-testing. The only real cleanup is deleting the row (and
+    # everything that references it) outright via the cascade-purge
+    # admin endpoint added specifically to fix that bug.
+    r = _delete(f"/admin/debates/{debate_id}", params={"secret": ADMIN_SECRET})
+    assert r.status_code == 200, f"cleanup delete failed: {r.status_code} {r.text}"
+    assert r.json()["ok"] is True
 
 
 def test_same_account_cannot_vote_twice(live_consultation):
