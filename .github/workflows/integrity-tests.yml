@@ -36,6 +36,20 @@ jobs:
   integrity:
     name: Run vote integrity suite against production
     runs-on: ubuntu-latest
+    # Queue runs instead of letting them overlap. Multiple pushes to main
+    # in quick succession (e.g. several fixes shipped back-to-back) each
+    # trigger their own run AND their own Render redeploy — and a redeploy
+    # restarts the live server, resetting any in-flight connections. Two
+    # suites hitting the same live server at once (one mid-redeploy) is
+    # how a run can fail in ~3 minutes with raw ConnectionResetErrors
+    # while its sibling runs pass cleanly in the normal ~20 — a false
+    # alarm that looks exactly like a real regression in the failure
+    # email. `cancel-in-progress: false` queues the newer run behind the
+    # older one rather than canceling either — every push still gets a
+    # real, complete, uncontended result; it just may run a bit later.
+    concurrency:
+      group: integrity-tests
+      cancel-in-progress: false
     # Two slow, disclosed dependencies stack here: Render deploys lag
     # ~10-15 min behind the push that triggers them (see the "Wait for
     # this commit" step), and registration is slow because email delivery
