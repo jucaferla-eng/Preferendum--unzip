@@ -3889,6 +3889,31 @@ def run_market_agent_uk_landregistry(secret: str, db: Session = Depends(get_db))
                          for c in communes]}
 
 
+@app.post('/admin/purge-stale-fallback-communes')
+def purge_stale_fallback_communes(secret: str, country: str, db: Session = Depends(get_db)):
+    """
+    Borra filas de CommuneMarketData que quedaron marcadas portal='fallback'
+    para un país — es decir, los nombres de comuna inventados de la tabla de
+    respaldo que no coinciden con los nombres reales de una fuente oficial
+    recién conectada (p.ej. "Kensington"/"Chelsea" del fallback vs. el
+    borough real "Kensington and Chelsea" del HM Land Registry — el upsert
+    los deja conviviendo como huérfanos en vez de reemplazarlos, porque no
+    coinciden por nombre). Solo borra filas explícitamente marcadas como
+    'fallback' — nunca toca datos reales de un scrape o una fuente oficial.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    rows = db.query(CommuneMarketData).filter(
+        CommuneMarketData.country == country.upper(),
+        CommuneMarketData.portal == 'fallback',
+    ).all()
+    deleted = [{'commune': r.commune, 'income_index': r.income_index} for r in rows]
+    for r in rows:
+        db.delete(r)
+    db.commit()
+    return {'ok': True, 'country': country.upper(), 'deleted_count': len(deleted), 'deleted': deleted}
+
+
 @app.get('/communes')
 def get_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
     """Tabla de comunas con índice de ingreso y CPM. Usada por el motor de ads."""
