@@ -2163,12 +2163,11 @@ def _cost_per_impression_clp(campaign, db) -> int:
 
 
 # Cada cuántas opiniones aparece un anuncio en la sala de debate.
-# Valor de prueba temporal pedido por el fundador (2026-06-07) — el valor
-# de producción documentado en CLAUDE.md es 5; se bajó a 2 para poder
-# probar el ciclo de impresiones/métricas de campañas más rápido durante
-# las 84 horas previas al almuerzo con el inversionista. Revertir a 5
-# cuando termine la prueba.
-AD_EVERY_N_OPINIONS = 2
+# Valor de producción documentado en CLAUDE.md y en la "Architecture
+# Decisions" — 1 anuncio cada 5 opiniones. (Se usó temporalmente 2 el
+# 2026-06-07 para probar el ciclo de impresiones/métricas de campañas
+# más rápido; revertido a 5 antes del almuerzo con el inversionista.)
+AD_EVERY_N_OPINIONS = 5
 
 # Tipo de cambio usado para traducir CPM (USD por mil impresiones, tabla de
 # comunas) a CLP. Vive aquí — no dentro de _optimize_campaign — porque tanto
