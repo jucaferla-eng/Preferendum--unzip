@@ -307,6 +307,7 @@ class AdCampaign(Base):
     logo_url            = Column(String, default='')   # data URI o URL pública del logo
     ad_copy             = Column(String, default='')   # texto del anuncio
     ad_image_url        = Column(String, default='')   # imagen principal del anuncio
+    target_debate_ids   = Column(String, default='')   # '4,6,9' — override directo, bypass matrix
     link_url            = Column(String, default='')   # destino al hacer clic en "Ver más"
 
 class AdImpressionLog(Base):
@@ -542,6 +543,7 @@ def _migrate():
             ('ad_image_url',      "TEXT DEFAULT ''"),
             ('created_at',        'TIMESTAMP DEFAULT NOW()'),
             ('link_url',          "TEXT DEFAULT ''"),
+            ('target_debate_ids', "TEXT DEFAULT ''"),
         ]:
             if col not in existing_ad_cols:
                 try:
@@ -2157,13 +2159,17 @@ def _tier_matches(user_tier: str, target_tiers_str: str) -> bool:
 
 def _campaign_matches_debate(c, debate) -> bool:
     """
-    Cruza la matriz de targeting de la campaña (país, comunas, género, edad)
-    contra la matriz de alcance/targeting de la consulta. Evita que campañas
-    hiper-locales aparezcan en consultas fuera de su zona, y que consultas con
-    audiencia acotada (género/edad/comuna) muestren campañas fuera de ese rango.
+    Cruza la matriz de targeting de la campaña contra la consulta.
+    Si la campaña tiene target_debate_ids explícitos, esos debates
+    siempre hacen match (bypass de la matriz — usado para demo/pruebas).
     """
     if not debate:
         return True
+    # Conexión directa campaña ↔ debate (override de toda la matriz)
+    if c.target_debate_ids:
+        pinned = [int(x.strip()) for x in c.target_debate_ids.split(',') if x.strip().isdigit()]
+        if pinned:
+            return debate.id in pinned
     # País — 'ALL'/vacío en cualquiera de los dos lados = sin restricción
     c_country = _country_code(c.target_country) if c.target_country else ''
     d_country = _country_code(debate.scope_country) if debate.scope_country else ''
@@ -4707,7 +4713,8 @@ def admin_recompute_campaign_spend(campaign_id: int, secret: str, db: Session = 
 
 @app.patch('/admin/campaigns/{campaign_id}/creative')
 def admin_update_campaign_creative(campaign_id: int, secret: str, db: Session = Depends(get_db),
-                                   logo_url: str = '', ad_image_url: str = '', ad_copy: str = ''):
+                                   logo_url: str = '', ad_image_url: str = '', ad_copy: str = '',
+                                   target_debate_ids: str = ''):
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
     c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
@@ -4719,8 +4726,12 @@ def admin_update_campaign_creative(campaign_id: int, secret: str, db: Session = 
         c.ad_image_url = ad_image_url
     if ad_copy:
         c.ad_copy = ad_copy
+    if target_debate_ids:
+        c.target_debate_ids = target_debate_ids
     db.commit()
-    return {'ok': True, 'campaign_id': campaign_id, 'logo_url': c.logo_url, 'ad_image_url': c.ad_image_url, 'ad_copy': c.ad_copy}
+    return {'ok': True, 'campaign_id': campaign_id, 'logo_url': c.logo_url,
+            'ad_image_url': c.ad_image_url, 'ad_copy': c.ad_copy,
+            'target_debate_ids': c.target_debate_ids}
 
 
 @app.get('/admin/debug-ads')
