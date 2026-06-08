@@ -3017,6 +3017,13 @@ def supervisor_approve(token: str, action: str, db: Session = Depends(get_db),
         raise HTTPException(403, 'Solo supervisores verificados pueden autorizar')
     if sup_profile.status != 'approved':
         raise HTTPException(403, 'Tu cuenta debe estar aprobada para autorizar empleados')
+    # Hard requirement, not just an admin-review courtesy: the boss must have
+    # put their own face on record before vouching for anyone else's. Someone
+    # who'd fabricate an employee identity could otherwise approve it from an
+    # account that was admin-approved on paperwork alone — selfie included
+    # closes that path, exactly per the "no crook films their own face" logic.
+    if not user.selfie_verified:
+        raise HTTPException(403, 'Debes verificar tu propia identidad con selfie antes de poder autorizar a alguien')
 
     req.status             = action  # approved / rejected
     req.supervisor_user_id = user.id
@@ -3424,7 +3431,13 @@ def marketer_supervisor_approve(token: str, action: str, db: Session = Depends(g
     if not sup_profile or not sup_profile.is_supervisor:
         raise HTTPException(403, 'Solo jefes con cuenta de marketer verificada pueden autorizar')
     if sup_profile.status != 'approved':
-        raise HTTPException(403, 'Tu cuenta debe estar aprobada (incluida selfie) para autorizar empleados')
+        raise HTTPException(403, 'Tu cuenta debe estar aprobada para autorizar campañas')
+    # Hard requirement, not just an admin-review courtesy: the boss must have
+    # put their own face on record before vouching for a campaign that will
+    # display their company's name to real voters. Closes the path where a
+    # paperwork-only approval lets someone authorize without ever showing a face.
+    if not user.selfie_verified:
+        raise HTTPException(403, 'Debes verificar tu propia identidad con selfie antes de poder autorizar campañas')
 
     req.status             = action  # approved / rejected
     req.supervisor_user_id = user.id
@@ -4396,6 +4409,27 @@ def admin_set_organizer_status(user_id: int, secret: str, status: str, reason: s
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
     profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user_id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil no encontrado')
+    profile.status           = status
+    profile.rejection_reason = reason
+    if status == 'approved':
+        profile.approved_at = datetime.utcnow()
+    db.commit()
+    return {'ok': True, 'user_id': user_id, 'status': status}
+
+
+@app.post('/admin/marketer/{user_id}/status')
+def admin_set_marketer_status(user_id: int, secret: str, status: str, reason: str = '', db: Session = Depends(get_db)):
+    """
+    El agente (o un admin) aprueba/rechaza/suspende un marketer.
+    Sin este endpoint ningún perfil de empresa podía pasar nunca de 'pending' a
+    'approved' — ni el de un empleado ni el de su jefe — dejando la cadena entera
+    (incluida la puerta de campañas) sin salida posible para cuentas de empresa reales.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user_id).first()
     if not profile:
         raise HTTPException(404, 'Perfil no encontrado')
     profile.status           = status
