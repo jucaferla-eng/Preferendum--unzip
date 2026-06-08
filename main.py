@@ -4705,6 +4705,24 @@ def admin_recompute_campaign_spend(campaign_id: int, secret: str, db: Session = 
     }
 
 
+@app.patch('/admin/campaigns/{campaign_id}/creative')
+def admin_update_campaign_creative(campaign_id: int, secret: str, db: Session = Depends(get_db),
+                                   logo_url: str = '', ad_image_url: str = '', ad_copy: str = ''):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(404, 'Campaign not found')
+    if logo_url:
+        c.logo_url = logo_url
+    if ad_image_url:
+        c.ad_image_url = ad_image_url
+    if ad_copy:
+        c.ad_copy = ad_copy
+    db.commit()
+    return {'ok': True, 'campaign_id': campaign_id, 'logo_url': c.logo_url, 'ad_image_url': c.ad_image_url, 'ad_copy': c.ad_copy}
+
+
 @app.get('/admin/debug-ads')
 def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session = Depends(get_db)):
     """Diagnóstico: por qué un usuario no ve ads en un debate. Devuelve user, opiniones, campañas activas y por qué cada una matchea o no."""
