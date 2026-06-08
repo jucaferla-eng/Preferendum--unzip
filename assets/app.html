@@ -10066,6 +10066,13 @@ function PreferendumV8() {
       desc: "Defines el porcentaje y Preferendum genera códigos únicos automáticamente.",
       color: T.gold,
       rec: false
+    }, {
+      k: "none",
+      icon: "🚫",
+      name: "No ofrecer incentivo por la plataforma",
+      desc: "Tu organización entregará el beneficio de otra forma (en tienda, por email, redes sociales, etc.). Preferendum no emitirá ni rastreará códigos.",
+      color: T.muted,
+      rec: false
     }];
     return /*#__PURE__*/React.createElement("div", {
       style: phone
@@ -10303,7 +10310,17 @@ function PreferendumV8() {
         fontSize: 11,
         color: T.teal
       }
-    }, "BRAND-[A\xD1O]-[ALEATORIO]"))), rwMethod && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(Lbl, null, "Enlace de redenci\xF3n"), /*#__PURE__*/React.createElement("div", {
+    }, "BRAND-[A\xD1O]-[ALEATORIO]"))), rwMethod === "none" && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(Lbl, null, "Sin incentivo por la plataforma"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontSize: 12,
+        color: T.fog,
+        lineHeight: 1.6
+      }
+    }, "Preferendum no emitir\xE1 c\xF3digos ni rastrear\xE1 redenciones para esta consulta. El votante ver\xE1 el resultado de su voto, pero ", /*#__PURE__*/React.createElement("strong", {
+      style: {
+        color: T.white
+      }
+    }, "el beneficio (si lo hay) lo entregar\xE1 tu organizaci\xF3n por su propio canal"), " — en tienda, por email, redes sociales, etc.")), rwMethod && rwMethod !== "none" && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(Lbl, null, "Enlace de redenci\xF3n"), /*#__PURE__*/React.createElement("div", {
       style: {
         fontSize: 12,
         color: T.fog,
@@ -10414,7 +10431,14 @@ function PreferendumV8() {
         fontWeight: 900,
         cursor: "pointer"
       }
-    }, "\uD83D\uDECD Usar mi descuento ahora \u2192")))), rwMethod && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Btn, {
+    }, "\uD83D\uDECD Usar mi descuento ahora \u2192")))), rwMethod === "none" ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Btn, {
+      label: "Confirmar \u2014 sin incentivo por la plataforma \u2192",
+      full: true,
+      onPress: () => {
+        alert('Listo. Esta consulta no ofrecer\u00E1 incentivo a trav\u00E9s de Preferendum \u2014 el beneficio (si lo hay) lo entregar\u00E1 tu organizaci\u00F3n por su propio canal.');
+        go("marketer");
+      }
+    })) : rwMethod && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Btn, {
       label: "Guardar configuraci\xF3n de descuento \u2192",
       full: true,
       disabled: rwMethod === "csv" && !rwCsvDone,
