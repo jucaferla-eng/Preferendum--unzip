@@ -86,9 +86,51 @@ def _confirm_email(email, token):
     known-fragile dependency unrelated to vote integrity (see CLAUDE.md
     'EMAIL VERIFICATION FIX'), so we fetch the *real* pending code through
     the admin-gated /admin/test-otp endpoint — same DB row a human would
-    read out of their inbox, just without requiring a live mailbox in CI."""
+    read out of their inbox, just without requiring a live mailbox in CI.
+
+    register() mints the OTP with a 10-minute expiry *before* it calls the
+    known-slow, synchronous send_email_otp() — so on the rare run where
+    that send hangs long enough to blow past our already-generous 150s
+    client timeout (and, worse, can keep a single-worker server tied up
+    queuing every other request behind it), more than 10 minutes can
+    elapse between the OTP being minted and us getting a turn to read it,
+    and /admin/test-otp legitimately reports 'No active OTP' — the code
+    really did expire unread, exactly as it would for a real user whose
+    inbox was just as slow. The honest recovery is the same one a real
+    user has: hit 'resend code' (POST /verify/email/send), then read
+    *that* fresh one. No integrity assertion is skipped — we still
+    confirm with a real, server-issued code.
+
+    One more layer of the exact same disease lurks here too:
+    send_email_code() (the handler behind /verify/email/send) does
+    db.commit() — invalidating the stale OTP and persisting a brand-new
+    one with its own fresh 10-minute clock — BEFORE making its own
+    synchronous send_email_otp() call. So even when *that* call also
+    hangs long enough to raise a bare ReadTimeout (no status code —
+    proven live, not theorized), the fresh OTP row is already real and
+    committed; only the ack describing it was lost in transit, the same
+    "lost response, not lost action" shape as register()'s. We tolerate
+    that one specific exception and go straight to reading the code
+    that's already there, instead of asserting on a response that may
+    simply never arrive."""
     r = _get("/admin/test-otp", params={"email": email, "secret": ADMIN_SECRET})
-    assert r.status_code == 200, f"could not fetch test OTP for {email}: {r.status_code} {r.text}"
+    if r.status_code == 404:
+        resend_problem = None
+        try:
+            r_resend = _post("/verify/email/send", token=token)
+            if r_resend.status_code != 200:
+                resend_problem = f"resend returned {r_resend.status_code} {r_resend.text[:200]}"
+        except requests.exceptions.RequestException as e:
+            resend_problem = f"resend raised {e!r} (no response ever arrived)"
+
+        r = _get("/admin/test-otp", params={"email": email, "secret": ADMIN_SECRET})
+        assert r.status_code == 200, (
+            f"original OTP for {email} expired unread (slow-email-pipeline "
+            f"symptom), and no fresh, readable OTP was left behind by the "
+            f"resend either"
+            + (f" — {resend_problem}" if resend_problem else "")
+            + f": {r.status_code} {r.text}"
+        )
     code = r.json()["code"]
     r2 = _post("/verify/email/confirm", json={"code": code, "channel": "email"}, token=token)
     assert r2.status_code == 200, f"email confirm failed for {email}: {r2.status_code} {r2.text}"
@@ -106,9 +148,12 @@ def _register_voter(*, phone, national_id, imei=None, device_model="E2E Test Dev
     send_welcome_certificate() — both of which can hang for a long time
     on the known-broken Gmail SMTP fallback before the response is ever
     sent back to the client. When that hang outlasts the gateway's
-    patience, the gateway answers with a 502 *of its own* — but the
-    account already exists and is fully committed server-side; only the
-    *response* describing it was lost in transit.
+    patience, the gateway answers with a 502/503/504 *of its own*; when it
+    outlasts even our own generous 150s client-side read timeout, the
+    connection just drops with no status code at all (a raw
+    requests.exceptions.ReadTimeout). Either way the account already
+    exists and is fully committed server-side — only the *response*
+    describing it was lost in transit.
     Blindly retrying POST /auth/register at that point would deterministically
     fail with 400 "Email already registered" (a real safeguard, correctly
     triggered) and misreport a lost-response as a registration failure.
@@ -119,19 +164,38 @@ def _register_voter(*, phone, national_id, imei=None, device_model="E2E Test Dev
     this only changes how we obtain a valid token to test *with*.
     """
     email = _rand("voter")
-    r = _post("/auth/register", json={
+    register_kwargs = dict(json={
         "email": email, "password": "Test1234!", "name": "Auditor E2E",
         "phone": phone, "country": "CL", "county": "Santiago",
         "gender": "F", "dob": "1990-01-01", "national_id": national_id,
     })
-    if r.status_code in (502, 503, 504):
+    lost_response_reason = None
+    r = None
+    try:
+        r = _post("/auth/register", **register_kwargs)
+        if r.status_code in (502, 503, 504):
+            lost_response_reason = f"register returned a gateway error ({r.status_code})"
+    except requests.exceptions.RequestException as e:
+        # Even more extreme version of the same documented symptom (CLAUDE.md
+        # "EMAIL VERIFICATION FIX"): main.py commits the new User row and
+        # returns its id INSTANTLY, then synchronously calls send_email_otp()
+        # and send_welcome_certificate() on the known-broken Gmail SMTP
+        # fallback — which has no connect timeout and can hang long enough
+        # to blow through not just the gateway's patience (502/503/504,
+        # handled below) but our own generous 150s client read timeout too,
+        # so the connection drops with no status code to inspect at all.
+        # The account is still real and committed server-side; only the
+        # response describing it never arrived. Same honest recovery applies.
+        lost_response_reason = f"register raised {e!r} (no response ever arrived)"
+
+    if lost_response_reason is not None:
         r_login = _post("/auth/login", json={"email": email, "password": "Test1234!"})
         assert r_login.status_code == 200, (
-            f"register returned a gateway error ({r.status_code}) — known "
-            f"symptom of the slow email pipeline outlasting the gateway "
-            f"timeout — AND logging into the account it should have just "
-            f"created also failed, so this is a genuine registration "
-            f"failure, not a lost response: {r_login.status_code} {r_login.text[:300]}"
+            f"{lost_response_reason} — known symptom of the slow email "
+            f"pipeline outlasting the gateway/client timeout — AND logging "
+            f"into the account it should have just created also failed, so "
+            f"this is a genuine registration failure, not a lost response: "
+            f"{r_login.status_code} {r_login.text[:300]}"
         )
         lbody = r_login.json()
         token, user_id = lbody["token"], lbody["user"]["id"]
