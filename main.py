@@ -4440,6 +4440,156 @@ def admin_set_marketer_status(user_id: int, secret: str, status: str, reason: st
     return {'ok': True, 'user_id': user_id, 'status': status}
 
 
+@app.get('/admin/pending-approvals')
+def admin_pending_approvals(secret: str, db: Session = Depends(get_db)):
+    """Lista compacta de organizadores y marketers tipo empresa en 'pending',
+    pensada para aprobación de un toque desde el celular — sin esto, una empresa
+    real registrada en vivo queda atascada esperando selfie + autorización del jefe,
+    un proceso que toma minutos/horas, no segundos."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    out = []
+    for o in db.query(OrganizerProfile).filter(OrganizerProfile.status == 'pending').all():
+        u = db.query(User).filter(User.id == o.user_id).first()
+        out.append({
+            'kind': 'organizer', 'user_id': o.user_id,
+            'name': u.name if u else '', 'email': u.email if u else '',
+            'company': o.company_name, 'cargo': o.cargo, 'org_type': o.org_type,
+            'business_category': '',
+            'rut_verified': o.rut_verified, 'domain_verified': o.domain_verified,
+            'web_verified': o.web_verified, 'selfie_verified': o.selfie_verified,
+            'created_at': o.created_at.isoformat(),
+        })
+    for m in db.query(MarketerProfile).filter(MarketerProfile.status == 'pending').all():
+        u = db.query(User).filter(User.id == m.user_id).first()
+        out.append({
+            'kind': 'marketer', 'user_id': m.user_id,
+            'name': u.name if u else '', 'email': u.email if u else '',
+            'company': m.company_name, 'cargo': m.cargo, 'org_type': m.org_type,
+            'business_category': m.business_category,
+            'rut_verified': m.rut_verified, 'domain_verified': m.domain_verified,
+            'web_verified': m.web_verified, 'selfie_verified': m.selfie_verified,
+            'created_at': m.created_at.isoformat(),
+        })
+    out.sort(key=lambda x: x['created_at'], reverse=True)
+    return {'pending': out}
+
+
+@app.get('/admin/approve', response_class=HTMLResponse)
+def admin_approve_page():
+    """Página móvil de aprobación de un toque — convierte 'pending' en 'approved'
+    en segundos, para que una empresa real registrada en vivo (p.ej. durante una
+    demo) pueda lanzar su campaña o publicar su consulta de inmediato, sin esperar
+    el ciclo normal de selfie + autorización del jefe."""
+    return HTMLResponse(content=ADMIN_APPROVE_PAGE_HTML)
+
+
+ADMIN_APPROVE_PAGE_HTML = """<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Preferendum — Aprobaciones</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+          background:#090D18; color:#F0F4FF; padding:16px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:#64748B; font-size:13px; margin-bottom:18px; }
+  .card { background:#10172A; border:1px solid #1E293B; border-radius:14px;
+           padding:16px; margin-bottom:14px; }
+  .name { font-size:17px; font-weight:700; }
+  .meta { font-size:13px; color:#94A3B8; margin-top:4px; line-height:1.6; }
+  .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px;
+            margin:2px 4px 0 0; }
+  .ok { background:rgba(16,185,129,0.18); color:#10B981; }
+  .no { background:rgba(244,63,94,0.18); color:#F43F5E; }
+  .kindtag { display:inline-block; font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+              color:#2563EB; background:rgba(37,99,235,0.15); padding:3px 9px; border-radius:6px;
+              margin-bottom:6px; }
+  .row { display:flex; gap:10px; margin-top:14px; }
+  button { flex:1; border:none; border-radius:10px; padding:14px; font-size:16px;
+            font-weight:700; cursor:pointer; -webkit-tap-highlight-color: transparent; }
+  .approve { background:#10B981; color:#06291E; }
+  .reject { background:#1E293B; color:#F43F5E; }
+  .approve:active, .reject:active { transform: scale(0.97); }
+  .empty { color:#64748B; text-align:center; padding:40px 0; }
+  .done { color:#10B981; font-weight:700; }
+  .refresh { background:#2563EB; color:#fff; border:none; border-radius:10px;
+              padding:12px 18px; font-size:14px; font-weight:700; margin-bottom:16px; width:100%; }
+</style>
+</head>
+<body>
+  <h1>Aprobaciones pendientes</h1>
+  <div class="sub">Empresas esperando luz verde para anunciar / organizar — un toque para aprobar.</div>
+  <button class="refresh" onclick="load()">Actualizar</button>
+  <div id="list"><div class="empty">Cargando...</div></div>
+
+<script>
+const secret = new URLSearchParams(location.search).get('secret') || '';
+
+function badge(label, ok) {
+  return '<span class="badge ' + (ok ? 'ok' : 'no') + '">' + (ok ? String.fromCharCode(10003) : String.fromCharCode(10007)) + ' ' + label + '</span>';
+}
+
+async function load() {
+  const list = document.getElementById('list');
+  list.innerHTML = '<div class="empty">Cargando...</div>';
+  try {
+    const r = await fetch('/admin/pending-approvals?secret=' + encodeURIComponent(secret));
+    const d = await r.json();
+    if (!r.ok) { list.innerHTML = '<div class="empty">' + (d.detail || 'Error') + '</div>'; return; }
+    if (!d.pending.length) { list.innerHTML = '<div class="empty">No hay cuentas pendientes</div>'; return; }
+    list.innerHTML = d.pending.map(function(p) {
+      return '<div class="card" id="card-' + p.kind + '-' + p.user_id + '">' +
+        '<span class="kindtag">' + (p.kind === 'marketer' ? 'Anunciante' : 'Organizador') + '</span>' +
+        '<div class="name">' + (p.company || p.name || '(sin nombre)') + '</div>' +
+        '<div class="meta">' + p.name + ' &middot; ' + p.email + '<br>' +
+          (p.cargo ? 'Cargo: ' + p.cargo + '<br>' : '') +
+          (p.business_category ? 'Rubro: ' + p.business_category + '<br>' : '') +
+          'Tipo: ' + p.org_type + ' &middot; Registrado: ' + new Date(p.created_at).toLocaleString('es-CL') +
+        '</div>' +
+        '<div class="meta">' + badge('RUT', p.rut_verified) + badge('Dominio', p.domain_verified) + badge('Web', p.web_verified) + badge('Selfie', p.selfie_verified) + '</div>' +
+        '<div class="row">' +
+          '<button class="approve" onclick="act(\\'' + p.kind + '\\', ' + p.user_id + ', \\'approved\\', this)">Aprobar</button>' +
+          '<button class="reject" onclick="act(\\'' + p.kind + '\\', ' + p.user_id + ', \\'suspended\\', this)">Rechazar</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } catch (e) {
+    list.innerHTML = '<div class="empty">Error de red: ' + e + '</div>';
+  }
+}
+
+async function act(kind, userId, status, btn) {
+  btn.closest('.card').style.opacity = '0.5';
+  try {
+    const r = await fetch('/admin/' + kind + '/' + userId + '/status?secret=' + encodeURIComponent(secret) + '&status=' + status, { method: 'POST' });
+    const d = await r.json();
+    const card = document.getElementById('card-' + kind + '-' + userId);
+    if (r.ok && d.ok) {
+      card.innerHTML = '<div class="done">' + (status === 'approved' ? 'Aprobado — ya puede lanzar campanas / publicar consultas' : 'Rechazado') + '</div>';
+    } else {
+      card.innerHTML = '<div class="empty">Error: ' + (d.detail || 'desconocido') + '</div>';
+      card.style.opacity = '1';
+    }
+  } catch (e) {
+    btn.closest('.card').style.opacity = '1';
+    alert('Error de red: ' + e);
+  }
+}
+
+if (!secret) {
+  document.getElementById('list').innerHTML = '<div class="empty">Falta ?secret= en la URL</div>';
+} else {
+  load();
+  setInterval(load, 15000);
+}
+</script>
+</body>
+</html>"""
+
+
 @app.post('/admin/reassign-tiers')
 def admin_reassign_tiers(secret: str, db: Session = Depends(get_db)):
     """Re-corre _assign_user_tier para usuarios con se_tier vacío (cuentas creadas antes
