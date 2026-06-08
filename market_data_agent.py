@@ -528,6 +528,80 @@ def run_sii_chile() -> list:
     return all_communes
 
 
+# ══════════════════════════════════════════════════════════════
+# FUENTE HM LAND REGISTRY — UK House Price Index (Reino Unido)
+# API gratuita y oficial del gobierno británico — sin Apify, sin
+# scraping, sin selectores que se rompan. Mismo principio que el
+# avalúo SII: el precio de vivienda de un borough es un proxy
+# estable del poder adquisitivo del área (cambia lento — la
+# posición relativa de un borough tarda años en moverse).
+# ══════════════════════════════════════════════════════════════
+
+UK_LAND_REGISTRY_BASE = 'https://landregistry.data.gov.uk/data/ukhpi/region'
+
+UK_LONDON_BOROUGHS = {
+    'kensington-and-chelsea': 'Kensington and Chelsea',
+    'camden':                 'Camden',
+    'city-of-london':         'City of London',
+    'hackney':                'Hackney',
+    'southwark':              'Southwark',
+    'lambeth':                'Lambeth',
+    'tower-hamlets':          'Tower Hamlets',
+    'newham':                 'Newham',
+    'barking-and-dagenham':   'Barking and Dagenham',
+}
+
+
+def run_uk_land_registry() -> list:
+    """
+    Descarga el UK House Price Index oficial (HM Land Registry, gov.uk)
+    para los boroughs de Londres y construye el índice relativo —
+    misma fórmula que SII Chile: mediana = índice 100.
+    Fuente pública gratuita, no requiere token, no depende de Apify.
+    """
+    all_communes = []
+    for slug, display_name in UK_LONDON_BOROUGHS.items():
+        try:
+            list_resp = _requests.get(f'{UK_LAND_REGISTRY_BASE}/{slug}.json',
+                                       headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
+            if list_resp.status_code != 200:
+                continue
+            items = list_resp.json().get('result', {}).get('items', [])
+            if not items:
+                continue
+            latest_month_url = items[0]  # la API los lista del más reciente al más antiguo
+            data_resp = _requests.get(f'{latest_month_url}.json',
+                                       headers={'User-Agent': 'Mozilla/5.0'}, timeout=15)
+            if data_resp.status_code != 200:
+                continue
+            topic = data_resp.json().get('result', {}).get('primaryTopic', {})
+            avg_price = topic.get('averagePrice')
+            if not avg_price:
+                continue
+            all_communes.append({
+                'country': 'GB', 'commune': display_name,
+                'price_m2_avg': 0.0,
+                'avg_house_price_gbp': avg_price,
+                'income_index': 100.0,
+                'cpm_usd': 6.0, 'se_tier': 'BBB',
+                'portal': 'HM-Land-Registry',
+            })
+        except Exception as e:
+            print(f'[UK-LandRegistry] Error con {slug}: {e}')
+            continue
+
+    if not all_communes:
+        return []
+    prices = sorted([c['avg_house_price_gbp'] for c in all_communes if c['avg_house_price_gbp'] > 0])
+    median_price = prices[len(prices) // 2] if prices else 1.0
+    for c in all_communes:
+        idx = round((c['avg_house_price_gbp'] / median_price) * 100, 1)
+        c['income_index'] = idx
+        c['cpm_usd']      = calculate_cpm_from_index(idx)
+        c['se_tier']      = get_se_tier(idx)
+    return all_communes
+
+
 if __name__ == '__main__':
     result = run_full_agent()
     if result['total_communes'] == 0:

@@ -3858,6 +3858,37 @@ def test_market_agent_portal(secret: str, country: str = None):
     return trace
 
 
+@app.post('/admin/run-market-agent/uk-landregistry')
+def run_market_agent_uk_landregistry(secret: str, db: Session = Depends(get_db)):
+    """
+    Corre el agente contra una fuente OFICIAL y gratuita — el UK House Price
+    Index del HM Land Registry (gov.uk) — en vez de Apify. No requiere token,
+    no depende de selectores CSS, no se puede bloquear como un scraper: es la
+    misma API pública que usa cualquier ciudadano británico.
+
+    Esto resuelve, para Reino Unido, lo que el founder pidió: una fuente que
+    "siempre encuentre la información" — porque los precios de vivienda
+    cambian lento (la posición relativa de un borough tarda años en moverse),
+    así que correr esto una vez al mes (o menos) basta para mantener el
+    índice al día, y cada corrida exitosa queda guardada en la base de datos
+    — de ahí en adelante /communes sirve datos reales sin depender de nada
+    en tiempo real.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from market_data_agent import run_uk_land_registry
+    communes = run_uk_land_registry()
+    if not communes:
+        return {'ok': False, 'source': 'hm-land-registry', 'communes_saved': 0,
+                'note': 'La API del Land Registry no devolvió datos utilizables en esta corrida.'}
+    saved = _save_communes_to_db(communes, db)
+    return {'ok': True, 'source': 'hm-land-registry', 'country': 'GB',
+            'communes_saved': saved,
+            'communes': [{'commune': c['commune'], 'avg_house_price_gbp': c['avg_house_price_gbp'],
+                          'income_index': c['income_index'], 'cpm_usd': c['cpm_usd'], 'se_tier': c['se_tier']}
+                         for c in communes]}
+
+
 @app.get('/communes')
 def get_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
     """Tabla de comunas con índice de ingreso y CPM. Usada por el motor de ads."""
