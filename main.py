@@ -3194,7 +3194,14 @@ def _optimize_campaign(budget_clp: float, target_country: str, target_communes: 
 
     # 3. Estimar votantes alcanzables por comuna
     # Factor demográfico: ajustar por género y edad objetivo
-    age_range = target_age_max - target_age_min
+    # A targeting window always covers at least one age — "exactly 30" is a
+    # legitimate, common choice, not "zero people". Treating it as a
+    # zero-width range zeroed out demo_factor for every commune, which zeroed
+    # out total_weight below and crashed this whole request with a
+    # ZeroDivisionError BEFORE the campaign row was ever created — a launch
+    # that looked like it silently did nothing. floor it at one year so a
+    # single-age target still represents the (small, real) slice it is.
+    age_range = max(target_age_max - target_age_min, 1)
     age_factor = min(1.0, age_range / 60.0)   # 60 años = 100% población activa
     gender_factor = 0.52 if target_gender == 'F' else 0.48 if target_gender == 'M' else 1.0
     demo_factor = age_factor * gender_factor
@@ -3207,6 +3214,17 @@ def _optimize_campaign(budget_clp: float, target_country: str, target_communes: 
     # 4. Distribuir presupuesto — proporcional a votantes, penalizando CPM alto
     # Peso = votantes / cpm → más peso a comunas con más audiencia y menor costo
     total_weight = sum(c['voters_est'] / max(c['cpm_usd'], 0.1) for c in data)
+    if total_weight <= 0:
+        # Belt-and-suspenders: whatever combination of inputs got us to "every
+        # matching commune estimates zero reachable voters", dividing by that
+        # is what turns a bad estimate into a hard crash that drops the whole
+        # campaign. Fall back to spreading the budget evenly across the
+        # matching communes rather than refusing to create the campaign —
+        # an organizer who picks unusual targeting still gets a campaign and
+        # an honest (if rough) allocation, not a vanished submission.
+        total_weight = float(len(data))
+        for c in data:
+            c['voters_est'] = max(c['voters_est'], 1)
     budget_usd = budget_clp / USD_TO_CLP
 
     allocation = []
