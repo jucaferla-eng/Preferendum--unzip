@@ -520,3 +520,105 @@ above rather than trusting the diff.
 - `AD_EVERY_N_OPINIONS = 2` is still the live testing value — **must be
   reverted to `5`** before the investor lunch (documented in `CLAUDE.md`,
   flagged inline in `main.py`).
+
+## 2026-06-07 (continued V) — integrity-suite finally green, duplicate-campaign guard, and the real reason campaigns were vanishing
+
+**1. The automated vote-integrity suite (added in "continued III") was flaky —
+not because vote integrity was broken, but because of THREE layered
+manifestations of the already-disclosed slow-email-pipeline disease.**
+Three live-debugging rounds, one fix each, each one peeling back a deeper
+layer of the same root cause (`send_email_otp` synchronously bound to the
+broken Gmail SMTP connection):
+
+- **Round 1 — `requests.exceptions.ReadTimeout` raised raw from
+  `POST /auth/register`** (no status code at all — worse than the documented
+  502/503/504 symptom). Fixed `_register_voter` to catch
+  `RequestException` too, not just gateway-error status codes, and recover
+  via `/auth/login` ("lost response, not lost action" — register's User row
+  commits before the slow email send).
+- **Round 2 — `/admin/test-otp` returned a legitimate `404 No active OTP`.**
+  Traced to `register()` minting the OTP row with a 10-minute expiry
+  *before* the slow synchronous send — if the pipeline takes longer than
+  that to let the test read it, the code genuinely expires unread. Not an
+  OTP-system bug; a real symptom of pipeline latency. Fixed `_confirm_email`
+  to do what a real user would: hit `POST /verify/email/send` (resend) on
+  404, then re-read.
+- **Round 3 — the resend call itself raised a bare `ReadTimeout`**, same
+  disease one layer deeper. Read `main.py`'s `send_email_code()` handler —
+  it commits the fresh OTP row to the DB *before* its own synchronous send,
+  so the code is real and already persisted even if the ack times out.
+  Tolerated that one specific exception and proceeded straight to reading
+  the already-committed code.
+
+**Run 7: genuinely green — `4 passed, 1 warning in 1231.66s (0:20:31)`,
+zero failures.** Committed as `41189b99` with a commit message documenting
+all three failure modes and why each recovery preserves every integrity
+assertion rather than weakening or skipping it.
+
+**2. Duplicate-campaign creation on rapid resubmission (`fdfd5dac`).**
+A user double-tapping "Launch campaign" (or a flaky connection causing a
+client-side retry) created two near-identical `AdCampaign` rows. Added a
+10-second de-dupe guard to `POST /marketer/campaigns`: if an identical
+`(advertiser_email, title, budget_clp)` campaign was created in the last
+10 seconds, return *that* campaign's id instead of minting a new one.
+**Confirmed live**: two rapid identical POSTs both returned
+`campaign_id: 13`.
+
+**3. THE reason the founder's campaigns kept "vanishing" — a silent
+`ZeroDivisionError` on exact-age targeting (`bcac3dc7`).** The founder
+reported launching a campaign ("Just-AI") multiple times and resending it,
+but `/admin/campaigns` showed nothing new each time. Root cause, found by
+reading `_optimize_campaign()`:
+
+```python
+age_range = target_age_max - target_age_min   # = 0 when targeting "exactly 30"
+age_factor = min(1.0, age_range / 60.0)        # = 0
+demo_factor = age_factor * gender_factor       # = 0
+# every commune's voters_est = 0 -> total_weight = 0 -> ZeroDivisionError
+```
+
+Targeting "exactly age 30" is a normal, legitimate choice (not "zero
+people"), but it drove every downstream factor to zero and crashed
+*before* `db.add(campaign)` / `db.commit()` — so the campaign vanished
+with a bare `500` and zero persisted trace, while the frontend's
+`await res.json()` on that plain-text 500 body threw its own cryptic
+`SyntaxError`, fully masking the real cause. **Reproduced live**:
+`POST /marketer/campaigns` with `target_age_min == target_age_max == 30`
+returned `Internal Server Error` / `HTTP_STATUS:500`.
+
+**Fix:** floor `age_range` at 1 (a single age represents real people, not
+nobody) and added a belt-and-suspenders fallback for `total_weight <= 0`
+(even budget distribution instead of crashing). **Confirmed live after
+deploy**: the identical probe now returns `200 OK` with `campaign_id: 14`
+and a full 16-commune budget allocation.
+
+**4. Second-level cascading-question index-misalignment bug (`6185dd9b`).**
+Same disease as `680a8e0a`, one nesting level deeper — found by noticing
+live debate #30's first follow-up question had 2 `options` but 3
+`branches` (the gap happened to sit at the end of that array, so it was
+harmless *there*, but a mid-list gap would corrupt voter-visible nuance
+routing exactly like debate #10). Fixed `assets/app.html` ~line 8119-8135:
+collect the non-blank slot indices of `ncQ2[i].opts` once (`q2Idx`), then
+build `branches` by mapping over `q2Idx` in that order, so
+`branches[k]` always pairs with `options[k]`.
+
+**Deploy verification (same pattern as every fix this session):** pushed
+each commit to `main` and `working-copy-2026-06-06`, polled `/health`
+until `git_commit` matched, then re-ran the exact live reproduction that
+previously failed — never trusted the diff alone.
+
+**Ghost debate #31 status:** checked — it's gone (`404 Consultation not
+found`), self-cleaned by the now-fixed test-teardown. No manual purge
+needed.
+
+**Still open / carried forward:**
+- The "No incentives to vote" alternative the founder requested (some
+  organizations may want to deliver the benefit through a channel other
+  than the platform's code-based reward system) — no backend field models
+  incentives at all yet (`grep -i "incentiv" main.py` is empty); needs a
+  new `rwMethods` entry plus a downstream flow that skips code-delivery
+  configuration entirely.
+- Debate #10's existing corrupted `follow_up_questions` data still needs
+  manual repair/re-authoring — code fixes only stop *future* corruption.
+- `AD_EVERY_N_OPINIONS = 2` is still the live testing value — **must be
+  reverted to `5`** before the investor lunch on June 10.
