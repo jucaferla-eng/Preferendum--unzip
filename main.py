@@ -3763,6 +3763,101 @@ def run_market_agent_daily(secret: str, db: Session = Depends(get_db)):
             'source': 'apify', 'communes_saved': saved}
 
 
+@app.post('/admin/test-market-agent-portal')
+def test_market_agent_portal(secret: str, country: str = None):
+    """
+    Diagnóstico de UNA corrida del scraper de Apify, paso a paso.
+    `run_apify_scraper()` traga cualquier error y devuelve `[]` en silencio
+    (por diseño — para que el agente caiga al fallback sin romper nada). Eso
+    es perfecto para producción y pésimo para diagnosticar: no dice SI falló
+    el inicio del run, el polling, el dataset, o el parseo de la página.
+    Este endpoint repite la misma llamada pero reporta cada paso para que
+    se pueda ver exactamente dónde se cae la cadena.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from market_data_agent import (PORTALS, APIFY_TOKEN, APIFY_BASE,
+                                   _build_page_function, aggregate_by_commune)
+    import requests as _req
+
+    if country:
+        portal = next((p for p in PORTALS if p['country'] == country.upper()), None)
+        if not portal:
+            raise HTTPException(404, f'No hay portal configurado para {country}')
+    else:
+        day_of_year = datetime.utcnow().timetuple().tm_yday
+        portal = PORTALS[day_of_year % len(PORTALS)]
+
+    trace = {'portal': portal['portal'], 'country': portal['country'],
+             'actor': portal['actor'], 'start_urls': portal['start_urls']}
+
+    trace['apify_token_set'] = bool(APIFY_TOKEN)
+    if not APIFY_TOKEN:
+        trace['verdict'] = 'NO APIFY_API_TOKEN en el entorno — el agente nunca llega a llamar a Apify.'
+        return trace
+
+    actor_id = portal['actor'].replace('/', '~')
+    run_input = {
+        'startUrls': [{'url': u} for u in portal['start_urls']],
+        'maxRequestsPerCrawl': 20,
+        'pageFunction': _build_page_function(portal),
+    }
+
+    start_resp = _req.post(f'{APIFY_BASE}/acts/{actor_id}/runs',
+                           params={'token': APIFY_TOKEN}, json=run_input, timeout=30)
+    trace['start_run_status_code'] = start_resp.status_code
+    trace['start_run_body'] = start_resp.text[:500]
+    if start_resp.status_code not in (200, 201):
+        trace['verdict'] = (f'Apify rechazó el inicio del run con {start_resp.status_code} — '
+                            f'revisar el actor_id ("{portal["actor"]}"), el token, o el plan/cuota de Apify.')
+        return trace
+
+    run_id = start_resp.json()['data']['id']
+    trace['run_id'] = run_id
+    status_history = []
+    final_status = None
+    status_resp = None
+    for i in range(18):  # ~3 minutos de polling para el diagnóstico (la corrida real espera hasta 10)
+        time.sleep(10)
+        status_resp = _req.get(f'{APIFY_BASE}/actor-runs/{run_id}', params={'token': APIFY_TOKEN}, timeout=10)
+        status = status_resp.json()['data']['status']
+        status_history.append(status)
+        if status in ('SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT'):
+            final_status = status
+            break
+    trace['status_history'] = status_history
+    trace['final_status'] = final_status or 'still RUNNING after ~3min (diagnóstico cortó el polling temprano)'
+
+    if final_status != 'SUCCEEDED':
+        trace['verdict'] = (f'El run de Apify no terminó en SUCCEEDED (terminó en {trace["final_status"]}) — '
+                            'el actor no pudo completar el scrape (selectores rotos, sitio bloqueando el bot, '
+                            'timeout del actor, o cuota de cómputo agotada).')
+        return trace
+
+    dataset_id = status_resp.json()['data']['defaultDatasetId']
+    trace['dataset_id'] = dataset_id
+    items_resp = _req.get(f'{APIFY_BASE}/datasets/{dataset_id}/items',
+                          params={'token': APIFY_TOKEN, 'format': 'json', 'limit': 20}, timeout=30)
+    trace['items_status_code'] = items_resp.status_code
+    items = items_resp.json() if items_resp.status_code == 200 else []
+    trace['items_returned'] = len(items)
+    trace['sample_items'] = items[:5]
+
+    if not items:
+        trace['verdict'] = ('El run de Apify terminó OK pero el dataset llegó VACÍO — el actor recorrió '
+                            'la(s) URL(s) pero el pageFunction no extrajo nada (selectores CSS desactualizados '
+                            'frente al HTML actual del sitio, o el sitio sirvió una página de bloqueo/captcha).')
+        return trace
+
+    aggregated = aggregate_by_commune(items, portal['country'])
+    trace['communes_aggregated'] = list(aggregated.items())
+    trace['verdict'] = ('Apify devolvió datos crudos y se agregaron por comuna — el pipeline SÍ está '
+                        'funcionando con datos reales en esta corrida.') if aggregated else (
+                        'Apify devolvió items pero ninguno se pudo agrupar en una comuna válida — '
+                        'revisar el location_selector o el parseo de price_m2 en aggregate_by_commune.')
+    return trace
+
+
 @app.get('/communes')
 def get_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
     """Tabla de comunas con índice de ingreso y CPM. Usada por el motor de ads."""
