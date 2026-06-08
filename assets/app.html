@@ -8118,10 +8118,17 @@ function PreferendumV8() {
         const q2i = ncQ2[i]; if (!opt || !q2i || !q2i.on || !q2i.title) return null;
         const q2Opts = ncQ2[i].opts.filter(Boolean);
         if (q2Opts.length < 2) return null;
+        // Same blank-slot misalignment, one level deeper: q2Opts is
+        // compacted but ncQ3[i] is indexed by ncQ2[i].opts' RAW slot
+        // positions. Walk the same non-blank indices, in the same order,
+        // as q2Opts so branches[k] stays pinned to options[k] = q2Opts[k].
+        const q2Idx = [];
+        ncQ2[i].opts.forEach((o2, j) => { if (o2) q2Idx.push(j); });
         return {
           title: ncQ2[i].title,
           options: q2Opts,
-          branches: ncQ2[i].opts.map((o2, j) => {
+          branches: q2Idx.map((j) => {
+            const o2 = ncQ2[i].opts[j];
             if (!o2 || !ncQ3[i][j] || !ncQ3[i][j].on || !ncQ3[i][j].title) return null;
             const q3Opts = ncQ3[i][j].opts.filter(Boolean);
             if (q3Opts.length < 2) return null;
