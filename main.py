@@ -389,6 +389,73 @@ class AuthorizationRequest(Base):
     resolved_at          = Column(DateTime, nullable=True)
 
 
+class MarketerProfile(Base):
+    """
+    Perfil extendido del marketer/anunciante — persona natural o representante de empresa.
+    Espejo de OrganizerProfile: mismo principio de "rastro de identidad" — selfie + ID +
+    documento de cargo + autorización del jefe — porque ningún estafador se filma la cara.
+    """
+    __tablename__ = 'marketer_profiles'
+    id                   = Column(Integer, primary_key=True)
+    user_id              = Column(Integer, index=True, unique=True)
+
+    # Tipo de marketer
+    org_type             = Column(String, default='company')  # person / company
+    is_supervisor        = Column(Boolean, default=False)     # puede autorizar empleados/campañas
+
+    # Datos corporativos
+    company_name         = Column(String, default='')
+    company_rut          = Column(String, default='')         # RUT empresa
+    company_web          = Column(String, default='')         # sitio web
+    company_email_domain = Column(String, default='')         # dominio del email corporativo
+    business_category    = Column(String, default='')         # rubro declarado — ver _check_business_category
+    cargo                = Column(String, default='')         # cargo en la empresa
+    department           = Column(String, default='')         # departamento dentro de la empresa
+    applicant_phone      = Column(String, default='')
+
+    # Jefe que lo autoriza (NULL si es supervisor)
+    supervisor_user_id   = Column(Integer, nullable=True)
+    supervisor_name      = Column(String, default='')
+    supervisor_email     = Column(String, default='')
+    supervisor_phone     = Column(String, default='')
+
+    # Verificaciones automáticas
+    rut_verified         = Column(Boolean, default=False)     # RUT empresa existe en SII
+    domain_verified      = Column(Boolean, default=False)     # dominio email corporativo válido
+    web_verified         = Column(Boolean, default=False)     # web empresa existe y es real
+    selfie_verified      = Column(Boolean, default=False)     # cara = carné (Rekognition)
+    doc_verified         = Column(Boolean, default=False)     # documento de cargo revisado
+
+    # Documento de cargo
+    cargo_doc_hash       = Column(String, default='')
+    cargo_doc_bytes      = Column(Text)                       # base64, se borra tras revisión
+
+    # Estado de la cuenta
+    status               = Column(String, default='pending')  # pending/approved/suspended
+    rejection_reason     = Column(String, default='')
+    created_at           = Column(DateTime, default=datetime.utcnow)
+    approved_at          = Column(DateTime, nullable=True)
+
+
+class MarketerAuthorizationRequest(Base):
+    """
+    Solicitud de un empleado para que su jefe lo autorice a lanzar campañas
+    publicitarias en nombre de la empresa. El jefe recibe email con link único
+    — entra una sola vez (con su propia cuenta verificada, selfie incluida) y aprueba.
+    """
+    __tablename__ = 'marketer_authorization_requests'
+    id                   = Column(Integer, primary_key=True)
+    employee_user_id     = Column(Integer, index=True)
+    employee_name        = Column(String)
+    employee_email       = Column(String)
+    supervisor_email     = Column(String, index=True)
+    supervisor_user_id   = Column(Integer, nullable=True)    # se llena cuando el jefe entra
+    token                = Column(String, unique=True)        # link único para el jefe
+    status               = Column(String, default='pending')  # pending/approved/rejected
+    created_at           = Column(DateTime, default=datetime.utcnow)
+    resolved_at          = Column(DateTime, nullable=True)
+
+
 class ConsultationModerationLog(Base):
     """Resultado del análisis de IA antes de publicar una consulta."""
     __tablename__ = 'consultation_moderation_logs'
@@ -1560,6 +1627,41 @@ def _verify_company_web(web_url: str, company_name: str, company_rut: str) -> di
         return {'valid': False, 'reason': f'No pudimos acceder al sitio: {str(e)[:60]}'}
 
 
+# Categorías permitidas en el pop-up de registro de marketer — lista cerrada,
+# el solicitante elige una, no escribe texto libre (más fácil de auditar).
+MARKETER_BUSINESS_CATEGORIES = [
+    'retail_comercio', 'banca_finanzas', 'automotriz', 'tecnologia',
+    'alimentos_bebidas', 'inmobiliaria', 'salud_bienestar', 'educacion',
+    'turismo_viajes', 'telecomunicaciones', 'energia_servicios_basicos',
+    'medios_entretenimiento', 'ong_sin_fines_de_lucro', 'gobierno_sector_publico',
+    'otro',
+]
+
+# Categorías que nunca podrán anunciar en Preferendum — el filtro corta acá,
+# antes de gastar tiempo de revisión humana o llamadas a Rekognition en alguien
+# que jamás debió pasar de esta pantalla.
+MARKETER_PROHIBITED_CATEGORIES = [
+    'pornografia', 'contenido_adulto', 'servicios_sexuales',
+    'drogas_ilegales', 'armas_de_fuego', 'apuestas_no_reguladas',
+    'productos_falsificados', 'odio_extremismo',
+]
+
+def _check_business_category(category: str) -> dict:
+    """
+    Filtro de entrada del pop-up de categoría — corta de raíz a rubros prohibidos
+    antes de que avancen a verificación de identidad.
+    Devuelve {allowed, reason}.
+    """
+    cat = (category or '').strip().lower()
+    if not cat:
+        return {'allowed': False, 'reason': 'Debes declarar la categoría de tu empresa'}
+    if cat in MARKETER_PROHIBITED_CATEGORIES:
+        return {'allowed': False, 'reason': f'Preferendum no acepta anunciantes de la categoría "{cat}"'}
+    if cat not in MARKETER_BUSINESS_CATEGORIES:
+        return {'allowed': False, 'reason': f'"{cat}" no es una categoría reconocida — elige una de la lista'}
+    return {'allowed': True, 'reason': ''}
+
+
 def _moderate_consultation(title: str, context: str, options: list) -> dict:
     """
     Analiza una consulta con IA antes de publicarla.
@@ -1608,8 +1710,9 @@ decision debe ser: "approved" (score>=80), "review" (score 50-79), "rejected" (s
     return {'score': 60, 'decision': 'review', 'reason': 'Error en moderación — revisión manual'}
 
 
-def _send_supervisor_authorization_email(supervisor_email, employee_name, employee_email, company, cargo, token):
-    approve_url = f'https://preferendum-unzip-d2zd.onrender.com/organizer/authorize/{token}'
+def _send_supervisor_authorization_email(supervisor_email, employee_name, employee_email, company, cargo, token, role='organizer'):
+    approve_url = f'https://preferendum-unzip-d2zd.onrender.com/{role}/authorize/{token}'
+    action_desc = 'crear consultas' if role == 'organizer' else 'lanzar campañas publicitarias'
     html = (
         f'<div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#07090f;color:#fff;border-radius:16px;overflow:hidden;">'
         f'<div style="background:#0d1526;padding:28px 32px;border-bottom:1px solid #1e2d4a;">'
@@ -1618,10 +1721,10 @@ def _send_supervisor_authorization_email(supervisor_email, employee_name, employ
         f'<h2 style="margin:0 0 16px;font-size:18px;">Solicitud de autorización</h2>'
         f'<p style="color:#94a3b8;font-size:14px;line-height:1.6;">'
         f'<strong style="color:#fff">{employee_name}</strong> ({employee_email}) solicita autorización '
-        f'para crear consultas en Preferendum en nombre de <strong style="color:#fff">{company}</strong> '
+        f'para {action_desc} en Preferendum en nombre de <strong style="color:#fff">{company}</strong> '
         f'con cargo <strong style="color:#fff">{cargo}</strong>.</p>'
         f'<p style="color:#94a3b8;font-size:13px;">Al aprobar, usted asume responsabilidad solidaria '
-        f'por las consultas que publique este usuario.</p>'
+        f'por {"las consultas" if role == "organizer" else "las campañas publicitarias"} que publique este usuario.</p>'
         f'<div style="display:flex;gap:12px;margin-top:24px;">'
         f'<a href="{approve_url}?action=approved" style="flex:1;background:#10b981;color:#fff;text-decoration:none;'
         f'padding:14px;border-radius:10px;text-align:center;font-weight:700;font-size:14px;">✓ Autorizar</a>'
@@ -2951,7 +3054,10 @@ def organizer_status(user: User = Depends(get_current_user), db: Session = Depen
         'verifications': {
             'email':   user.email_verified,
             'phone':   user.phone_verified,
-            'selfie':  profile.selfie_verified,
+            # profile.selfie_verified is never written by /verify/selfie — the real
+            # flag lives on the user record. Reading the profile copy always showed
+            # false here even after a successful selfie match; read the live one.
+            'selfie':  user.selfie_verified,
             'rut':     profile.rut_verified,
             'domain':  profile.domain_verified,
             'web':     profile.web_verified,
@@ -3110,22 +3216,141 @@ def reward_codes_status(consultation_id: int, user: User = Depends(get_current_u
 # ROUTES: MARKETER (v2 — /marketer/ prefix)
 # ══════════════════════════════════════════════════════════════
 
+class MarketerRegisterInput(BaseModel):
+    email:             str
+    password:          str
+    name:              str
+    phone:             str = ''
+    national_id:       str = ''
+    country:           str = 'CL'
+    # Tipo
+    org_type:          str = 'company'   # person / company
+    is_supervisor:     bool = True
+    # Datos empresa
+    company_name:      str = ''
+    company_rut:       str = ''
+    company_web:       str = ''
+    business_category: str = ''           # elegida del pop-up — ver MARKETER_BUSINESS_CATEGORIES
+    cargo:             str = ''
+    department:        str = ''           # departamento dentro de la empresa
+    # Jefe que lo autoriza (solo si is_supervisor=False)
+    supervisor_name:   str = ''
+    supervisor_email:  str = ''
+    supervisor_phone:  str = ''
+
+
 @app.post('/marketer/register')
-def marketer_register(data: RegisterInput, db: Session = Depends(get_db)):
+def marketer_register(data: MarketerRegisterInput, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(400, 'Email already registered')
+
+    # Filtro de categoría — corta de raíz antes de cualquier verificación de identidad,
+    # tal como un guardia de entrada revisa el rubro antes de pedir documentos.
+    cat_check = _check_business_category(data.business_category)
+    if not cat_check['allowed']:
+        raise HTTPException(403, cat_check['reason'])
+
+    # Verificar dominio email corporativo
+    if data.org_type == 'company':
+        domain_check = _verify_email_domain(data.email)
+        if not domain_check['valid']:
+            raise HTTPException(400, domain_check.get('reason', 'Email inválido'))
+
     hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
     user = User(
         email=data.email, name=data.name, password=hashed,
-        phone=data.phone or '', country=data.country, role='marketer',
+        phone=data.phone, national_id=data.national_id,
+        country=data.country, role='marketer',
     )
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    # Verificar RUT empresa en SII y sitio web
+    rut_ok, web_ok, rut_info, web_check = False, False, {}, {}
+    if data.org_type == 'company' and data.company_rut:
+        rut_info = _verify_company_rut(data.company_rut)
+        rut_ok   = rut_info.get('valid', False)
+    if data.org_type == 'company' and data.company_web:
+        web_check = _verify_company_web(data.company_web, data.company_name, data.company_rut)
+        web_ok    = web_check.get('valid', False)
+
+    domain_ok = data.org_type == 'company' and _verify_email_domain(data.email)['valid']
+
+    profile = MarketerProfile(
+        user_id              = user.id,
+        org_type             = data.org_type,
+        is_supervisor        = data.is_supervisor,
+        company_name         = data.company_name,
+        company_rut          = data.company_rut,
+        company_web          = data.company_web,
+        company_email_domain = data.email.split('@')[1] if '@' in data.email else '',
+        business_category    = data.business_category.strip().lower(),
+        cargo                = data.cargo,
+        department           = data.department,
+        applicant_phone      = data.phone,
+        supervisor_name      = data.supervisor_name,
+        supervisor_email     = data.supervisor_email,
+        supervisor_phone     = data.supervisor_phone,
+        rut_verified         = rut_ok,
+        domain_verified      = domain_ok,
+        web_verified         = web_ok,
+        # Igual que en organizer: personas naturales no tienen RUT/dominio que
+        # un revisor pueda aprobar — entran activas. Cuentas de empresa requieren
+        # revisión + selfie + autorización del jefe porque afirman representar
+        # una marca real, y esa marca quedará visible dentro de los debates.
+        status               = 'approved' if data.org_type == 'person' else 'pending',
+    )
+    db.add(profile)
+    db.commit()
+    if profile.status == 'approved':
+        profile.approved_at = datetime.utcnow()
+        db.commit()
+
+    # OTP email
+    code = gen_otp()
+    db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
+                   expires_at=datetime.utcnow() + timedelta(minutes=10)))
+    db.commit()
+    send_email_otp(user.email, code, user.name)
+
+    # Si necesita autorización del jefe → email al jefe (con su propia cuenta verificada)
+    if not data.is_supervisor and data.supervisor_email:
+        token = hashlib.sha256(f'{user.id}-{data.supervisor_email}-{datetime.utcnow()}'.encode()).hexdigest()[:32]
+        db.add(MarketerAuthorizationRequest(
+            employee_user_id = user.id,
+            employee_name    = user.name,
+            employee_email   = user.email,
+            supervisor_email = data.supervisor_email,
+            token            = token,
+        ))
+        db.commit()
+        _send_supervisor_authorization_email(
+            supervisor_email = data.supervisor_email,
+            employee_name    = user.name,
+            employee_email   = user.email,
+            company          = data.company_name,
+            cargo            = data.cargo,
+            token            = token,
+            role             = 'marketer',
+        )
+
+    verifications = {
+        'email_sent':   True,
+        'category_ok':  cat_check['allowed'],
+        'rut_verified': rut_ok,
+        'rut_name':     rut_info.get('razon_social', ''),
+        'domain_ok':    domain_ok,
+        'web_ok':       web_ok,
+        'needs_doc':    True,
+        'needs_selfie': True,
+        'status':       profile.status,
+    }
     return {
         'token': make_token(user.id, 'marketer'),
-        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': 'marketer'},
-        'message': 'Marketer account created'
+        'user':  {'id': user.id, 'name': user.name, 'email': user.email, 'role': 'marketer'},
+        'verifications': verifications,
+        'message': 'Registro iniciado. Verifica tu email y sube tu documento de cargo + selfie.',
     }
 
 @app.post('/marketer/login')
@@ -3133,9 +3358,119 @@ def marketer_login(data: LoginInput, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email, User.role.in_(['marketer', 'admin'])).first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
         raise HTTPException(401, 'Credenciales inválidas')
+    profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user.id).first()
     return {
-        'token': make_token(user.id, user.role),
-        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+        'token':   make_token(user.id, user.role),
+        'user':    {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+        'profile': {
+            'status':        profile.status if profile else 'pending',
+            'org_type':      profile.org_type if profile else 'company',
+            'is_supervisor': profile.is_supervisor if profile else True,
+            'rut_verified':  profile.rut_verified if profile else False,
+            'web_verified':  profile.web_verified if profile else False,
+            'doc_verified':  profile.doc_verified if profile else False,
+        } if profile else None,
+    }
+
+
+@app.post('/marketer/upload-cargo-doc')
+async def marketer_upload_cargo_doc(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Sube el documento que acredita el cargo (contrato, poder notarial, etc.)"""
+    contents = await file.read()
+    if file.content_type not in ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']:
+        raise HTTPException(400, 'Solo JPG, PNG o PDF')
+    profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil de marketer no encontrado')
+    profile.cargo_doc_hash  = hashlib.sha256(contents).hexdigest()
+    profile.cargo_doc_bytes = base64.b64encode(contents).decode()
+    db.commit()
+    return {'ok': True, 'message': 'Documento recibido. Será revisado en 1-2 días hábiles.'}
+
+
+@app.get('/marketer/authorize/{token}')
+def marketer_authorization_page(token: str, db: Session = Depends(get_db)):
+    """Link que recibe el jefe en su email — muestra quién pide autorización para lanzar campañas."""
+    req = db.query(MarketerAuthorizationRequest).filter(
+        MarketerAuthorizationRequest.token == token,
+        MarketerAuthorizationRequest.status == 'pending'
+    ).first()
+    if not req:
+        raise HTTPException(404, 'Link de autorización inválido o ya usado')
+    return {
+        'employee_name':  req.employee_name,
+        'employee_email': req.employee_email,
+        'token':          token,
+        'message':        f'{req.employee_name} solicita autorización para lanzar campañas publicitarias en Preferendum',
+    }
+
+
+@app.post('/marketer/authorize/{token}')
+def marketer_supervisor_approve(token: str, action: str, db: Session = Depends(get_db),
+                                 user: User = Depends(get_current_user)):
+    """El jefe aprueba o rechaza al empleado desde su propia cuenta verificada (con selfie)."""
+    req = db.query(MarketerAuthorizationRequest).filter(
+        MarketerAuthorizationRequest.token == token,
+        MarketerAuthorizationRequest.status == 'pending'
+    ).first()
+    if not req:
+        raise HTTPException(404, 'Solicitud no encontrada')
+
+    sup_profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user.id).first()
+    if not sup_profile or not sup_profile.is_supervisor:
+        raise HTTPException(403, 'Solo jefes con cuenta de marketer verificada pueden autorizar')
+    if sup_profile.status != 'approved':
+        raise HTTPException(403, 'Tu cuenta debe estar aprobada (incluida selfie) para autorizar empleados')
+
+    req.status             = action  # approved / rejected
+    req.supervisor_user_id = user.id
+    req.resolved_at        = datetime.utcnow()
+
+    if action == 'approved':
+        emp_profile = db.query(MarketerProfile).filter(
+            MarketerProfile.user_id == req.employee_user_id
+        ).first()
+        if emp_profile:
+            emp_profile.supervisor_user_id = user.id
+            emp_profile.supervisor_name    = user.name
+            emp_profile.status             = 'approved'
+
+    db.commit()
+    return {'ok': True, 'action': action, 'employee': req.employee_name}
+
+
+@app.get('/marketer/status')
+def marketer_status(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Estado completo de verificación del marketer."""
+    profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil de marketer no encontrado')
+    pending_employees = db.query(MarketerAuthorizationRequest).filter(
+        MarketerAuthorizationRequest.supervisor_email == user.email,
+        MarketerAuthorizationRequest.status == 'pending'
+    ).count()
+    return {
+        'status':            profile.status,
+        'org_type':          profile.org_type,
+        'is_supervisor':     profile.is_supervisor,
+        'company_name':      profile.company_name,
+        'business_category': profile.business_category,
+        'cargo':             profile.cargo,
+        'department':        profile.department,
+        'verifications': {
+            'email':   user.email_verified,
+            'phone':   user.phone_verified,
+            'selfie':  user.selfie_verified,
+            'rut':     profile.rut_verified,
+            'domain':  profile.domain_verified,
+            'web':     profile.web_verified,
+            'doc':     profile.doc_verified,
+        },
+        'pending_authorization_requests': pending_employees,
     }
 
 @app.get('/marketer/communes')
@@ -3329,6 +3664,29 @@ def list_social_sponsors(email: str, db: Session = Depends(get_db)):
 @app.post('/marketer/campaigns')
 def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
     """Crea la campaña y devuelve la optimización de asignación."""
+    # Gate: the brand name on this campaign (advertiser_name) is shown live,
+    # publicly, inside real debates (main.py _match_campaigns → 'brand': ...).
+    # That display is worthless — actively harmful — if anyone can type any
+    # company name with no identity behind it. Require a marketer account that
+    # has cleared the same chain organizers go through: RUT/web/domain checks,
+    # selfie-vs-ID face match, cargo document, and (if not the boss) the boss's
+    # own sign-off from their own verified, selfie-checked account.
+    marketer_user = db.query(User).filter(
+        User.email == data.advertiser_email, User.role.in_(['marketer', 'admin'])
+    ).first()
+    if not marketer_user:
+        raise HTTPException(403, 'Debes registrarte como marketer en Preferendum antes de lanzar una campaña')
+    if marketer_user.role != 'admin':
+        profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == marketer_user.id).first()
+        if not profile:
+            raise HTTPException(403, 'Perfil de marketer no encontrado — completa tu registro primero')
+        if profile.status != 'approved':
+            raise HTTPException(403,
+                f'Tu cuenta de marketer aún no está aprobada (estado: {profile.status}). '
+                f'Se requiere verificación de identidad (selfie + documento de cargo'
+                f'{" + autorización de tu jefe" if not profile.is_supervisor else ""}) '
+                f'antes de que el nombre de tu empresa pueda mostrarse en los debates.')
+
     # Guard against accidental duplicate submissions (e.g. a slow response
     # tempting a double-click, or a flaky connection causing a silent retry):
     # if the same advertiser just created an identical campaign in the last
