@@ -3677,6 +3677,15 @@ def _save_communes_to_db(communes: list, db):
             existing.income_index = c['income_index']
             existing.cpm_usd      = c['cpm_usd']
             existing.se_tier      = c['se_tier']
+            # Bug found 2026-06-08: this never updated `portal`, so a row
+            # first created from get_fallback_table() (portal='fallback')
+            # that later got real values written over it (e.g. Hackney and
+            # Tower Hamlets, upgraded in place by the new HM Land Registry
+            # agent) kept showing 'fallback' forever — real numbers wearing
+            # a fake-data label. That mislabeling is exactly what caused
+            # /admin/purge-stale-fallback-communes to delete two rows that
+            # actually held correct, freshly-fetched official data.
+            existing.portal       = c.get('portal', existing.portal)
             existing.updated_at   = datetime.utcnow()
         else:
             db.add(CommuneMarketData(
