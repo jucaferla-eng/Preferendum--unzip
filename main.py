@@ -3780,6 +3780,12 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
     db.add(campaign)
     db.commit()
     db.refresh(campaign)
+    # Auto-pin to all active debates so the campaign appears immediately
+    all_debate_ids = [str(d.id) for d in db.query(Debate).filter(Debate.is_active == True).all()]
+    if not all_debate_ids:
+        all_debate_ids = [str(d.id) for d in db.query(Debate).all()]
+    campaign.target_debate_ids = ','.join(all_debate_ids)
+    db.commit()
     return {'message': 'Campaign created', 'campaign_id': campaign.id,
             'optimization': optimization, 'campaign': _format_campaign(campaign)}
 
