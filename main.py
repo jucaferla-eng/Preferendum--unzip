@@ -2219,7 +2219,8 @@ def _match_campaigns(user, debate, db) -> list:
         if not _campaign_matches_debate(c, debate):
             continue
         # País — normaliza ambos lados ('Chile' vs 'CL') antes de comparar
-        if c.target_country and _country_code(c.target_country) != user_country:
+        # Si el usuario no tiene país configurado, no filtrar por país
+        if c.target_country and user_country and _country_code(c.target_country) != user_country:
             continue
         # Género
         if c.target_gender and c.target_gender != 'all' and c.target_gender != user_gender:
