@@ -2109,6 +2109,13 @@ function PreferendumV8() {
   const [walletAddr, setWalletAddr] = useState('');
   const API = 'https://preferendum-unzip-d2zd.onrender.com';
 
+  // Keep Render awake — ping every 4 min so the backend never sleeps during a demo
+  useEffect(() => {
+    fetch(`${API}/health`).catch(()=>{});
+    const t = setInterval(() => fetch(`${API}/health`).catch(()=>{}), 4 * 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
+
   // Route first-time visitors to language selector
   useEffect(() => {
     if (!localStorage.getItem('pref_lang') && !localStorage.getItem('pref_lang_skip')) {
@@ -3015,13 +3022,19 @@ function PreferendumV8() {
     type: "email",
     value: email,
     onChange: setEmail
-  }), /*#__PURE__*/React.createElement(Input, {
-    label: "Contrase\xF1a",
-    placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
-    type: "password",
-    value: pw,
-    onChange: setPw
-  }), vfError && /*#__PURE__*/React.createElement("div", {
+  }), /*#__PURE__*/React.createElement("div", {style:{position:"relative"}},
+    /*#__PURE__*/React.createElement(Input, {
+      label: "Contrase\xF1a",
+      placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022",
+      type: window._showLoginPw ? "text" : "password",
+      value: pw,
+      onChange: v => { setPw(v); setVfError(""); }
+    }),
+    /*#__PURE__*/React.createElement("div", {
+      onClick: () => { window._showLoginPw = !window._showLoginPw; setPw(pw => pw); },
+      style: {position:"absolute", right:12, top:36, cursor:"pointer", fontSize:18, color:"#64748B", userSelect:"none"}
+    }, window._showLoginPw ? "\ud83d\udc41" : "\ud83d\udc41\u200d\ud83d\udde8")
+  ), vfError && /*#__PURE__*/React.createElement("div", {
     style: {
       background: `${T.coral}22`,
       border: `1px solid ${T.coral}44`,
