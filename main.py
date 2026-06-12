@@ -2303,39 +2303,62 @@ def get_opinions(debate_id: int,
     ad_idx  = 0
     now     = datetime.utcnow()
 
+    def _safe_url(url, limit=200_000):
+        if url and url.startswith('data:') and len(url) > limit:
+            return ''
+        return url or ''
+
+    def _append_campaign_ad(campaign):
+        result.append({'type': 'ad', 'ad': {
+            'brand':       campaign.advertiser_name,
+            'copy':        campaign.ad_copy or campaign.title,
+            'cta':         'Ver más',
+            'logo_color':  '#2563eb',
+            'logo_url':    _safe_url(campaign.logo_url),
+            'image_url':   _safe_url(campaign.ad_image_url),
+            'link_url':    campaign.link_url or '',
+            'campaign_id': campaign.id,
+        }})
+        if user:
+            db.add(AdImpressionLog(
+                campaign_id = campaign.id,
+                debate_id   = debate_id,
+                gender      = user.gender or '',
+                age_group   = _get_age_group(user.dob),
+                county      = user.county or '',
+                country     = user.country or '',
+            ))
+        campaign.spent_clp = min(
+            campaign.budget_clp,
+            (campaign.spent_clp or 0) + _cost_per_impression_clp(campaign, db),
+        )
+
+    # Show first ad at the top — even with 0 opinions, the campaign is visible
+    if matched:
+        _append_campaign_ad(matched[ad_idx % len(matched)])
+        ad_idx += 1
+    elif static_ads:
+        ad = static_ads[0]
+        ad.impressions += 1
+        result.append({'type': 'ad', 'ad': {
+            'brand': ad.brand, 'copy': ad.copy,
+            'cta': ad.cta, 'logo_color': ad.logo_color,
+            'link_url': ad.link_url or '',
+        }})
+        ad_idx += 1
+
     for i, op in enumerate(opinions):
-        if i > 0 and i % AD_EVERY_N_OPINIONS == 0:
-            # Prioridad: campaña de marketer que hace match → ad estático del debate
+        result.append({'type': 'opinion', 'opinion': {
+            'id': op.id, 'text': op.text,
+            'knowledge_level': op.knowledge_level,
+            'user_name': op.user_name,
+            'created_at': op.created_at.isoformat(),
+        }})
+        # Ad after every AD_EVERY_N_OPINIONS opinions
+        if (i + 1) % AD_EVERY_N_OPINIONS == 0:
             if matched:
-                campaign = matched[ad_idx % len(matched)]
-                # Cap base64 images to avoid memory exhaustion (Render free tier)
-                def _safe_url(url, limit=200_000):
-                    if url and url.startswith('data:') and len(url) > limit:
-                        return ''
-                    return url or ''
-                result.append({'type': 'ad', 'ad': {
-                    'brand':       campaign.advertiser_name,
-                    'copy':        campaign.ad_copy or campaign.title,
-                    'cta':         'Ver más',
-                    'logo_color':  '#2563eb',
-                    'logo_url':    _safe_url(campaign.logo_url),
-                    'image_url':   _safe_url(campaign.ad_image_url),
-                    'link_url':    campaign.link_url or '',
-                    'campaign_id': campaign.id,
-                }})
-                # Registrar impresión — solo datos anónimos, nunca identidad
-                db.add(AdImpressionLog(
-                    campaign_id = campaign.id,
-                    debate_id   = debate_id,
-                    gender      = user.gender or '',
-                    age_group   = _get_age_group(user.dob),
-                    county      = user.county or '',   # comuna, no dirección
-                    country     = user.country or '',
-                ))
-                campaign.spent_clp = min(
-                    campaign.budget_clp,
-                    (campaign.spent_clp or 0) + _cost_per_impression_clp(campaign, db),
-                )
+                _append_campaign_ad(matched[ad_idx % len(matched)])
+                ad_idx += 1
             elif static_ads:
                 ad = static_ads[ad_idx % len(static_ads)]
                 ad.impressions += 1
@@ -2344,14 +2367,7 @@ def get_opinions(debate_id: int,
                     'cta': ad.cta, 'logo_color': ad.logo_color,
                     'link_url': ad.link_url or '',
                 }})
-            ad_idx += 1
-
-        result.append({'type': 'opinion', 'opinion': {
-            'id': op.id, 'text': op.text,
-            'knowledge_level': op.knowledge_level,
-            'user_name': op.user_name,
-            'created_at': op.created_at.isoformat(),
-        }})
+                ad_idx += 1
 
     db.commit()
     return {'items': result, 'total_opinions': len(opinions)}
