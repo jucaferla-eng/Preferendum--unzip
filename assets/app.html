@@ -5100,7 +5100,24 @@ function PreferendumV8() {
         color: "#94a3b8",
         fontSize: 13
       }
-    }, "Cargando debate\u2026"), !opinionsLoading && debateOpinions.length === 0 && /*#__PURE__*/React.createElement("div", {
+    }, "Cargando debate\u2026"), !opinionsLoading && debateAdSlots[0] && debateOpinions.length === 0 && /*#__PURE__*/React.createElement("div", {
+      style: {background: "#fff", margin: "8px 12px", borderRadius: 14, padding: "14px 16px", boxShadow: "0 1px 4px rgba(0,0,0,0.08)", border: "1px solid #e2e8f0"}
+    }, /*#__PURE__*/React.createElement("div", {style: {fontSize: 9, color: "#c2410c", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8}}, "Publicidad"),
+    /*#__PURE__*/React.createElement("div", {style: {display: "flex", gap: 12, alignItems: "center"}},
+      debateAdSlots[0].logo_url
+        ? /*#__PURE__*/React.createElement("img", {src: debateAdSlots[0].logo_url, style: {width: 44, height: 44, borderRadius: 8, objectFit: "contain", background: "#f8fafc", border: "1px solid #e2e8f0"}})
+        : /*#__PURE__*/React.createElement("div", {style: {width: 44, height: 44, borderRadius: 8, background: debateAdSlots[0].logo_color || "#2563eb", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, color: "#fff", fontWeight: 900, flexShrink: 0}}, (debateAdSlots[0].brand || "A")[0]),
+      /*#__PURE__*/React.createElement("div", {style: {flex: 1}},
+        /*#__PURE__*/React.createElement("div", {style: {fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 2}}, debateAdSlots[0].brand),
+        /*#__PURE__*/React.createElement("div", {style: {fontSize: 12, color: "#475569", lineHeight: 1.5}}, debateAdSlots[0].copy)
+      ),
+      /*#__PURE__*/React.createElement("div", {style: {background: debateAdSlots[0].logo_color || "#2563eb", color: "#fff", borderRadius: 8, padding: "7px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0},
+        onClick: () => {
+          const dest = debateAdSlots[0].link_url || ("https://www.google.com/search?q=" + encodeURIComponent(debateAdSlots[0].brand || ""));
+          window.open(dest, "_blank", "noopener,noreferrer");
+        }
+      }, debateAdSlots[0].cta || "Ver m\xE1s")
+    )), !opinionsLoading && debateOpinions.length === 0 && /*#__PURE__*/React.createElement("div", {
       style: {
         textAlign: "center",
         padding: 32,
@@ -9978,7 +9995,7 @@ function PreferendumV8() {
             end_date: endDate || (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().split('T')[0]; })(),
             logo_url: logoPrev || '',
             ad_copy: adTitle || adBody || '',
-            ad_image_url: imgPrev || '',
+            ad_image_url: bannerPrev || '',
           });
           setLaunchedCampaignId(resp.campaign_id || null);
           if (resp.campaign_id) setMyCampaignIds(prev => [resp.campaign_id, ...prev]);

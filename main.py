@@ -3796,8 +3796,8 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
     db.add(campaign)
     db.commit()
     db.refresh(campaign)
-    # Auto-pin to all active debates so the campaign appears immediately
-    all_debate_ids = [str(d.id) for d in db.query(Debate).filter(Debate.is_active == True).all()]
+    # Auto-pin to all live debates so the campaign appears immediately
+    all_debate_ids = [str(d.id) for d in db.query(Debate).filter(Debate.status == 'live').all()]
     if not all_debate_ids:
         all_debate_ids = [str(d.id) for d in db.query(Debate).all()]
     campaign.target_debate_ids = ','.join(all_debate_ids)
