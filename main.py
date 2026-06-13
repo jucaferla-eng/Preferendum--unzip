@@ -4844,3 +4844,30 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
         'real_match_campaigns_result': real_match_ids,
         'campaigns': reasons,
     }
+
+
+@app.delete('/admin/reset-marketers')
+def admin_reset_marketers(secret: str, db: Session = Depends(get_db)):
+    """Borra todos los usuarios con role='marketer' y sus perfiles/campañas — reset completo para demo."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    marketer_users = db.query(User).filter(User.role == 'marketer').all()
+    ids = [u.id for u in marketer_users]
+    deleted_profiles = db.query(MarketerProfile).filter(MarketerProfile.user_id.in_(ids)).delete(synchronize_session=False)
+    deleted_campaigns = db.query(AdCampaign).filter(AdCampaign.advertiser_email.in_([u.email for u in marketer_users])).delete(synchronize_session=False)
+    deleted_users = db.query(User).filter(User.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    return {'ok': True, 'deleted_users': deleted_users, 'deleted_profiles': deleted_profiles, 'deleted_campaigns': deleted_campaigns}
+
+
+@app.delete('/admin/reset-organizers')
+def admin_reset_organizers(secret: str, db: Session = Depends(get_db)):
+    """Borra todos los usuarios con role='organizer' y sus perfiles — reset completo para demo."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    org_users = db.query(User).filter(User.role == 'organizer').all()
+    ids = [u.id for u in org_users]
+    deleted_profiles = db.query(OrganizerProfile).filter(OrganizerProfile.user_id.in_(ids)).delete(synchronize_session=False)
+    deleted_users = db.query(User).filter(User.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    return {'ok': True, 'deleted_users': deleted_users, 'deleted_profiles': deleted_profiles}
