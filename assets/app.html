@@ -2029,6 +2029,12 @@ function PreferendumV8() {
 
   // Marketer state — Ad Creator
   const [mkScreen, setMkScreen] = useState("hub"); // hub|adcreator|reward|dashboard
+  const [mkToken, setMkToken] = useState(null);
+  const [mkEmail, setMkEmail] = useState("");
+  const [mkPw, setMkPw] = useState("");
+  const [mkCompany, setMkCompany] = useState("");
+  const [mkLoading, setMkLoading] = useState(false);
+  const [mkError, setMkError] = useState("");
   const [adStep, setAdStep] = useState(0);
   const [adType, setAdType] = useState(null);
   const [brandName, setBrand] = useState("");
@@ -8332,6 +8338,54 @@ function PreferendumV8() {
   // ══════════════════════════════════════════════════════════════
   // SCREEN: MARKETER HUB
   // ══════════════════════════════════════════════════════════════
+  // ── MARKETER LOGIN / REGISTER ─────────────────────────────────
+  if (screen === "marketer" && !mkToken) return /*#__PURE__*/React.createElement("div", {
+    style: phone
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {background:"#ffffff", borderBottom:"1px solid #e2e8f0", padding:"12px 16px", display:"flex", alignItems:"center", gap:10, position:"sticky", top:0, zIndex:99}
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => go("choose-type"),
+    style: {background:"none", border:"none", color:T.blue, fontSize:18, cursor:"pointer", padding:"0 4px"}
+  }, "←"), /*#__PURE__*/React.createElement("div", {
+    style: {fontWeight:900, fontSize:17, color:T.white, flex:1}
+  }, "prefer", /*#__PURE__*/React.createElement("span", {style:{color:T.blue}}, "endum"),
+    /*#__PURE__*/React.createElement("span", {style:{fontSize:12, color:T.gold, fontWeight:400}}, " · Anunciante"))),
+  /*#__PURE__*/React.createElement("div", {style:{padding:"32px 24px"}},
+    /*#__PURE__*/React.createElement("div", {style:{fontSize:24, fontWeight:900, color:T.white, marginBottom:6}}, "Crear cuenta de anunciante"),
+    /*#__PURE__*/React.createElement("div", {style:{fontSize:14, color:T.fog, marginBottom:28, lineHeight:1.6}}, "Registra tu empresa para lanzar campañas en los debates de Preferendum."),
+    /*#__PURE__*/React.createElement("div", {style:{background:T.panel, border:`1px solid ${T.rim}`, borderRadius:16, padding:"20px 18px", display:"flex", flexDirection:"column", gap:14}},
+      /*#__PURE__*/React.createElement(Input, {label:"Nombre de empresa o marca", placeholder:"Ej: JusticIA, Samsung, CAIP", value:mkCompany, onChange:v=>{setMkCompany(v); setMkError("");}}),
+      /*#__PURE__*/React.createElement(Input, {label:"Email corporativo", placeholder:"contacto@tuempresa.com", type:"email", value:mkEmail, onChange:v=>{setMkEmail(v); setMkError("");}}),
+      /*#__PURE__*/React.createElement(Input, {label:"Contraseña", placeholder:"••••••••", type:"password", value:mkPw, onChange:v=>{setMkPw(v); setMkError("");}}),
+      mkError && /*#__PURE__*/React.createElement("div", {style:{color:"#ef4444", fontSize:13}}, mkError),
+      /*#__PURE__*/React.createElement("button", {
+        disabled: mkLoading,
+        onClick: async () => {
+          if (!mkCompany.trim() || !mkEmail.trim() || !mkPw.trim()) { setMkError("Completa todos los campos."); return; }
+          setMkLoading(true); setMkError("");
+          try {
+            const r = await apiFetch('POST', '/marketer/register', {
+              email: mkEmail.trim(), password: mkPw, name: mkCompany.trim(),
+              company_name: mkCompany.trim(), country: 'CL', org_type: 'company'
+            });
+            setMkToken(r.token || "ok");
+            setBrand(mkCompany.trim());
+          } catch(e1) {
+            try {
+              const r2 = await apiFetch('POST', '/marketer/login', {email: mkEmail.trim(), password: mkPw});
+              setMkToken(r2.token || "ok");
+              setBrand(mkCompany.trim() || r2.user?.name || "");
+            } catch(e2) {
+              setMkError(e2.message || "No pudimos registrarte. Verifica tus datos.");
+            }
+          }
+          setMkLoading(false);
+        },
+        style: {background:mkLoading?T.mist:T.blue, border:"none", color:"#fff", borderRadius:12, padding:"14px 0", fontSize:16, fontWeight:700, cursor:mkLoading?"default":"pointer"}
+      }, mkLoading ? "⏳ Procesando..." : "Crear cuenta y continuar")
+    )
+  ));
+
   if (screen === "marketer") return /*#__PURE__*/React.createElement("div", {
     style: phone
   }, /*#__PURE__*/React.createElement("div", {
@@ -9981,7 +10035,7 @@ function PreferendumV8() {
         try {
           const today = new Date().toISOString().split('T')[0];
           const resp = await apiFetch('POST', '/marketer/campaigns', {
-            advertiser_email: email || (brandName||'anunciante').toLowerCase().replace(/\s+/g,'.')+('@demo.cl'),
+            advertiser_email: mkEmail || email || (brandName||'anunciante').toLowerCase().replace(/\s+/g,'.')+('@demo.cl'),
             advertiser_name: brandName || 'Anunciante',
             campaign_title: (brandName || 'Campa\u00F1a') + ' \u00B7 Preferendum',
             budget_clp: parseInt(budget) || 10000,
