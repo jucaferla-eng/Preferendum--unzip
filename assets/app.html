@@ -8338,53 +8338,226 @@ function PreferendumV8() {
   // ══════════════════════════════════════════════════════════════
   // SCREEN: MARKETER HUB
   // ══════════════════════════════════════════════════════════════
-  // ── MARKETER LOGIN / REGISTER ─────────────────────────────────
-  if (screen === "marketer" && !mkToken) return /*#__PURE__*/React.createElement("div", {
-    style: phone
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {background:"#ffffff", borderBottom:"1px solid #e2e8f0", padding:"12px 16px", display:"flex", alignItems:"center", gap:10, position:"sticky", top:0, zIndex:99}
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => go("choose-type"),
-    style: {background:"none", border:"none", color:T.blue, fontSize:18, cursor:"pointer", padding:"0 4px"}
-  }, "←"), /*#__PURE__*/React.createElement("div", {
-    style: {fontWeight:900, fontSize:17, color:T.white, flex:1}
-  }, "prefer", /*#__PURE__*/React.createElement("span", {style:{color:T.blue}}, "endum"),
-    /*#__PURE__*/React.createElement("span", {style:{fontSize:12, color:T.gold, fontWeight:400}}, " · Anunciante"))),
-  /*#__PURE__*/React.createElement("div", {style:{padding:"32px 24px"}},
-    /*#__PURE__*/React.createElement("div", {style:{fontSize:24, fontWeight:900, color:T.white, marginBottom:6}}, "Crear cuenta de anunciante"),
-    /*#__PURE__*/React.createElement("div", {style:{fontSize:14, color:T.fog, marginBottom:28, lineHeight:1.6}}, "Registra tu empresa para lanzar campañas en los debates de Preferendum."),
-    /*#__PURE__*/React.createElement("div", {style:{background:T.panel, border:`1px solid ${T.rim}`, borderRadius:16, padding:"20px 18px", display:"flex", flexDirection:"column", gap:14}},
-      /*#__PURE__*/React.createElement(Input, {label:"Nombre de empresa o marca", placeholder:"Ej: JusticIA, Samsung, CAIP", value:mkCompany, onChange:v=>{setMkCompany(v); setMkError("");}}),
-      /*#__PURE__*/React.createElement(Input, {label:"Email corporativo", placeholder:"contacto@tuempresa.com", type:"email", value:mkEmail, onChange:v=>{setMkEmail(v); setMkError("");}}),
-      /*#__PURE__*/React.createElement(Input, {label:"Contraseña", placeholder:"••••••••", type:"password", value:mkPw, onChange:v=>{setMkPw(v); setMkError("");}}),
-      mkError && /*#__PURE__*/React.createElement("div", {style:{color:"#ef4444", fontSize:13}}, mkError),
-      /*#__PURE__*/React.createElement("button", {
-        disabled: mkLoading,
-        onClick: async () => {
-          if (!mkCompany.trim() || !mkEmail.trim() || !mkPw.trim()) { setMkError("Completa todos los campos."); return; }
-          setMkLoading(true); setMkError("");
-          try {
-            const r = await apiFetch('POST', '/marketer/register', {
-              email: mkEmail.trim(), password: mkPw, name: mkCompany.trim(),
-              company_name: mkCompany.trim(), country: 'CL', org_type: 'company'
-            });
-            setMkToken(r.token || "ok");
-            setBrand(mkCompany.trim());
-          } catch(e1) {
-            try {
-              const r2 = await apiFetch('POST', '/marketer/login', {email: mkEmail.trim(), password: mkPw});
-              setMkToken(r2.token || "ok");
-              setBrand(mkCompany.trim() || r2.user?.name || "");
-            } catch(e2) {
-              setMkError(e2.message || "No pudimos registrarte. Verifica tus datos.");
-            }
-          }
-          setMkLoading(false);
-        },
-        style: {background:mkLoading?T.mist:T.blue, border:"none", color:"#fff", borderRadius:12, padding:"14px 0", fontSize:16, fontWeight:700, cursor:mkLoading?"default":"pointer"}
-      }, mkLoading ? "⏳ Procesando..." : "Crear cuenta y continuar")
-    )
-  ));
+  // ── MARKETER REGISTRO COMPLETO (multi-paso) ────────────────────
+  if (screen === "marketer" && !mkToken) {
+    const MK_STEPS = ["Rol","Datos personales","Empresa","Jefe/Supervisor","Documentos","Confirmar"];
+    const [mkRegStep, setMkRegStep] = React.useState(0);
+    const [mkIsSup, setMkIsSup] = React.useState(true);
+    const [mkName, setMkName] = React.useState("");
+    const [mkPhone, setMkPhone] = React.useState("");
+    const [mkRut, setMkRut] = React.useState("");
+    const [mkWeb, setMkWeb] = React.useState("");
+    const [mkCargo, setMkCargo] = React.useState("");
+    const [mkDept, setMkDept] = React.useState("");
+    const [mkCat, setMkCat] = React.useState("");
+    const [mkSupName, setMkSupName] = React.useState("");
+    const [mkSupEmail, setMkSupEmail] = React.useState("");
+    const [mkSupPhone, setMkSupPhone] = React.useState("");
+    const [mkSelfieUrl, setMkSelfieUrl] = React.useState("");
+    const [mkDocUrl, setMkDocUrl] = React.useState("");
+    const CATS = [
+      ["retail_comercio","🛍 Retail / Comercio"],["banca_finanzas","🏦 Banca y Finanzas"],
+      ["automotriz","🚗 Automotriz"],["tecnologia","💻 Tecnología"],
+      ["alimentos_bebidas","🍽 Alimentos y Bebidas"],["inmobiliaria","🏠 Inmobiliaria"],
+      ["salud_bienestar","❤️ Salud y Bienestar"],["educacion","🎓 Educación"],
+      ["turismo_viajes","✈️ Turismo y Viajes"],["telecomunicaciones","📡 Telecomunicaciones"],
+      ["energia_servicios_basicos","⚡ Energía / Servicios"],["medios_entretenimiento","🎬 Medios y Entretenimiento"],
+      ["ong_sin_fines_de_lucro","🤝 ONG / Sin Fines de Lucro"],["gobierno_sector_publico","🏛 Gobierno / Sector Público"],
+      ["otro","📦 Otro"],
+    ];
+    const hdr = /*#__PURE__*/React.createElement("div", {
+      style:{background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"12px 16px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:99}
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick:()=>{ if(mkRegStep>0) setMkRegStep(mkRegStep-1); else go("choose-type"); },
+      style:{background:"none",border:"none",color:T.blue,fontSize:18,cursor:"pointer",padding:"0 4px"}
+    },"←"), /*#__PURE__*/React.createElement("div", {style:{flex:1}},
+      /*#__PURE__*/React.createElement("div", {style:{fontWeight:900,fontSize:16,color:T.white}},
+        "prefer",/*#__PURE__*/React.createElement("span",{style:{color:T.blue}},"endum"),
+        /*#__PURE__*/React.createElement("span",{style:{fontSize:11,color:T.gold,fontWeight:400}}," · Registro Anunciante")),
+      /*#__PURE__*/React.createElement("div", {style:{fontSize:11,color:T.fog,marginTop:2}},
+        `Paso ${mkRegStep+1} de ${MK_STEPS.length} — ${MK_STEPS[mkRegStep]}`)
+    ), /*#__PURE__*/React.createElement("div", {
+      style:{display:"flex",gap:3}
+    }, MK_STEPS.map((_,i)=>/*#__PURE__*/React.createElement("div",{key:i,style:{width:20,height:4,borderRadius:2,background:i<=mkRegStep?T.blue:T.rim}})))
+    );
+    const next = () => setMkRegStep(s=>s+1);
+    const Card2 = ({children}) => /*#__PURE__*/React.createElement("div",{style:{background:T.panel,border:`1px solid ${T.rim}`,borderRadius:16,padding:"18px 16px",display:"flex",flexDirection:"column",gap:14}},children);
+
+    // PASO 0: ROL
+    if (mkRegStep === 0) return /*#__PURE__*/React.createElement("div",{style:phone}, hdr,
+      /*#__PURE__*/React.createElement("div",{style:{padding:"24px 20px"}},
+        /*#__PURE__*/React.createElement("div",{style:{fontSize:20,fontWeight:900,color:T.white,marginBottom:8}},"¿Cuál es tu rol?"),
+        /*#__PURE__*/React.createElement("div",{style:{fontSize:13,color:T.fog,marginBottom:24,lineHeight:1.6}},"Para anunciar en Preferendum necesitamos verificar que representas legítimamente a tu empresa. Nadie puede simplemente decir que es de Nestlé sin probarlo."),
+        /*#__PURE__*/React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:12}},
+          [true,false].map(isSup=>/*#__PURE__*/React.createElement("div",{
+            key:String(isSup),
+            onClick:()=>{setMkIsSup(isSup);next();},
+            style:{background:T.panel,border:`2px solid ${T.blue}44`,borderRadius:14,padding:"18px 16px",cursor:"pointer"}
+          },
+            /*#__PURE__*/React.createElement("div",{style:{fontSize:16,fontWeight:800,color:T.white,marginBottom:4}},
+              isSup?"👔 Soy Jefe / Supervisor":"👤 Soy Empleado / Ejecutivo"),
+            /*#__PURE__*/React.createElement("div",{style:{fontSize:12,color:T.fog,lineHeight:1.5}},
+              isSup?"Puedo autorizar campañas directamente. Mi cuenta quedará aprobada tras revisión de Preferendum.":"Necesito la aprobación de mi jefe. Le llegará un email para que confirme mi representación.")
+          ))
+        )
+      )
+    );
+
+    // PASO 1: DATOS PERSONALES
+    if (mkRegStep === 1) return /*#__PURE__*/React.createElement("div",{style:phone}, hdr,
+      /*#__PURE__*/React.createElement("div",{style:{padding:"24px 20px"}},
+        /*#__PURE__*/React.createElement("div",{style:{fontSize:18,fontWeight:900,color:T.white,marginBottom:20}},"Tus datos personales"),
+        /*#__PURE__*/React.createElement(Card2, null,
+          /*#__PURE__*/React.createElement(Input,{label:"Nombre completo",placeholder:"Juan Carlos Fernández",value:mkName,onChange:setMkName}),
+          /*#__PURE__*/React.createElement(Input,{label:"Email corporativo",placeholder:"juan@tuempresa.com",type:"email",value:mkEmail,onChange:v=>{setMkEmail(v);setMkError("");}}),
+          /*#__PURE__*/React.createElement(Input,{label:"Teléfono",placeholder:"+56 9 1234 5678",value:mkPhone,onChange:setMkPhone}),
+          /*#__PURE__*/React.createElement(Input,{label:"Contraseña",placeholder:"••••••••",type:"password",value:mkPw,onChange:setMkPw}),
+          mkError&&/*#__PURE__*/React.createElement("div",{style:{color:"#ef4444",fontSize:13}},mkError),
+          /*#__PURE__*/React.createElement("button",{
+            onClick:()=>{
+              if(!mkName.trim()||!mkEmail.trim()||!mkPw.trim()){setMkError("Nombre, email y contraseña son obligatorios.");return;}
+              setMkError("");next();
+            },
+            style:{background:T.blue,border:"none",color:"#fff",borderRadius:12,padding:"14px 0",fontSize:15,fontWeight:700,cursor:"pointer"}
+          },"Continuar →")
+        )
+      )
+    );
+
+    // PASO 2: EMPRESA
+    if (mkRegStep === 2) return /*#__PURE__*/React.createElement("div",{style:phone}, hdr,
+      /*#__PURE__*/React.createElement("div",{style:{padding:"24px 20px",paddingBottom:60}},
+        /*#__PURE__*/React.createElement("div",{style:{fontSize:18,fontWeight:900,color:T.white,marginBottom:20}},"Datos de la empresa"),
+        /*#__PURE__*/React.createElement(Card2, null,
+          /*#__PURE__*/React.createElement(Input,{label:"Nombre de la empresa",placeholder:"Nestlé Chile S.A.",value:mkCompany,onChange:v=>{setMkCompany(v);setBrand(v);}}),
+          /*#__PURE__*/React.createElement(Input,{label:"RUT empresa (opcional)",placeholder:"76.XXX.XXX-X",value:mkRut,onChange:setMkRut}),
+          /*#__PURE__*/React.createElement(Input,{label:"Sitio web",placeholder:"https://tuempresa.com",value:mkWeb,onChange:setMkWeb}),
+          /*#__PURE__*/React.createElement(Input,{label:"Tu cargo",placeholder:"Gerente de Marketing",value:mkCargo,onChange:setMkCargo}),
+          /*#__PURE__*/React.createElement(Input,{label:"Departamento",placeholder:"Marketing Digital",value:mkDept,onChange:setMkDept}),
+          /*#__PURE__*/React.createElement("div",null,
+            /*#__PURE__*/React.createElement("div",{style:{fontSize:12,fontWeight:700,color:T.silver,marginBottom:8}},"Rubro de la empresa"),
+            /*#__PURE__*/React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:8}},
+              CATS.map(([val,lbl])=>/*#__PURE__*/React.createElement("div",{
+                key:val,onClick:()=>setMkCat(val),
+                style:{padding:"6px 12px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",
+                  background:mkCat===val?T.blue:`${T.blue}22`,color:mkCat===val?"#fff":T.blue,border:`1px solid ${T.blue}44`}
+              },lbl))
+            )
+          ),
+          mkError&&/*#__PURE__*/React.createElement("div",{style:{color:"#ef4444",fontSize:13}},mkError),
+          /*#__PURE__*/React.createElement("button",{
+            onClick:()=>{
+              if(!mkCompany.trim()||!mkCat){setMkError("Nombre de empresa y rubro son obligatorios.");return;}
+              setMkError("");next();
+            },
+            style:{background:T.blue,border:"none",color:"#fff",borderRadius:12,padding:"14px 0",fontSize:15,fontWeight:700,cursor:"pointer"}
+          },"Continuar →")
+        )
+      )
+    );
+
+    // PASO 3: JEFE (solo si es empleado)
+    if (mkRegStep === 3) return /*#__PURE__*/React.createElement("div",{style:phone}, hdr,
+      /*#__PURE__*/React.createElement("div",{style:{padding:"24px 20px"}},
+        mkIsSup
+          ? /*#__PURE__*/React.createElement("div",null,
+              /*#__PURE__*/React.createElement("div",{style:{fontSize:18,fontWeight:900,color:T.white,marginBottom:12}},"Eres Supervisor"),
+              /*#__PURE__*/React.createElement("div",{style:{fontSize:13,color:T.fog,marginBottom:24,lineHeight:1.6}},"Como jefe, tu cuenta será revisada directamente por Preferendum. Recibirás confirmación por email."),
+              /*#__PURE__*/React.createElement("button",{onClick:next,style:{background:T.blue,border:"none",color:"#fff",borderRadius:12,padding:"14px 24px",fontSize:15,fontWeight:700,cursor:"pointer",width:"100%"}},"Continuar →")
+            )
+          : /*#__PURE__*/React.createElement("div",null,
+              /*#__PURE__*/React.createElement("div",{style:{fontSize:18,fontWeight:900,color:T.white,marginBottom:8}},"Datos de tu jefe"),
+              /*#__PURE__*/React.createElement("div",{style:{fontSize:13,color:T.fog,marginBottom:20,lineHeight:1.6}},"Tu jefe recibirá un email para autorizar tu cuenta. Él también debe tener selfie verificada en Preferendum."),
+              /*#__PURE__*/React.createElement(Card2, null,
+                /*#__PURE__*/React.createElement(Input,{label:"Nombre del jefe",placeholder:"María González",value:mkSupName,onChange:setMkSupName}),
+                /*#__PURE__*/React.createElement(Input,{label:"Email del jefe",placeholder:"jefe@tuempresa.com",type:"email",value:mkSupEmail,onChange:setMkSupEmail}),
+                /*#__PURE__*/React.createElement(Input,{label:"Teléfono del jefe",placeholder:"+56 9 8765 4321",value:mkSupPhone,onChange:setMkSupPhone}),
+                mkError&&/*#__PURE__*/React.createElement("div",{style:{color:"#ef4444",fontSize:13}},mkError),
+                /*#__PURE__*/React.createElement("button",{
+                  onClick:()=>{
+                    if(!mkSupName.trim()||!mkSupEmail.trim()){setMkError("Nombre y email del jefe son obligatorios.");return;}
+                    setMkError("");next();
+                  },
+                  style:{background:T.blue,border:"none",color:"#fff",borderRadius:12,padding:"14px 0",fontSize:15,fontWeight:700,cursor:"pointer"}
+                },"Continuar →")
+              )
+            )
+      )
+    );
+
+    // PASO 4: DOCUMENTOS (selfie + poderes)
+    if (mkRegStep === 4) return /*#__PURE__*/React.createElement("div",{style:phone}, hdr,
+      /*#__PURE__*/React.createElement("div",{style:{padding:"24px 20px"}},
+        /*#__PURE__*/React.createElement("div",{style:{fontSize:18,fontWeight:900,color:T.white,marginBottom:8}},"Verificación de identidad"),
+        /*#__PURE__*/React.createElement("div",{style:{fontSize:13,color:T.fog,marginBottom:20,lineHeight:1.6}},"Nadie puede representar a una empresa sin probarlo. Necesitamos una selfie tuya y el documento que acredita tus poderes."),
+        /*#__PURE__*/React.createElement(Card2, null,
+          /*#__PURE__*/React.createElement("div",{style:{background:`${T.blue}18`,border:`1px solid ${T.blue}33`,borderRadius:12,padding:"12px 14px",fontSize:12,color:T.blue,lineHeight:1.6}},
+            "📸 Selfie: foto tuya sosteniendo tu cédula de identidad junto a tu rostro.",/*#__PURE__*/React.createElement("br",null),
+            "📄 Documento de poderes: poder notarial, contrato, o carta de la empresa que prueba que puedes representarla comercialmente."
+          ),
+          /*#__PURE__*/React.createElement(Input,{label:"URL de tu selfie con cédula",placeholder:"https://drive.google.com/... o similar",value:mkSelfieUrl,onChange:setMkSelfieUrl}),
+          /*#__PURE__*/React.createElement(Input,{label:"URL del documento de poderes",placeholder:"https://drive.google.com/... o similar",value:mkDocUrl,onChange:setMkDocUrl}),
+          mkError&&/*#__PURE__*/React.createElement("div",{style:{color:"#ef4444",fontSize:13}},mkError),
+          /*#__PURE__*/React.createElement("button",{
+            onClick:()=>{
+              if(!mkSelfieUrl.trim()||!mkDocUrl.trim()){setMkError("Ambos documentos son obligatorios.");return;}
+              setMkError("");next();
+            },
+            style:{background:T.blue,border:"none",color:"#fff",borderRadius:12,padding:"14px 0",fontSize:15,fontWeight:700,cursor:"pointer"}
+          },"Continuar →")
+        )
+      )
+    );
+
+    // PASO 5: CONFIRMAR Y ENVIAR
+    if (mkRegStep === 5) return /*#__PURE__*/React.createElement("div",{style:phone}, hdr,
+      /*#__PURE__*/React.createElement("div",{style:{padding:"24px 20px"}},
+        /*#__PURE__*/React.createElement("div",{style:{fontSize:18,fontWeight:900,color:T.white,marginBottom:20}},"Confirma tu registro"),
+        /*#__PURE__*/React.createElement(Card2, null,
+          [
+            ["Nombre",mkName],["Email",mkEmail],["Teléfono",mkPhone],
+            ["Empresa",mkCompany],["RUT",mkRut||"—"],["Web",mkWeb||"—"],
+            ["Cargo",mkCargo||"—"],["Departamento",mkDept||"—"],
+            ["Rubro",CATS.find(c=>c[0]===mkCat)?.[1]||"—"],
+            ["Rol",mkIsSup?"Supervisor / Jefe":"Empleado"],
+            ...(!mkIsSup?[["Jefe",`${mkSupName} (${mkSupEmail})`]]:[] ),
+          ].map(([l,v])=>/*#__PURE__*/React.createElement("div",{key:l,style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,borderBottom:`1px solid ${T.rim}`,paddingBottom:8}},
+            /*#__PURE__*/React.createElement("span",{style:{fontSize:12,color:T.fog,flexShrink:0}},l),
+            /*#__PURE__*/React.createElement("span",{style:{fontSize:12,color:T.snow,textAlign:"right",wordBreak:"break-all"}},v)
+          )),
+          mkError&&/*#__PURE__*/React.createElement("div",{style:{color:"#ef4444",fontSize:13}},mkError),
+          /*#__PURE__*/React.createElement("button",{
+            disabled:mkLoading,
+            onClick: async()=>{
+              setMkLoading(true); setMkError("");
+              try {
+                const r = await apiFetch('POST','/marketer/register',{
+                  email:mkEmail.trim(), password:mkPw, name:mkName.trim(),
+                  phone:mkPhone, country:'CL', org_type:'company',
+                  is_supervisor:mkIsSup, company_name:mkCompany.trim(),
+                  company_rut:mkRut, company_web:mkWeb,
+                  business_category:mkCat, cargo:mkCargo, department:mkDept,
+                  supervisor_name:mkSupName, supervisor_email:mkSupEmail, supervisor_phone:mkSupPhone,
+                });
+                setMkToken(r.token||"ok");
+                setBrand(mkCompany.trim());
+              } catch(e1){
+                if(e1.status===400&&e1.message?.includes('already')){
+                  try{
+                    const r2=await apiFetch('POST','/marketer/login',{email:mkEmail.trim(),password:mkPw});
+                    setMkToken(r2.token||"ok");
+                    setBrand(mkCompany.trim()||r2.user?.name||"");
+                  }catch(e2){ setMkError(e2.message||"Error al iniciar sesión."); }
+                } else { setMkError(e1.message||"Error al registrar. Revisa los datos."); }
+              }
+              setMkLoading(false);
+            },
+            style:{background:mkLoading?T.mist:T.green,border:"none",color:"#fff",borderRadius:12,padding:"16px 0",fontSize:16,fontWeight:700,cursor:mkLoading?"default":"pointer"}
+          }, mkLoading?"⏳ Enviando...":"✓ Crear cuenta de anunciante")
+        )
+      )
+    );
+  }
 
   if (screen === "marketer") return /*#__PURE__*/React.createElement("div", {
     style: phone
