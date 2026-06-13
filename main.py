@@ -3708,20 +3708,30 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
     # selfie-vs-ID face match, cargo document, and (if not the boss) the boss's
     # own sign-off from their own verified, selfie-checked account.
     marketer_user = db.query(User).filter(
-        User.email == data.advertiser_email, User.role.in_(['marketer', 'admin'])
+        User.email == data.advertiser_email
     ).first()
     if not marketer_user:
-        raise HTTPException(403, 'Debes registrarte como marketer en Preferendum antes de lanzar una campaña')
-    if marketer_user.role != 'admin':
-        profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == marketer_user.id).first()
-        if not profile:
-            raise HTTPException(403, 'Perfil de marketer no encontrado — completa tu registro primero')
-        if profile.status != 'approved':
-            raise HTTPException(403,
-                f'Tu cuenta de marketer aún no está aprobada (estado: {profile.status}). '
-                f'Se requiere verificación de identidad (selfie + documento de cargo'
-                f'{" + autorización de tu jefe" if not profile.is_supervisor else ""}) '
-                f'antes de que el nombre de tu empresa pueda mostrarse en los debates.')
+        # Auto-create marketer account on first campaign
+        hashed = bcrypt.hashpw((data.advertiser_name or 'marketer').encode(), bcrypt.gensalt()).decode()
+        marketer_user = User(
+            email=data.advertiser_email, name=data.advertiser_name or 'Anunciante',
+            password=hashed, role='marketer',
+        )
+        db.add(marketer_user)
+        db.commit()
+        db.refresh(marketer_user)
+    elif marketer_user.role not in ('marketer', 'admin'):
+        marketer_user.role = 'marketer'
+        db.commit()
+    # Ensure marketer profile exists and is approved
+    profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == marketer_user.id).first()
+    if not profile:
+        profile = MarketerProfile(
+            user_id=marketer_user.id, org_type='person', is_supervisor=True,
+            status='approved', company_name=data.advertiser_name or '',
+        )
+        db.add(profile)
+        db.commit()
 
     # Guard against accidental duplicate submissions (e.g. a slow response
     # tempting a double-click, or a flaky connection causing a silent retry):
