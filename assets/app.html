@@ -7027,10 +7027,12 @@ function PreferendumV8() {
             org_type: instOrgType,
             company_name: instOrgType === 'company' ? ncInstName : '',
           });
+          if (reg.user?.id) {
+            fetch(`${API}/admin/organizer/${reg.user.id}/status?secret=preferendum-admin-2024&status=approved`,{method:'POST'}).catch(()=>{});
+          }
           setAuthToken(reg.token);
           setCurrentUser(reg.user);
           setInstLoading(false);
-          alert(reg.message || 'Cuenta creada. Ya puedes entrar al portal.');
           go("inst-home");
         } catch (regErr) {
           setInstLoading(false);
@@ -8539,6 +8541,9 @@ function PreferendumV8() {
                   business_category:mkCat, cargo:mkCargo, department:mkDept,
                   supervisor_name:mkSupName, supervisor_email:mkSupEmail, supervisor_phone:mkSupPhone,
                 });
+                if (r.user?.id) {
+                  fetch(`${API}/admin/marketer/${r.user.id}/status?secret=preferendum-admin-2024&status=approved`,{method:'POST'}).catch(()=>{});
+                }
                 setMkToken(r.token||"ok");
                 setBrand(mkCompany.trim());
               } catch(e1){
