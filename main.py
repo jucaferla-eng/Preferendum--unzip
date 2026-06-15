@@ -532,18 +532,23 @@ def _migrate():
         # ad_campaigns — nuevas columnas de targeting por ingreso
         existing_ad_cols = {c['name'] for c in inspector.get_columns('ad_campaigns')} if inspector.has_table('ad_campaigns') else set()
         for col, defn in [
-            ('target_communes',   "TEXT DEFAULT ''"),
-            ('target_se_tiers',   "TEXT DEFAULT 'A,B,C,D'"),
-            ('target_income_min', 'FLOAT DEFAULT 0.0'),
-            ('target_income_max', 'FLOAT DEFAULT 9999.0'),
-            ('target_age_min',    'INTEGER DEFAULT 13'),
-            ('target_age_max',    'INTEGER DEFAULT 99'),
-            ('logo_url',          "TEXT DEFAULT ''"),
-            ('ad_copy',           "TEXT DEFAULT ''"),
-            ('ad_image_url',      "TEXT DEFAULT ''"),
-            ('created_at',        'TIMESTAMP DEFAULT NOW()'),
-            ('link_url',          "TEXT DEFAULT ''"),
-            ('target_debate_ids', "TEXT DEFAULT ''"),
+            ('target_communes',     "TEXT DEFAULT ''"),
+            ('target_se_tiers',     "TEXT DEFAULT 'A,B,C,D'"),
+            ('target_income_min',   'FLOAT DEFAULT 0.0'),
+            ('target_income_max',   'FLOAT DEFAULT 9999.0'),
+            ('target_age_min',      'INTEGER DEFAULT 13'),
+            ('target_age_max',      'INTEGER DEFAULT 99'),
+            ('logo_url',            "TEXT DEFAULT ''"),
+            ('ad_copy',             "TEXT DEFAULT ''"),
+            ('ad_image_url',        "TEXT DEFAULT ''"),
+            ('created_at',          'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+            ('link_url',            "TEXT DEFAULT ''"),
+            ('target_debate_ids',   "TEXT DEFAULT ''"),
+            ('target_age_ranges',   "TEXT DEFAULT ''"),
+            ('target_categories',   "TEXT DEFAULT ''"),
+            ('excluded_categories', "TEXT DEFAULT ''"),
+            ('blocked_competitors', "TEXT DEFAULT ''"),
+            ('spent_clp',           'FLOAT DEFAULT 0.0'),
         ]:
             if col not in existing_ad_cols:
                 try:
