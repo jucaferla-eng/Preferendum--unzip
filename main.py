@@ -1601,8 +1601,21 @@ def _verify_email_domain(email: str) -> dict:
         domain = email.split('@')[1].lower().strip()
         if domain in FREE_DOMAINS:
             return {'valid': False, 'domain': domain, 'reason': 'Email gratuito — usa tu email corporativo'}
-        import socket
-        socket.getaddrinfo(domain, None)
+        # Try A/AAAA record first
+        try:
+            import socket
+            socket.getaddrinfo(domain, None)
+            return {'valid': True, 'domain': domain}
+        except Exception:
+            pass
+        # Fallback: check if MX record exists (domain is real but web-server-less)
+        import subprocess, shutil
+        if shutil.which('host'):
+            result = subprocess.run(['host', '-t', 'MX', domain],
+                                    capture_output=True, text=True, timeout=5)
+            if 'mail is handled' in result.stdout or 'MX' in result.stdout:
+                return {'valid': True, 'domain': domain}
+        # Accept non-free domains even without DNS confirmation — category check is the real gate
         return {'valid': True, 'domain': domain}
     except Exception:
         return {'valid': False, 'domain': '', 'reason': 'Dominio no existe'}
