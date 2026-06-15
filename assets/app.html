@@ -2035,6 +2035,20 @@ function PreferendumV8() {
   const [mkCompany, setMkCompany] = useState("");
   const [mkLoading, setMkLoading] = useState(false);
   const [mkError, setMkError] = useState("");
+  const [mkRegStep, setMkRegStep] = useState(0);
+  const [mkIsSup, setMkIsSup] = useState(true);
+  const [mkName, setMkName] = useState("");
+  const [mkPhone, setMkPhone] = useState("");
+  const [mkRut, setMkRut] = useState("");
+  const [mkWeb, setMkWeb] = useState("");
+  const [mkCargo, setMkCargo] = useState("");
+  const [mkDept, setMkDept] = useState("");
+  const [mkCat, setMkCat] = useState("");
+  const [mkSupName, setMkSupName] = useState("");
+  const [mkSupEmail, setMkSupEmail] = useState("");
+  const [mkSupPhone, setMkSupPhone] = useState("");
+  const [mkSelfieUrl, setMkSelfieUrl] = useState("");
+  const [mkDocUrl, setMkDocUrl] = useState("");
   const [adStep, setAdStep] = useState(0);
   const [adType, setAdType] = useState(null);
   const [brandName, setBrand] = useState("");
@@ -8341,20 +8355,6 @@ function PreferendumV8() {
   // ── MARKETER REGISTRO COMPLETO (multi-paso) ────────────────────
   if (screen === "marketer" && !mkToken) {
     const MK_STEPS = ["Rol","Datos personales","Empresa","Jefe/Supervisor","Documentos","Confirmar"];
-    const [mkRegStep, setMkRegStep] = React.useState(0);
-    const [mkIsSup, setMkIsSup] = React.useState(true);
-    const [mkName, setMkName] = React.useState("");
-    const [mkPhone, setMkPhone] = React.useState("");
-    const [mkRut, setMkRut] = React.useState("");
-    const [mkWeb, setMkWeb] = React.useState("");
-    const [mkCargo, setMkCargo] = React.useState("");
-    const [mkDept, setMkDept] = React.useState("");
-    const [mkCat, setMkCat] = React.useState("");
-    const [mkSupName, setMkSupName] = React.useState("");
-    const [mkSupEmail, setMkSupEmail] = React.useState("");
-    const [mkSupPhone, setMkSupPhone] = React.useState("");
-    const [mkSelfieUrl, setMkSelfieUrl] = React.useState("");
-    const [mkDocUrl, setMkDocUrl] = React.useState("");
     const CATS = [
       ["retail_comercio","🛍 Retail / Comercio"],["banca_finanzas","🏦 Banca y Finanzas"],
       ["automotriz","🚗 Automotriz"],["tecnologia","💻 Tecnología"],

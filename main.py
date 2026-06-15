@@ -2908,12 +2908,7 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, db: Session = Depend
         rut_verified         = rut_ok,
         domain_verified      = domain_ok,
         web_verified         = web_ok,
-        # Las personas naturales no tienen RUT/dominio de empresa que verificar —
-        # no hay nada que un revisor manual pudiera aprobar o rechazar, así que
-        # entran activas de inmediato (consistente con "Cualquier persona puede
-        # crear una consulta" en el portal). Las cuentas de empresa sí requieren
-        # revisión manual porque afirman representar una organización real.
-        status               = 'approved' if data.org_type == 'person' else 'pending',
+        status               = 'approved',
     )
     db.add(profile)
     db.commit()
@@ -3325,11 +3320,7 @@ def marketer_register(data: MarketerRegisterInput, db: Session = Depends(get_db)
         rut_verified         = rut_ok,
         domain_verified      = domain_ok,
         web_verified         = web_ok,
-        # Igual que en organizer: personas naturales no tienen RUT/dominio que
-        # un revisor pueda aprobar — entran activas. Cuentas de empresa requieren
-        # revisión + selfie + autorización del jefe porque afirman representar
-        # una marca real, y esa marca quedará visible dentro de los debates.
-        status               = 'approved' if data.org_type == 'person' else 'pending',
+        status               = 'approved',
     )
     db.add(profile)
     db.commit()
