@@ -7062,7 +7062,7 @@ function PreferendumV8() {
     style: {
       background: "none",
       border: "none",
-      color: T.snow,
+      color: T.blue,
       fontSize: 16,
       cursor: "pointer",
       padding: "4px 8px 4px 0"
@@ -7079,12 +7079,12 @@ function PreferendumV8() {
     style: {
       fontWeight: 900,
       fontSize: 15,
-      color: T.white
+      color: "#111827"
     }
   }, ncInstName || 'Mi organización'), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 10,
-      color: T.fog
+      color: "#64748b"
     }
   }, "Portal institucional")), /*#__PURE__*/React.createElement("button", {
     onClick: () => setInstTab("create"),
@@ -8371,10 +8371,10 @@ function PreferendumV8() {
       onClick:()=>{ if(mkRegStep>0) setMkRegStep(mkRegStep-1); else go("choose-type"); },
       style:{background:"none",border:"none",color:T.blue,fontSize:18,cursor:"pointer",padding:"0 4px"}
     },"←"), /*#__PURE__*/React.createElement("div", {style:{flex:1}},
-      /*#__PURE__*/React.createElement("div", {style:{fontWeight:900,fontSize:16,color:T.white}},
+      /*#__PURE__*/React.createElement("div", {style:{fontWeight:900,fontSize:16,color:"#111827"}},
         "prefer",/*#__PURE__*/React.createElement("span",{style:{color:T.blue}},"endum"),
-        /*#__PURE__*/React.createElement("span",{style:{fontSize:11,color:T.gold,fontWeight:400}}," · Registro Anunciante")),
-      /*#__PURE__*/React.createElement("div", {style:{fontSize:11,color:T.fog,marginTop:2}},
+        /*#__PURE__*/React.createElement("span",{style:{fontSize:11,color:"#d97706",fontWeight:400}}," · Registro Anunciante")),
+      /*#__PURE__*/React.createElement("div", {style:{fontSize:11,color:"#64748b",marginTop:2}},
         `Paso ${mkRegStep+1} de ${MK_STEPS.length} — ${MK_STEPS[mkRegStep]}`)
     ), /*#__PURE__*/React.createElement("div", {
       style:{display:"flex",gap:3}
@@ -8597,7 +8597,7 @@ function PreferendumV8() {
     style: {
       fontWeight: 900,
       fontSize: 17,
-      color: T.white,
+      color: "#111827",
       flex: 1
     }
   }, "prefer", /*#__PURE__*/React.createElement("span", {
@@ -8607,7 +8607,7 @@ function PreferendumV8() {
   }, "endum"), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 12,
-      color: T.gold,
+      color: "#d97706",
       fontWeight: 400
     }
   }, " \xB7 Portal Anunciante"))), /*#__PURE__*/React.createElement("div", {
