@@ -4137,6 +4137,22 @@ def _recalculate_global_index(db):
     db.commit()
 
 
+@app.get('/admin/db-schema')
+def db_schema(secret: str):
+    """Inspecciona columnas de tablas clave — diagnóstico remoto."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from sqlalchemy import inspect as sa_inspect
+    inspector = sa_inspect(engine)
+    result = {}
+    for table in ['ad_campaigns', 'users', 'debates', 'organizer_profiles', 'marketer_profiles']:
+        if inspector.has_table(table):
+            result[table] = [c['name'] for c in inspector.get_columns(table)]
+        else:
+            result[table] = 'TABLE_MISSING'
+    return result
+
+
 @app.post('/admin/run-market-agent')
 def run_market_agent(secret: str, db: Session = Depends(get_db)):
     """Corre el agente completo de una vez. Para uso manual o pruebas."""
