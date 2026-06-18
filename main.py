@@ -2969,13 +2969,13 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, db: Session = Depend
         'web_ok':       web_ok,
         'needs_doc':    True,
         'needs_selfie': True,
-        'status':       'pending',
+        'status':       profile.status,
     }
     return {
         'token': make_token(user.id, 'organizer'),
         'user':  {'id': user.id, 'name': user.name, 'email': user.email, 'role': 'organizer'},
         'verifications': verifications,
-        'message': 'Registro iniciado. Verifica tu email y sube tu documento de cargo.',
+        'message': 'Registro completado. Tu cuenta está activa.',
     }
 
 
