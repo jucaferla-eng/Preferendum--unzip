@@ -1557,37 +1557,46 @@ def confirm_phone(data: OTPInput, user: User = Depends(get_current_user), db: Se
 
 def _verify_company_rut(rut: str) -> dict:
     """
-    Verifica RUT empresa contra el SII.
-    Devuelve {valid, razon_social, activo}
+    Valida RUT chileno por dígito verificador (matemático, siempre funciona).
+    Intenta enriquecer con razón social desde SII como bonus — si falla, no importa.
     """
     rut_clean = rut.replace('.', '').replace('-', '').strip().upper()
-    try:
-        resp = _requests.get(
-            f'https://zeus.sii.cl/cvc_cgi/stc/getstc?RUT={rut_clean}',
-            headers={'User-Agent': 'Mozilla/5.0'},
-            timeout=10,
-        )
-        if resp.status_code == 200 and 'razon_social' in resp.text.lower():
-            import re
-            match = re.search(r'<razon_social>(.*?)</razon_social>', resp.text, re.IGNORECASE)
-            razon = match.group(1).strip() if match else ''
-            return {'valid': True, 'razon_social': razon, 'activo': True}
-    except Exception:
-        pass
-    # Fallback: validar formato RUT chileno
+    # Validación matemática del dígito verificador — esto es el check real
+    format_valid = False
     try:
         digits = rut_clean[:-1]
         dv     = rut_clean[-1]
         n = int(digits)
+        if n < 1_000_000:
+            return {'valid': False, 'razon_social': '', 'activo': False}
         s, m = 0, 2
         while n:
             s += (n % 10) * m
             n //= 10
             m = 2 if m == 7 else m + 1
         expected = str(11 - s % 11).replace('10', 'K').replace('11', '0')
-        return {'valid': dv == expected, 'razon_social': '', 'activo': None}
+        format_valid = (dv == expected)
     except Exception:
         return {'valid': False, 'razon_social': '', 'activo': False}
+
+    if not format_valid:
+        return {'valid': False, 'razon_social': '', 'activo': False}
+
+    # Optional enrichment: try SII for company name (best-effort, 5s max)
+    razon = ''
+    try:
+        resp = _requests.get(
+            f'https://zeus.sii.cl/cvc_cgi/stc/getstc?RUT={rut_clean}',
+            headers={'User-Agent': 'Mozilla/5.0'},
+            timeout=5,
+        )
+        if resp.status_code == 200 and 'razon_social' in resp.text.lower():
+            match = re.search(r'<razon_social>(.*?)</razon_social>', resp.text, re.IGNORECASE)
+            razon = match.group(1).strip() if match else ''
+    except Exception:
+        pass
+
+    return {'valid': True, 'razon_social': razon, 'activo': True}
 
 
 def _verify_email_domain(email: str) -> dict:
