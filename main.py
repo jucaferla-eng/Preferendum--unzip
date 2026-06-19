@@ -28,7 +28,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from fastapi import (FastAPI, HTTPException, Depends, UploadFile,
-                     File, Form, Query, Request)
+                     File, Form, Query, Request, BackgroundTasks)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -1446,7 +1446,7 @@ En memoria del Fundador José Ignacio Fernández (1989–2024), quien demostró 
 # ══════════════════════════════════════════════════════════════
 
 @app.post('/auth/register')
-def register(data: RegisterInput, db: Session = Depends(get_db)):
+def register(data: RegisterInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(400, 'Email already registered')
     hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
@@ -1465,8 +1465,8 @@ def register(data: RegisterInput, db: Session = Depends(get_db)):
         channel='email', expires_at=datetime.utcnow() + timedelta(minutes=10)
     ))
     db.commit()
-    send_email_otp(user.email, code, user.name)
-    send_welcome_certificate(user.email, user.name, user.id)
+    bg.add_task(send_email_otp, user.email, code, user.name)
+    bg.add_task(send_welcome_certificate, user.email, user.name, user.id)
     return {
         'token': make_token(user.id),
         'user': {'id': user.id, 'name': user.name, 'email': user.email, 'verify_level': 0},
@@ -1502,7 +1502,7 @@ def me(user: User = Depends(get_current_user)):
 # ══════════════════════════════════════════════════════════════
 
 @app.post('/verify/email/send')
-def send_email_code(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def send_email_code(bg: BackgroundTasks, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if user.email_verified:
         return {'message': 'Email already verified', 'verified': True}
     db.query(OTPCode).filter(OTPCode.user_id == user.id, OTPCode.channel == 'email', OTPCode.used == False).update({'used': True})
@@ -1510,7 +1510,7 @@ def send_email_code(user: User = Depends(get_current_user), db: Session = Depend
     code = gen_otp()
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email', expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
-    send_email_otp(user.email, code, user.name)
+    bg.add_task(send_email_otp, user.email, code, user.name)
     return {'message': f'Code sent to {user.email}'}
 
 @app.post('/verify/email/confirm')
@@ -2878,7 +2878,7 @@ class OrganizerRegisterFullInput(BaseModel):
 
 
 @app.post('/organizer/register')
-def organizer_register_v2(data: OrganizerRegisterFullInput, db: Session = Depends(get_db)):
+def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(400, 'Email ya registrado')
 
@@ -2939,7 +2939,7 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, db: Session = Depend
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
                    expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
-    send_email_otp(user.email, code, user.name)
+    bg.add_task(send_email_otp, user.email, code, user.name)
 
     # Si necesita autorización de supervisor → enviar email al jefe
     if not data.is_supervisor and data.supervisor_email:
@@ -2952,13 +2952,13 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, db: Session = Depend
             token            = token,
         ))
         db.commit()
-        _send_supervisor_authorization_email(
-            supervisor_email = data.supervisor_email,
-            employee_name    = user.name,
-            employee_email   = user.email,
-            company          = data.company_name,
-            cargo            = data.cargo,
-            token            = token,
+        bg.add_task(_send_supervisor_authorization_email,
+            supervisor_email=data.supervisor_email,
+            employee_name=user.name,
+            employee_email=user.email,
+            company=data.company_name,
+            cargo=data.cargo,
+            token=token,
         )
 
     verifications = {
@@ -3283,7 +3283,7 @@ class MarketerRegisterInput(BaseModel):
 
 
 @app.post('/marketer/register')
-def marketer_register(data: MarketerRegisterInput, db: Session = Depends(get_db)):
+def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(400, 'Email already registered')
 
@@ -3351,7 +3351,7 @@ def marketer_register(data: MarketerRegisterInput, db: Session = Depends(get_db)
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
                    expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
-    send_email_otp(user.email, code, user.name)
+    bg.add_task(send_email_otp, user.email, code, user.name)
 
     # Si necesita autorización del jefe → email al jefe (con su propia cuenta verificada)
     if not data.is_supervisor and data.supervisor_email:
@@ -3364,14 +3364,14 @@ def marketer_register(data: MarketerRegisterInput, db: Session = Depends(get_db)
             token            = token,
         ))
         db.commit()
-        _send_supervisor_authorization_email(
-            supervisor_email = data.supervisor_email,
-            employee_name    = user.name,
-            employee_email   = user.email,
-            company          = data.company_name,
-            cargo            = data.cargo,
-            token            = token,
-            role             = 'marketer',
+        bg.add_task(_send_supervisor_authorization_email,
+            supervisor_email=data.supervisor_email,
+            employee_name=user.name,
+            employee_email=user.email,
+            company=data.company_name,
+            cargo=data.cargo,
+            token=token,
+            role='marketer',
         )
 
     verifications = {
