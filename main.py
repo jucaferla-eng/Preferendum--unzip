@@ -39,6 +39,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
 import jwt
 import bcrypt
+from blockchain import blockchain as _blockchain
 
 # ══════════════════════════════════════════════════════════════
 # DATABASE
@@ -2464,8 +2465,9 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         raise HTTPException(400, 'Invalid option')
     option = opts[data.option_index]
     verify_code = generate_verify_code()
-    blockchain_tx = mock_blockchain_tx()
     vote_hash = hashlib.sha256(f'{debate_id}:{option}:{verify_code}'.encode()).hexdigest()
+    bc_result = _blockchain.anchor_vote(debate_id, vote_hash, verify_code)
+    blockchain_tx = bc_result['tx_hash']
     encrypted = encrypt_vote_aes(debate_id, option, {'country': 'CL'})
     vote = DebateVote(
         debate_id=debate_id, voter_id=None,
@@ -4173,6 +4175,12 @@ def aws_check(secret: str):
     else:
         result['rekognition'] = 'NO_CREDENTIALS'
     return result
+
+@app.get('/admin/blockchain-status')
+def blockchain_status(secret: str):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    return _blockchain.status()
 
 @app.get('/admin/db-schema')
 def db_schema(secret: str):
