@@ -4146,6 +4146,34 @@ def _recalculate_global_index(db):
     db.commit()
 
 
+@app.get('/admin/aws-check')
+def aws_check(secret: str):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    key = os.getenv('AWS_ACCESS_KEY_ID', '')
+    sec = os.getenv('AWS_SECRET_ACCESS_KEY', '')
+    region = os.getenv('AWS_REGION', 'us-east-1')
+    result = {
+        'key_set': bool(key),
+        'key_prefix': key[:4] if key else '',
+        'key_length': len(key),
+        'secret_set': bool(sec),
+        'secret_length': len(sec),
+        'region': region,
+    }
+    if key and sec:
+        try:
+            import boto3
+            rek = boto3.client('rekognition', region_name=region,
+                               aws_access_key_id=key, aws_secret_access_key=sec)
+            rek.list_collections(MaxResults=1)
+            result['rekognition'] = 'CONNECTED'
+        except Exception as e:
+            result['rekognition'] = f'ERROR: {str(e)[:120]}'
+    else:
+        result['rekognition'] = 'NO_CREDENTIALS'
+    return result
+
 @app.get('/admin/db-schema')
 def db_schema(secret: str):
     """Inspecciona columnas de tablas clave — diagnóstico remoto."""
