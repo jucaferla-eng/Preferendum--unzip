@@ -113,6 +113,10 @@ class PreferendumBlockchain:
         self.wallet_address   = os.getenv('WALLET_ADDRESS')
         self.private_key      = os.getenv('WALLET_PRIVATE_KEY') or self._read_secret('WALLET_PRIVATE_KEY')
         self.rpc_url          = os.getenv('POLYGON_RPC_URL', 'https://polygon-rpc.com')
+        self.web3             = None
+        self.contract         = None
+        self.live             = False
+        self._init()
 
     @staticmethod
     def _read_secret(name: str) -> str:
@@ -123,10 +127,6 @@ class PreferendumBlockchain:
             except Exception:
                 pass
         return ''
-        self.web3             = None
-        self.contract         = None
-        self.live             = False
-        self._init()
 
     def _init(self):
         """Try to connect to Polygon. Fall back to mock if not configured."""
