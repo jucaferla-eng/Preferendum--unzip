@@ -111,8 +111,18 @@ class PreferendumBlockchain:
     def __init__(self):
         self.contract_address = os.getenv('CONTRACT_ADDRESS')
         self.wallet_address   = os.getenv('WALLET_ADDRESS')
-        self.private_key      = os.getenv('WALLET_PRIVATE_KEY')
+        self.private_key      = os.getenv('WALLET_PRIVATE_KEY') or self._read_secret('WALLET_PRIVATE_KEY')
         self.rpc_url          = os.getenv('POLYGON_RPC_URL', 'https://polygon-rpc.com')
+
+    @staticmethod
+    def _read_secret(name: str) -> str:
+        for path in [f'/etc/secrets/{name}', f'./{name}']:
+            try:
+                with open(path, 'r') as f:
+                    return f.read().strip()
+            except Exception:
+                pass
+        return ''
         self.web3             = None
         self.contract         = None
         self.live             = False
