@@ -17,14 +17,14 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.caip.preferendumapp",
-      "buildNumber": "51",
+      "buildNumber": "59",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "com.caip.preferendum",
-      "versionCode": 1,
+      "versionCode": 75,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#090D18"
