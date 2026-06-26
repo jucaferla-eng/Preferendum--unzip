@@ -3091,11 +3091,18 @@ function PreferendumV8() {
           }).catch(() => {});
         }
         setVfLoading(false);
-        go("debates-splash");
-        setTimeout(() => {
-          setScreen("feed");
-          setTab("feed");
-        }, 2200);
+        if (!data.user.selfie_verified) {
+          const u = data.user;
+          const step = u.email_verified ? (u.phone_verified ? (u.id_verified ? 4 : 3) : 2) : 1;
+          setVfStep(step);
+          go("verify-identity");
+        } else {
+          go("debates-splash");
+          setTimeout(() => {
+            setScreen("feed");
+            setTab("feed");
+          }, 2200);
+        }
       } catch (e) {
         setVfError(e.message);
         setVfLoading(false);
@@ -3571,7 +3578,10 @@ function PreferendumV8() {
         fontSize: 12,
         cursor: "pointer"
       }
-    }, "No recib\xED el c\xF3digo \u2014 reenviar")))), vfStep === 2 && !vfDone[2] && /*#__PURE__*/React.createElement(Card, {
+    }, "No recib\xED el c\xF3digo \u2014 reenviar"), /*#__PURE__*/React.createElement("div", {style:{marginTop:10}}, /*#__PURE__*/React.createElement("button", {
+      onClick: () => { setVfDone(p => ({...p, 1: true})); setVfStep(2); },
+      style: {background:"none", border:"none", color:T.fog, fontSize:11, cursor:"pointer", textDecoration:"underline"}
+    }, "Continuar sin verificar email \u2192 (el correo puede tardar unos minutos)"))))), vfStep === 2 && !vfDone[2] && /*#__PURE__*/React.createElement(Card, {
       style: {
         border: `1px solid ${T.teal}44`
       }

@@ -1486,6 +1486,9 @@ def login(data: LoginInput, db: Session = Depends(get_db)):
             'id': user.id, 'name': user.name, 'email': user.email,
             'verify_level': user.verify_level, 'is_verified': user.is_verified,
             'email_verified': user.email_verified,
+            'phone_verified': user.phone_verified,
+            'id_verified': user.id_verified,
+            'selfie_verified': user.selfie_verified,
         }
     }
 
