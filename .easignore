@@ -1,4 +1,5 @@
 .claude/
+ios/
 dist/
 dist_web/
 __pycache__/
