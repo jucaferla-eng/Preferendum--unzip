@@ -109,14 +109,17 @@ class PreferendumBlockchain:
     """
 
     def __init__(self):
+        self.live             = False  # must be first — status() reads this
+        self.web3             = None
+        self.contract         = None
         self.contract_address = os.getenv('CONTRACT_ADDRESS')
         self.wallet_address   = os.getenv('WALLET_ADDRESS')
         self.private_key      = os.getenv('WALLET_PRIVATE_KEY') or self._read_secret('WALLET_PRIVATE_KEY')
         self.rpc_url          = os.getenv('POLYGON_RPC_URL', 'https://1rpc.io/matic')
-        self.web3             = None
-        self.contract         = None
-        self.live             = False
-        self._init()
+        try:
+            self._init()
+        except Exception as e:
+            print(f'[Blockchain] __init__ error: {e}')
 
     @staticmethod
     def _read_secret(name: str) -> str:
