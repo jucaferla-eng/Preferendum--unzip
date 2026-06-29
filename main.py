@@ -2227,25 +2227,42 @@ def _campaign_matches_debate(c, debate) -> bool:
         return False
     return True
 
+def _normalize_gender(g: str) -> str:
+    """Normalize gender values from any source to 'F', 'M', or 'all'."""
+    if not g:
+        return 'all'
+    g = g.lower().strip()
+    if g in ('f', 'female', 'mujer', 'femenino'):
+        return 'F'
+    if g in ('m', 'male', 'hombre', 'masculino'):
+        return 'M'
+    return 'all'
+
 def _match_campaigns(user, debate, db) -> list:
     """
     Encuentra campañas activas que hagan match con el perfil del votante.
     Solo la comuna (tier) — nunca datos personales.
+    Works for both authenticated and unauthenticated users.
     """
     now = datetime.utcnow()
-    # Include campaigns whose end_date is today or later (allow same-day)
     campaigns = db.query(AdCampaign).filter(
         AdCampaign.is_active == True,
         AdCampaign.start_date <= now,
     ).all()
 
-    matched = []
-    user_tier      = user.se_tier or 'BBB'
-    user_gender    = user.gender or 'all'
-    user_age_group = _get_age_group(user.dob)
-    user_country   = _country_code(user.country)
-    user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
+    if user:
+        user_tier      = user.se_tier or 'BBB'
+        user_gender    = _normalize_gender(user.gender)
+        user_age_group = _get_age_group(user.dob)
+        user_country   = _country_code(user.country)
+        user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
+    else:
+        user_tier = None
+        user_gender = 'all'
+        user_country = None
+        user_age = None
 
+    matched = []
     for c in campaigns:
         # Check expiry with 24h grace period
         if c.end_date and c.end_date < (now - timedelta(hours=24)):
@@ -2253,22 +2270,24 @@ def _match_campaigns(user, debate, db) -> list:
         # Matriz campaña vs. matriz de la consulta — país/comuna/género/edad
         if not _campaign_matches_debate(c, debate):
             continue
-        # País — normaliza ambos lados ('Chile' vs 'CL') antes de comparar
-        # Si el usuario no tiene país configurado, no filtrar por país
-        if c.target_country and user_country and _country_code(c.target_country) != user_country:
+        # País — only filter when both campaign and user have specific countries
+        if user_country and c.target_country and _country_code(c.target_country) != user_country:
             continue
-        # Género
-        if c.target_gender and c.target_gender != 'all' and c.target_gender != user_gender:
+        # Género — normalize both sides; only filter when both have a specific gender
+        campaign_gender = _normalize_gender(c.target_gender)
+        if campaign_gender != 'all' and user_gender != 'all' and campaign_gender != user_gender:
             continue
-        # Edad
-        age_min = getattr(c, 'target_age_min', 13) or 13
-        age_max = getattr(c, 'target_age_max', 99) or 99
-        if not (age_min <= user_age <= age_max):
-            continue
-        # Nivel de ingreso — acepta 'A,B,C,D' y 'AAA,ABB,BBB' formats
-        target_tiers = c.target_se_tiers or 'AAA,AAB,ABB,BBB,BBC,BCC'
-        if user_tier and not _tier_matches(user_tier, target_tiers):
-            continue
+        # Edad — only filter when user age is known
+        if user_age is not None:
+            age_min = getattr(c, 'target_age_min', 13) or 13
+            age_max = getattr(c, 'target_age_max', 99) or 99
+            if not (age_min <= user_age <= age_max):
+                continue
+        # Nivel de ingreso — only filter when user tier is known
+        if user_tier:
+            target_tiers = c.target_se_tiers or 'AAA,AAB,ABB,BBB,BBC,BCC'
+            if not _tier_matches(user_tier, target_tiers):
+                continue
         matched.append(c)
 
     return matched
@@ -2331,7 +2350,7 @@ def get_opinions(debate_id: int,
     ).order_by(Opinion.created_at.asc()).all()
 
     debate    = db.query(Debate).filter(Debate.id == debate_id).first()
-    matched   = _match_campaigns(user, debate, db) if user else []
+    matched   = _match_campaigns(user, debate, db)
     static_ads = db.query(DebateAd).filter(DebateAd.debate_id == debate_id).all()
 
     result  = []
@@ -4898,7 +4917,7 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
     if user:
         now = datetime.utcnow()
         user_tier      = user.se_tier or 'BBB'
-        user_gender    = user.gender or 'all'
+        user_gender    = _normalize_gender(user.gender)
         user_age_group = _get_age_group(user.dob)
         user_country   = _country_code(user.country)
         user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
@@ -4917,6 +4936,7 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
                  'target_gender': c.target_gender,
                  'target_age_min': c.target_age_min, 'target_age_max': c.target_age_max,
                  'verdict': 'MATCH', 'reason': ''}
+            campaign_gender = _normalize_gender(c.target_gender)
             if not c.is_active:
                 r['verdict'] = 'SKIP'; r['reason'] = 'is_active=False'
             elif c.start_date and c.start_date > now:
@@ -4925,8 +4945,8 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
                 r['verdict'] = 'SKIP'; r['reason'] = f'end_date {c.end_date.isoformat()} expired'
             elif c.target_country and _country_code(c.target_country) != user_country:
                 r['verdict'] = 'SKIP'; r['reason'] = f'country mismatch: target={c.target_country} user={user_country}'
-            elif c.target_gender and c.target_gender != 'all' and c.target_gender != user_gender:
-                r['verdict'] = 'SKIP'; r['reason'] = f'gender mismatch: target={c.target_gender} user={user_gender}'
+            elif campaign_gender != 'all' and user_gender != 'all' and campaign_gender != user_gender:
+                r['verdict'] = 'SKIP'; r['reason'] = f'gender mismatch: target={c.target_gender}(→{campaign_gender}) user={user.gender}(→{user_gender})'
             elif not ((c.target_age_min or 13) <= user_age <= (c.target_age_max or 99)):
                 r['verdict'] = 'SKIP'; r['reason'] = f'age mismatch: range=[{c.target_age_min},{c.target_age_max}] user_age={user_age}'
             else:
@@ -4940,7 +4960,7 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
     else:
         now_iso = datetime.utcnow().isoformat()
 
-    real_match_ids = [c.id for c in _match_campaigns(user, debate, db)] if user else []
+    real_match_ids = [c.id for c in _match_campaigns(user, debate, db)]
     return {
         'now_utc': now_iso,
         'debate_id': debate_id,
