@@ -159,6 +159,15 @@ class PreferendumBlockchain:
         """Generate a realistic-looking mock transaction hash."""
         return '0x' + hashlib.sha256(f'polygon-mock-{vote_hash}'.encode()).hexdigest()
 
+    def _chain_id(self) -> int:
+        """Detect chainId from RPC URL: Amoy=80002, mainnet=137."""
+        rpc = self.rpc_url or ''
+        if 'amoy' in rpc:
+            return 80002
+        if 'mumbai' in rpc:
+            return 80001
+        return 137
+
     def _send_transaction(self, func) -> Optional[str]:
         """Sign and send a transaction to Polygon."""
         try:
@@ -166,7 +175,6 @@ class PreferendumBlockchain:
             nonce = w3.eth.get_transaction_count(
                 w3.to_checksum_address(self.wallet_address)
             )
-            # Get current gas price and add 10% buffer
             gas_price = int(w3.eth.gas_price * 1.1)
 
             tx = func.build_transaction({
@@ -174,7 +182,7 @@ class PreferendumBlockchain:
                 'nonce':    nonce,
                 'gas':      200000,
                 'gasPrice': gas_price,
-                'chainId':  137  # Polygon Mainnet (use 80001 for Mumbai testnet)
+                'chainId':  self._chain_id(),
             })
 
             signed = w3.eth.account.sign_transaction(tx, self.private_key)
@@ -324,15 +332,21 @@ class PreferendumBlockchain:
             return -1
 
     def status(self) -> dict:
-        """Return blockchain connection status."""
-        return {
-            'live':             self.live,
-            'network':          'Polygon Mainnet' if self.live else 'Mock mode',
-            'contract_address': self.contract_address or 'Not deployed',
-            'wallet':           self.wallet_address or 'Not configured',
-            'rpc_url':          self.rpc_url,
-            'total_anchored':   self.get_total_votes(),
-        }
+        """Return blockchain connection status — never raises."""
+        try:
+            chain = self._chain_id()
+            net_name = {137: 'Polygon Mainnet', 80002: 'Polygon Amoy Testnet', 80001: 'Polygon Mumbai (deprecated)'}.get(chain, f'Unknown (chainId {chain})')
+            return {
+                'live':             self.live,
+                'network':          net_name if self.live else 'Mock mode',
+                'chain_id':         chain,
+                'contract_address': self.contract_address or 'Not deployed',
+                'wallet':           self.wallet_address or 'Not configured',
+                'rpc_url':          self.rpc_url,
+                'total_anchored':   self.get_total_votes(),
+            }
+        except Exception as e:
+            return {'live': False, 'network': 'Mock mode', 'error': str(e)}
 
 
 # ── SINGLETON ─────────────────────────────────────────────────

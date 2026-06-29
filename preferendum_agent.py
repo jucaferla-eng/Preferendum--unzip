@@ -21,12 +21,12 @@ ARQUITECTURA DE SEGURIDAD DEL AGENTE:
 En memoria de José Ignacio Fernández (1989–2024)
 """
 
-import os, json, hashlib, time, re
+import os, json, hashlib, time, re, xml.etree.ElementTree as ET
 from collections import defaultdict
 from datetime import datetime, timedelta
 import requests as _requests
 
-BACKEND_URL  = os.getenv('BACKEND_URL', 'https://preferendum-unzip-d2zd.onrender.com')
+BACKEND_URL  = os.getenv('BACKEND_URL', 'https://preferendum-unzip.onrender.com')
 ADMIN_SECRET = os.getenv('ADMIN_SECRET', 'preferendum-admin-2024')
 
 def get_api_key():
@@ -510,20 +510,252 @@ def run_agent(user_message: str, conversation_history: list = None,
 SCHEDULED_TASKS = [
     {
         "name":     "semestral_apify",
-        "schedule": "0 6 1 1,7 *",    # 1 enero y 1 julio a las 6am UTC (cada 6 meses)
+        "schedule": "0 6 1 1,7 *",
         "prompt":   "Ejecuta el agente Apify para actualizar los datos de comunas semestrales. Confirma qué países se procesaron y el total de comunas actualizadas.",
     },
     {
         "name":     "daily_review",
-        "schedule": "0 9 * * *",      # 9am UTC todos los días
+        "schedule": "0 9 * * *",
         "prompt":   "Revisa los organizadores pendientes de aprobación y las consultas en revisión. Dame un resumen de lo que encontraste.",
     },
     {
         "name":     "weekly_summary",
-        "schedule": "0 8 * * 1",      # Lunes 8am UTC
+        "schedule": "0 8 * * 1",
         "prompt":   "Dame un resumen semanal del sistema: nuevos usuarios, consultas publicadas, campañas activas, cualquier anomalía.",
     },
+    {
+        "name":     "daily_debates",
+        "schedule": "0 7 * * *",
+        "prompt":   "daily_debates",   # handled separately — not routed through the LLM agent loop
+    },
 ]
+
+
+# ══════════════════════════════════════════════════════════════
+# AGENTE DE NOTICIAS — Lee noticias mundiales y crea debates
+# ══════════════════════════════════════════════════════════════
+
+# Countries supported: ISO code, language, display name, Google News ceid
+NEWS_COUNTRIES = [
+    {'code': 'CL', 'lang': 'es', 'name': 'Chile',          'ceid': 'CL:es'},
+    {'code': 'AR', 'lang': 'es', 'name': 'Argentina',      'ceid': 'AR:es'},
+    {'code': 'PE', 'lang': 'es', 'name': 'Perú',           'ceid': 'PE:es'},
+    {'code': 'MX', 'lang': 'es', 'name': 'México',         'ceid': 'MX:es'},
+    {'code': 'CO', 'lang': 'es', 'name': 'Colombia',       'ceid': 'CO:es'},
+    {'code': 'ES', 'lang': 'es', 'name': 'España',         'ceid': 'ES:es'},
+    {'code': 'US', 'lang': 'en', 'name': 'United States',  'ceid': 'US:en'},
+    {'code': 'BR', 'lang': 'pt', 'name': 'Brasil',         'ceid': 'BR:pt-419'},
+    {'code': 'DE', 'lang': 'de', 'name': 'Alemania',       'ceid': 'DE:de'},
+    {'code': 'GB', 'lang': 'en', 'name': 'Reino Unido',    'ceid': 'GB:en'},
+    {'code': 'FR', 'lang': 'fr', 'name': 'Francia',        'ceid': 'FR:fr'},
+    {'code': 'IT', 'lang': 'it', 'name': 'Italia',         'ceid': 'IT:it'},
+]
+
+# Civic categories — these are the ONLY categories that make good debates
+CIVIC_CATEGORIES = [
+    'politics', 'economy', 'environment', 'health', 'infrastructure',
+    'social', 'education', 'justice', 'housing', 'technology', 'energy'
+]
+
+# Simple dedup — stores hashes of debate titles created this session
+_created_this_run: set = set()
+
+
+def _fetch_google_news_rss(country_code: str, lang: str, ceid: str, max_items: int = 8) -> list:
+    """Fetch top news items from Google News RSS for a country."""
+    url = f'https://news.google.com/rss?hl={lang}&gl={country_code}&ceid={ceid}'
+    try:
+        r = _requests.get(url, timeout=15, headers={
+            'User-Agent': 'Mozilla/5.0 (compatible; Preferendum/1.0; +https://preferendum.com)'
+        })
+        if not r.ok:
+            return []
+        root = ET.fromstring(r.content)
+        items = []
+        for item in root.findall('.//item')[:max_items]:
+            title = (item.findtext('title') or '').strip()
+            desc  = (item.findtext('description') or '').strip()
+            # Strip HTML from description
+            desc = re.sub(r'<[^>]+>', '', desc)[:300]
+            if title:
+                items.append({'title': title, 'description': desc})
+        return items
+    except Exception as e:
+        print(f'[NewsAgent] RSS error {country_code}: {e}')
+        return []
+
+
+def _analyze_news_item(item: dict, country: dict) -> dict | None:
+    """
+    Call Claude Haiku to decide if news item is debate-worthy and generate debate content.
+    Returns debate dict or None.
+    """
+    api_key = get_api_key()
+    if not api_key:
+        return None
+
+    lang_instructions = {
+        'es': 'Responde en español. La pregunta y las opciones deben estar en español.',
+        'en': 'Respond in English. The question and options must be in English.',
+        'pt': 'Responda em português. A pergunta e as opções devem estar em português.',
+        'de': 'Antworte auf Deutsch. Die Frage und die Optionen müssen auf Deutsch sein.',
+        'fr': 'Répondez en français. La question et les options doivent être en français.',
+        'it': "Rispondi in italiano. La domanda e le opzioni devono essere in italiano.",
+    }
+    lang_note = lang_instructions.get(country['lang'], lang_instructions['es'])
+
+    prompt = f"""Eres un analista de debates cívicos para Preferendum, plataforma de decisiones democráticas verificadas.
+
+País: {country['name']}
+Titular: {item['title']}
+Descripción: {item['description']}
+
+{lang_note}
+
+Decide si este tema es adecuado para una consulta ciudadana. Un buen debate cívico:
+- Pregunta a la ciudadanía sobre políticas públicas, gasto, medio ambiente, salud, economía, justicia social
+- Tiene opciones claras que representan posiciones distintas
+- Afecta la vida de las personas de forma concreta
+- NO es: chismes de famosos, resultados deportivos, entretenimiento, humor, sucesos de crónica roja sin implicación política
+
+Si es adecuado, responde con JSON exacto:
+{{
+  "suitable": true,
+  "question": "¿[pregunta de debate en el idioma del país]?",
+  "context": "[2-3 frases de contexto que explican el tema]",
+  "options": ["Opción 1", "Opción 2", "Opción 3"],
+  "scope": "country",
+  "category": "{'/'.join(CIVIC_CATEGORIES)}"
+}}
+
+Si NO es adecuado:
+{{"suitable": false}}
+
+Responde ÚNICAMENTE con JSON válido, sin texto adicional."""
+
+    try:
+        resp = _requests.post(
+            'https://api.anthropic.com/v1/messages',
+            headers={
+                'x-api-key':         api_key,
+                'anthropic-version': '2023-06-01',
+                'content-type':      'application/json',
+            },
+            json={
+                'model':      'claude-haiku-4-5-20251001',
+                'max_tokens': 512,
+                'messages':   [{'role': 'user', 'content': prompt}],
+            },
+            timeout=20,
+        )
+        if not resp.ok:
+            return None
+        content = resp.json().get('content', [])
+        text = next((c['text'] for c in content if c.get('type') == 'text'), '')
+        # Extract JSON from response
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if not match:
+            return None
+        data = json.loads(match.group())
+        if not data.get('suitable'):
+            return None
+        return data
+    except Exception as e:
+        print(f'[NewsAgent] Analysis error: {e}')
+        return None
+
+
+def _create_debate_via_api(debate_data: dict, country_code: str) -> bool:
+    """POST a new debate to the backend. Returns True on success."""
+    closes_at = (datetime.utcnow() + timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%S')
+    payload = {
+        'title':         debate_data['question'],
+        'context':       debate_data['context'],
+        'options':       debate_data['options'],
+        'creator_type':  'agent',
+        'inst_name':     'Preferendum News Agent',
+        'debate_type':   'citizen',
+        'scope':         debate_data.get('scope', 'country'),
+        'scope_country': country_code,
+        'closes_at':     closes_at,
+        'verify_days':   14,
+    }
+    try:
+        r = _requests.post(
+            f'{BACKEND_URL}/debates',
+            json=payload,
+            headers={'X-Agent-Secret': ADMIN_SECRET},
+            timeout=15,
+        )
+        if r.ok:
+            debate_id = r.json().get('debate', {}).get('id', '?')
+            print(f'[NewsAgent] Created debate #{debate_id} [{country_code}]: {debate_data["question"][:60]}')
+            return True
+        else:
+            print(f'[NewsAgent] Failed to create debate: {r.status_code} {r.text[:100]}')
+            return False
+    except Exception as e:
+        print(f'[NewsAgent] Create debate error: {e}')
+        return False
+
+
+def run_daily_debates() -> dict:
+    """
+    Main news agent task: fetch news per country, analyze, create civic debates.
+    Creates at most 2 debates per country per run to avoid flooding.
+    """
+    global _created_this_run
+    _created_this_run = set()
+
+    total_created = 0
+    total_skipped = 0
+    summary = []
+
+    for country in NEWS_COUNTRIES:
+        print(f'[NewsAgent] Processing {country["name"]}...')
+        items = _fetch_google_news_rss(country['code'], country['lang'], country['ceid'])
+
+        created_for_country = 0
+        for item in items:
+            if created_for_country >= 2:
+                break
+
+            # Dedup by title hash
+            title_hash = hashlib.sha256(item['title'].encode()).hexdigest()[:16]
+            if title_hash in _created_this_run:
+                total_skipped += 1
+                continue
+
+            debate = _analyze_news_item(item, country)
+            if not debate:
+                total_skipped += 1
+                continue
+
+            # Extra dedup on generated question
+            q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
+            if q_hash in _created_this_run:
+                total_skipped += 1
+                continue
+
+            _created_this_run.add(title_hash)
+            _created_this_run.add(q_hash)
+
+            if _create_debate_via_api(debate, country['code']):
+                created_for_country += 1
+                total_created += 1
+                summary.append({
+                    'country': country['code'],
+                    'question': debate['question'][:80],
+                    'category': debate.get('category', '?'),
+                })
+
+    print(f'[NewsAgent] Done — created {total_created} debates, skipped {total_skipped}')
+    return {
+        'debates_created': total_created,
+        'debates_skipped': total_skipped,
+        'summary': summary,
+        'run_at': datetime.utcnow().isoformat(),
+    }
 
 
 def run_scheduled_task(task_name: str) -> dict:
@@ -532,6 +764,8 @@ def run_scheduled_task(task_name: str) -> dict:
     if not task:
         return {"error": f"Tarea {task_name} no encontrada"}
     print(f'[Agent] Ejecutando tarea: {task_name} — {datetime.utcnow().isoformat()}')
+    if task_name == 'daily_debates':
+        return run_daily_debates()
     result = run_agent(task["prompt"])
     print(f'[Agent] {task_name} completado: {result["response"][:100]}')
     return result

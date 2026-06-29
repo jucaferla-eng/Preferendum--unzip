@@ -4238,6 +4238,31 @@ def blockchain_status(secret: str):
         raise HTTPException(403, 'Forbidden')
     return _blockchain.status()
 
+@app.post('/admin/agent/daily-debates')
+def agent_daily_debates(secret: str, bg: BackgroundTasks):
+    """Trigger the news agent to create debates from world news."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_daily_debates
+    bg.add_task(run_daily_debates)
+    return {'ok': True, 'message': 'News agent started in background — check server logs for results'}
+
+@app.post('/admin/agent/daily-debates/sync')
+def agent_daily_debates_sync(secret: str):
+    """Run the news agent synchronously and return results (may take up to 2 min)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_daily_debates
+    return run_daily_debates()
+
+@app.post('/admin/agent/task/{task_name}')
+def run_agent_task(task_name: str, secret: str):
+    """Run any scheduled agent task by name."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_scheduled_task
+    return run_scheduled_task(task_name)
+
 @app.get('/admin/db-schema')
 def db_schema(secret: str):
     """Inspecciona columnas de tablas clave — diagnóstico remoto."""

@@ -16,12 +16,12 @@ import os, sys, json, argparse
 
 NETWORKS = {
     'testnet': {
-        'name':    'Polygon Mumbai Testnet',
-        'rpc':     'https://rpc-mumbai.maticvigil.com',
-        'chain_id': 80001,
-        'explorer': 'https://mumbai.polygonscan.com/tx/',
+        'name':    'Polygon Amoy Testnet',
+        'rpc':     'https://rpc-amoy.polygon.technology',
+        'chain_id': 80002,
+        'explorer': 'https://amoy.polygonscan.com/tx/',
         'faucet':  'https://faucet.polygon.technology/',
-        'note':    'Free MATIC from faucet. Use for testing.',
+        'note':    'Free POL from faucet. Use for testing.',
     },
     'mainnet': {
         'name':    'Polygon Mainnet',

@@ -3054,7 +3054,13 @@ function PreferendumV8() {
             const fs2 = new FormData(); fs2.append('file', selfieFile);
             const sr = await fetch(`${API}/verify/selfie`, {method:'POST', headers:{Authorization:`Bearer ${data.token}`}, body:fs2});
             const sd = await sr.json().catch(()=>({}));
-            if (sd.verified) data.user.selfie_verified = true;
+            if (sd.verified) {
+              data.user.selfie_verified = true;
+              const pct = sd.match_score || 0;
+              alert(`✅ Identidad verificada — coincidencia facial: ${pct}%`);
+            } else if (sd.match_score !== undefined) {
+              alert(`⚠️ Coincidencia facial baja (${sd.match_score}%). Intenta con mejor iluminación y el carné visible bajo el mentón.`);
+            }
           } catch(e) {}
         }
         setVfLoading(false);
@@ -4130,6 +4136,15 @@ function PreferendumV8() {
             alert(d.detail || 'No pudimos verificar tu identidad. Intenta con mejor iluminación.');
             setVfLoading(false);
             return;
+          }
+          if (d.match_score !== undefined) {
+            const pct = d.match_score;
+            if (pct < 90) {
+              alert(`⚠️ Coincidencia facial: ${pct}%. Necesitamos al menos 90%. Asegúrate de mirar directo a la cámara con el carné bajo el mentón.`);
+              setVfLoading(false);
+              return;
+            }
+            alert(`✅ Identidad verificada — coincidencia facial: ${pct}%`);
           }
         } catch (e) {/* sin backend: modo demo */}
         setVfLoading(false);
