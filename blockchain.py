@@ -109,14 +109,34 @@ class PreferendumBlockchain:
     """
 
     def __init__(self):
-        self.contract_address = os.getenv('CONTRACT_ADDRESS')
-        self.wallet_address   = os.getenv('WALLET_ADDRESS')
-        self.private_key      = os.getenv('WALLET_PRIVATE_KEY')
-        self.rpc_url          = os.getenv('POLYGON_RPC_URL', 'https://polygon-rpc.com')
+        self.live             = False
         self.web3             = None
         self.contract         = None
-        self.live             = False
-        self._init()
+        self._initialized     = False  # lazy: connect on first use, not at import
+        self.contract_address = os.getenv('CONTRACT_ADDRESS')
+        self.wallet_address   = os.getenv('WALLET_ADDRESS')
+        self.private_key      = os.getenv('WALLET_PRIVATE_KEY') or self._read_secret('WALLET_PRIVATE_KEY')
+        self.rpc_url          = os.getenv('POLYGON_RPC_URL', 'https://1rpc.io/matic')
+
+    def _ensure_init(self):
+        """Connect to Polygon on first use. Never blocks server startup."""
+        if self._initialized:
+            return
+        self._initialized = True
+        try:
+            self._init()
+        except BaseException as e:
+            print(f'[Blockchain] connect error ({type(e).__name__}): {e} — running mock')
+
+    @staticmethod
+    def _read_secret(name: str) -> str:
+        for path in [f'/etc/secrets/{name}', f'./{name}']:
+            try:
+                with open(path, 'r') as f:
+                    return f.read().strip()
+            except Exception:
+                pass
+        return ''
 
     def _init(self):
         """Try to connect to Polygon. Fall back to mock if not configured."""
@@ -126,7 +146,7 @@ class PreferendumBlockchain:
 
         try:
             from web3 import Web3
-            w3 = Web3(Web3.HTTPProvider(self.rpc_url))
+            w3 = Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs={'timeout': 15}))
             if not w3.is_connected():
                 print(f'[Blockchain] Cannot connect to {self.rpc_url} — using mock mode')
                 return
@@ -139,15 +159,21 @@ class PreferendumBlockchain:
             self.live = True
             print(f'[Blockchain] LIVE — Connected to Polygon at {self.contract_address}')
 
-        except ImportError:
-            print('[Blockchain] web3 not installed — using mock mode')
-            print('[Blockchain] Add web3==6.11.1 to requirements.txt to go live')
-        except Exception as e:
-            print(f'[Blockchain] Init error: {e} — using mock mode')
+        except BaseException as e:
+            print(f'[Blockchain] Init error: {type(e).__name__}: {e} — using mock mode')
 
     def _mock_tx(self, vote_hash: str) -> str:
         """Generate a realistic-looking mock transaction hash."""
         return '0x' + hashlib.sha256(f'polygon-mock-{vote_hash}'.encode()).hexdigest()
+
+    def _chain_id(self) -> int:
+        """Detect chainId from RPC URL: Amoy=80002, mainnet=137."""
+        rpc = self.rpc_url or ''
+        if 'amoy' in rpc:
+            return 80002
+        if 'mumbai' in rpc:
+            return 80001
+        return 137
 
     def _send_transaction(self, func) -> Optional[str]:
         """Sign and send a transaction to Polygon."""
@@ -156,7 +182,6 @@ class PreferendumBlockchain:
             nonce = w3.eth.get_transaction_count(
                 w3.to_checksum_address(self.wallet_address)
             )
-            # Get current gas price and add 10% buffer
             gas_price = int(w3.eth.gas_price * 1.1)
 
             tx = func.build_transaction({
@@ -164,11 +189,11 @@ class PreferendumBlockchain:
                 'nonce':    nonce,
                 'gas':      200000,
                 'gasPrice': gas_price,
-                'chainId':  137  # Polygon Mainnet (use 80001 for Mumbai testnet)
+                'chainId':  self._chain_id(),
             })
 
             signed = w3.eth.account.sign_transaction(tx, self.private_key)
-            tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+            tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
             return tx_hash.hex()
 
         except Exception as e:
@@ -178,17 +203,7 @@ class PreferendumBlockchain:
     # ── PUBLIC METHODS ────────────────────────────────────────
 
     def anchor_vote(self, debate_id: int, vote_hash: str, vcode: str) -> dict:
-        """
-        Anchor a single vote on Polygon.
-
-        Args:
-            debate_id:  Database debate ID
-            vote_hash:  SHA-256 hex string of encrypted vote
-            vcode:      Voter's verification code (XXXX-XXXX-XXXX)
-
-        Returns:
-            {'tx_hash': '0x...', 'live': bool, 'success': bool}
-        """
+        self._ensure_init()
         if not self.live:
             tx_hash = self._mock_tx(vote_hash)
             return {'tx_hash': tx_hash, 'live': False, 'success': True}
@@ -225,6 +240,7 @@ class PreferendumBlockchain:
         Returns:
             {'tx_hash': '0x...', 'count': int, 'live': bool}
         """
+        self._ensure_init()
         if not self.live:
             combined = ''.join(v['vote_hash'] for v in votes)
             tx_hash = self._mock_tx(combined)
@@ -249,6 +265,7 @@ class PreferendumBlockchain:
 
     def open_debate(self, debate_id: int, title: str, institution: str) -> dict:
         """Register a debate opening on-chain."""
+        self._ensure_init()
         if not self.live:
             return {'tx_hash': self._mock_tx(f'open-{debate_id}'), 'live': False}
 
@@ -262,6 +279,7 @@ class PreferendumBlockchain:
 
     def close_debate(self, debate_id: int) -> dict:
         """Register a debate closing on-chain."""
+        self._ensure_init()
         if not self.live:
             return {'tx_hash': self._mock_tx(f'close-{debate_id}'), 'live': False}
 
@@ -278,6 +296,7 @@ class PreferendumBlockchain:
         Verify a vote on-chain using its verification code.
         This is a READ operation — free, no gas needed.
         """
+        self._ensure_init()
         if not self.live:
             return {
                 'exists':    True,
@@ -306,6 +325,7 @@ class PreferendumBlockchain:
 
     def get_total_votes(self) -> int:
         """Get total votes anchored across all debates."""
+        self._ensure_init()
         if not self.live:
             return -1
         try:
@@ -314,15 +334,22 @@ class PreferendumBlockchain:
             return -1
 
     def status(self) -> dict:
-        """Return blockchain connection status."""
-        return {
-            'live':             self.live,
-            'network':          'Polygon Mainnet' if self.live else 'Mock mode',
-            'contract_address': self.contract_address or 'Not deployed',
-            'wallet':           self.wallet_address or 'Not configured',
-            'rpc_url':          self.rpc_url,
-            'total_anchored':   self.get_total_votes(),
-        }
+        """Return blockchain connection status — never raises."""
+        self._ensure_init()
+        try:
+            chain = self._chain_id()
+            net_name = {137: 'Polygon Mainnet', 80002: 'Polygon Amoy Testnet', 80001: 'Polygon Mumbai (deprecated)'}.get(chain, f'Unknown (chainId {chain})')
+            return {
+                'live':             self.live,
+                'network':          net_name if self.live else 'Mock mode',
+                'chain_id':         chain,
+                'contract_address': self.contract_address or 'Not deployed',
+                'wallet':           self.wallet_address or 'Not configured',
+                'rpc_url':          self.rpc_url,
+                'total_anchored':   self.get_total_votes(),
+            }
+        except Exception as e:
+            return {'live': False, 'network': 'Mock mode', 'error': str(e)}
 
 
 # ── SINGLETON ─────────────────────────────────────────────────
