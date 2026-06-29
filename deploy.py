@@ -25,11 +25,11 @@ NETWORKS = {
     },
     'mainnet': {
         'name':    'Polygon Mainnet',
-        'rpc':     'https://polygon-rpc.com',
+        'rpc':     'https://1rpc.io/matic',
         'chain_id': 137,
         'explorer': 'https://polygonscan.com/tx/',
         'faucet':  None,
-        'note':    'Real MATIC required. ~0.01 MATIC (~$0.01) to deploy.',
+        'note':    'Real POL required. ~0.02 POL (~$0.01) to deploy.',
     }
 }
 

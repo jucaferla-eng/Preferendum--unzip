@@ -10,3 +10,4 @@ __pycache__/
 *.db-wal
 .expo/
 .expo-shared/
+.deploy_wallet.json
