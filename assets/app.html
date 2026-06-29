@@ -3588,10 +3588,14 @@ function PreferendumV8() {
         fontSize: 12,
         cursor: "pointer"
       }
-    }, "No recib\xED el c\xF3digo \u2014 reenviar"), /*#__PURE__*/React.createElement("div", {style:{marginTop:10}}, /*#__PURE__*/React.createElement("button", {
-      onClick: () => { setVfDone(p => ({...p, 1: true})); setVfStep(2); },
-      style: {background:"none", border:"none", color:T.fog, fontSize:11, cursor:"pointer", textDecoration:"underline"}
-    }, "Continuar sin verificar email \u2192 (el correo puede tardar unos minutos)"))))), vfStep === 2 && !vfDone[2] && /*#__PURE__*/React.createElement(Card, {
+    }, "No recib\xED el c\xF3digo \u2014 reenviar"),
+    /*#__PURE__*/React.createElement("div", {style:{marginTop:6, fontSize:11, color:T.fog, textAlign:"center"}}, "\u26a0\ufe0f Revisa tu carpeta de spam / correo no deseado"),
+    /*#__PURE__*/React.createElement("div", {style:{marginTop:14, borderTop:`1px solid ${T.rim}`, paddingTop:14}},
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => { setVfDone(p => ({...p, 1: true})); setVfStep(2); },
+        style: {width:"100%", padding:"12px", background:`${T.gold}22`, border:`1px solid ${T.gold}66`, borderRadius:10, color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer"}
+      }, "\u23e9 Saltar verificaci\xF3n de email \u2192 (hacerlo despu\xE9s)")
+    )))), vfStep === 2 && !vfDone[2] && /*#__PURE__*/React.createElement(Card, {
       style: {
         border: `1px solid ${T.teal}44`
       }
@@ -3683,7 +3687,13 @@ function PreferendumV8() {
         }
       },
       style: { background: "none", border: "none", color: T.fog, fontSize: 12, cursor: "pointer" }
-    }, "No recib\xED el c\xF3digo \u2014 reenviar"))), vfStep === 3 && !vfDone[3] && /*#__PURE__*/React.createElement(Card, {
+    }, "No recib\xED el c\xF3digo \u2014 reenviar"),
+    /*#__PURE__*/React.createElement("div", {style:{marginTop:14, borderTop:`1px solid ${T.rim}`, paddingTop:14}},
+      /*#__PURE__*/React.createElement("button", {
+        onClick: () => { setVfDone(p => ({...p, 2: true})); setVfStep(3); },
+        style: {width:"100%", padding:"12px", background:`${T.gold}22`, border:`1px solid ${T.gold}66`, borderRadius:10, color:T.gold, fontSize:13, fontWeight:700, cursor:"pointer"}
+      }, "\u23e9 Saltar verificaci\xF3n de tel\xE9fono \u2192 (hacerlo despu\xE9s)")
+    )))), vfStep === 3 && !vfDone[3] && /*#__PURE__*/React.createElement(Card, {
       style: {
         border: `1px solid ${T.gold}44`
       }
