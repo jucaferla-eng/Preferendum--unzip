@@ -4232,10 +4232,15 @@ def aws_check(secret: str):
         result['rekognition'] = 'NO_CREDENTIALS'
     return result
 
+@app.get('/admin/ping')
+def admin_ping():
+    return {'pong': True, 'version': 'lazy-init-v2'}
+
 @app.get('/admin/blockchain-status')
 def blockchain_status(secret: str):
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
+    print('[blockchain-status] endpoint called')
     try:
         bc = _blockchain
         live = bool(getattr(bc, 'live', False))
@@ -4243,12 +4248,7 @@ def blockchain_status(secret: str):
         wallet   = str(getattr(bc, 'wallet_address',   '') or 'not set')
         rpc      = str(getattr(bc, 'rpc_url',          '') or 'not set')
         initialized = bool(getattr(bc, '_initialized', False))
-        total = -1
-        if live:
-            try:
-                total = int(bc.contract.functions.totalVotesAnchored().call())
-            except Exception:
-                pass
+        print(f'[blockchain-status] live={live} initialized={initialized}')
         return {
             'live': live,
             'initialized': initialized,
@@ -4256,11 +4256,12 @@ def blockchain_status(secret: str):
             'contract_address': contract,
             'wallet': wallet,
             'rpc_url': rpc,
-            'total_anchored': total,
+            'total_anchored': -1,
             'code_version': 'lazy-init-v2',
         }
-    except Exception as e:
+    except BaseException as e:
         import traceback
+        print(f'[blockchain-status] ERROR: {e}')
         return {'live': False, 'error': str(e), 'traceback': traceback.format_exc()}
 
 @app.post('/admin/agent/daily-debates')
