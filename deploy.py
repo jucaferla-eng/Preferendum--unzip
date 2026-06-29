@@ -80,11 +80,18 @@ def deploy(network: str):
 
     # Compile
     print('[Deploy] Compiling PreferendumVote.sol...')
-    install_solc('0.8.19')
+    for version in ['0.8.28', '0.8.25', '0.8.20']:
+        try:
+            install_solc(version)
+            solc_version = version
+            print(f'[Deploy] Using solc {version}')
+            break
+        except Exception:
+            continue
     compiled = compile_source(
         CONTRACT_SOURCE,
         output_values=['abi', 'bin'],
-        solc_version='0.8.19'
+        solc_version=solc_version
     )
     contract_id = '<stdin>:PreferendumVote'
     contract_interface = compiled[contract_id]
@@ -98,19 +105,32 @@ def deploy(network: str):
     )
 
     nonce     = w3.eth.get_transaction_count(wallet_address)
-    gas_price = int(w3.eth.gas_price * 1.1)
+    gas_price = w3.eth.gas_price  # exact price, no multiplier
+
+    print(f'[Deploy] Estimating gas...')
+    constructor_tx = Contract.constructor().build_transaction({
+        'from':     wallet_address,
+        'nonce':    nonce,
+        'gasPrice': gas_price,
+        'chainId':  net['chain_id']
+    })
+    estimated_gas = w3.eth.estimate_gas(constructor_tx)
+    gas_limit = int(estimated_gas * 1.05)  # minimal 5% buffer to stay under fee caps
+    print(f'[Deploy] Gas price: {gas_price / 1e9:.1f} Gwei, estimated: {estimated_gas}, limit: {gas_limit}')
+    fee_pol = gas_limit * gas_price / 1e18
+    print(f'[Deploy] Estimated fee: {fee_pol:.4f} POL')
 
     print(f'[Deploy] Deploying contract...')
     tx = Contract.constructor().build_transaction({
         'from':     wallet_address,
         'nonce':    nonce,
-        'gas':      2000000,
+        'gas':      gas_limit,
         'gasPrice': gas_price,
         'chainId':  net['chain_id']
     })
 
     signed = w3.eth.account.sign_transaction(tx, private_key)
-    tx_hash = w3.eth.send_raw_transaction(signed.rawTransaction)
+    tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
 
     print(f'[Deploy] Transaction sent: {tx_hash.hex()}')
     print(f'[Deploy] Waiting for confirmation...')

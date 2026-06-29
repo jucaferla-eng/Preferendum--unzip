@@ -1,8 +1,7 @@
 {
-  "contract_address": "0x14031D0f594Dc3f74C607f633A37eA171B10F956",
-  "tx_hash": "5c25d937d3dde58e0824ee723565b89b81d4f214f6f0359bb720a4cb928382c0",
-  "wallet_address": "0x668108Ecfd50993Cf3bCcbeE0ADaedF5Fa306d51",
-  "network": "Polygon Mainnet",
+  "contract_address": "0xB7fCD1aD46eC0a3ABfaddf95961e435C991dfd36",
+  "tx_hash": "16ab67462f48e4d15975aac7a077ad75050eae526a279c90fa9d4087da80a1c6",
+  "network": "mainnet",
   "chain_id": 137,
   "abi": [
     {
@@ -470,5 +469,7 @@
       "stateMutability": "view",
       "type": "function"
     }
-  ]
+  ],
+  "deployed_at": "2026-06-29 18:00:37.764727",
+  "dedication": "En memoria de Jose Ignacio Fernandez (1989-2024)"
 }
