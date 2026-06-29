@@ -313,7 +313,7 @@ contract PreferendumVote {
         returns (string[] memory)
     {
         require(debates[debateId].exists, "Debate does not exist");
-        require(!debates[debateId].isOpen, "Debate still open — audit available after closing");
+        require(!debates[debateId].isOpen, "Debate still open - audit available after closing");
         return debateVcodes[debateId];
     }
 

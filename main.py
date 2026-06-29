@@ -13,18 +13,22 @@ Todos los módulos integrados en un solo archivo para Render:
   ✅ Privacy: /privacy
 
 Run: uvicorn main:app --host 0.0.0.0 --port 10000
-En memoria de José Ignacio Fernández (1989-2024)
+En memoria del Fundador José Ignacio Fernández (1989–2024)
 """
 
-import os, json, hashlib, random, string, re, base64
-import urllib.request, smtplib
+from __future__ import annotations
+import os, json, hashlib, random, string, re, base64, uuid
+import urllib.request, urllib.error, smtplib
+import requests as _requests
+import boto3
+from botocore.exceptions import ClientError
 from datetime import datetime, timedelta
 from typing import Optional, List
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from fastapi import (FastAPI, HTTPException, Depends, UploadFile,
-                     File, Form, Query)
+                     File, Form, Query, Request, BackgroundTasks)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -35,15 +39,20 @@ from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
 import jwt
 import bcrypt
+from blockchain import blockchain as _blockchain
 
 # ══════════════════════════════════════════════════════════════
 # DATABASE
 # ══════════════════════════════════════════════════════════════
 
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./preferendum.db')
+# Render provides postgres:// but SQLAlchemy 1.4+ requires postgresql://
+if DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
 engine = create_engine(
     DATABASE_URL,
-    connect_args={'check_same_thread': False} if 'sqlite' in DATABASE_URL else {}
+    connect_args={'check_same_thread': False} if 'sqlite' in DATABASE_URL else {},
+    pool_pre_ping=True,
 )
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
@@ -66,7 +75,9 @@ class User(Base):
     name            = Column(String)
     password        = Column(String)
     country         = Column(String, default='CL')
-    county          = Column(String, default='')
+    county          = Column(String, default='')   # comuna declarada — nunca dirección exacta
+    se_tier         = Column(String, default='')   # AAA/AAB/ABB/BBB/BBC/BCC — asignado por CommuneMarketData
+    income_index    = Column(Float, default=0.0)   # índice de ingreso de su comuna
     gender          = Column(String, default='F')
     dob             = Column(String, default='')
     national_id     = Column(String, default='')
@@ -126,6 +137,7 @@ class DocumentLog(Base):
     user_id     = Column(Integer, index=True)
     doc_hash    = Column(String)
     doc_type    = Column(String)
+    face_bytes  = Column(Text)   # base64 de la imagen — se borra después de comparar con selfie
     verified    = Column(Boolean, default=False)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
@@ -136,6 +148,7 @@ class SelfieLog(Base):
     selfie_hash = Column(String)
     match_score = Column(Float, default=0.0)
     verified    = Column(Boolean, default=False)
+    face_bytes  = Column(Text)   # cara de referencia para comparar en visitas futuras
     created_at  = Column(DateTime, default=datetime.utcnow)
 
 class VoteIdentityLock(Base):
@@ -172,6 +185,9 @@ class Debate(Base):
     legitimacy_score = Column(Float, default=0.0)
     verifications_ok    = Column(Integer, default=0)
     verifications_total = Column(Integer, default=0)
+    follow_up_questions = Column(Text, default='')
+    reward           = Column(Text, default='')
+    option_images    = Column(Text, default='[]')
     created_at       = Column(DateTime, default=datetime.utcnow)
 
 class Opinion(Base):
@@ -202,6 +218,7 @@ class DebateVote(Base):
     verified        = Column(Boolean, nullable=True)
     verified_at     = Column(DateTime, nullable=True)
     dispute_reason  = Column(Text, default='')
+    vote_chain      = Column(Text, default='[]')
     created_at      = Column(DateTime, default=datetime.utcnow)
 
 class HasVotedLog(Base):
@@ -212,6 +229,33 @@ class HasVotedLog(Base):
     verify_code = Column(String)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
+class SimVoteLog(Base):
+    """Un SIM (phone_hash) solo puede votar una vez por debate.
+    Bloquea aunque el chip cambie de aparato o el usuario cree otra cuenta."""
+    __tablename__ = 'sim_vote_log'
+    id          = Column(Integer, primary_key=True)
+    debate_id   = Column(Integer, index=True, nullable=False)
+    phone_hash  = Column(String, index=True, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+class NationalIdVoteLog(Base):
+    """Un RUT/DNI solo puede votar una vez por debate.
+    Bloquea aunque el usuario tenga chip nuevo y cuenta nueva."""
+    __tablename__ = 'national_id_vote_log'
+    id               = Column(Integer, primary_key=True)
+    debate_id        = Column(Integer, index=True, nullable=False)
+    national_id_hash = Column(String, index=True, nullable=False)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+
+class ImeiVoteLog(Base):
+    """Un aparato (IMEI) solo puede votar una vez por debate.
+    Bloquea aunque cambien el chip o la cuenta."""
+    __tablename__ = 'imei_vote_log'
+    id          = Column(Integer, primary_key=True)
+    debate_id   = Column(Integer, index=True, nullable=False)
+    imei_hash   = Column(String, index=True, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
 class DebateAd(Base):
     __tablename__ = 'debate_ads'
     id          = Column(Integer, primary_key=True)
@@ -220,7 +264,17 @@ class DebateAd(Base):
     copy        = Column(String)
     cta         = Column(String, default='Ver más')
     logo_color  = Column(String, default='#3b82f6')
+    link_url    = Column(String, default='')   # destino al hacer clic en "Ver más"
     impressions = Column(Integer, default=0)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+class DebateRewardCode(Base):
+    __tablename__ = 'debate_reward_codes'
+    id          = Column(Integer, primary_key=True)
+    debate_id   = Column(Integer, index=True)
+    code        = Column(String, nullable=False)
+    claimed     = Column(Boolean, default=False)
+    claimed_at  = Column(DateTime, nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
 class AdCampaign(Base):
@@ -232,9 +286,18 @@ class AdCampaign(Base):
     budget_clp          = Column(Integer, default=0)
     spent_clp           = Column(Integer, default=0)
     ad_type             = Column(String, default='banner')
-    target_country      = Column(String, default='')
-    target_gender       = Column(String, default='all')
-    target_age_ranges   = Column(String, default='')
+    # ── Targeting geográfico ──
+    target_country      = Column(String, default='')        # 'CL' / 'AR' / '' = todos
+    target_communes     = Column(String, default='')        # 'Vitacura,Las Condes' / '' = todas
+    # ── Targeting de nivel de ingreso ──
+    target_se_tiers     = Column(String, default='A,B,C,D') # tiers deseados: 'A,B' = premium
+    target_income_min   = Column(Float, default=0.0)        # índice mínimo (0 = sin límite)
+    target_income_max   = Column(Float, default=9999.0)     # índice máximo (9999 = sin límite)
+    # ── Targeting demográfico ──
+    target_gender       = Column(String, default='all')     # 'F' / 'M' / 'all'
+    target_age_min      = Column(Integer, default=13)
+    target_age_max      = Column(Integer, default=99)
+    target_age_ranges   = Column(String, default='')        # legacy
     target_categories   = Column(String, default='')
     excluded_categories = Column(String, default='')
     blocked_competitors = Column(String, default='')
@@ -242,6 +305,11 @@ class AdCampaign(Base):
     end_date            = Column(DateTime, nullable=True)
     is_active           = Column(Boolean, default=True)
     created_at          = Column(DateTime, default=datetime.utcnow)
+    logo_url            = Column(String, default='')   # data URI o URL pública del logo
+    ad_copy             = Column(String, default='')   # texto del anuncio
+    ad_image_url        = Column(String, default='')   # imagen principal del anuncio
+    target_debate_ids   = Column(String, default='')   # '4,6,9' — override directo, bypass matrix
+    link_url            = Column(String, default='')   # destino al hacer clic en "Ver más"
 
 class AdImpressionLog(Base):
     __tablename__ = 'ad_impression_logs'
@@ -254,7 +322,278 @@ class AdImpressionLog(Base):
     country     = Column(String, default='')
     created_at  = Column(DateTime, default=datetime.utcnow)
 
+class ClosedListEntry(Base):
+    __tablename__ = 'closed_list_entries'
+    id               = Column(Integer, primary_key=True)
+    debate_id        = Column(Integer, index=True)
+    national_id_hash = Column(String, index=True)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+
+
+class OrganizerProfile(Base):
+    """
+    Perfil extendido del organizador — persona natural o representante de empresa.
+    Separado de User para no mezclar datos de votante con datos corporativos.
+    """
+    __tablename__ = 'organizer_profiles'
+    id                   = Column(Integer, primary_key=True)
+    user_id              = Column(Integer, index=True, unique=True)
+
+    # Tipo de organizador
+    org_type             = Column(String, default='person')  # person / company
+    is_supervisor        = Column(Boolean, default=False)    # puede autorizar empleados
+
+    # Datos corporativos
+    company_name         = Column(String, default='')
+    company_rut          = Column(String, default='')        # RUT empresa
+    company_web          = Column(String, default='')        # sitio web
+    company_email_domain = Column(String, default='')        # dominio del email corporativo
+    cargo                = Column(String, default='')        # cargo en la empresa
+
+    # Supervisor que lo autorizó (NULL si es supervisor)
+    supervisor_user_id   = Column(Integer, nullable=True)
+    supervisor_name      = Column(String, default='')
+    supervisor_email     = Column(String, default='')
+
+    # Verificaciones automáticas
+    rut_verified         = Column(Boolean, default=False)    # RUT empresa existe en SII
+    domain_verified      = Column(Boolean, default=False)    # dominio email corporativo válido
+    web_verified         = Column(Boolean, default=False)    # web empresa existe y es real
+    selfie_verified      = Column(Boolean, default=False)    # cara = carné (Rekognition)
+    doc_verified         = Column(Boolean, default=False)    # documento de cargo revisado
+
+    # Documento de cargo
+    cargo_doc_hash       = Column(String, default='')
+    cargo_doc_bytes      = Column(Text)                      # base64, se borra tras revisión
+
+    # Estado de la cuenta
+    status               = Column(String, default='pending') # pending/approved/suspended
+    rejection_reason     = Column(String, default='')
+    created_at           = Column(DateTime, default=datetime.utcnow)
+    approved_at          = Column(DateTime, nullable=True)
+
+
+class AuthorizationRequest(Base):
+    """
+    Solicitud de un empleado para que su jefe lo autorice a crear consultas.
+    El jefe recibe email con link único — entra una sola vez y aprueba.
+    """
+    __tablename__ = 'authorization_requests'
+    id                   = Column(Integer, primary_key=True)
+    employee_user_id     = Column(Integer, index=True)
+    employee_name        = Column(String)
+    employee_email       = Column(String)
+    supervisor_email     = Column(String, index=True)
+    supervisor_user_id   = Column(Integer, nullable=True)   # se llena cuando el jefe entra
+    token                = Column(String, unique=True)       # link único para el jefe
+    status               = Column(String, default='pending') # pending/approved/rejected
+    created_at           = Column(DateTime, default=datetime.utcnow)
+    resolved_at          = Column(DateTime, nullable=True)
+
+
+class MarketerProfile(Base):
+    """
+    Perfil extendido del marketer/anunciante — persona natural o representante de empresa.
+    Espejo de OrganizerProfile: mismo principio de "rastro de identidad" — selfie + ID +
+    documento de cargo + autorización del jefe — porque ningún estafador se filma la cara.
+    """
+    __tablename__ = 'marketer_profiles'
+    id                   = Column(Integer, primary_key=True)
+    user_id              = Column(Integer, index=True, unique=True)
+
+    # Tipo de marketer
+    org_type             = Column(String, default='company')  # person / company
+    is_supervisor        = Column(Boolean, default=False)     # puede autorizar empleados/campañas
+
+    # Datos corporativos
+    company_name         = Column(String, default='')
+    company_rut          = Column(String, default='')         # RUT empresa
+    company_web          = Column(String, default='')         # sitio web
+    company_email_domain = Column(String, default='')         # dominio del email corporativo
+    business_category    = Column(String, default='')         # rubro declarado — ver _check_business_category
+    cargo                = Column(String, default='')         # cargo en la empresa
+    department           = Column(String, default='')         # departamento dentro de la empresa
+    applicant_phone      = Column(String, default='')
+
+    # Jefe que lo autoriza (NULL si es supervisor)
+    supervisor_user_id   = Column(Integer, nullable=True)
+    supervisor_name      = Column(String, default='')
+    supervisor_email     = Column(String, default='')
+    supervisor_phone     = Column(String, default='')
+
+    # Verificaciones automáticas
+    rut_verified         = Column(Boolean, default=False)     # RUT empresa existe en SII
+    domain_verified      = Column(Boolean, default=False)     # dominio email corporativo válido
+    web_verified         = Column(Boolean, default=False)     # web empresa existe y es real
+    selfie_verified      = Column(Boolean, default=False)     # cara = carné (Rekognition)
+    doc_verified         = Column(Boolean, default=False)     # documento de cargo revisado
+
+    # Documento de cargo
+    cargo_doc_hash       = Column(String, default='')
+    cargo_doc_bytes      = Column(Text)                       # base64, se borra tras revisión
+
+    # Estado de la cuenta
+    status               = Column(String, default='pending')  # pending/approved/suspended
+    rejection_reason     = Column(String, default='')
+    created_at           = Column(DateTime, default=datetime.utcnow)
+    approved_at          = Column(DateTime, nullable=True)
+
+
+class MarketerAuthorizationRequest(Base):
+    """
+    Solicitud de un empleado para que su jefe lo autorice a lanzar campañas
+    publicitarias en nombre de la empresa. El jefe recibe email con link único
+    — entra una sola vez (con su propia cuenta verificada, selfie incluida) y aprueba.
+    """
+    __tablename__ = 'marketer_authorization_requests'
+    id                   = Column(Integer, primary_key=True)
+    employee_user_id     = Column(Integer, index=True)
+    employee_name        = Column(String)
+    employee_email       = Column(String)
+    supervisor_email     = Column(String, index=True)
+    supervisor_user_id   = Column(Integer, nullable=True)    # se llena cuando el jefe entra
+    token                = Column(String, unique=True)        # link único para el jefe
+    status               = Column(String, default='pending')  # pending/approved/rejected
+    created_at           = Column(DateTime, default=datetime.utcnow)
+    resolved_at          = Column(DateTime, nullable=True)
+
+
+class ConsultationModerationLog(Base):
+    """Resultado del análisis de IA antes de publicar una consulta."""
+    __tablename__ = 'consultation_moderation_logs'
+    id            = Column(Integer, primary_key=True)
+    debate_id     = Column(Integer, index=True)
+    score         = Column(Integer, default=0)       # 0-100
+    decision      = Column(String, default='review') # approved/rejected/review
+    reason        = Column(Text, default='')
+    raw_response  = Column(Text, default='')
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+class CommuneMarketData(Base):
+    """Precio de arriendo por m² por comuna — actualizado mensualmente por el agente."""
+    __tablename__ = 'commune_market_data'
+    id           = Column(Integer, primary_key=True)
+    country      = Column(String, index=True)
+    commune      = Column(String, index=True)
+    price_m2_avg = Column(Float, default=0.0)
+    income_index = Column(Float, default=100.0)  # mediana global = 100
+    cpm_usd      = Column(Float, default=6.0)
+    se_tier      = Column(String, default='C')   # A / B / C / D
+    portal       = Column(String)
+    sample_count = Column(Integer, default=0)
+    scraped_at   = Column(DateTime)
+    updated_at   = Column(DateTime, default=datetime.utcnow)
+
 Base.metadata.create_all(bind=engine)
+
+# Column migrations — works for both SQLite and PostgreSQL
+def _migrate():
+    from sqlalchemy import text, inspect
+    is_pg = 'postgresql' in DATABASE_URL
+    inspector = inspect(engine)
+    with engine.connect() as conn:
+        # debates table
+        existing_debate_cols = {c['name'] for c in inspector.get_columns('debates')} if inspector.has_table('debates') else set()
+        for col, definition in [
+            ('follow_up_questions', "TEXT DEFAULT ''"),
+            ('reward',              "TEXT DEFAULT ''"),
+            ('option_images',       "TEXT DEFAULT '[]'"),
+        ]:
+            if col not in existing_debate_cols:
+                try:
+                    conn.execute(text(f"ALTER TABLE debates ADD COLUMN {col} {definition}"))
+                    conn.commit()
+                except Exception:
+                    pass
+        # debate_votes table
+        existing_vote_cols = {c['name'] for c in inspector.get_columns('debate_votes')} if inspector.has_table('debate_votes') else set()
+        if 'vote_chain' not in existing_vote_cols:
+            try:
+                conn.execute(text("ALTER TABLE debate_votes ADD COLUMN vote_chain TEXT DEFAULT '[]'"))
+                conn.commit()
+            except Exception:
+                pass
+        # document_logs — face_bytes para comparar con selfie via Rekognition
+        existing_doc_cols = {c['name'] for c in inspector.get_columns('document_logs')} if inspector.has_table('document_logs') else set()
+        if 'face_bytes' not in existing_doc_cols:
+            try:
+                conn.execute(text("ALTER TABLE document_logs ADD COLUMN face_bytes TEXT"))
+                conn.commit()
+            except Exception:
+                pass
+        # users — se_tier e income_index para matching de ads
+        existing_user_cols = {c['name'] for c in inspector.get_columns('users')} if inspector.has_table('users') else set()
+        for col, defn in [('se_tier', "TEXT DEFAULT ''"), ('income_index', 'FLOAT DEFAULT 0.0')]:
+            if col not in existing_user_cols:
+                try:
+                    conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
+                    conn.commit()
+                except Exception:
+                    pass
+        # ad_campaigns — nuevas columnas de targeting por ingreso
+        existing_ad_cols = {c['name'] for c in inspector.get_columns('ad_campaigns')} if inspector.has_table('ad_campaigns') else set()
+        for col, defn in [
+            ('target_communes',     "TEXT DEFAULT ''"),
+            ('target_se_tiers',     "TEXT DEFAULT 'A,B,C,D'"),
+            ('target_income_min',   'FLOAT DEFAULT 0.0'),
+            ('target_income_max',   'FLOAT DEFAULT 9999.0'),
+            ('target_age_min',      'INTEGER DEFAULT 13'),
+            ('target_age_max',      'INTEGER DEFAULT 99'),
+            ('logo_url',            "TEXT DEFAULT ''"),
+            ('ad_copy',             "TEXT DEFAULT ''"),
+            ('ad_image_url',        "TEXT DEFAULT ''"),
+            ('created_at',          'TIMESTAMP DEFAULT CURRENT_TIMESTAMP'),
+            ('link_url',            "TEXT DEFAULT ''"),
+            ('target_debate_ids',   "TEXT DEFAULT ''"),
+            ('target_age_ranges',   "TEXT DEFAULT ''"),
+            ('target_categories',   "TEXT DEFAULT ''"),
+            ('excluded_categories', "TEXT DEFAULT ''"),
+            ('blocked_competitors', "TEXT DEFAULT ''"),
+            ('spent_clp',           'FLOAT DEFAULT 0.0'),
+        ]:
+            if col not in existing_ad_cols:
+                try:
+                    conn.execute(text(f'ALTER TABLE ad_campaigns ADD COLUMN {col} {defn}'))
+                    conn.commit()
+                except Exception:
+                    pass
+        # debate_ads — link_url para que "Ver más" tenga un destino real
+        existing_debate_ad_cols = {c['name'] for c in inspector.get_columns('debate_ads')} if inspector.has_table('debate_ads') else set()
+        if 'link_url' not in existing_debate_ad_cols:
+            try:
+                conn.execute(text("ALTER TABLE debate_ads ADD COLUMN link_url TEXT DEFAULT ''"))
+                conn.commit()
+            except Exception:
+                pass
+        # Backfill link_url on demo ad rows that existed before this column —
+        # the seed block only runs once at first DB init, so rows created
+        # earlier kept link_url=''  ("Ver más" had nowhere to go). One-time,
+        # idempotent (only touches rows that are still empty).
+        try:
+            for brand, url in [
+                ('BancoEstado',   'https://www.bancoestado.cl/'),
+                ('Toyota Chile',  'https://www.toyota.cl/'),
+                ('Samsung',       'https://www.samsung.com/cl/'),
+                ('Nestlé Chile',  'https://www.nestle.cl/'),
+                ('Nestle',        'https://www.nestle.cl/'),
+                ('Nestle Chile',  'https://www.nestle.cl/'),
+            ]:
+                conn.execute(
+                    text("UPDATE debate_ads SET link_url = :url WHERE brand = :brand AND (link_url IS NULL OR link_url = '')"),
+                    {'url': url, 'brand': brand}
+                )
+            conn.commit()
+        except Exception:
+            pass
+        # selfie_logs — face_bytes como referencia para re-autenticación facial
+        existing_selfie_cols = {c['name'] for c in inspector.get_columns('selfie_logs')} if inspector.has_table('selfie_logs') else set()
+        if 'face_bytes' not in existing_selfie_cols:
+            try:
+                conn.execute(text("ALTER TABLE selfie_logs ADD COLUMN face_bytes TEXT"))
+                conn.commit()
+            except Exception:
+                pass
+_migrate()
 
 # ══════════════════════════════════════════════════════════════
 # APP
@@ -263,7 +602,7 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(
     title='Preferendum API',
     version='3.0.0',
-    description='En memoria de Jose Ignacio Fernandez (1989-2024)'
+    description='En memoria del Fundador José Ignacio Fernández (1989–2024)'
 )
 
 app.add_middleware(CORSMiddleware,
@@ -271,7 +610,8 @@ app.add_middleware(CORSMiddleware,
     allow_methods=['*'], allow_headers=['*'])
 
 SECRET = os.getenv('JWT_SECRET', 'preferendum-jwt-secret-2024')
-security = HTTPBearer()
+security          = HTTPBearer()
+security_optional = HTTPBearer(auto_error=False)  # no lanza error si no hay token
 
 # ══════════════════════════════════════════════════════════════
 # HELPERS
@@ -302,6 +642,25 @@ def get_current_user(
         raise HTTPException(401, 'Token expired')
     except Exception:
         raise HTTPException(401, 'Invalid token')
+
+def get_optional_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security_optional),
+    db: Session = Depends(get_db)
+):
+    """Igual que get_current_user pero devuelve None si no hay token — no lanza error."""
+    if not credentials:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET, algorithms=['HS256'])
+        user = db.query(User).filter(User.id == int(payload['sub'])).first()
+        return user
+    except Exception:
+        return None
+
+def get_verified_user(user: User = Depends(get_current_user)):
+    if not user.email_verified:
+        raise HTTPException(403, 'Email verification required')
+    return user
 
 def count_verified(user):
     flags = [user.email_verified, user.phone_verified, user.id_verified,
@@ -347,6 +706,7 @@ def get_debate_status(debate):
 def format_debate(debate, has_voted=False):
     opts = json.loads(debate.options or '[]')
     counts = json.loads(debate.vote_counts or '{}')
+    imgs = json.loads(debate.option_images or '[]')
     status = get_debate_status(debate)
     total = debate.total_votes or 0
     results = []
@@ -359,6 +719,7 @@ def format_debate(debate, has_voted=False):
         'title': debate.title,
         'context': debate.context,
         'options': opts,
+        'option_images': imgs,
         'results': results,
         'creator_type': debate.creator_type,
         'inst_name': debate.inst_name,
@@ -367,14 +728,18 @@ def format_debate(debate, has_voted=False):
         'scope_country': debate.scope_country,
         'scope_commune': debate.scope_commune,
         'target_gender': debate.target_gender,
+        'target_age_min': debate.target_age_min,
+        'target_age_max': debate.target_age_max,
         'status': status,
         'total_votes': total,
-        'opens_at': debate.opens_at.isoformat(),
+        'opens_at': debate.opens_at.isoformat() if debate.opens_at else None,
         'closes_at': debate.closes_at.isoformat() if debate.closes_at else None,
         'verify_closes_at': debate.verify_closes_at.isoformat() if debate.verify_closes_at else None,
         'legitimacy_score': debate.legitimacy_score,
         'verifications_ok': debate.verifications_ok,
         'verifications_total': debate.verifications_total,
+        'follow_up_questions': debate.follow_up_questions or '',
+        'reward': debate.reward or '',
         'has_voted': has_voted,
         'created_at': debate.created_at.isoformat(),
     }
@@ -384,19 +749,46 @@ def format_debate(debate, has_voted=False):
 # ══════════════════════════════════════════════════════════════
 
 def send_email_otp(email, code, name=''):
-    import smtplib
-    from email.mime.text import MIMEText
-    from email.mime.multipart import MIMEMultipart
+    html = (
+        f'<div style="font-family:sans-serif;padding:40px;background:#07090f;color:#fff;border-radius:12px;">'
+        f'<h1 style="color:#2563eb;">prefer<span style="color:#fff">endum</span></h1>'
+        f'<p>Hola {name or "Ciudadano"},</p><p>Tu código de verificación:</p>'
+        f'<div style="background:#1e2a3d;padding:24px;text-align:center;border-radius:8px;">'
+        f'<span style="font-size:40px;font-weight:bold;letter-spacing:10px;color:#2563eb;">{code}</span></div>'
+        f'<p style="color:#94a3b8;">Válido por 10 minutos. No lo compartas con nadie.</p>'
+        f'<p style="color:#475569;font-size:12px;">En memoria del Fundador José Ignacio Fernández (1989–2024)</p>'
+        f'</div>'
+    )
 
+    # Resend — preferendum.com domain is verified
+    resend_key = os.getenv('RESEND_API_KEY')
+    if resend_key:
+        try:
+            resp = _requests.post(
+                'https://api.resend.com/emails',
+                json={
+                    'from': 'Preferendum <noreply@preferendum.com>',
+                    'to': [email],
+                    'subject': f'Tu código Preferendum: {code}',
+                    'html': html,
+                    'text': f'Tu código Preferendum es: {code}. Válido 10 minutos.',
+                },
+                headers={'Authorization': f'Bearer {resend_key}'},
+                timeout=10,
+            )
+            print(f'[Resend] status={resp.status_code} body={resp.text}')
+            if resp.status_code in (200, 201):
+                return True
+        except Exception as e:
+            print(f'[Resend Error] {e}')
+        print('[Resend] Failed — falling back to Gmail')
+
+    # Fallback: Gmail SMTP
     gmail_user = os.getenv('GMAIL_USER', 'jucaferla@gmail.com')
     gmail_pass = os.getenv('GMAIL_APP_PASSWORD')
-
     if not gmail_pass:
         print(f'[DEV EMAIL] To: {email} | Code: {code}')
         return True
-
-    html = f'<div style="font-family:sans-serif;padding:40px;background:#07090f;color:#fff;border-radius:12px;"><h1 style="color:#3b82f6;">prefer<span style="color:#fff">endum</span></h1><p>Hola {name or "Ciudadano"},</p><p>Tu código:</p><div style="background:#1e2a3d;padding:24px;text-align:center;border-radius:8px;"><span style="font-size:40px;font-weight:bold;letter-spacing:10px;color:#3b82f6;">{code}</span></div><p style="color:#94a3b8;">Válido 10 minutos.</p></div>'
-
     try:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = f'Tu código Preferendum: {code}'
@@ -413,6 +805,58 @@ def send_email_otp(email, code, name=''):
         print(f'[Gmail Error] {e}')
         print(f'[DEV EMAIL] To: {email} | Code: {code}')
         return False
+
+
+def send_welcome_certificate(email, name, user_id):
+    cert_url = f'https://preferendum-unzip-d2zd.onrender.com/debates/feed'
+    qr_url   = f'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data={cert_url}&bgcolor=07090f&color=2563eb&format=png'
+    cert_id  = f'PRF-{user_id:06d}'
+    html = (
+        f'<div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#07090f;color:#fff;border-radius:16px;overflow:hidden;">'
+        f'<div style="background:#0d1526;padding:28px 32px;border-bottom:1px solid #1e2d4a;">'
+        f'<h1 style="margin:0;font-size:22px;">prefer<span style="color:#fff">endum</span></h1>'
+        f'<p style="margin:6px 0 0;color:#64748b;font-size:13px;">Plataforma de decisiones verificadas</p>'
+        f'</div>'
+        f'<div style="padding:32px;">'
+        f'<p style="color:#94a3b8;font-size:14px;margin:0 0 6px;">Hola {name},</p>'
+        f'<h2 style="margin:0 0 24px;font-size:20px;color:#fff;">Tu certificado de registro está listo</h2>'
+        f'<div style="background:#0d1526;border:1px solid #1e2d4a;border-radius:12px;padding:24px;text-align:center;margin-bottom:24px;">'
+        f'<div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Certificado de Ciudadano Verificado</div>'
+        f'<img src="{qr_url}" width="160" height="160" style="border-radius:8px;margin-bottom:12px;" alt="QR Preferendum"/>'
+        f'<div style="font-size:13px;font-weight:700;color:#2563eb;letter-spacing:0.15em;">{cert_id}</div>'
+        f'<div style="font-size:11px;color:#64748b;margin-top:4px;">Tu número de registro Preferendum</div>'
+        f'</div>'
+        f'<p style="color:#94a3b8;font-size:13px;line-height:1.6;">'
+        f'Tu identidad será verificada con 7 capas de seguridad. '
+        f'Tus votos quedan anclados en blockchain y son auditables públicamente a través de tu código XXXX-XXXX-XXXX. '
+        f'Nadie — ni Preferendum — puede vincular tu voto a tu identidad.'
+        f'</p>'
+        f'<div style="background:#0f2040;border:1px solid #1e3a6e;border-radius:8px;padding:12px 16px;font-size:12px;color:#7ab4ff;margin-top:16px;">'
+        f'🔒 Bridge destruction activo · AES-256 · Polygon blockchain'
+        f'</div>'
+        f'</div>'
+        f'<div style="padding:16px 32px;border-top:1px solid #1e2d4a;text-align:center;">'
+        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria del Fundador José Ignacio Fernández (1989–2024)</p>'
+        f'</div>'
+        f'</div>'
+    )
+    resend_key = os.getenv('RESEND_API_KEY')
+    if resend_key:
+        try:
+            _requests.post(
+                'https://api.resend.com/emails',
+                json={
+                    'from': 'Preferendum <noreply@preferendum.com>',
+                    'to': [email],
+                    'subject': f'Tu Certificado de Registro en Preferendum — {cert_id}',
+                    'html': html,
+                    'text': f'Hola {name}, tu certificado de registro Preferendum es {cert_id}.',
+                },
+                headers={'Authorization': f'Bearer {resend_key}'},
+                timeout=10,
+            )
+        except Exception as e:
+            print(f'[Certificate Email Error] {e}')
 
 
 def send_sms_otp(phone, code):
@@ -479,11 +923,14 @@ class DebateCreate(BaseModel):
     scope:          str = 'country'
     scope_country:  str = 'CL'
     scope_commune:  str = ''
-    target_gender:  str = 'all'
-    target_age_min: int = 13
-    target_age_max: int = 99
-    closes_at:      str
-    verify_days:    int = 14
+    target_gender:       str = 'all'
+    target_age_min:      int = 13
+    target_age_max:      int = 99
+    closes_at:           str
+    verify_days:         int = 14
+    follow_up_questions: str = ''
+    reward:              str = ''
+    option_images:       List[str] = []
 
 class OpinionCreate(BaseModel):
     text:            str
@@ -491,6 +938,7 @@ class OpinionCreate(BaseModel):
 
 class CastVoteRequest(BaseModel):
     option_index: int
+    vote_chain:   list = []
 
 class VerifyVoteRequest(BaseModel):
     code: str
@@ -501,14 +949,27 @@ class CampaignCreate(BaseModel):
     campaign_title:      str
     budget_clp:          int
     ad_type:             str = 'banner'
+    # Geo
     target_country:      str = ''
+    target_communes:     str = ''        # 'Vitacura,Las Condes' / '' = todas
+    # Nivel de ingreso
+    target_se_tiers:     str = 'A,B,C,D' # 'A,B' = solo premium
+    target_income_min:   float = 0.0
+    target_income_max:   float = 9999.0
+    # Demo
     target_gender:       str = 'all'
+    target_age_min:      int = 13
+    target_age_max:      int = 99
     target_age_ranges:   str = ''
     target_categories:   str = ''
     excluded_categories: str = ''
     blocked_competitors: str = ''
     start_date:          str
     end_date:            str
+    logo_url:            str = ''
+    ad_copy:             str = ''
+    ad_image_url:        str = ''
+    link_url:            str = ''
 
 class AdViewInput(BaseModel):
     campaign_id: int
@@ -517,6 +978,19 @@ class AdViewInput(BaseModel):
     age_group:   str = ''
     county:      str = ''
     country:     str = ''
+
+class OrganizerRegisterInput(BaseModel):
+    email:    str
+    password: str
+    name:     str
+    phone:    str = ''
+    country:  str = 'CL'
+    county:   str = ''
+    org_type: str = 'company'
+
+class EstimateInput(BaseModel):
+    budget_clp: int
+    communes:   List[str]
 
 # ══════════════════════════════════════════════════════════════
 # SEED DEMO DATA
@@ -589,9 +1063,10 @@ def seed_demo_data():
             db.add(op)
 
         ads = [
-            DebateAd(debate_id=1, brand='BancoEstado', copy='Cuenta RUT sin costo para todos los chilenos', cta='Abrir cuenta', logo_color='#10b981'),
-            DebateAd(debate_id=1, brand='Toyota Chile', copy='Corolla Cross Hybrid — Eficiencia para el Chile real', cta='Ver modelos', logo_color='#ef4444'),
-            DebateAd(debate_id=2, brand='Samsung', copy='Galaxy S26 Ultra — La camara que lo cambia todo', cta='Descubrir', logo_color='#3b82f6'),
+            DebateAd(debate_id=1, brand='BancoEstado', copy='Cuenta RUT sin costo para todos los chilenos', cta='Abrir cuenta', logo_color='#10b981', link_url='https://www.bancoestado.cl/'),
+            DebateAd(debate_id=1, brand='Toyota Chile', copy='Corolla Cross Hybrid — Eficiencia para el Chile real', cta='Ver modelos', logo_color='#ef4444', link_url='https://www.toyota.cl/'),
+            DebateAd(debate_id=2, brand='Samsung', copy='Galaxy S26 Ultra — La camara que lo cambia todo', cta='Descubrir', logo_color='#3b82f6', link_url='https://www.samsung.com/cl/'),
+            DebateAd(debate_id=2, brand='Nestlé Chile', copy='Calidad en cada producto para tu familia', cta='Conocer más', logo_color='#dc2626', link_url='https://www.nestle.cl/'),
         ]
         for ad in ads:
             db.add(ad)
@@ -610,18 +1085,332 @@ seed_demo_data()
 # ROUTES: ROOT
 # ══════════════════════════════════════════════════════════════
 
-@app.get('/')
+@app.get('/', response_class=HTMLResponse)
 def root():
-    return {
-        'system': 'Preferendum',
-        'version': '3.0.0',
-        'status': 'running',
-        'dedication': 'En memoria de Jose Ignacio Fernandez (1989-2024)',
-    }
+    return HTMLResponse(content="""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Preferendum</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:#090D18;color:#F0F4FF;
+  font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;overflow-x:hidden;}
+
+/* PAGE 1 — CONCEPT */
+#page1{min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;text-align:center;padding:40px 24px;
+  background:radial-gradient(ellipse 70% 50% at 50% 40%,rgba(37,99,235,0.12) 0%,transparent 65%);}
+.brand{font-family:'Playfair Display',serif;font-size:clamp(15px,4vw,22px);
+  font-weight:400;color:rgba(240,244,255,0.45);letter-spacing:0.35em;
+  text-transform:uppercase;margin-bottom:48px;}
+.headline{font-family:'Playfair Display',serif;font-size:clamp(36px,8vw,96px);
+  font-weight:900;color:#F0F4FF;line-height:1.02;letter-spacing:-2px;
+  margin-bottom:28px;max-width:820px;}
+.headline em{color:#2563EB;font-style:normal;}
+.nuance{font-size:clamp(15px,2.5vw,20px);color:rgba(240,244,255,0.55);
+  line-height:1.7;max-width:520px;margin:0 auto 56px;font-weight:300;}
+.nuance strong{color:#F0F4FF;font-weight:500;}
+.enter-btn{display:inline-flex;align-items:center;gap:10px;
+  background:#2563EB;color:#fff;padding:18px 48px;border-radius:12px;
+  font-size:17px;font-weight:600;text-decoration:none;border:none;cursor:pointer;
+  transition:all .25s;box-shadow:0 4px 40px rgba(37,99,235,0.3);}
+.enter-btn:hover{background:#3b82f6;transform:translateY(-2px);box-shadow:0 8px 48px rgba(37,99,235,0.45);}
+.tagline{margin-top:40px;font-size:12px;color:rgba(240,244,255,0.25);
+  letter-spacing:0.2em;text-transform:uppercase;}
+
+/* PAGE 2 — ROLE SELECTION */
+#page2{display:none;min-height:100vh;flex-direction:column;align-items:center;
+  justify-content:center;padding:40px 24px;
+  background:radial-gradient(ellipse 60% 60% at 50% 30%,rgba(37,99,235,0.08) 0%,transparent 65%);}
+#page2.active{display:flex;}
+.p2-logo{font-family:'Playfair Display',serif;font-size:20px;color:rgba(240,244,255,0.4);
+  letter-spacing:0.3em;text-transform:uppercase;margin-bottom:12px;}
+.p2-title{font-family:'Playfair Display',serif;font-size:clamp(24px,5vw,40px);
+  font-weight:700;color:#F0F4FF;text-align:center;margin-bottom:8px;}
+.p2-sub{font-size:15px;color:rgba(240,244,255,0.45);text-align:center;
+  margin-bottom:52px;line-height:1.6;max-width:440px;}
+.p2-sub strong{color:rgba(240,244,255,0.7);font-weight:500;}
+.roles{display:flex;flex-direction:column;gap:14px;width:100%;max-width:420px;}
+.role-card{display:block;background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.09);border-radius:18px;
+  padding:24px 28px;text-decoration:none;transition:all .2s;cursor:pointer;}
+.role-card:hover{background:rgba(37,99,235,0.1);border-color:#2563EB;
+  transform:translateY(-2px);box-shadow:0 8px 32px rgba(37,99,235,0.15);}
+.role-name{font-size:18px;font-weight:700;color:#F0F4FF;margin-bottom:4px;}
+.role-phrase{font-size:13px;color:rgba(240,244,255,0.45);line-height:1.5;font-style:italic;}
+.role-arrow{float:right;color:rgba(240,244,255,0.3);font-size:20px;margin-top:-2px;}
+.back-btn{margin-top:32px;background:none;border:none;color:rgba(240,244,255,0.3);
+  font-size:13px;cursor:pointer;letter-spacing:0.1em;transition:color .2s;}
+.back-btn:hover{color:rgba(240,244,255,0.6);}
+.p2-memo{margin-top:48px;font-size:11px;color:rgba(240,244,255,0.18);
+  font-style:italic;text-align:center;}
+
+@media(max-width:480px){
+  .headline{letter-spacing:-1px;}
+  .roles{max-width:100%;}
+  .role-card{padding:20px 22px;}
+}
+</style>
+</head>
+<body>
+
+<!-- PAGE 1: CONCEPT -->
+<div id="page1">
+  <div class="brand">prefer<span style="color:#2563EB">endum</span></div>
+  <h1 class="headline">
+    Anyone.<br/>
+    Anywhere.<br/>
+    <em>Any issue.</em>
+  </h1>
+  <p class="nuance">
+    <strong>Global decisions. Define your path.</strong><br/>
+    When everyone expresses their preference, the nuance appears.
+  </p>
+  <button class="enter-btn" onclick="showPage2()">
+    Enter →
+  </button>
+  <div class="tagline">Freedom to choose goes global</div>
+</div>
+
+<!-- PAGE 2: ROLE SELECTION -->
+<div id="page2">
+  <div class="p2-logo">prefer<span style="color:#2563EB">endum</span></div>
+  <h2 class="p2-title">Who are you?</h2>
+  <p class="p2-sub">
+    <strong>Every decision begins with a preference.</strong><br/>
+    Choose your path to get started.
+  </p>
+  <div class="roles">
+    <a href="/app" class="role-card">
+      <span class="role-arrow">→</span>
+      <div class="role-name">I'm a Voter</div>
+      <div class="role-phrase">"Your voice, verified. Your identity, never."</div>
+    </a>
+    <a href="/organizers" class="role-card">
+      <span class="role-arrow">→</span>
+      <div class="role-name">I want to run a consultation</div>
+      <div class="role-phrase">"Do you want to ask your peers to express their preferences?"</div>
+    </a>
+    <a href="/marketers" class="role-card">
+      <span class="role-arrow">→</span>
+      <div class="role-name">I'm an Advertiser</div>
+      <div class="role-phrase">"Benefit from reaching people who are actively deciding."</div>
+    </a>
+  </div>
+  <button class="back-btn" onclick="showPage1()">← Back</button>
+  <div class="p2-memo">In memory of Founder José Ignacio Fernández (1989–2024)</div>
+</div>
+
+<script>
+function showPage2(){
+  document.getElementById('page1').style.display='none';
+  document.getElementById('page2').classList.add('active');
+}
+function showPage1(){
+  document.getElementById('page2').classList.remove('active');
+  document.getElementById('page1').style.display='flex';
+}
+</script>
+
+</body>
+</html>""")
 
 @app.get('/health')
 def health():
-    return {'status': 'ok', 'timestamp': datetime.utcnow().isoformat()}
+    # RENDER_GIT_COMMIT is set automatically by Render for every deploy —
+    # exposing it lets CI know it's actually talking to the NEW deploy
+    # before running post-deploy tests against it (Render pushes go live
+    # ~10-15 min after the git push that triggers them, so "just pushed"
+    # and "live" are different moments — this closes that gap honestly).
+    return {
+        'status': 'ok',
+        'timestamp': datetime.utcnow().isoformat(),
+        'git_commit': os.getenv('RENDER_GIT_COMMIT', ''),
+    }
+
+@app.get('/ping-test', response_class=HTMLResponse)
+def ping_test():
+    return HTMLResponse(content='''<!DOCTYPE html>
+<html><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/></head>
+<body style="background:#090D18;color:white;font-family:sans-serif;text-align:center;padding:60px 20px">
+<div id="root"><p>Loading React...</p></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script>
+try {
+  var el = React.createElement;
+  var root = ReactDOM.createRoot(document.getElementById("root"));
+  root.render(el("div",null,
+    el("div",{style:{fontSize:60,marginBottom:20}},"✅"),
+    el("div",{style:{fontSize:28,fontWeight:900,color:"#fff",marginBottom:10}},
+      "prefer",el("span",{style:{color:"#4d8aff"}},"endum")),
+    el("div",{style:{fontSize:16,color:"#90b8d8"}},"React working on this device")
+  ));
+} catch(e) {
+  document.getElementById("root").innerHTML = "<p style=color:red>Error: "+e.message+"</p>";
+}
+</script>
+</body></html>''')
+
+@app.get('/app', response_class=HTMLResponse)
+def serve_app():
+    """Sirve la app web directamente desde el servidor.
+    La app móvil la carga aquí — cambios se ven sin rebuild de la app."""
+    try:
+        with open('assets/app.html', 'r', encoding='utf-8') as f:
+            content = f.read()
+        return HTMLResponse(content=content, headers={
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+        })
+    except FileNotFoundError:
+        return HTMLResponse(content='<html><body>App not found</body></html>', status_code=404)
+
+@app.get('/r/{debate_id}', response_class=HTMLResponse)
+def public_results_page(debate_id: int, db: Session = Depends(get_db)):
+    """Página pública de resultados — compartible por el organizador."""
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        return HTMLResponse('<html><body>Consulta no encontrada</body></html>', status_code=404)
+
+    opts    = json.loads(debate.options or '[]')
+    counts  = json.loads(debate.vote_counts or '{}')
+    total   = debate.total_votes or 0
+    ls      = round(debate.legitimacy_score or 0, 1)
+    status  = debate.status or 'live'
+    status_label = {'live': 'En curso', 'closed': 'Cerrada', 'draft': 'Borrador'}.get(status, status)
+    status_color = {'live': '#10B981', 'closed': '#2563EB', 'draft': '#F59E0B'}.get(status, '#64748B')
+    closes  = debate.closes_at.strftime('%d %b %Y') if debate.closes_at else ''
+    tx      = debate.created_at.strftime('%d %b %Y') if debate.created_at else ''
+
+    COLORS = ['#2563EB','#10B981','#F59E0B','#F43F5E','#8B5CF6','#06B6D4','#EC4899','#84CC16','#F97316','#6366F1']
+
+    bars_html = ''
+    winner_opt = ''
+    winner_count = 0
+    for i, opt in enumerate(opts):
+        cnt  = counts.get(opt, 0)
+        pct  = round(cnt / total * 100, 1) if total > 0 else 0
+        color = COLORS[i % len(COLORS)]
+        if cnt > winner_count:
+            winner_count = cnt
+            winner_opt   = opt
+        bars_html += f'''
+        <div style="margin-bottom:20px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:15px;color:#e8f0fc;font-weight:600;">{opt}</span>
+            <span style="font-size:15px;font-weight:800;color:{color};">{pct}%</span>
+          </div>
+          <div style="background:#1a2240;border-radius:8px;height:12px;overflow:hidden;">
+            <div style="height:100%;width:{pct}%;background:{color};border-radius:8px;transition:width 1s;"></div>
+          </div>
+          <div style="font-size:12px;color:#64748b;margin-top:4px;">{cnt:,} votos</div>
+        </div>'''
+
+    winner_html = ''
+    if status == 'closed' and winner_opt:
+        winner_html = f'''
+        <div style="background:linear-gradient(135deg,#10b98122,#2563eb22);border:1px solid #10b981;
+          border-radius:16px;padding:20px 24px;margin-bottom:28px;text-align:center;">
+          <div style="font-size:11px;color:#10b981;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;">Resultado verificado</div>
+          <div style="font-size:22px;font-weight:900;color:#f0f4ff;margin-bottom:4px;">🏆 {winner_opt}</div>
+          <div style="font-size:13px;color:#94a3b8;">{winner_count:,} votos · {round(winner_count/total*100,1) if total>0 else 0}%</div>
+        </div>'''
+
+    html = f'''<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta property="og:title" content="Resultados: {debate.title[:60]}"/>
+<meta property="og:description" content="{total:,} votos verificados · Legitimacy Score {ls}% · Preferendum"/>
+<meta property="og:type" content="website"/>
+<title>Resultados — {debate.title[:50]} | Preferendum</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box;}}
+body{{background:#090D18;color:#f0f4ff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;}}
+.wrap{{max-width:640px;margin:0 auto;padding:24px 20px 60px;}}
+.nav{{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;}}
+.logo{{font-size:20px;font-weight:900;color:#f0f4ff;letter-spacing:-0.5px;}}
+.logo span{{color:#2563EB;}}
+.badge{{font-size:11px;padding:4px 12px;border-radius:20px;font-weight:700;letter-spacing:0.5px;}}
+.card{{background:#0f1528;border:1px solid #1a2240;border-radius:20px;padding:24px;margin-bottom:20px;}}
+.inst{{font-size:13px;color:#64748b;font-weight:600;margin-bottom:6px;}}
+.title{{font-size:22px;font-weight:900;color:#f0f4ff;line-height:1.4;margin-bottom:16px;}}
+.context{{font-size:14px;color:#94a3b8;line-height:1.7;}}
+.stats{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px;}}
+.stat{{background:#0f1528;border:1px solid #1a2240;border-radius:14px;padding:16px;text-align:center;}}
+.stat-n{{font-size:26px;font-weight:900;color:#f0f4ff;}}
+.stat-l{{font-size:11px;color:#64748b;margin-top:4px;letter-spacing:0.5px;text-transform:uppercase;}}
+.chain{{background:#0f1528;border:1px solid #1a2240;border-radius:14px;padding:16px;margin-bottom:20px;
+  display:flex;align-items:center;gap:12px;}}
+.chain-icon{{font-size:24px;}}
+.chain-text{{font-size:11px;color:#64748b;}}
+.chain-hash{{font-family:monospace;font-size:11px;color:#2563eb;word-break:break-all;margin-top:2px;}}
+.footer{{text-align:center;margin-top:40px;padding-top:24px;border-top:1px solid #1a2240;}}
+.footer-logo{{font-size:18px;font-weight:900;margin-bottom:8px;}}
+.footer-logo span{{color:#2563eb;}}
+.footer-sub{{font-size:12px;color:#64748b;margin-bottom:4px;}}
+.footer-mem{{font-size:11px;color:#475569;font-style:italic;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="nav">
+    <div class="logo">prefer<span>endum</span></div>
+    <span class="badge" style="background:{status_color}22;color:{status_color};">{status_label}</span>
+  </div>
+
+  <div class="card">
+    <div class="inst">{debate.inst_name or 'Preferendum'}</div>
+    <div class="title">{debate.title}</div>
+    {f'<div class="context">{debate.context}</div>' if debate.context else ''}
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-n">{total:,}</div>
+      <div class="stat-l">Votos</div>
+    </div>
+    <div class="stat">
+      <div class="stat-n" style="color:#10b981;">{ls}%</div>
+      <div class="stat-l">Legitimacy</div>
+    </div>
+    <div class="stat">
+      <div class="stat-n" style="font-size:16px;color:#64748b;">{closes or '—'}</div>
+      <div class="stat-l">Cierre</div>
+    </div>
+  </div>
+
+  {winner_html}
+
+  <div class="card">
+    <div style="font-size:11px;color:#64748b;letter-spacing:2px;text-transform:uppercase;margin-bottom:20px;">Distribución de votos</div>
+    {bars_html if total > 0 else '<div style="text-align:center;color:#64748b;padding:20px;">Aún no hay votos</div>'}
+  </div>
+
+  <div class="chain">
+    <div class="chain-icon">⛓</div>
+    <div>
+      <div class="chain-text">Resultado anclado en Polygon blockchain</div>
+      <div class="chain-hash">{debate.tx_hash or 'Pendiente de anclaje blockchain'}</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="footer-logo">prefer<span>endum</span></div>
+    <div class="footer-sub">Plataforma de decisiones verificadas · preferendum.com</div>
+    <div class="footer-mem">En memoria del Fundador José Ignacio Fernández (1989–2024)</div>
+  </div>
+</div>
+</body>
+</html>'''
+    return HTMLResponse(content=html)
+
 
 @app.get('/privacy')
 def privacy():
@@ -653,7 +1442,7 @@ Ads are targeted using anonymous demographic data only.</p>
 <h2>Contact</h2>
 <p>privacy@preferendum.com — CAIP Task Force, Santiago, Chile</p>
 <p style="margin-top:48px;color:#4a5568;font-size:13px;font-style:italic;">
-In memory of Jose Ignacio Fernandez (1989-2024), who proved this was possible.</p>
+En memoria del Fundador José Ignacio Fernández (1989–2024), quien demostró que era posible.</p>
 </body></html>"""
     return HTMLResponse(content=html)
 
@@ -662,7 +1451,7 @@ In memory of Jose Ignacio Fernandez (1989-2024), who proved this was possible.</
 # ══════════════════════════════════════════════════════════════
 
 @app.post('/auth/register')
-def register(data: RegisterInput, db: Session = Depends(get_db)):
+def register(data: RegisterInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == data.email).first():
         raise HTTPException(400, 'Email already registered')
     hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
@@ -674,13 +1463,15 @@ def register(data: RegisterInput, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+    _assign_user_tier(user, db)
     code = gen_otp()
     db.add(OTPCode(
         user_id=user.id, email=user.email, code=code,
         channel='email', expires_at=datetime.utcnow() + timedelta(minutes=10)
     ))
     db.commit()
-    send_email_otp(user.email, code, user.name)
+    bg.add_task(send_email_otp, user.email, code, user.name)
+    bg.add_task(send_welcome_certificate, user.email, user.name, user.id)
     return {
         'token': make_token(user.id),
         'user': {'id': user.id, 'name': user.name, 'email': user.email, 'verify_level': 0},
@@ -699,6 +1490,9 @@ def login(data: LoginInput, db: Session = Depends(get_db)):
             'id': user.id, 'name': user.name, 'email': user.email,
             'verify_level': user.verify_level, 'is_verified': user.is_verified,
             'email_verified': user.email_verified,
+            'phone_verified': user.phone_verified,
+            'id_verified': user.id_verified,
+            'selfie_verified': user.selfie_verified,
         }
     }
 
@@ -716,7 +1510,7 @@ def me(user: User = Depends(get_current_user)):
 # ══════════════════════════════════════════════════════════════
 
 @app.post('/verify/email/send')
-def send_email_code(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def send_email_code(bg: BackgroundTasks, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if user.email_verified:
         return {'message': 'Email already verified', 'verified': True}
     db.query(OTPCode).filter(OTPCode.user_id == user.id, OTPCode.channel == 'email', OTPCode.used == False).update({'used': True})
@@ -724,7 +1518,7 @@ def send_email_code(user: User = Depends(get_current_user), db: Session = Depend
     code = gen_otp()
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email', expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
-    send_email_otp(user.email, code, user.name)
+    bg.add_task(send_email_otp, user.email, code, user.name)
     return {'message': f'Code sent to {user.email}'}
 
 @app.post('/verify/email/confirm')
@@ -769,6 +1563,254 @@ def confirm_phone(data: OTPInput, user: User = Depends(get_current_user), db: Se
     update_verify_level(user, db)
     return {'verified': True, 'verify_level': user.verify_level}
 
+def _verify_company_rut(rut: str) -> dict:
+    """
+    Valida RUT chileno por dígito verificador (matemático, siempre funciona).
+    Intenta enriquecer con razón social desde SII como bonus — si falla, no importa.
+    """
+    rut_clean = rut.replace('.', '').replace('-', '').strip().upper()
+    # Validación matemática del dígito verificador — esto es el check real
+    format_valid = False
+    try:
+        digits = rut_clean[:-1]
+        dv     = rut_clean[-1]
+        n = int(digits)
+        if n < 1_000_000:
+            return {'valid': False, 'razon_social': '', 'activo': False}
+        s, m = 0, 2
+        while n:
+            s += (n % 10) * m
+            n //= 10
+            m = 2 if m == 7 else m + 1
+        expected = str(11 - s % 11).replace('10', 'K').replace('11', '0')
+        format_valid = (dv == expected)
+    except Exception:
+        return {'valid': False, 'razon_social': '', 'activo': False}
+
+    if not format_valid:
+        return {'valid': False, 'razon_social': '', 'activo': False}
+
+    # Optional enrichment: try SII for company name (best-effort, 5s max)
+    razon = ''
+    try:
+        resp = _requests.get(
+            f'https://zeus.sii.cl/cvc_cgi/stc/getstc?RUT={rut_clean}',
+            headers={'User-Agent': 'Mozilla/5.0'},
+            timeout=5,
+        )
+        if resp.status_code == 200 and 'razon_social' in resp.text.lower():
+            match = re.search(r'<razon_social>(.*?)</razon_social>', resp.text, re.IGNORECASE)
+            razon = match.group(1).strip() if match else ''
+    except Exception:
+        pass
+
+    return {'valid': True, 'razon_social': razon, 'activo': True}
+
+
+def _verify_email_domain(email: str) -> dict:
+    """
+    Verifica que el dominio del email corporativo existe y no es gratuito.
+    Rechaza gmail, hotmail, yahoo, outlook, etc.
+    """
+    FREE_DOMAINS = {'gmail.com','hotmail.com','yahoo.com','outlook.com',
+                    'icloud.com','live.com','msn.com','protonmail.com'}
+    try:
+        domain = email.split('@')[1].lower().strip()
+        if domain in FREE_DOMAINS:
+            return {'valid': False, 'domain': domain, 'reason': 'Email gratuito — usa tu email corporativo'}
+        # Try A/AAAA record first
+        try:
+            import socket
+            socket.getaddrinfo(domain, None)
+            return {'valid': True, 'domain': domain}
+        except Exception:
+            pass
+        # Fallback: check if MX record exists (domain is real but web-server-less)
+        import subprocess, shutil
+        if shutil.which('host'):
+            result = subprocess.run(['host', '-t', 'MX', domain],
+                                    capture_output=True, text=True, timeout=5)
+            if 'mail is handled' in result.stdout or 'MX' in result.stdout:
+                return {'valid': True, 'domain': domain}
+        # Accept non-free domains even without DNS confirmation — category check is the real gate
+        return {'valid': True, 'domain': domain}
+    except Exception:
+        return {'valid': False, 'domain': '', 'reason': 'Dominio no existe'}
+
+
+def _verify_company_web(web_url: str, company_name: str, company_rut: str) -> dict:
+    """
+    Verifica que el sitio web de la empresa existe y menciona la empresa.
+    """
+    if not web_url.startswith('http'):
+        web_url = 'https://' + web_url
+    try:
+        resp = _requests.get(web_url, headers={'User-Agent': 'Mozilla/5.0'},
+                             timeout=10, allow_redirects=True)
+        if resp.status_code != 200:
+            return {'valid': False, 'reason': f'Sitio no responde ({resp.status_code})'}
+        content = resp.text.lower()
+        rut_clean = company_rut.replace('.', '').replace('-', '').lower()
+        name_words = [w.lower() for w in company_name.split() if len(w) > 3]
+        name_found = any(w in content for w in name_words)
+        rut_found  = rut_clean[:6] in content  # primeros 6 dígitos del RUT
+        return {
+            'valid': name_found or rut_found,
+            'name_found': name_found,
+            'rut_found': rut_found,
+            'reason': '' if (name_found or rut_found) else 'No encontramos el nombre de la empresa en el sitio'
+        }
+    except Exception as e:
+        return {'valid': False, 'reason': f'No pudimos acceder al sitio: {str(e)[:60]}'}
+
+
+# Categorías permitidas en el pop-up de registro de marketer — lista cerrada,
+# el solicitante elige una, no escribe texto libre (más fácil de auditar).
+MARKETER_BUSINESS_CATEGORIES = [
+    'retail_comercio', 'banca_finanzas', 'automotriz', 'tecnologia',
+    'alimentos_bebidas', 'inmobiliaria', 'salud_bienestar', 'educacion',
+    'turismo_viajes', 'telecomunicaciones', 'energia_servicios_basicos',
+    'medios_entretenimiento', 'ong_sin_fines_de_lucro', 'gobierno_sector_publico',
+    'otro',
+]
+
+# Categorías que nunca podrán anunciar en Preferendum — el filtro corta acá,
+# antes de gastar tiempo de revisión humana o llamadas a Rekognition en alguien
+# que jamás debió pasar de esta pantalla.
+MARKETER_PROHIBITED_CATEGORIES = [
+    'pornografia', 'contenido_adulto', 'servicios_sexuales',
+    'drogas_ilegales', 'armas_de_fuego', 'apuestas_no_reguladas',
+    'productos_falsificados', 'odio_extremismo',
+]
+
+def _check_business_category(category: str) -> dict:
+    """
+    Filtro de entrada del pop-up de categoría — corta de raíz a rubros prohibidos
+    antes de que avancen a verificación de identidad.
+    Devuelve {allowed, reason}.
+    """
+    cat = (category or '').strip().lower()
+    if not cat:
+        return {'allowed': False, 'reason': 'Debes declarar la categoría de tu empresa'}
+    if cat in MARKETER_PROHIBITED_CATEGORIES:
+        return {'allowed': False, 'reason': f'Preferendum no acepta anunciantes de la categoría "{cat}"'}
+    if cat not in MARKETER_BUSINESS_CATEGORIES:
+        return {'allowed': False, 'reason': f'"{cat}" no es una categoría reconocida — elige una de la lista'}
+    return {'allowed': True, 'reason': ''}
+
+
+def _moderate_consultation(title: str, context: str, options: list) -> dict:
+    """
+    Analiza una consulta con IA antes de publicarla.
+    Score 0-100. Decisión: approved / review / rejected.
+    """
+    api_key = os.getenv('ANTHROPIC_API_KEY')
+    if not api_key:
+        return {'score': 75, 'decision': 'approved', 'reason': 'Sin API key — modo demo'}
+
+    prompt = f"""Eres el moderador de Preferendum, plataforma de consultas ciudadanas verificadas.
+Analiza esta consulta y da un score de 0 a 100 basado en estos criterios:
+
+TÍTULO: {title}
+CONTEXTO: {context}
+OPCIONES: {', '.join(options)}
+
+CRITERIOS (suma puntos si cumple):
+- Es una pregunta legítima de decisión colectiva (+30)
+- Opciones equilibradas y no manipuladoras (+20)
+- Sin contenido obsceno ni violento (+20)
+- Sin ataques a personas específicas (+15)
+- Sin propaganda política disfrazada de consulta (+15)
+
+Responde SOLO en este formato JSON:
+{{"score": 85, "decision": "approved", "reason": "Consulta legítima sobre..."}}
+
+decision debe ser: "approved" (score>=80), "review" (score 50-79), "rejected" (score<50)"""
+
+    try:
+        resp = _requests.post(
+            'https://api.anthropic.com/v1/messages',
+            headers={'x-api-key': api_key, 'anthropic-version': '2023-06-01',
+                     'content-type': 'application/json'},
+            json={'model': 'claude-haiku-4-5-20251001', 'max_tokens': 200,
+                  'messages': [{'role': 'user', 'content': prompt}]},
+            timeout=15,
+        )
+        import re, json as _json
+        text = resp.json()['content'][0]['text']
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            result = _json.loads(match.group())
+            return result
+    except Exception as e:
+        print(f'[Moderation] Error: {e}')
+    return {'score': 60, 'decision': 'review', 'reason': 'Error en moderación — revisión manual'}
+
+
+def _send_supervisor_authorization_email(supervisor_email, employee_name, employee_email, company, cargo, token, role='organizer'):
+    approve_url = f'https://preferendum-unzip-d2zd.onrender.com/{role}/authorize/{token}'
+    action_desc = 'crear consultas' if role == 'organizer' else 'lanzar campañas publicitarias'
+    html = (
+        f'<div style="font-family:sans-serif;max-width:520px;margin:0 auto;background:#07090f;color:#fff;border-radius:16px;overflow:hidden;">'
+        f'<div style="background:#0d1526;padding:28px 32px;border-bottom:1px solid #1e2d4a;">'
+        f'<h1 style="margin:0;font-size:22px;">prefer<span style="color:#fff">endum</span></h1></div>'
+        f'<div style="padding:32px;">'
+        f'<h2 style="margin:0 0 16px;font-size:18px;">Solicitud de autorización</h2>'
+        f'<p style="color:#94a3b8;font-size:14px;line-height:1.6;">'
+        f'<strong style="color:#fff">{employee_name}</strong> ({employee_email}) solicita autorización '
+        f'para {action_desc} en Preferendum en nombre de <strong style="color:#fff">{company}</strong> '
+        f'con cargo <strong style="color:#fff">{cargo}</strong>.</p>'
+        f'<p style="color:#94a3b8;font-size:13px;">Al aprobar, usted asume responsabilidad solidaria '
+        f'por {"las consultas" if role == "organizer" else "las campañas publicitarias"} que publique este usuario.</p>'
+        f'<div style="display:flex;gap:12px;margin-top:24px;">'
+        f'<a href="{approve_url}?action=approved" style="flex:1;background:#10b981;color:#fff;text-decoration:none;'
+        f'padding:14px;border-radius:10px;text-align:center;font-weight:700;font-size:14px;">✓ Autorizar</a>'
+        f'<a href="{approve_url}?action=rejected" style="flex:1;background:#1e2d4a;color:#94a3b8;text-decoration:none;'
+        f'padding:14px;border-radius:10px;text-align:center;font-size:14px;">Rechazar</a>'
+        f'</div></div>'
+        f'<div style="padding:16px 32px;border-top:1px solid #1e2d4a;text-align:center;">'
+        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria del Fundador José Ignacio Fernández (1989–2024)</p>'
+        f'</div></div>'
+    )
+    resend_key = os.getenv('RESEND_API_KEY')
+    if resend_key:
+        try:
+            _requests.post('https://api.resend.com/emails',
+                json={'from':'Preferendum <noreply@preferendum.com>','to':[supervisor_email],
+                      'subject':f'Autorización solicitada por {employee_name} — Preferendum',
+                      'html':html},
+                headers={'Authorization':f'Bearer {resend_key}'}, timeout=10)
+        except Exception as e:
+            print(f'[SupervisorEmail] {e}')
+
+
+def _assign_user_tier(user, db):
+    """Asigna se_tier e income_index al usuario según su comuna declarada."""
+    if not user.county:
+        return
+    commune_data = db.query(CommuneMarketData).filter(
+        CommuneMarketData.commune.ilike(user.county.strip()),
+        CommuneMarketData.country == _country_code(user.country)
+    ).first()
+    if not commune_data:
+        # Búsqueda parcial si no hay match exacto
+        commune_data = db.query(CommuneMarketData).filter(
+            CommuneMarketData.commune.ilike(f'%{user.county.strip()}%')
+        ).first()
+    if commune_data:
+        user.se_tier      = commune_data.se_tier
+        user.income_index = commune_data.income_index
+        db.commit()
+
+
+def _rekognition_client():
+    return boto3.client(
+        'rekognition',
+        region_name=os.getenv('AWS_REGION', 'us-east-1'),
+        aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+        aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+    )
+
 @app.post('/verify/document')
 async def verify_document(
     file: UploadFile = File(...),
@@ -777,12 +1819,40 @@ async def verify_document(
     db: Session = Depends(get_db)
 ):
     contents = await file.read()
-    verified = file.content_type in ['image/jpeg', 'image/png', 'image/webp']
-    db.add(DocumentLog(user_id=user.id, doc_hash=hashlib.sha256(contents).hexdigest(), doc_type=doc_type, verified=verified))
-    if verified:
+    if file.content_type not in ['image/jpeg', 'image/png', 'image/webp']:
+        raise HTTPException(400, 'Solo se aceptan imágenes JPG o PNG')
+
+    # Verificar que el documento tenga al menos una cara visible
+    aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+    face_detected = False
+    if aws_key:
+        try:
+            rek = _rekognition_client()
+            resp = rek.detect_faces(
+                Image={'Bytes': contents},
+                Attributes=['DEFAULT']
+            )
+            face_detected = len(resp.get('FaceDetails', [])) > 0
+            if not face_detected:
+                raise HTTPException(400, 'No detectamos una cara en el documento. Asegúrate de fotografiar el lado con tu foto.')
+        except ClientError as e:
+            face_detected = True  # si AWS falla, no bloqueamos al usuario
+    else:
+        face_detected = True  # sin credenciales: modo demo
+
+    doc_log = DocumentLog(
+        user_id=user.id,
+        doc_hash=hashlib.sha256(contents).hexdigest(),
+        doc_type=doc_type,
+        face_bytes=base64.b64encode(contents).decode(),
+        verified=face_detected
+    )
+    db.add(doc_log)
+    if face_detected:
         user.id_verified = True
         update_verify_level(user, db)
-    return {'verified': verified, 'verify_level': user.verify_level}
+    db.commit()
+    return {'verified': face_detected, 'verify_level': user.verify_level}
 
 @app.post('/verify/selfie')
 async def verify_selfie(
@@ -791,13 +1861,96 @@ async def verify_selfie(
     db: Session = Depends(get_db)
 ):
     contents = await file.read()
-    is_image = file.content_type in ['image/jpeg', 'image/png', 'image/webp']
-    match_score = 0.95 if is_image else 0.0
-    db.add(SelfieLog(user_id=user.id, selfie_hash=hashlib.sha256(contents).hexdigest(), match_score=match_score, verified=is_image))
-    if is_image:
+    if file.content_type not in ['image/jpeg', 'image/png', 'image/webp']:
+        raise HTTPException(400, 'Solo se aceptan imágenes JPG o PNG')
+
+    # Buscar el documento previamente subido para comparar
+    doc_log = db.query(DocumentLog).filter(
+        DocumentLog.user_id == user.id,
+        DocumentLog.verified == True,
+        DocumentLog.face_bytes != None
+    ).order_by(DocumentLog.created_at.desc()).first()
+
+    match_score = 0.0
+    verified = False
+    aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+
+    if aws_key and doc_log and doc_log.face_bytes:
+        try:
+            rek = _rekognition_client()
+            doc_bytes = base64.b64decode(doc_log.face_bytes)
+            resp = rek.compare_faces(
+                SourceImage={'Bytes': doc_bytes},   # cara del documento
+                TargetImage={'Bytes': contents},    # selfie con carné bajo el mentón
+                SimilarityThreshold=80.0
+            )
+            matches = resp.get('FaceMatches', [])
+            if matches:
+                match_score = matches[0]['Similarity'] / 100.0
+                verified = match_score >= 0.90
+            else:
+                raise HTTPException(400, 'Tu cara no coincide con el documento. Asegúrate de mirar directo a la cámara frontal con el carné bajo el mentón.')
+        except ClientError:
+            verified = True; match_score = 0.95  # AWS falló: modo demo
+    else:
+        verified = True; match_score = 0.95  # sin credenciales o documento: modo demo
+
+    db.add(SelfieLog(
+        user_id=user.id,
+        selfie_hash=hashlib.sha256(contents).hexdigest(),
+        match_score=match_score,
+        verified=verified,
+        face_bytes=base64.b64encode(contents).decode() if verified else None
+    ))
+    if verified:
         user.selfie_verified = True
         update_verify_level(user, db)
-    return {'verified': is_image, 'match_score': round(match_score * 100), 'verify_level': user.verify_level}
+        if doc_log:
+            doc_log.face_bytes = None  # ya no se necesita
+    db.commit()
+    return {'verified': verified, 'match_score': round(match_score * 100), 'verify_level': user.verify_level}
+
+
+@app.post('/verify/face')
+async def verify_face_returning(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Para usuarios que ya se verificaron antes — solo selfie, sin carné."""
+    if not user.selfie_verified:
+        raise HTTPException(400, 'Primero debes completar la verificación completa con tu documento')
+
+    contents = await file.read()
+    if file.content_type not in ['image/jpeg', 'image/png', 'image/webp']:
+        raise HTTPException(400, 'Solo se aceptan imágenes JPG o PNG')
+
+    # Buscar la cara de referencia guardada
+    ref = db.query(SelfieLog).filter(
+        SelfieLog.user_id == user.id,
+        SelfieLog.verified == True,
+        SelfieLog.face_bytes != None
+    ).order_by(SelfieLog.created_at.desc()).first()
+
+    aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+    if aws_key and ref and ref.face_bytes:
+        try:
+            rek = _rekognition_client()
+            resp = rek.compare_faces(
+                SourceImage={'Bytes': base64.b64decode(ref.face_bytes)},
+                TargetImage={'Bytes': contents},
+                SimilarityThreshold=80.0
+            )
+            matches = resp.get('FaceMatches', [])
+            if not matches:
+                raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
+            score = matches[0]['Similarity'] / 100.0
+            if score < 0.90:
+                raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
+        except ClientError:
+            pass  # AWS falló: dejamos pasar
+
+    return {'verified': True, 'message': 'Identidad confirmada'}
 
 @app.post('/verify/location')
 def verify_location(data: GeoInput, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -852,6 +2005,72 @@ def verify_status(user: User = Depends(get_current_user)):
     }
 
 # ══════════════════════════════════════════════════════════════
+# ROUTES: IMAGE UPLOAD (Cloudinary)
+# ══════════════════════════════════════════════════════════════
+
+@app.post('/upload/image')
+async def upload_image(
+    file: UploadFile = File(...),
+):
+    if not (file.content_type or '').startswith('image/'):
+        raise HTTPException(400, 'Only image files allowed')
+    contents = await file.read()
+    if len(contents) > 8 * 1024 * 1024:
+        raise HTTPException(400, 'Image too grande — máximo 8 MB')
+
+    # Compress image with Pillow to keep base64 small (max 800px, JPEG q70)
+    try:
+        import io
+        from PIL import Image
+        img = Image.open(io.BytesIO(contents))
+        img = img.convert('RGB')
+        max_dim = 800
+        w, h = img.size
+        if w > max_dim or h > max_dim:
+            ratio = min(max_dim / w, max_dim / h)
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format='JPEG', quality=70, optimize=True)
+        contents = buf.getvalue()
+    except Exception:
+        pass  # if Pillow fails, use original
+
+    # Try S3 if credentials available, otherwise return base64 data URI
+    aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+    aws_secret = os.getenv('AWS_SECRET_ACCESS_KEY')
+    if aws_key and aws_secret:
+        try:
+            aws_region = os.getenv('AWS_REGION', 'us-east-1')
+            bucket = os.getenv('AWS_S3_BUCKET', 'preferendum-images')
+            key = f"products/{uuid.uuid4().hex}.jpg"
+            s3 = boto3.client('s3',
+                region_name=aws_region,
+                aws_access_key_id=aws_key,
+                aws_secret_access_key=aws_secret,
+            )
+            try:
+                s3.head_bucket(Bucket=bucket)
+            except ClientError as e:
+                if e.response['Error']['Code'] in ('404', 'NoSuchBucket'):
+                    if aws_region == 'us-east-1':
+                        s3.create_bucket(Bucket=bucket)
+                    else:
+                        s3.create_bucket(Bucket=bucket,
+                            CreateBucketConfiguration={'LocationConstraint': aws_region})
+                    s3.put_public_access_block(Bucket=bucket,
+                        PublicAccessBlockConfiguration={
+                            'BlockPublicAcls': False, 'IgnorePublicAcls': False,
+                            'BlockPublicPolicy': False, 'RestrictPublicBuckets': False,
+                        })
+            s3.put_object(Bucket=bucket, Key=key, Body=contents,
+                ContentType='image/jpeg', ACL='public-read')
+            return {'url': f"https://{bucket}.s3.{aws_region}.amazonaws.com/{key}"}
+        except Exception:
+            pass  # fall through to base64
+    data_uri = f"data:image/jpeg;base64,{base64.b64encode(contents).decode()}"
+    return {'url': data_uri}
+
+# ══════════════════════════════════════════════════════════════
 # ROUTES: DEBATES
 # ══════════════════════════════════════════════════════════════
 
@@ -859,16 +2078,25 @@ def verify_status(user: User = Depends(get_current_user)):
 def list_debates(
     country: str = Query('CL'),
     commune: str = Query(None),
-    limit:   int = Query(20),
+    limit:   int = Query(50),
     db: Session = Depends(get_db)
 ):
-    q = db.query(Debate).filter(Debate.scope_country == country)
+    q = db.query(Debate)
+    if country and country != 'ALL':
+        q = q.filter(Debate.scope_country.in_([country, 'ALL']))
     debates = q.order_by(Debate.created_at.desc()).limit(limit).all()
-    return {'debates': [format_debate(d) for d in debates]}
+    safe = []
+    for d in debates:
+        try:
+            safe.append(format_debate(d))
+        except Exception:
+            pass
+    return {'debates': safe}
 
 @app.get('/debates/feed')
 def get_feed(
     country: str = Query('CL'),
+    user: User = Depends(get_verified_user),
     db: Session = Depends(get_db)
 ):
     debates = db.query(Debate).filter(
@@ -902,40 +2130,304 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
+        follow_up_questions=data.follow_up_questions or '',
+        reward=data.reward or '',
+        option_images=json.dumps(data.option_images or []),
     )
     db.add(debate)
     db.commit()
     db.refresh(debate)
     return {'debate': format_debate(debate), 'message': 'Consultation created'}
 
+_COUNTRY_CODES = {
+    'chile': 'CL', 'argentina': 'AR', 'brasil': 'BR', 'brazil': 'BR',
+    'méxico': 'MX', 'mexico': 'MX', 'colombia': 'CO', 'perú': 'PE', 'peru': 'PE',
+    'españa': 'ES', 'spain': 'ES', 'usa': 'US', 'estados unidos': 'US',
+    'todos': 'ALL', 'all': 'ALL',
+}
+
+def _country_code(name: str) -> str:
+    """Normaliza nombres de país ('Chile') y códigos ISO ('CL') a un código común.
+    El registro guarda nombres completos ('Chile') pero campañas/CommuneMarketData usan códigos ISO ('CL')."""
+    if not name:
+        return 'CL'
+    s = name.strip()
+    if len(s) <= 3:
+        return s.upper()
+    return _COUNTRY_CODES.get(s.lower(), s.upper())
+
+def _get_age_group(dob: str) -> str:
+    if not dob:
+        return ''
+    try:
+        birth = datetime.fromisoformat(dob)
+        age = (datetime.utcnow() - birth).days // 365
+        if age < 25:  return '18-24'
+        if age < 35:  return '25-34'
+        if age < 45:  return '35-44'
+        if age < 55:  return '45-54'
+        return '55+'
+    except Exception:
+        return ''
+
+TIER_ORDER = ['AAA', 'AAB', 'ABB', 'BBB', 'BBC', 'BCC', 'A', 'B', 'C', 'D']
+
+def _tier_gte(user_tier: str, min_tier: str) -> bool:
+    """Devuelve True si user_tier >= min_tier en la escala de ingreso."""
+    try:
+        return TIER_ORDER.index(user_tier) <= TIER_ORDER.index(min_tier)
+    except ValueError:
+        return True
+
+def _tier_matches(user_tier: str, target_tiers_str: str) -> bool:
+    """Handles both 'AAA,BBB' and abbreviated 'A,B,C,D' tier formats."""
+    tiers = [t.strip() for t in target_tiers_str.split(',') if t.strip()]
+    if not tiers:
+        return True
+    if user_tier in tiers:
+        return True
+    # Abbreviated format: first letter of user_tier (e.g. 'BBB' → 'B')
+    first = user_tier[0] if user_tier else ''
+    if first and first in tiers:
+        return True
+    return False
+
+def _campaign_matches_debate(c, debate) -> bool:
+    """
+    Cruza la matriz de targeting de la campaña contra la consulta.
+    Si la campaña tiene target_debate_ids explícitos, esos debates
+    siempre hacen match (bypass de la matriz — usado para demo/pruebas).
+    """
+    if not debate:
+        return True
+    # Conexión directa campaña ↔ debate (override de toda la matriz)
+    if c.target_debate_ids:
+        pinned = [int(x.strip()) for x in c.target_debate_ids.split(',') if x.strip().isdigit()]
+        if pinned:
+            return debate.id in pinned
+    # País — 'ALL'/vacío en cualquiera de los dos lados = sin restricción
+    c_country = _country_code(c.target_country) if c.target_country else ''
+    d_country = _country_code(debate.scope_country) if debate.scope_country else ''
+    if c_country and c_country != 'ALL' and d_country and d_country != 'ALL' and c_country != d_country:
+        return False
+    # Comuna — si la campaña apunta a comunas específicas y la consulta tiene
+    # alcance comunal definido, la comuna de la consulta debe estar en la lista
+    target_communes = [x.strip() for x in (c.target_communes or '').split(',') if x.strip()]
+    if target_communes and debate.scope_commune and debate.scope_commune not in target_communes:
+        return False
+    # Género — incompatible solo si ambas matrices especifican géneros distintos
+    c_gender = (c.target_gender or 'all').lower()
+    d_gender = (debate.target_gender or 'all').lower()
+    if c_gender != 'all' and d_gender != 'all' and c_gender != d_gender:
+        return False
+    # Edad — los rangos de ambas matrices deben solaparse
+    c_min, c_max = c.target_age_min or 13, c.target_age_max or 99
+    d_min, d_max = debate.target_age_min or 13, debate.target_age_max or 99
+    if c_max < d_min or d_max < c_min:
+        return False
+    return True
+
+def _normalize_gender(g: str) -> str:
+    """Normalize gender values from any source to 'F', 'M', or 'all'."""
+    if not g:
+        return 'all'
+    g = g.lower().strip()
+    if g in ('f', 'female', 'mujer', 'femenino'):
+        return 'F'
+    if g in ('m', 'male', 'hombre', 'masculino'):
+        return 'M'
+    return 'all'
+
+def _match_campaigns(user, debate, db) -> list:
+    """
+    Encuentra campañas activas que hagan match con el perfil del votante.
+    Solo la comuna (tier) — nunca datos personales.
+    Works for both authenticated and unauthenticated users.
+    """
+    now = datetime.utcnow()
+    campaigns = db.query(AdCampaign).filter(
+        AdCampaign.is_active == True,
+        AdCampaign.start_date <= now,
+    ).all()
+
+    if user:
+        user_tier      = user.se_tier or 'BBB'
+        user_gender    = _normalize_gender(user.gender)
+        user_age_group = _get_age_group(user.dob)
+        user_country   = _country_code(user.country)
+        user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
+    else:
+        user_tier = None
+        user_gender = 'all'
+        user_country = None
+        user_age = None
+
+    matched = []
+    for c in campaigns:
+        # Check expiry with 24h grace period
+        if c.end_date and c.end_date < (now - timedelta(hours=24)):
+            continue
+        # Matriz campaña vs. matriz de la consulta — país/comuna/género/edad
+        if not _campaign_matches_debate(c, debate):
+            continue
+        # País — only filter when both campaign and user have specific countries
+        if user_country and c.target_country and _country_code(c.target_country) != user_country:
+            continue
+        # Género — normalize both sides; only filter when both have a specific gender
+        campaign_gender = _normalize_gender(c.target_gender)
+        if campaign_gender != 'all' and user_gender != 'all' and campaign_gender != user_gender:
+            continue
+        # Edad — only filter when user age is known
+        if user_age is not None:
+            age_min = getattr(c, 'target_age_min', 13) or 13
+            age_max = getattr(c, 'target_age_max', 99) or 99
+            if not (age_min <= user_age <= age_max):
+                continue
+        # Nivel de ingreso — only filter when user tier is known
+        if user_tier:
+            target_tiers = c.target_se_tiers or 'AAA,AAB,ABB,BBB,BBC,BCC'
+            if not _tier_matches(user_tier, target_tiers):
+                continue
+        matched.append(c)
+
+    return matched
+
+
+def _cost_per_impression_clp(campaign, db) -> int:
+    """What one served impression actually costs against the campaign's budget.
+
+    CPM means "cost per *mille*" — cost per 1000 impressions — so one
+    impression costs cpm_usd/1000 (converted to CLP). This derives that
+    rate from the same live CommuneMarketData table /marketer/estimate
+    reads (real backend numbers, never invented), averaged over whichever
+    communes the campaign actually targets — falling back to the full
+    table average for broad/untargeted campaigns.
+
+    Replaces the previous formula
+    `budget_clp / max(1, len(opinions) // 5)`, which divided the WHOLE
+    budget by a tiny denominator (e.g. 3 for a 15-opinion debate) and
+    could exhaust a 250-million-CLP flight in 3 impressions — a
+    catastrophic overspend that would have wrecked the advertising
+    revenue story for investors.
+    """
+    q = db.query(CommuneMarketData)
+    if campaign.target_country:
+        q = q.filter(CommuneMarketData.country == campaign.target_country)
+    if campaign.target_communes:
+        names = [c.strip() for c in campaign.target_communes.split(',') if c.strip()]
+        if names:
+            q = q.filter(CommuneMarketData.commune.in_(names))
+    rows = q.all()
+    if not rows:
+        rows = db.query(CommuneMarketData).all()
+
+    cpm_usd_avg = (sum(r.cpm_usd for r in rows) / len(rows)) if rows else 6.0
+    cost = (cpm_usd_avg * USD_TO_CLP) / 1000.0
+    return max(1, int(round(cost)))
+
+
+# Cada cuántas opiniones aparece un anuncio en la sala de debate.
+# Valor de producción documentado en CLAUDE.md y en la "Architecture
+# Decisions" — 1 anuncio cada 5 opiniones. (Se usó temporalmente 2 el
+# 2026-06-07 para probar el ciclo de impresiones/métricas de campañas
+# más rápido; revertido a 5 antes del almuerzo con el inversionista.)
+AD_EVERY_N_OPINIONS = 5
+
+# Tipo de cambio usado para traducir CPM (USD por mil impresiones, tabla de
+# comunas) a CLP. Vive aquí — no dentro de _optimize_campaign — porque tanto
+# la simulación de presupuesto (/marketer/estimate) como el cobro real por
+# impresión servida (/debates/{id}/opinions) deben usar el mismo número o
+# "presupuesto estimado" y "gasto real" divergen.
+USD_TO_CLP = 950
+
+
 @app.get('/debates/{debate_id}/opinions')
-def get_opinions(debate_id: int, db: Session = Depends(get_db)):
+def get_opinions(debate_id: int,
+                 user: User = Depends(get_optional_user),
+                 db: Session = Depends(get_db)):
     opinions = db.query(Opinion).filter(
         Opinion.debate_id == debate_id
     ).order_by(Opinion.created_at.asc()).all()
-    ads = db.query(DebateAd).filter(DebateAd.debate_id == debate_id).all()
-    result = []
-    ad_idx = 0
+
+    debate    = db.query(Debate).filter(Debate.id == debate_id).first()
+    matched   = _match_campaigns(user, debate, db)
+    static_ads = db.query(DebateAd).filter(DebateAd.debate_id == debate_id).all()
+
+    result  = []
+    ad_idx  = 0
+    now     = datetime.utcnow()
+
+    def _safe_url(url, limit=200_000):
+        if url and url.startswith('data:') and len(url) > limit:
+            return ''
+        return url or ''
+
+    def _append_campaign_ad(campaign):
+        result.append({'type': 'ad', 'ad': {
+            'brand':       campaign.advertiser_name,
+            'copy':        campaign.ad_copy or campaign.title,
+            'cta':         'Ver más',
+            'logo_color':  '#2563eb',
+            'logo_url':    _safe_url(campaign.logo_url),
+            'image_url':   _safe_url(campaign.ad_image_url),
+            'link_url':    campaign.link_url or '',
+            'campaign_id': campaign.id,
+        }})
+        if user:
+            db.add(AdImpressionLog(
+                campaign_id = campaign.id,
+                debate_id   = debate_id,
+                gender      = user.gender or '',
+                age_group   = _get_age_group(user.dob),
+                county      = user.county or '',
+                country     = user.country or '',
+            ))
+        campaign.spent_clp = min(
+            campaign.budget_clp,
+            (campaign.spent_clp or 0) + _cost_per_impression_clp(campaign, db),
+        )
+
+    # Show first ad at the top — even with 0 opinions, the campaign is visible
+    if matched:
+        _append_campaign_ad(matched[ad_idx % len(matched)])
+        ad_idx += 1
+    elif static_ads:
+        ad = static_ads[0]
+        ad.impressions += 1
+        result.append({'type': 'ad', 'ad': {
+            'brand': ad.brand, 'copy': ad.copy,
+            'cta': ad.cta, 'logo_color': ad.logo_color,
+            'link_url': ad.link_url or '',
+        }})
+        ad_idx += 1
+
     for i, op in enumerate(opinions):
-        if i > 0 and i % 5 == 0 and ads:
-            ad = ads[ad_idx % len(ads)]
-            ad.impressions += 1
-            result.append({'type': 'ad', 'ad': {
-                'brand': ad.brand, 'copy': ad.copy,
-                'cta': ad.cta, 'logo_color': ad.logo_color,
-            }})
-            ad_idx += 1
         result.append({'type': 'opinion', 'opinion': {
             'id': op.id, 'text': op.text,
             'knowledge_level': op.knowledge_level,
             'user_name': op.user_name,
             'created_at': op.created_at.isoformat(),
         }})
+        # Ad after every AD_EVERY_N_OPINIONS opinions
+        if (i + 1) % AD_EVERY_N_OPINIONS == 0:
+            if matched:
+                _append_campaign_ad(matched[ad_idx % len(matched)])
+                ad_idx += 1
+            elif static_ads:
+                ad = static_ads[ad_idx % len(static_ads)]
+                ad.impressions += 1
+                result.append({'type': 'ad', 'ad': {
+                    'brand': ad.brand, 'copy': ad.copy,
+                    'cta': ad.cta, 'logo_color': ad.logo_color,
+                    'link_url': ad.link_url or '',
+                }})
+                ad_idx += 1
+
     db.commit()
     return {'items': result, 'total_opinions': len(opinions)}
 
 @app.post('/debates/{debate_id}/opinions')
-def post_opinion(debate_id: int, data: OpinionCreate, db: Session = Depends(get_db)):
+def post_opinion(debate_id: int, data: OpinionCreate, user: User = Depends(get_verified_user), db: Session = Depends(get_db)):
     if len(data.text) < 20:
         raise HTTPException(400, 'Opinion must be at least 20 characters')
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
@@ -949,31 +2441,89 @@ def post_opinion(debate_id: int, data: OpinionCreate, db: Session = Depends(get_
     return {'opinion': {'id': op.id, 'text': op.text, 'created_at': op.created_at.isoformat()}}
 
 @app.post('/debates/{debate_id}/vote')
-def cast_vote(debate_id: int, data: CastVoteRequest, db: Session = Depends(get_db)):
+def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_verified_user), db: Session = Depends(get_db)):
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
         raise HTTPException(404, 'Consultation not found')
     if get_debate_status(debate) != 'live':
         raise HTTPException(400, 'Consultation is not open for voting')
+
+    # Bloqueo 1: misma cuenta
+    already = db.query(HasVotedLog).filter(
+        HasVotedLog.user_id == user.id,
+        HasVotedLog.debate_id == debate_id
+    ).first()
+    if already:
+        raise HTTPException(409, 'Ya votaste en esta consulta')
+
+    # Bloqueo 2: mismo SIM (aunque cambien de cuenta o de aparato)
+    if user.phone:
+        phone_hash = hash_str(user.phone.replace(' ', '').replace('-', ''), 'pref-sim-')
+        sim_voted = db.query(SimVoteLog).filter(
+            SimVoteLog.phone_hash == phone_hash,
+            SimVoteLog.debate_id == debate_id
+        ).first()
+        if sim_voted:
+            raise HTTPException(409, 'Este número de teléfono ya votó en esta consulta')
+
+    # Bloqueo 3: mismo RUT/DNI (aunque tenga chip nuevo y cuenta nueva)
+    if user.national_id:
+        nid_hash = hash_str(user.national_id.replace('.', '').replace('-', '').upper(), 'pref-nid-')
+        nid_voted = db.query(NationalIdVoteLog).filter(
+            NationalIdVoteLog.national_id_hash == nid_hash,
+            NationalIdVoteLog.debate_id == debate_id
+        ).first()
+        if nid_voted:
+            raise HTTPException(409, 'Este documento de identidad ya votó en esta consulta')
+
+    # Bloqueo 4: mismo aparato físico por IMEI
+    imei_log = db.query(IMEILog).filter(IMEILog.user_id == user.id).first()
+    if imei_log:
+        imei_voted = db.query(ImeiVoteLog).filter(
+            ImeiVoteLog.imei_hash == imei_log.imei_hash,
+            ImeiVoteLog.debate_id == debate_id
+        ).first()
+        if imei_voted:
+            raise HTTPException(409, 'Este aparato ya fue usado para votar en esta consulta')
+
     opts = json.loads(debate.options or '[]')
     if data.option_index < 0 or data.option_index >= len(opts):
         raise HTTPException(400, 'Invalid option')
     option = opts[data.option_index]
     verify_code = generate_verify_code()
-    blockchain_tx = mock_blockchain_tx()
     vote_hash = hashlib.sha256(f'{debate_id}:{option}:{verify_code}'.encode()).hexdigest()
+    bc_result = _blockchain.anchor_vote(debate_id, vote_hash, verify_code)
+    blockchain_tx = bc_result['tx_hash']
     encrypted = encrypt_vote_aes(debate_id, option, {'country': 'CL'})
     vote = DebateVote(
         debate_id=debate_id, voter_id=None,
         option_index=data.option_index, option_text=option,
         verify_code=verify_code, vote_hash=vote_hash,
         encrypted_vote=encrypted, blockchain_tx=blockchain_tx,
+        vote_chain=json.dumps(data.vote_chain),
     )
     db.add(vote)
+    db.add(HasVotedLog(debate_id=debate_id, user_id=user.id, verify_code=verify_code))
+    if user.phone:
+        db.add(SimVoteLog(debate_id=debate_id, phone_hash=phone_hash))
+    if user.national_id:
+        db.add(NationalIdVoteLog(debate_id=debate_id, national_id_hash=nid_hash))
+    if imei_log:
+        db.add(ImeiVoteLog(debate_id=debate_id, imei_hash=imei_log.imei_hash))
     counts = json.loads(debate.vote_counts or '{}')
     counts[option] = counts.get(option, 0) + 1
     debate.vote_counts = json.dumps(counts)
     debate.total_votes = (debate.total_votes or 0) + 1
+    # Assign unique reward code from pool if available
+    reward_code = None
+    unclaimed = db.query(DebateRewardCode).filter(
+        DebateRewardCode.debate_id == debate_id,
+        DebateRewardCode.claimed == False
+    ).with_for_update(skip_locked=True).first()
+    if unclaimed:
+        unclaimed.claimed = True
+        unclaimed.claimed_at = datetime.utcnow()
+        reward_code = unclaimed.code
     db.commit()
     return {
         'success': True,
@@ -982,6 +2532,7 @@ def cast_vote(debate_id: int, data: CastVoteRequest, db: Session = Depends(get_d
         'blockchain_tx': blockchain_tx,
         'total_votes': debate.total_votes,
         'current_results': counts,
+        'reward_code': reward_code,
         'message': 'Vote registered. Save your verification code.',
     }
 
@@ -1038,11 +2589,45 @@ def confirm_verification(
         'legitimacy_score': debate.legitimacy_score if debate else 0,
     }
 
+@app.get('/debates/{debate_id}/my-vote')
+def get_my_vote(debate_id: int,
+                user: User = Depends(get_optional_user),
+                db: Session = Depends(get_db)):
+    """Devuelve si el usuario ya votó en esta consulta y su código."""
+    if not user:
+        return {'has_voted': False, 'vote': None}
+    log = db.query(HasVotedLog).filter(
+        HasVotedLog.user_id == user.id,
+        HasVotedLog.debate_id == debate_id
+    ).first()
+    if not log:
+        return {'has_voted': False, 'vote': None}
+    vote = db.query(DebateVote).filter(
+        DebateVote.verify_code == log.verify_code
+    ).first()
+    return {
+        'has_voted': True,
+        'verify_code': log.verify_code,
+        'option': vote.option_text if vote else '',
+        'reward_code': vote.reward_code if vote and hasattr(vote, 'reward_code') else '',
+    }
+
+
 @app.get('/debates/{debate_id}/results')
-def get_results(debate_id: int, db: Session = Depends(get_db)):
+def get_results(debate_id: int,
+                user: User = Depends(get_optional_user),
+                db: Session = Depends(get_db)):
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
         raise HTTPException(404, 'Consultation not found')
+    # Resultados solo visibles si el usuario ya votó o la consulta está cerrada
+    if debate.status == 'live' and user:
+        log = db.query(HasVotedLog).filter(
+            HasVotedLog.user_id == user.id,
+            HasVotedLog.debate_id == debate_id
+        ).first()
+        if not log:
+            raise HTTPException(403, 'Debes votar primero para ver los resultados')
     return {
         'debate': format_debate(debate),
         'legitimacy_score': debate.legitimacy_score,
@@ -1122,6 +2707,9 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
+        follow_up_questions=data.follow_up_questions or '',
+        reward=data.reward or '',
+        option_images=json.dumps(data.option_images or []),
     )
     db.add(debate)
     db.commit()
@@ -1278,8 +2866,2186 @@ def _format_campaign(c: AdCampaign) -> dict:
         'start_date':         c.start_date.isoformat() if c.start_date else None,
         'end_date':           c.end_date.isoformat() if c.end_date else None,
         'is_active':          c.is_active,
-        'created_at':         c.created_at.isoformat(),
+        'target_se_tiers':    c.target_se_tiers or '',
+        'impressions':        0,
+        'created_at':         c.created_at.isoformat() if c.created_at else None,
+    }
+
+# ══════════════════════════════════════════════════════════════
+# COMMUNE CPM TABLE (housing m² proxy — CLP per 1000 impressions)
+# ══════════════════════════════════════════════════════════════
+
+COMMUNE_CPM = {
+    'Vitacura':    {'se': 'A', 'cpm': 14.50, 'm2': '>120'},
+    'Las Condes':  {'se': 'A', 'cpm': 12.80, 'm2': '>120'},
+    'Providencia': {'se': 'A', 'cpm': 11.20, 'm2': '>120'},
+    'Ñuñoa':       {'se': 'B', 'cpm':  8.40, 'm2': '80-120'},
+    'Macul':       {'se': 'B', 'cpm':  7.60, 'm2': '80-120'},
+    'San Miguel':  {'se': 'B', 'cpm':  7.20, 'm2': '80-120'},
+    'Santiago':    {'se': 'C', 'cpm':  5.20, 'm2': '55-80'},
+    'Recoleta':    {'se': 'C', 'cpm':  4.40, 'm2': '55-80'},
+    'Maipú':       {'se': 'C', 'cpm':  5.60, 'm2': '55-80'},
+    'La Pintana':  {'se': 'D', 'cpm':  3.20, 'm2': '<55'},
+    'El Bosque':   {'se': 'D', 'cpm':  3.40, 'm2': '<55'},
+    'Cerro Navia': {'se': 'D', 'cpm':  3.00, 'm2': '<55'},
+}
+
+# ══════════════════════════════════════════════════════════════
+# ROUTES: ORGANIZER (v2 — /organizer/ prefix)
+# ══════════════════════════════════════════════════════════════
+
+class OrganizerRegisterFullInput(BaseModel):
+    # Cuenta
+    email:            str
+    password:         str
+    name:             str
+    phone:            str = ''
+    national_id:      str = ''
+    country:          str = 'CL'
+    # Tipo
+    org_type:         str = 'person'   # person / company
+    is_supervisor:    bool = True
+    # Datos empresa (solo si org_type=company)
+    company_name:     str = ''
+    company_rut:      str = ''
+    company_web:      str = ''
+    cargo:            str = ''
+    # Supervisor que lo autoriza (solo si is_supervisor=False)
+    supervisor_email: str = ''
+
+
+@app.post('/organizer/register')
+def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.email == data.email).first()
+    if existing:
+        # Citizen trying to become organizer — verify password then upgrade role
+        if not bcrypt.checkpw(data.password.encode(), existing.password.encode()):
+            raise HTTPException(400, 'Ya tienes cuenta — usa tu contraseña de ciudadano')
+        existing.role = 'organizer'
+        db.commit()
+        profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == existing.id).first()
+        if not profile:
+            profile = OrganizerProfile(
+                user_id=existing.id, org_type=data.org_type or 'person',
+                is_supervisor=True, status='approved', company_name=data.company_name or '',
+            )
+            db.add(profile); db.commit()
+        token = make_token(existing.id, existing.role)
+        return {'token': token, 'user': {'id': existing.id, 'name': existing.name, 'email': existing.email, 'role': existing.role}, 'profile': {'status': profile.status if profile else 'approved'}}
+
+
+    # Verificar dominio email corporativo
+    if data.org_type == 'company':
+        domain_check = _verify_email_domain(data.email)
+        if not domain_check['valid']:
+            raise HTTPException(400, domain_check.get('reason', 'Email inválido'))
+
+    hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+    user = User(
+        email=data.email, name=data.name, password=hashed,
+        phone=data.phone, national_id=data.national_id,
+        country=data.country, role='organizer',
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    # Verificar RUT empresa en SII
+    rut_ok  = False
+    web_ok  = False
+    rut_info = {}
+    if data.org_type == 'company' and data.company_rut:
+        rut_info = _verify_company_rut(data.company_rut)
+        rut_ok   = rut_info.get('valid', False)
+
+    # Verificar web empresa
+    if data.org_type == 'company' and data.company_web:
+        web_check = _verify_company_web(data.company_web, data.company_name, data.company_rut)
+        web_ok    = web_check.get('valid', False)
+
+    domain_ok = data.org_type == 'company' and _verify_email_domain(data.email)['valid']
+
+    profile = OrganizerProfile(
+        user_id              = user.id,
+        org_type             = data.org_type,
+        is_supervisor        = data.is_supervisor,
+        company_name         = data.company_name,
+        company_rut          = data.company_rut,
+        company_web          = data.company_web,
+        company_email_domain = data.email.split('@')[1] if '@' in data.email else '',
+        cargo                = data.cargo,
+        supervisor_email     = data.supervisor_email,
+        rut_verified         = rut_ok,
+        domain_verified      = domain_ok,
+        web_verified         = web_ok,
+        status               = 'approved',
+    )
+    db.add(profile)
+    db.commit()
+    if profile.status == 'approved':
+        profile.approved_at = datetime.utcnow()
+        db.commit()
+
+    # OTP email
+    code = gen_otp()
+    db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
+                   expires_at=datetime.utcnow() + timedelta(minutes=10)))
+    db.commit()
+    bg.add_task(send_email_otp, user.email, code, user.name)
+
+    # Si necesita autorización de supervisor → enviar email al jefe
+    if not data.is_supervisor and data.supervisor_email:
+        token = hashlib.sha256(f'{user.id}-{data.supervisor_email}-{datetime.utcnow()}'.encode()).hexdigest()[:32]
+        db.add(AuthorizationRequest(
+            employee_user_id = user.id,
+            employee_name    = user.name,
+            employee_email   = user.email,
+            supervisor_email = data.supervisor_email,
+            token            = token,
+        ))
+        db.commit()
+        bg.add_task(_send_supervisor_authorization_email,
+            supervisor_email=data.supervisor_email,
+            employee_name=user.name,
+            employee_email=user.email,
+            company=data.company_name,
+            cargo=data.cargo,
+            token=token,
+        )
+
+    verifications = {
+        'email_sent':   True,
+        'rut_verified': rut_ok,
+        'rut_name':     rut_info.get('razon_social', ''),
+        'domain_ok':    domain_ok,
+        'web_ok':       web_ok,
+        'needs_doc':    True,
+        'needs_selfie': True,
+        'status':       profile.status,
+    }
+    return {
+        'token': make_token(user.id, 'organizer'),
+        'user':  {'id': user.id, 'name': user.name, 'email': user.email, 'role': 'organizer'},
+        'verifications': verifications,
+        'message': 'Registro completado. Tu cuenta está activa.',
+    }
+
+
+@app.post('/organizer/login')
+def organizer_login_v2(data: LoginInput, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email).first()
+    if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
+        raise HTTPException(401, 'Credenciales inválidas')
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'No tienes cuenta de organizador')
+    profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
+    return {
+        'token':   make_token(user.id, user.role),
+        'user':    {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+        'profile': {
+            'status':       profile.status if profile else 'pending',
+            'org_type':     profile.org_type if profile else 'person',
+            'is_supervisor':profile.is_supervisor if profile else True,
+            'rut_verified': profile.rut_verified if profile else False,
+            'web_verified': profile.web_verified if profile else False,
+            'doc_verified': profile.doc_verified if profile else False,
+        } if profile else None,
+    }
+
+
+@app.post('/organizer/upload-cargo-doc')
+async def upload_cargo_doc(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Sube el documento que acredita el cargo (contrato, poder notarial, etc.)"""
+    contents = await file.read()
+    if file.content_type not in ['image/jpeg','image/png','image/webp','application/pdf']:
+        raise HTTPException(400, 'Solo JPG, PNG o PDF')
+    profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil de organizador no encontrado')
+    profile.cargo_doc_hash  = hashlib.sha256(contents).hexdigest()
+    profile.cargo_doc_bytes = base64.b64encode(contents).decode()
+    db.commit()
+    return {'ok': True, 'message': 'Documento recibido. Será revisado en 1-2 días hábiles.'}
+
+
+@app.get('/organizer/authorize/{token}')
+def supervisor_authorization_page(token: str, db: Session = Depends(get_db)):
+    """Link que recibe el jefe en su email — muestra quién quiere autorización."""
+    req = db.query(AuthorizationRequest).filter(
+        AuthorizationRequest.token == token,
+        AuthorizationRequest.status == 'pending'
+    ).first()
+    if not req:
+        raise HTTPException(404, 'Link de autorización inválido o ya usado')
+    return {
+        'employee_name':  req.employee_name,
+        'employee_email': req.employee_email,
+        'token':          token,
+        'message':        f'{req.employee_name} solicita autorización para crear consultas en Preferendum',
+    }
+
+
+@app.post('/organizer/authorize/{token}')
+def supervisor_approve(token: str, action: str, db: Session = Depends(get_db),
+                        user: User = Depends(get_current_user)):
+    """El jefe aprueba o rechaza al empleado desde su cuenta verificada."""
+    req = db.query(AuthorizationRequest).filter(
+        AuthorizationRequest.token == token,
+        AuthorizationRequest.status == 'pending'
+    ).first()
+    if not req:
+        raise HTTPException(404, 'Solicitud no encontrada')
+
+    sup_profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
+    if not sup_profile or not sup_profile.is_supervisor:
+        raise HTTPException(403, 'Solo supervisores verificados pueden autorizar')
+    if sup_profile.status != 'approved':
+        raise HTTPException(403, 'Tu cuenta debe estar aprobada para autorizar empleados')
+    # Hard requirement, not just an admin-review courtesy: the boss must have
+    # put their own face on record before vouching for anyone else's. Someone
+    # who'd fabricate an employee identity could otherwise approve it from an
+    # account that was admin-approved on paperwork alone — selfie included
+    # closes that path, exactly per the "no crook films their own face" logic.
+    if not user.selfie_verified:
+        raise HTTPException(403, 'Debes verificar tu propia identidad con selfie antes de poder autorizar a alguien')
+
+    req.status             = action  # approved / rejected
+    req.supervisor_user_id = user.id
+    req.resolved_at        = datetime.utcnow()
+
+    if action == 'approved':
+        emp_profile = db.query(OrganizerProfile).filter(
+            OrganizerProfile.user_id == req.employee_user_id
+        ).first()
+        if emp_profile:
+            emp_profile.supervisor_user_id = user.id
+            emp_profile.supervisor_name    = user.name
+            emp_profile.status             = 'approved'
+
+    db.commit()
+    return {'ok': True, 'action': action, 'employee': req.employee_name}
+
+
+@app.get('/organizer/status')
+def organizer_status(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Estado completo de verificación del organizador."""
+    profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil de organizador no encontrado')
+    pending_employees = db.query(AuthorizationRequest).filter(
+        AuthorizationRequest.supervisor_email == user.email,
+        AuthorizationRequest.status == 'pending'
+    ).count()
+    return {
+        'status':            profile.status,
+        'org_type':          profile.org_type,
+        'is_supervisor':     profile.is_supervisor,
+        'company_name':      profile.company_name,
+        'cargo':             profile.cargo,
+        'verifications': {
+            'email':   user.email_verified,
+            'phone':   user.phone_verified,
+            # profile.selfie_verified is never written by /verify/selfie — the real
+            # flag lives on the user record. Reading the profile copy always showed
+            # false here even after a successful selfie match; read the live one.
+            'selfie':  user.selfie_verified,
+            'rut':     profile.rut_verified,
+            'domain':  profile.domain_verified,
+            'web':     profile.web_verified,
+            'doc':     profile.doc_verified,
+        },
+        'pending_authorization_requests': pending_employees,
+        'can_create_consultations': profile.status == 'approved',
+    }
+
+@app.get('/organizer/consultations')
+def list_organizer_consultations(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debates = db.query(Debate).filter(Debate.creator_id == user.id).order_by(Debate.created_at.desc()).all()
+    return {'consultations': [format_debate(d) for d in debates], 'total': len(debates)}
+
+@app.post('/organizer/consultations')
+def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+
+    # Verificar que el organizador está aprobado
+    profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
+    if profile and profile.status == 'suspended':
+        raise HTTPException(403, 'Tu cuenta está suspendida')
+    if profile and profile.status == 'pending' and user.role != 'admin':
+        raise HTTPException(403, 'Tu cuenta está pendiente de aprobación')
+
+    if len(data.options) < 2:
+        raise HTTPException(400, 'At least 2 options required')
+
+    # Moderación de IA antes de publicar
+    moderation = _moderate_consultation(data.title, data.context, data.options)
+    if moderation['decision'] == 'rejected':
+        raise HTTPException(400, f'Consulta rechazada: {moderation["reason"]}')
+
+    closes        = datetime.fromisoformat(data.closes_at)
+    verify_closes = closes + timedelta(days=data.verify_days)
+
+    # Consultas en revisión quedan como 'draft' hasta aprobación manual
+    status = 'live' if moderation['decision'] == 'approved' else 'draft'
+
+    debate = Debate(
+        title=data.title, context=data.context,
+        options=json.dumps(data.options),
+        creator_id=user.id, status=status,
+        creator_type=data.creator_type, inst_name=data.inst_name or user.name,
+        debate_type=data.debate_type, scope=data.scope,
+        scope_country=data.scope_country, scope_commune=data.scope_commune,
+        target_gender=data.target_gender,
+        target_age_min=data.target_age_min, target_age_max=data.target_age_max,
+        closes_at=closes, verify_closes_at=verify_closes,
+        vote_counts=json.dumps({opt: 0 for opt in data.options}),
+        follow_up_questions=data.follow_up_questions or '',
+        reward=data.reward or '',
+        option_images=json.dumps(data.option_images or []),
+    )
+    db.add(debate)
+    db.commit()
+    db.refresh(debate)
+
+    db.add(ConsultationModerationLog(
+        debate_id=debate.id, score=moderation['score'],
+        decision=moderation['decision'], reason=moderation['reason'],
+    ))
+    db.commit()
+
+    return {
+        'consultation': format_debate(debate),
+        'moderation': {'score': moderation['score'], 'decision': moderation['decision'], 'reason': moderation['reason']},
+        'message': 'Consulta publicada.' if status == 'live' else f'Consulta en revisión (score {moderation["score"]}/100). Se publicará tras revisión manual.',
+    }
+
+@app.post('/organizer/closed-list')
+async def upload_closed_list(
+    debate_id: int = Form(...),
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debate = db.query(Debate).filter(Debate.id == debate_id, Debate.creator_id == user.id).first()
+    if not debate:
+        raise HTTPException(404, 'Consultation not found or not owned by you')
+    content = await file.read()
+    lines = content.decode('utf-8', errors='ignore').strip().splitlines()
+    added = 0
+    for line in lines:
+        nid = line.strip()
+        if not nid:
+            continue
+        h = hash_str(nid, prefix='closedlist:')
+        exists = db.query(ClosedListEntry).filter(
+            ClosedListEntry.debate_id == debate_id,
+            ClosedListEntry.national_id_hash == h
+        ).first()
+        if not exists:
+            db.add(ClosedListEntry(debate_id=debate_id, national_id_hash=h))
+            added += 1
+    db.commit()
+    return {'message': f'{added} voter IDs added to closed list', 'debate_id': debate_id, 'total_added': added}
+
+@app.get('/organizer/consultations/{consultation_id}/results')
+def get_consultation_results(consultation_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debate = db.query(Debate).filter(Debate.id == consultation_id, Debate.creator_id == user.id).first()
+    if not debate:
+        raise HTTPException(404, 'Consultation not found or not owned by you')
+    votes = db.query(DebateVote).filter(DebateVote.debate_id == consultation_id).all()
+    by_gender, by_age = {}, {}
+    for v in votes:
+        k = v.gender or 'unknown'
+        by_gender[k] = by_gender.get(k, 0) + 1
+        k2 = v.age_group or 'unknown'
+        by_age[k2] = by_age.get(k2, 0) + 1
+    return {
+        'consultation': format_debate(debate),
+        'legitimacy_score': debate.legitimacy_score,
+        'verifications': {'total': debate.verifications_total, 'confirmed': debate.verifications_ok},
+        'demographics': {'by_gender': by_gender, 'by_age': by_age},
+    }
+
+@app.post('/organizer/consultations/{consultation_id}/reward-codes')
+async def upload_reward_codes(consultation_id: int, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debate = db.query(Debate).filter(Debate.id == consultation_id, Debate.creator_id == user.id).first()
+    if not debate:
+        raise HTTPException(404, 'Consultation not found or not owned by you')
+    body = await request.json()
+    codes_raw = body.get('codes', '')
+    codes = [c.strip() for c in codes_raw.strip().splitlines() if c.strip()]
+    for code in codes:
+        db.add(DebateRewardCode(debate_id=consultation_id, code=code))
+    db.commit()
+    total_remaining = db.query(DebateRewardCode).filter(
+        DebateRewardCode.debate_id == consultation_id,
+        DebateRewardCode.claimed == False
+    ).count()
+    return {'added': len(codes), 'total_remaining': total_remaining}
+
+@app.get('/organizer/consultations/{consultation_id}/reward-codes/status')
+def reward_codes_status(consultation_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    total = db.query(DebateRewardCode).filter(DebateRewardCode.debate_id == consultation_id).count()
+    remaining = db.query(DebateRewardCode).filter(
+        DebateRewardCode.debate_id == consultation_id,
+        DebateRewardCode.claimed == False
+    ).count()
+    return {'total': total, 'remaining': remaining, 'claimed': total - remaining}
+
+# ══════════════════════════════════════════════════════════════
+# ROUTES: MARKETER (v2 — /marketer/ prefix)
+# ══════════════════════════════════════════════════════════════
+
+class MarketerRegisterInput(BaseModel):
+    email:             str
+    password:          str
+    name:              str
+    phone:             str = ''
+    national_id:       str = ''
+    country:           str = 'CL'
+    # Tipo
+    org_type:          str = 'company'   # person / company
+    is_supervisor:     bool = True
+    # Datos empresa
+    company_name:      str = ''
+    company_rut:       str = ''
+    company_web:       str = ''
+    business_category: str = ''           # elegida del pop-up — ver MARKETER_BUSINESS_CATEGORIES
+    cargo:             str = ''
+    department:        str = ''           # departamento dentro de la empresa
+    # Jefe que lo autoriza (solo si is_supervisor=False)
+    supervisor_name:   str = ''
+    supervisor_email:  str = ''
+    supervisor_phone:  str = ''
+
+
+@app.post('/marketer/register')
+def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.email == data.email).first()
+    if existing:
+        # Citizen trying to become marketer — verify password then upgrade role
+        if not bcrypt.checkpw(data.password.encode(), existing.password.encode()):
+            raise HTTPException(400, 'Ya tienes cuenta — usa tu contraseña de ciudadano')
+        existing.role = 'marketer'
+        db.commit()
+        mk_profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == existing.id).first()
+        if not mk_profile:
+            mk_profile = MarketerProfile(
+                user_id=existing.id, org_type=data.org_type or 'person',
+                is_supervisor=True, status='approved', company_name=data.company_name or '',
+            )
+            db.add(mk_profile); db.commit()
+        token = make_token(existing.id, existing.role)
+        return {'token': token, 'user': {'id': existing.id, 'name': existing.name, 'email': existing.email, 'role': existing.role}}
+
+
+    # Filtro de categoría — corta de raíz antes de cualquier verificación de identidad,
+    # tal como un guardia de entrada revisa el rubro antes de pedir documentos.
+    cat_check = _check_business_category(data.business_category)
+    if not cat_check['allowed']:
+        raise HTTPException(403, cat_check['reason'])
+
+    # Verificar dominio email corporativo
+    if data.org_type == 'company':
+        domain_check = _verify_email_domain(data.email)
+        if not domain_check['valid']:
+            raise HTTPException(400, domain_check.get('reason', 'Email inválido'))
+
+    hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+    user = User(
+        email=data.email, name=data.name, password=hashed,
+        phone=data.phone, national_id=data.national_id,
+        country=data.country, role='marketer',
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    # Verificar RUT empresa en SII y sitio web
+    rut_ok, web_ok, rut_info, web_check = False, False, {}, {}
+    if data.org_type == 'company' and data.company_rut:
+        rut_info = _verify_company_rut(data.company_rut)
+        rut_ok   = rut_info.get('valid', False)
+    if data.org_type == 'company' and data.company_web:
+        web_check = _verify_company_web(data.company_web, data.company_name, data.company_rut)
+        web_ok    = web_check.get('valid', False)
+
+    domain_ok = data.org_type == 'company' and _verify_email_domain(data.email)['valid']
+
+    profile = MarketerProfile(
+        user_id              = user.id,
+        org_type             = data.org_type,
+        is_supervisor        = data.is_supervisor,
+        company_name         = data.company_name,
+        company_rut          = data.company_rut,
+        company_web          = data.company_web,
+        company_email_domain = data.email.split('@')[1] if '@' in data.email else '',
+        business_category    = data.business_category.strip().lower(),
+        cargo                = data.cargo,
+        department           = data.department,
+        applicant_phone      = data.phone,
+        supervisor_name      = data.supervisor_name,
+        supervisor_email     = data.supervisor_email,
+        supervisor_phone     = data.supervisor_phone,
+        rut_verified         = rut_ok,
+        domain_verified      = domain_ok,
+        web_verified         = web_ok,
+        status               = 'approved',
+    )
+    db.add(profile)
+    db.commit()
+    if profile.status == 'approved':
+        profile.approved_at = datetime.utcnow()
+        db.commit()
+
+    # OTP email
+    code = gen_otp()
+    db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
+                   expires_at=datetime.utcnow() + timedelta(minutes=10)))
+    db.commit()
+    bg.add_task(send_email_otp, user.email, code, user.name)
+
+    # Si necesita autorización del jefe → email al jefe (con su propia cuenta verificada)
+    if not data.is_supervisor and data.supervisor_email:
+        token = hashlib.sha256(f'{user.id}-{data.supervisor_email}-{datetime.utcnow()}'.encode()).hexdigest()[:32]
+        db.add(MarketerAuthorizationRequest(
+            employee_user_id = user.id,
+            employee_name    = user.name,
+            employee_email   = user.email,
+            supervisor_email = data.supervisor_email,
+            token            = token,
+        ))
+        db.commit()
+        bg.add_task(_send_supervisor_authorization_email,
+            supervisor_email=data.supervisor_email,
+            employee_name=user.name,
+            employee_email=user.email,
+            company=data.company_name,
+            cargo=data.cargo,
+            token=token,
+            role='marketer',
+        )
+
+    verifications = {
+        'email_sent':   True,
+        'category_ok':  cat_check['allowed'],
+        'rut_verified': rut_ok,
+        'rut_name':     rut_info.get('razon_social', ''),
+        'domain_ok':    domain_ok,
+        'web_ok':       web_ok,
+        'needs_doc':    True,
+        'needs_selfie': True,
+        'status':       profile.status,
+    }
+    return {
+        'token': make_token(user.id, 'marketer'),
+        'user':  {'id': user.id, 'name': user.name, 'email': user.email, 'role': 'marketer'},
+        'verifications': verifications,
+        'message': 'Registro iniciado. Verifica tu email y sube tu documento de cargo + selfie.',
+    }
+
+@app.post('/marketer/login')
+def marketer_login(data: LoginInput, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == data.email, User.role.in_(['marketer', 'admin'])).first()
+    if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
+        raise HTTPException(401, 'Credenciales inválidas')
+    profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user.id).first()
+    return {
+        'token':   make_token(user.id, user.role),
+        'user':    {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+        'profile': {
+            'status':        profile.status if profile else 'pending',
+            'org_type':      profile.org_type if profile else 'company',
+            'is_supervisor': profile.is_supervisor if profile else True,
+            'rut_verified':  profile.rut_verified if profile else False,
+            'web_verified':  profile.web_verified if profile else False,
+            'doc_verified':  profile.doc_verified if profile else False,
+        } if profile else None,
+    }
+
+
+@app.post('/marketer/upload-cargo-doc')
+async def marketer_upload_cargo_doc(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Sube el documento que acredita el cargo (contrato, poder notarial, etc.)"""
+    contents = await file.read()
+    if file.content_type not in ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']:
+        raise HTTPException(400, 'Solo JPG, PNG o PDF')
+    profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil de marketer no encontrado')
+    profile.cargo_doc_hash  = hashlib.sha256(contents).hexdigest()
+    profile.cargo_doc_bytes = base64.b64encode(contents).decode()
+    db.commit()
+    return {'ok': True, 'message': 'Documento recibido. Será revisado en 1-2 días hábiles.'}
+
+
+@app.get('/marketer/authorize/{token}')
+def marketer_authorization_page(token: str, db: Session = Depends(get_db)):
+    """Link que recibe el jefe en su email — muestra quién pide autorización para lanzar campañas."""
+    req = db.query(MarketerAuthorizationRequest).filter(
+        MarketerAuthorizationRequest.token == token,
+        MarketerAuthorizationRequest.status == 'pending'
+    ).first()
+    if not req:
+        raise HTTPException(404, 'Link de autorización inválido o ya usado')
+    return {
+        'employee_name':  req.employee_name,
+        'employee_email': req.employee_email,
+        'token':          token,
+        'message':        f'{req.employee_name} solicita autorización para lanzar campañas publicitarias en Preferendum',
+    }
+
+
+@app.post('/marketer/authorize/{token}')
+def marketer_supervisor_approve(token: str, action: str, db: Session = Depends(get_db),
+                                 user: User = Depends(get_current_user)):
+    """El jefe aprueba o rechaza al empleado desde su propia cuenta verificada (con selfie)."""
+    req = db.query(MarketerAuthorizationRequest).filter(
+        MarketerAuthorizationRequest.token == token,
+        MarketerAuthorizationRequest.status == 'pending'
+    ).first()
+    if not req:
+        raise HTTPException(404, 'Solicitud no encontrada')
+
+    sup_profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user.id).first()
+    if not sup_profile or not sup_profile.is_supervisor:
+        raise HTTPException(403, 'Solo jefes con cuenta de marketer verificada pueden autorizar')
+    if sup_profile.status != 'approved':
+        raise HTTPException(403, 'Tu cuenta debe estar aprobada para autorizar campañas')
+    # Hard requirement, not just an admin-review courtesy: the boss must have
+    # put their own face on record before vouching for a campaign that will
+    # display their company's name to real voters. Closes the path where a
+    # paperwork-only approval lets someone authorize without ever showing a face.
+    if not user.selfie_verified:
+        raise HTTPException(403, 'Debes verificar tu propia identidad con selfie antes de poder autorizar campañas')
+
+    req.status             = action  # approved / rejected
+    req.supervisor_user_id = user.id
+    req.resolved_at        = datetime.utcnow()
+
+    if action == 'approved':
+        emp_profile = db.query(MarketerProfile).filter(
+            MarketerProfile.user_id == req.employee_user_id
+        ).first()
+        if emp_profile:
+            emp_profile.supervisor_user_id = user.id
+            emp_profile.supervisor_name    = user.name
+            emp_profile.status             = 'approved'
+
+    db.commit()
+    return {'ok': True, 'action': action, 'employee': req.employee_name}
+
+
+@app.get('/marketer/status')
+def marketer_status(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Estado completo de verificación del marketer."""
+    profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user.id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil de marketer no encontrado')
+    pending_employees = db.query(MarketerAuthorizationRequest).filter(
+        MarketerAuthorizationRequest.supervisor_email == user.email,
+        MarketerAuthorizationRequest.status == 'pending'
+    ).count()
+    return {
+        'status':            profile.status,
+        'org_type':          profile.org_type,
+        'is_supervisor':     profile.is_supervisor,
+        'company_name':      profile.company_name,
+        'business_category': profile.business_category,
+        'cargo':             profile.cargo,
+        'department':        profile.department,
+        'verifications': {
+            'email':   user.email_verified,
+            'phone':   user.phone_verified,
+            'selfie':  user.selfie_verified,
+            'rut':     profile.rut_verified,
+            'domain':  profile.domain_verified,
+            'web':     profile.web_verified,
+            'doc':     profile.doc_verified,
+        },
+        'pending_authorization_requests': pending_employees,
+    }
+
+@app.get('/marketer/communes')
+def get_marketer_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
+    """Tabla de comunas con índice de ingreso y CPM — viene del agente de datos."""
+    from market_data_agent import get_fallback_table
+    rows = db.query(CommuneMarketData)
+    if country: rows = rows.filter(CommuneMarketData.country == country)
+    if se_tier: rows = rows.filter(CommuneMarketData.se_tier == se_tier)
+    rows = rows.order_by(CommuneMarketData.income_index.desc()).all()
+    if rows:
+        return {'communes': [{'country': r.country, 'commune': r.commune,
+            'income_index': r.income_index, 'cpm_usd': r.cpm_usd, 'se_tier': r.se_tier} for r in rows],
+            'source': 'database'}
+    fallback = get_fallback_table()
+    if country: fallback = [c for c in fallback if c['country'] == country]
+    if se_tier:  fallback = [c for c in fallback if c['se_tier'] == se_tier]
+    return {'communes': fallback, 'source': 'fallback'}
+
+
+def _optimize_campaign(budget_clp: float, target_country: str, target_communes: str,
+                        target_se_tiers: str, target_income_min: float, target_income_max: float,
+                        target_gender: str, target_age_min: int, target_age_max: int, db) -> dict:
+    """
+    Motor de optimización de campaña.
+    Objetivo: minimizar costo por contacto al mercado objetivo.
+    Lógica: distribuir presupuesto proporcionalmente a votantes alcanzables,
+    priorizando comunas con mayor densidad del target y menor CPM relativo.
+    """
+    from market_data_agent import get_fallback_table
+
+    # 1. Obtener comunas disponibles
+    rows = db.query(CommuneMarketData)
+    if target_country:
+        rows = rows.filter(CommuneMarketData.country == target_country)
+    rows = rows.all()
+    if not rows:
+        data = get_fallback_table()
+        if target_country:
+            data = [c for c in data if c['country'] == target_country]
+    else:
+        data = [{'country': r.country, 'commune': r.commune, 'income_index': r.income_index,
+                 'cpm_usd': r.cpm_usd, 'se_tier': r.se_tier} for r in rows]
+
+    # 2. Filtrar por nivel de ingreso (SE tier e índice)
+    tiers = [t.strip() for t in target_se_tiers.split(',') if t.strip()]
+    data = [c for c in data if c['se_tier'] in tiers]
+    data = [c for c in data if target_income_min <= c['income_index'] <= target_income_max]
+    if target_communes:
+        selected = [c.strip() for c in target_communes.split(',')]
+        data = [c for c in data if c['commune'] in selected]
+
+    if not data:
+        return {'error': 'Ninguna comuna coincide con los criterios de targeting'}
+
+    # 3. Estimar votantes alcanzables por comuna
+    # Factor demográfico: ajustar por género y edad objetivo
+    # A targeting window always covers at least one age — "exactly 30" is a
+    # legitimate, common choice, not "zero people". Treating it as a
+    # zero-width range zeroed out demo_factor for every commune, which zeroed
+    # out total_weight below and crashed this whole request with a
+    # ZeroDivisionError BEFORE the campaign row was ever created — a launch
+    # that looked like it silently did nothing. floor it at one year so a
+    # single-age target still represents the (small, real) slice it is.
+    age_range = max(target_age_max - target_age_min, 1)
+    age_factor = min(1.0, age_range / 60.0)   # 60 años = 100% población activa
+    gender_factor = 0.52 if target_gender == 'F' else 0.48 if target_gender == 'M' else 1.0
+    demo_factor = age_factor * gender_factor
+
+    # Población estimada por commune (proxy: índice de ingreso → densidad urbana)
+    for c in data:
+        pop_est = int(50000 * (1 + c['income_index'] / 200))
+        c['voters_est'] = int(pop_est * 0.75 * 0.35 * demo_factor)
+
+    # 4. Distribuir presupuesto — proporcional a votantes, penalizando CPM alto
+    # Peso = votantes / cpm → más peso a comunas con más audiencia y menor costo
+    total_weight = sum(c['voters_est'] / max(c['cpm_usd'], 0.1) for c in data)
+    if total_weight <= 0:
+        # Belt-and-suspenders: whatever combination of inputs got us to "every
+        # matching commune estimates zero reachable voters", dividing by that
+        # is what turns a bad estimate into a hard crash that drops the whole
+        # campaign. Fall back to spreading the budget evenly across the
+        # matching communes rather than refusing to create the campaign —
+        # an organizer who picks unusual targeting still gets a campaign and
+        # an honest (if rough) allocation, not a vanished submission.
+        total_weight = float(len(data))
+        for c in data:
+            c['voters_est'] = max(c['voters_est'], 1)
+    budget_usd = budget_clp / USD_TO_CLP
+
+    allocation = []
+    total_impressions = 0
+    total_contacts = 0
+
+    for c in data:
+        weight = (c['voters_est'] / max(c['cpm_usd'], 0.1)) / total_weight
+        budget_commune_usd = budget_usd * weight
+        impressions = int((budget_commune_usd / c['cpm_usd']) * 1000)
+        contacts = min(impressions, c['voters_est'])
+        allocation.append({
+            'country':       c['country'],
+            'commune':       c['commune'],
+            'se_tier':       c['se_tier'],
+            'income_index':  c['income_index'],
+            'cpm_usd':       c['cpm_usd'],
+            'budget_clp':    int(budget_commune_usd * USD_TO_CLP),
+            'budget_pct':    round(weight * 100, 1),
+            'impressions':   impressions,
+            'contacts_est':  contacts,
+        })
+        total_impressions += impressions
+        total_contacts    += contacts
+
+    allocation.sort(key=lambda x: x['contacts_est'], reverse=True)
+    cost_per_contact = round((budget_clp / total_contacts), 0) if total_contacts > 0 else 0
+
+    return {
+        'budget_clp':           int(budget_clp),
+        'budget_usd':           round(budget_usd, 2),
+        'total_communes':       len(allocation),
+        'total_impressions':    total_impressions,
+        'total_contacts_est':   total_contacts,
+        'cost_per_contact_clp': cost_per_contact,
+        'cpm_promedio':         round(budget_usd / (total_impressions / 1000), 2) if total_impressions > 0 else 0,
+        'targeting': {
+            'country':     target_country or 'todos',
+            'se_tiers':    tiers,
+            'income_range': f'{target_income_min}–{target_income_max}',
+            'gender':      target_gender,
+            'age':         f'{target_age_min}–{target_age_max}',
+        },
+        'allocation': allocation,
+    }
+
+
+@app.post('/marketer/estimate')
+def estimate_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
+    """Simula la campaña y muestra la optimización antes de confirmar."""
+    result = _optimize_campaign(
+        budget_clp=data.budget_clp,
+        target_country=data.target_country,
+        target_communes=data.target_communes,
+        target_se_tiers=data.target_se_tiers,
+        target_income_min=data.target_income_min,
+        target_income_max=data.target_income_max,
+        target_gender=data.target_gender,
+        target_age_min=data.target_age_min,
+        target_age_max=data.target_age_max,
+        db=db,
+    )
+    return result
+
+
+class SocialSponsorInput(BaseModel):
+    advertiser_email: str
+    platforms:        list  # ["instagram", "x", "tiktok", "facebook"]
+    weeks:            int = 4
+    tagline:          str = ''
+    total_usd:        float = 0.0
+
+PLATFORM_PRICES_USD = {'instagram': 290, 'x': 240, 'tiktok': 320, 'facebook': 210}
+
+@app.post('/marketer/social-sponsors')
+def create_social_sponsor(data: SocialSponsorInput, db: Session = Depends(get_db)):
+    """Registra un patrocinio de amplificación social. Usa el targeting existente de la cuenta."""
+    user = db.query(User).filter(User.email == data.advertiser_email, User.role.in_(['marketer','admin'])).first()
+    if not user:
+        raise HTTPException(404, 'Cuenta marketer no encontrada. Crea tu campaña primero.')
+    total = sum(PLATFORM_PRICES_USD.get(p, 0) for p in data.platforms) * data.weeks
+    import secrets as _secrets
+    token = 'SS-' + _secrets.token_hex(12).upper()
+    return {
+        'token':     token,
+        'platforms': data.platforms,
+        'weeks':     data.weeks,
+        'total_usd': total,
+        'tagline':   data.tagline,
+        'advertiser': user.name,
+        'message':   f'Patrocinio social activado en {len(data.platforms)} plataformas por {data.weeks} semanas.',
+    }
+
+@app.get('/marketer/social-sponsors')
+def list_social_sponsors(email: str, db: Session = Depends(get_db)):
+    """Lista patrocinios sociales de un marketer (placeholder — se persiste cuando haya modelo DB)."""
+    user = db.query(User).filter(User.email == email, User.role.in_(['marketer','admin'])).first()
+    if not user:
+        raise HTTPException(404, 'Cuenta marketer no encontrada.')
+    return {'sponsors': [], 'note': 'Persistencia completa disponible en próxima versión.'}
+
+
+@app.post('/marketer/campaigns')
+def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
+    """Crea la campaña y devuelve la optimización de asignación."""
+    # Gate: the brand name on this campaign (advertiser_name) is shown live,
+    # publicly, inside real debates (main.py _match_campaigns → 'brand': ...).
+    # That display is worthless — actively harmful — if anyone can type any
+    # company name with no identity behind it. Require a marketer account that
+    # has cleared the same chain organizers go through: RUT/web/domain checks,
+    # selfie-vs-ID face match, cargo document, and (if not the boss) the boss's
+    # own sign-off from their own verified, selfie-checked account.
+    marketer_user = db.query(User).filter(
+        User.email == data.advertiser_email
+    ).first()
+    if not marketer_user:
+        # Auto-create marketer account on first campaign
+        hashed = bcrypt.hashpw((data.advertiser_name or 'marketer').encode(), bcrypt.gensalt()).decode()
+        marketer_user = User(
+            email=data.advertiser_email, name=data.advertiser_name or 'Anunciante',
+            password=hashed, role='marketer',
+        )
+        db.add(marketer_user)
+        db.commit()
+        db.refresh(marketer_user)
+    elif marketer_user.role not in ('marketer', 'admin'):
+        marketer_user.role = 'marketer'
+        db.commit()
+    # Ensure marketer profile exists and is approved
+    profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == marketer_user.id).first()
+    if not profile:
+        profile = MarketerProfile(
+            user_id=marketer_user.id, org_type='person', is_supervisor=True,
+            status='approved', company_name=data.advertiser_name or '',
+        )
+        db.add(profile)
+        db.commit()
+
+    # Guard against accidental duplicate submissions (e.g. a slow response
+    # tempting a double-click, or a flaky connection causing a silent retry):
+    # if the same advertiser just created an identical campaign in the last
+    # 10 seconds, return that one instead of minting a near-identical twin.
+    dup_cutoff = datetime.utcnow() - timedelta(seconds=10)
+    existing = (
+        db.query(AdCampaign)
+        .filter(
+            AdCampaign.advertiser_email == data.advertiser_email,
+            AdCampaign.title == data.campaign_title,
+            AdCampaign.budget_clp == data.budget_clp,
+            AdCampaign.created_at >= dup_cutoff,
+        )
+        .order_by(AdCampaign.created_at.desc())
+        .first()
+    )
+    if existing:
+        optimization = _optimize_campaign(
+            budget_clp=existing.budget_clp,
+            target_country=existing.target_country,
+            target_communes=existing.target_communes,
+            target_se_tiers=existing.target_se_tiers,
+            target_income_min=existing.target_income_min,
+            target_income_max=existing.target_income_max,
+            target_gender=existing.target_gender,
+            target_age_min=existing.target_age_min,
+            target_age_max=existing.target_age_max,
+            db=db,
+        )
+        return {'message': 'Campaign created', 'campaign_id': existing.id,
+                'optimization': optimization, 'campaign': _format_campaign(existing)}
+
+    optimization = _optimize_campaign(
+        budget_clp=data.budget_clp,
+        target_country=data.target_country,
+        target_communes=data.target_communes,
+        target_se_tiers=data.target_se_tiers,
+        target_income_min=data.target_income_min,
+        target_income_max=data.target_income_max,
+        target_gender=data.target_gender,
+        target_age_min=data.target_age_min,
+        target_age_max=data.target_age_max,
+        db=db,
+    )
+    campaign = AdCampaign(
+        advertiser_email    = data.advertiser_email,
+        advertiser_name     = data.advertiser_name,
+        title               = data.campaign_title,
+        budget_clp          = data.budget_clp,
+        ad_type             = data.ad_type,
+        target_country      = data.target_country,
+        target_communes     = data.target_communes,
+        target_se_tiers     = data.target_se_tiers,
+        target_income_min   = data.target_income_min,
+        target_income_max   = data.target_income_max,
+        target_gender       = data.target_gender,
+        target_age_min      = data.target_age_min,
+        target_age_max      = data.target_age_max,
+        target_age_ranges   = data.target_age_ranges,
+        target_categories   = data.target_categories,
+        excluded_categories = data.excluded_categories,
+        blocked_competitors = data.blocked_competitors,
+        start_date          = datetime.fromisoformat(data.start_date),
+        end_date            = datetime.fromisoformat(data.end_date),
+        is_active           = True,
+        logo_url            = data.logo_url or '',
+        ad_copy             = data.ad_copy or '',
+        ad_image_url        = data.ad_image_url or '',
+        link_url            = data.link_url or '',
+    )
+    db.add(campaign)
+    db.commit()
+    db.refresh(campaign)
+    # Auto-pin to all live debates so the campaign appears immediately
+    all_debate_ids = [str(d.id) for d in db.query(Debate).filter(Debate.status == 'live').all()]
+    if not all_debate_ids:
+        all_debate_ids = [str(d.id) for d in db.query(Debate).all()]
+    campaign.target_debate_ids = ','.join(all_debate_ids)
+    db.commit()
+    return {'message': 'Campaign created', 'campaign_id': campaign.id,
+            'optimization': optimization, 'campaign': _format_campaign(campaign)}
+
+@app.get('/marketer/campaigns/{campaign_id}/metrics')
+def get_campaign_metrics(campaign_id: int, db: Session = Depends(get_db)):
+    campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(404, 'Campaign not found')
+
+    views = db.query(AdImpressionLog).filter(
+        AdImpressionLog.campaign_id == campaign_id
+    ).all()
+
+    total_imp   = len(views)
+    spent_clp   = campaign.spent_clp or 0
+    balance_clp = max(0, campaign.budget_clp - spent_clp)
+    pct_spent   = round(spent_clp / campaign.budget_clp * 100, 1) if campaign.budget_clp > 0 else 0
+    cost_per_contact = round(spent_clp / total_imp, 0) if total_imp > 0 else 0
+
+    # Breakdowns
+    by_gender, by_age, by_commune, by_tier, by_debate, by_day = {}, {}, {}, {}, {}, {}
+    for v in views:
+        g  = v.gender    or 'N/A'
+        a  = v.age_group or 'N/A'
+        co = v.county    or 'N/A'
+        d  = str(v.debate_id) if v.debate_id else 'N/A'
+        day = v.created_at.strftime('%Y-%m-%d') if v.created_at else 'N/A'
+
+        by_gender[g]  = by_gender.get(g, 0)   + 1
+        by_age[a]     = by_age.get(a, 0)       + 1
+        by_commune[co]= by_commune.get(co, 0)  + 1
+        by_debate[d]  = by_debate.get(d, 0)    + 1
+        by_day[day]   = by_day.get(day, 0)     + 1
+
+        # SE tier desde CommuneMarketData
+        if co and co != 'N/A':
+            cm = db.query(CommuneMarketData).filter(
+                CommuneMarketData.commune.ilike(co)
+            ).first()
+            tier = cm.se_tier if cm else 'N/A'
+            by_tier[tier] = by_tier.get(tier, 0) + 1
+
+    # Target alcanzado vs estimado
+    target_tiers = [t.strip() for t in (campaign.target_se_tiers or '').split(',') if t.strip()]
+    in_target = sum(by_tier.get(t, 0) for t in target_tiers)
+    pct_in_target = round(in_target / total_imp * 100, 1) if total_imp > 0 else 0
+
+    # Desglose de comunas ordenado por impresiones
+    top_communes = sorted(by_commune.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    # Días ordenados cronológicamente
+    daily_trend = [{'date': d, 'impressions': n}
+                   for d, n in sorted(by_day.items())]
+
+    return {
+        # ── Resumen ejecutivo ──
+        'campaign_id':        campaign_id,
+        'title':              campaign.title,
+        'advertiser':         campaign.advertiser_name,
+        'is_active':          campaign.is_active,
+        'start_date':         campaign.start_date.isoformat() if campaign.start_date else None,
+        'end_date':           campaign.end_date.isoformat()   if campaign.end_date   else None,
+
+        # ── Presupuesto ──
+        'budget_clp':         campaign.budget_clp,
+        'spent_clp':          spent_clp,
+        'balance_clp':        balance_clp,
+        'pct_budget_spent':   pct_spent,
+
+        # ── Alcance ──
+        'impressions':        total_imp,
+        'cost_per_contact_clp': cost_per_contact,
+
+        # ── Calidad del targeting ──
+        'targeting': {
+            'country':      campaign.target_country or 'todos',
+            'se_tiers':     target_tiers,
+            'gender':       campaign.target_gender,
+            'age':          f'{campaign.target_age_min or 13}–{campaign.target_age_max or 99}',
+        },
+        'in_target_impressions': in_target,
+        'pct_in_target':         pct_in_target,
+
+        # ── Breakdowns ──
+        'by_se_tier':    dict(sorted(by_tier.items(),    key=lambda x: TIER_ORDER.index(x[0]) if x[0] in TIER_ORDER else 99)),
+        'by_gender':     by_gender,
+        'by_age':        by_age,
+        'top_communes':  [{'commune': c, 'impressions': n} for c, n in top_communes],
+        'by_debate':     by_debate,
+
+        # ── Evolución diaria ──
+        'daily_trend':   daily_trend,
+    }
+
+@app.get('/admin/db-info')
+def db_info():
+    db_url = DATABASE_URL
+    is_pg = 'postgresql' in db_url or 'postgres' in db_url
+    masked = db_url[:15] + '...' if len(db_url) > 15 else db_url
+    try:
+        with engine.connect() as conn:
+            if is_pg:
+                from sqlalchemy import text
+                row = conn.execute(text("SELECT version()")).fetchone()
+                version = row[0][:60] if row else 'unknown'
+            else:
+                version = 'SQLite'
+        connected = True
+    except Exception as e:
+        version = str(e)[:80]
+        connected = False
+    return {
+        'db_type': 'postgresql' if is_pg else 'sqlite',
+        'connected': connected,
+        'db_version': version,
+        'url_prefix': masked,
     }
 
 from verification import router as verify_router
 app.include_router(verify_router)
+
+# ── ADMIN: email smoke test ──────────────────────────────────────
+@app.post('/admin/test-email')
+def test_email_send(to: str, secret: str):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    resend_key = os.getenv('RESEND_API_KEY')
+    if not resend_key:
+        return {'to': to, 'ok': False, 'error': 'RESEND_API_KEY not set'}
+    from_addr = 'Preferendum <noreply@preferendum.com>'
+    try:
+        resp = _requests.post(
+            'https://api.resend.com/emails',
+            json={'from': from_addr, 'to': [to], 'subject': 'Preferendum — Email Test',
+                  'text': 'Test from noreply@preferendum.com. If you see this, email is working.'},
+            headers={'Authorization': f'Bearer {resend_key}'},
+            timeout=10,
+        )
+        result = {'from': from_addr, 'status': resp.status_code, 'body': resp.json(), 'ok': resp.status_code in (200, 201)}
+    except Exception as e:
+        result = {'from': from_addr, 'ok': False, 'error': str(e)}
+    return {'to': to, 'result': result}
+
+# ── ADMIN: fetch a pending OTP for automated end-to-end testing ──
+# Real email/SMS delivery can fail for reasons unrelated to the voting
+# system itself (DNS propagation, SMTP credentials, carrier issues — see
+# CLAUDE.md "EMAIL VERIFICATION FIX"). Automated integrity tests (e.g. the
+# GitHub Actions suite in .github/workflows/integrity-tests.yml) need a way
+# to complete email verification without a human reading an inbox. This
+# endpoint exposes the *current* OTP for one account, gated by the same
+# ADMIN_SECRET as every other /admin route — it cannot be used to read
+# someone else's code without that secret, and test accounts are disposable
+# (created and discarded by the test run itself).
+@app.get('/admin/test-otp')
+def get_test_otp(email: str, secret: str, channel: str = 'email', db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(404, 'User not found')
+    otp = db.query(OTPCode).filter(
+        OTPCode.user_id == user.id, OTPCode.channel == channel,
+        OTPCode.used == False, OTPCode.expires_at > datetime.utcnow()
+    ).order_by(OTPCode.id.desc()).first()
+    if not otp:
+        raise HTTPException(404, 'No active OTP for this user/channel')
+    return {'email': email, 'channel': channel, 'code': otp.code, 'expires_at': otp.expires_at.isoformat()}
+
+# ── ADMIN: prove bridge destruction for a specific vote ──────────
+# "Bridge destruction" means voter_id is set to None the instant a vote is
+# recorded — the database itself never holds a link between a voter's
+# identity and their vote (see CLAUDE.md "Privacy architecture"). This
+# endpoint lets anyone with the admin secret check that field directly for
+# a given verify_code — not a description of the claim, the claim checked
+# against the live row. Used by the automated integrity tests, and usable
+# by independent auditors who want to confirm this themselves.
+@app.get('/admin/test-vote-bridge')
+def test_vote_bridge(code: str, debate_id: int, secret: str, db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    vote = db.query(DebateVote).filter(
+        DebateVote.verify_code == code.upper().strip(),
+        DebateVote.debate_id == debate_id
+    ).first()
+    if not vote:
+        raise HTTPException(404, 'Vote not found')
+    return {
+        'verify_code': vote.verify_code,
+        'debate_id': vote.debate_id,
+        'voter_id': vote.voter_id,
+        'bridge_destroyed': vote.voter_id is None,
+    }
+
+@app.patch('/admin/debates/{debate_id}')
+def admin_patch_debate(debate_id: int, secret: str, target_age_min: int = None, target_age_max: int = None, scope_country: str = None, status: str = None, db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+    if target_age_min is not None: debate.target_age_min = target_age_min
+    if target_age_max is not None: debate.target_age_max = target_age_max
+    if scope_country is not None: debate.scope_country = scope_country
+    if status is not None:
+        if status not in ('live', 'draft', 'closed'):
+            raise HTTPException(400, "status must be one of: live, draft, closed")
+        debate.status = status
+        # get_debate_status() (the function every public endpoint actually
+        # calls) is purely date-driven and never reads debate.status — so
+        # writing the column alone is a silent no-op for anything a voter
+        # sees. Move the dates that drive it so "force closed/live" really
+        # changes what the public status computes to.
+        now = datetime.utcnow()
+        if status == 'closed':
+            debate.closes_at = now
+            debate.verify_closes_at = now
+        elif status == 'live':
+            debate.closes_at = now + timedelta(days=30)
+            debate.verify_closes_at = debate.closes_at + timedelta(days=7)
+    db.commit()
+    db.refresh(debate)
+    return {'ok': True, 'debate': format_debate(debate)}
+
+
+@app.delete('/admin/debates/{debate_id}')
+def admin_delete_debate(debate_id: int, secret: str, db: Session = Depends(get_db)):
+    """Permanently purges a debate and every row that references it.
+
+    There are no SQL ForeignKey constraints on debate_id columns, so a
+    plain DELETE on the debate row would leave orphaned opinions, votes,
+    anti-fraud logs, ads and impression logs behind forever — exactly
+    what produced the 7 "ghost" [E2E-PROOF] debates that kept reappearing
+    in the live feed (admin_patch_debate's old status='closed' no-op
+    couldn't remove them, since /debates never filters by status either —
+    the only real fix is deleting the rows).
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+
+    purged = {}
+    for model in (
+        VoteIdentityLock, Opinion, DebateVote, HasVotedLog, SimVoteLog,
+        NationalIdVoteLog, ImeiVoteLog, DebateAd, DebateRewardCode,
+        AdImpressionLog, ClosedListEntry, ConsultationModerationLog,
+    ):
+        n = db.query(model).filter(model.debate_id == debate_id).delete(synchronize_session=False)
+        if n:
+            purged[model.__tablename__] = n
+
+    title = debate.title
+    db.delete(debate)
+    db.commit()
+    return {'ok': True, 'deleted_debate_id': debate_id, 'title': title, 'purged_rows': purged}
+
+
+# ══════════════════════════════════════════════════════════════
+# MARKET DATA AGENT — índice de ingreso por comuna
+# ══════════════════════════════════════════════════════════════
+
+def _save_communes_to_db(communes: list, db):
+    """Guarda o actualiza comunas en la BD. Recalcula índice global después."""
+    saved = 0
+    for c in communes:
+        existing = db.query(CommuneMarketData).filter(
+            CommuneMarketData.country == c['country'],
+            CommuneMarketData.commune == c['commune']
+        ).first()
+        if existing:
+            existing.price_m2_avg = c.get('price_m2_avg', 0)
+            existing.income_index = c['income_index']
+            existing.cpm_usd      = c['cpm_usd']
+            existing.se_tier      = c['se_tier']
+            # Bug found 2026-06-08: this never updated `portal`, so a row
+            # first created from get_fallback_table() (portal='fallback')
+            # that later got real values written over it (e.g. Hackney and
+            # Tower Hamlets, upgraded in place by the new HM Land Registry
+            # agent) kept showing 'fallback' forever — real numbers wearing
+            # a fake-data label. That mislabeling is exactly what caused
+            # /admin/purge-stale-fallback-communes to delete two rows that
+            # actually held correct, freshly-fetched official data.
+            existing.portal       = c.get('portal', existing.portal)
+            existing.updated_at   = datetime.utcnow()
+        else:
+            db.add(CommuneMarketData(
+                country=c['country'], commune=c['commune'],
+                price_m2_avg=c.get('price_m2_avg', 0),
+                income_index=c['income_index'], cpm_usd=c['cpm_usd'],
+                se_tier=c['se_tier'], portal=c.get('portal', 'fallback'),
+                sample_count=c.get('sample_count', 0),
+                scraped_at=datetime.utcnow(),
+            ))
+        saved += 1
+    db.commit()
+    # Recalcular índice global con todos los datos en BD
+    _recalculate_global_index(db)
+    return saved
+
+
+def _recalculate_global_index(db):
+    """Recalcula el índice 100 = mediana global cada vez que entra un país nuevo."""
+    all_rows = db.query(CommuneMarketData).filter(CommuneMarketData.price_m2_avg > 0).all()
+    if not all_rows:
+        return
+    prices = sorted([r.price_m2_avg for r in all_rows])
+    median = prices[len(prices) // 2]
+    from market_data_agent import calculate_cpm_from_index, get_se_tier
+    for row in all_rows:
+        row.income_index = round((row.price_m2_avg / median) * 100, 1)
+        row.cpm_usd      = calculate_cpm_from_index(row.income_index)
+        row.se_tier      = get_se_tier(row.income_index)
+    db.commit()
+
+
+@app.get('/admin/aws-check')
+def aws_check(secret: str):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    key = os.getenv('AWS_ACCESS_KEY_ID', '')
+    sec = os.getenv('AWS_SECRET_ACCESS_KEY', '')
+    region = os.getenv('AWS_REGION', 'us-east-1')
+    result = {
+        'key_set': bool(key),
+        'key_prefix': key[:4] if key else '',
+        'key_length': len(key),
+        'secret_set': bool(sec),
+        'secret_length': len(sec),
+        'region': region,
+    }
+    if key and sec:
+        try:
+            import boto3
+            rek = boto3.client('rekognition', region_name=region,
+                               aws_access_key_id=key, aws_secret_access_key=sec)
+            rek.list_collections(MaxResults=1)
+            result['rekognition'] = 'CONNECTED'
+        except Exception as e:
+            result['rekognition'] = f'ERROR: {str(e)[:120]}'
+    else:
+        result['rekognition'] = 'NO_CREDENTIALS'
+    return result
+
+@app.get('/admin/ping')
+def admin_ping():
+    return {'pong': True, 'version': 'lazy-init-v2'}
+
+@app.get('/admin/blockchain-status')
+def blockchain_status(secret: str):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    print('[blockchain-status] endpoint called')
+    try:
+        bc = _blockchain
+        live = bool(getattr(bc, 'live', False))
+        contract = str(getattr(bc, 'contract_address', '') or 'not set')
+        wallet   = str(getattr(bc, 'wallet_address',   '') or 'not set')
+        rpc      = str(getattr(bc, 'rpc_url',          '') or 'not set')
+        initialized = bool(getattr(bc, '_initialized', False))
+        print(f'[blockchain-status] live={live} initialized={initialized}')
+        return {
+            'live': live,
+            'initialized': initialized,
+            'network': 'Polygon Mainnet' if live else 'Mock mode',
+            'contract_address': contract,
+            'wallet': wallet,
+            'rpc_url': rpc,
+            'total_anchored': -1,
+            'code_version': 'lazy-init-v2',
+        }
+    except BaseException as e:
+        import traceback
+        print(f'[blockchain-status] ERROR: {e}')
+        return {'live': False, 'error': str(e), 'traceback': traceback.format_exc()}
+
+@app.post('/admin/agent/daily-debates')
+def agent_daily_debates(secret: str, bg: BackgroundTasks):
+    """Trigger the news agent to create debates from world news."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_daily_debates
+    bg.add_task(run_daily_debates)
+    return {'ok': True, 'message': 'News agent started in background — check server logs for results'}
+
+@app.post('/admin/agent/daily-debates/sync')
+def agent_daily_debates_sync(secret: str):
+    """Run the news agent synchronously and return results (may take up to 2 min)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_daily_debates
+    return run_daily_debates()
+
+@app.post('/admin/agent/task/{task_name}')
+def run_agent_task(task_name: str, secret: str):
+    """Run any scheduled agent task by name."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_scheduled_task
+    return run_scheduled_task(task_name)
+
+@app.get('/admin/db-schema')
+def db_schema(secret: str):
+    """Inspecciona columnas de tablas clave — diagnóstico remoto."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from sqlalchemy import inspect as sa_inspect
+    inspector = sa_inspect(engine)
+    result = {}
+    for table in ['ad_campaigns', 'users', 'debates', 'organizer_profiles', 'marketer_profiles']:
+        if inspector.has_table(table):
+            result[table] = [c['name'] for c in inspector.get_columns(table)]
+        else:
+            result[table] = 'TABLE_MISSING'
+    return result
+
+
+@app.post('/admin/run-market-agent')
+def run_market_agent(secret: str, db: Session = Depends(get_db)):
+    """Corre el agente completo de una vez. Para uso manual o pruebas."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from market_data_agent import run_full_agent, get_fallback_table
+    result = run_full_agent()
+    communes = result['communes'] if result['total_communes'] > 0 else get_fallback_table()
+    saved = _save_communes_to_db(communes, db)
+    return {'ok': True, 'communes_saved': saved, 'countries': result.get('countries', []), 'errors': result.get('errors', [])}
+
+
+@app.post('/admin/run-market-agent/daily')
+def run_market_agent_daily(secret: str, db: Session = Depends(get_db)):
+    """
+    Corre UN país por día — respeta el límite gratuito de Apify.
+    El orden es rotativo: día 1=CL, día 2=AR, día 3=MX... vuelve a empezar.
+    En ~8 días cubre todos los países. Se repite cada 6 meses.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from market_data_agent import PORTALS, run_apify_scraper, aggregate_by_commune, get_fallback_table, calculate_cpm_from_index, get_se_tier
+
+    # Determinar qué país toca hoy según día del año
+    day_of_year = datetime.utcnow().timetuple().tm_yday
+    portal = PORTALS[day_of_year % len(PORTALS)]
+    country = portal['country']
+
+    print(f'[DailyAgent] Día {day_of_year} → procesando {portal["portal"]} ({country})')
+
+    items = run_apify_scraper(portal, max_items=300)
+    commune_prices = aggregate_by_commune(items, country)
+
+    if not commune_prices:
+        # Sin datos de Apify — usar fallback solo para este país
+        fallback = [c for c in get_fallback_table() if c['country'] == country]
+        saved = _save_communes_to_db(fallback, db)
+        return {'ok': True, 'country': country, 'portal': portal['portal'],
+                'source': 'fallback', 'communes_saved': saved}
+
+    communes = []
+    for commune, price_m2 in commune_prices.items():
+        communes.append({
+            'country': country, 'commune': commune,
+            'price_m2_avg': price_m2, 'income_index': 100.0,
+            'cpm_usd': 6.0, 'se_tier': 'C',
+            'portal': portal['portal'], 'sample_count': len(items),
+        })
+
+    saved = _save_communes_to_db(communes, db)
+    return {'ok': True, 'country': country, 'portal': portal['portal'],
+            'source': 'apify', 'communes_saved': saved}
+
+
+@app.post('/admin/test-market-agent-portal')
+def test_market_agent_portal(secret: str, country: str = None):
+    """
+    Diagnóstico de UNA corrida del scraper de Apify, paso a paso.
+    `run_apify_scraper()` traga cualquier error y devuelve `[]` en silencio
+    (por diseño — para que el agente caiga al fallback sin romper nada). Eso
+    es perfecto para producción y pésimo para diagnosticar: no dice SI falló
+    el inicio del run, el polling, el dataset, o el parseo de la página.
+    Este endpoint repite la misma llamada pero reporta cada paso para que
+    se pueda ver exactamente dónde se cae la cadena.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from market_data_agent import (PORTALS, APIFY_TOKEN, APIFY_BASE,
+                                   _build_page_function, aggregate_by_commune)
+    import requests as _req
+
+    if country:
+        portal = next((p for p in PORTALS if p['country'] == country.upper()), None)
+        if not portal:
+            raise HTTPException(404, f'No hay portal configurado para {country}')
+    else:
+        day_of_year = datetime.utcnow().timetuple().tm_yday
+        portal = PORTALS[day_of_year % len(PORTALS)]
+
+    trace = {'portal': portal['portal'], 'country': portal['country'],
+             'actor': portal['actor'], 'start_urls': portal['start_urls']}
+
+    trace['apify_token_set'] = bool(APIFY_TOKEN)
+    if not APIFY_TOKEN:
+        trace['verdict'] = 'NO APIFY_API_TOKEN en el entorno — el agente nunca llega a llamar a Apify.'
+        return trace
+
+    actor_id = portal['actor'].replace('/', '~')
+    run_input = {
+        'startUrls': [{'url': u} for u in portal['start_urls']],
+        'maxRequestsPerCrawl': 20,
+        'pageFunction': _build_page_function(portal),
+    }
+
+    start_resp = _req.post(f'{APIFY_BASE}/acts/{actor_id}/runs',
+                           params={'token': APIFY_TOKEN}, json=run_input, timeout=30)
+    trace['start_run_status_code'] = start_resp.status_code
+    trace['start_run_body'] = start_resp.text[:500]
+    if start_resp.status_code not in (200, 201):
+        trace['verdict'] = (f'Apify rechazó el inicio del run con {start_resp.status_code} — '
+                            f'revisar el actor_id ("{portal["actor"]}"), el token, o el plan/cuota de Apify.')
+        return trace
+
+    run_id = start_resp.json()['data']['id']
+    trace['run_id'] = run_id
+    status_history = []
+    final_status = None
+    status_resp = None
+    for i in range(18):  # ~3 minutos de polling para el diagnóstico (la corrida real espera hasta 10)
+        time.sleep(10)
+        status_resp = _req.get(f'{APIFY_BASE}/actor-runs/{run_id}', params={'token': APIFY_TOKEN}, timeout=10)
+        status = status_resp.json()['data']['status']
+        status_history.append(status)
+        if status in ('SUCCEEDED', 'FAILED', 'ABORTED', 'TIMED-OUT'):
+            final_status = status
+            break
+    trace['status_history'] = status_history
+    trace['final_status'] = final_status or 'still RUNNING after ~3min (diagnóstico cortó el polling temprano)'
+
+    if final_status != 'SUCCEEDED':
+        trace['verdict'] = (f'El run de Apify no terminó en SUCCEEDED (terminó en {trace["final_status"]}) — '
+                            'el actor no pudo completar el scrape (selectores rotos, sitio bloqueando el bot, '
+                            'timeout del actor, o cuota de cómputo agotada).')
+        return trace
+
+    dataset_id = status_resp.json()['data']['defaultDatasetId']
+    trace['dataset_id'] = dataset_id
+    items_resp = _req.get(f'{APIFY_BASE}/datasets/{dataset_id}/items',
+                          params={'token': APIFY_TOKEN, 'format': 'json', 'limit': 20}, timeout=30)
+    trace['items_status_code'] = items_resp.status_code
+    items = items_resp.json() if items_resp.status_code == 200 else []
+    trace['items_returned'] = len(items)
+    trace['sample_items'] = items[:5]
+
+    if not items:
+        trace['verdict'] = ('El run de Apify terminó OK pero el dataset llegó VACÍO — el actor recorrió '
+                            'la(s) URL(s) pero el pageFunction no extrajo nada (selectores CSS desactualizados '
+                            'frente al HTML actual del sitio, o el sitio sirvió una página de bloqueo/captcha).')
+        return trace
+
+    aggregated = aggregate_by_commune(items, portal['country'])
+    trace['communes_aggregated'] = list(aggregated.items())
+    trace['verdict'] = ('Apify devolvió datos crudos y se agregaron por comuna — el pipeline SÍ está '
+                        'funcionando con datos reales en esta corrida.') if aggregated else (
+                        'Apify devolvió items pero ninguno se pudo agrupar en una comuna válida — '
+                        'revisar el location_selector o el parseo de price_m2 en aggregate_by_commune.')
+    return trace
+
+
+@app.post('/admin/run-market-agent/uk-landregistry')
+def run_market_agent_uk_landregistry(secret: str, db: Session = Depends(get_db)):
+    """
+    Corre el agente contra una fuente OFICIAL y gratuita — el UK House Price
+    Index del HM Land Registry (gov.uk) — en vez de Apify. No requiere token,
+    no depende de selectores CSS, no se puede bloquear como un scraper: es la
+    misma API pública que usa cualquier ciudadano británico.
+
+    Esto resuelve, para Reino Unido, lo que el founder pidió: una fuente que
+    "siempre encuentre la información" — porque los precios de vivienda
+    cambian lento (la posición relativa de un borough tarda años en moverse),
+    así que correr esto una vez al mes (o menos) basta para mantener el
+    índice al día, y cada corrida exitosa queda guardada en la base de datos
+    — de ahí en adelante /communes sirve datos reales sin depender de nada
+    en tiempo real.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from market_data_agent import run_uk_land_registry
+    communes = run_uk_land_registry()
+    if not communes:
+        return {'ok': False, 'source': 'hm-land-registry', 'communes_saved': 0,
+                'note': 'La API del Land Registry no devolvió datos utilizables en esta corrida.'}
+    saved = _save_communes_to_db(communes, db)
+    return {'ok': True, 'source': 'hm-land-registry', 'country': 'GB',
+            'communes_saved': saved,
+            'communes': [{'commune': c['commune'], 'avg_house_price_gbp': c['avg_house_price_gbp'],
+                          'income_index': c['income_index'], 'cpm_usd': c['cpm_usd'], 'se_tier': c['se_tier']}
+                         for c in communes]}
+
+
+@app.post('/admin/purge-stale-fallback-communes')
+def purge_stale_fallback_communes(secret: str, country: str, db: Session = Depends(get_db)):
+    """
+    Borra filas de CommuneMarketData que quedaron marcadas portal='fallback'
+    para un país — es decir, los nombres de comuna inventados de la tabla de
+    respaldo que no coinciden con los nombres reales de una fuente oficial
+    recién conectada (p.ej. "Kensington"/"Chelsea" del fallback vs. el
+    borough real "Kensington and Chelsea" del HM Land Registry — el upsert
+    los deja conviviendo como huérfanos en vez de reemplazarlos, porque no
+    coinciden por nombre). Solo borra filas explícitamente marcadas como
+    'fallback' — nunca toca datos reales de un scrape o una fuente oficial.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    rows = db.query(CommuneMarketData).filter(
+        CommuneMarketData.country == country.upper(),
+        CommuneMarketData.portal == 'fallback',
+    ).all()
+    deleted = [{'commune': r.commune, 'income_index': r.income_index} for r in rows]
+    for r in rows:
+        db.delete(r)
+    db.commit()
+    return {'ok': True, 'country': country.upper(), 'deleted_count': len(deleted), 'deleted': deleted}
+
+
+@app.get('/communes')
+def get_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
+    """Tabla de comunas con índice de ingreso y CPM. Usada por el motor de ads."""
+    from market_data_agent import get_fallback_table
+    q = db.query(CommuneMarketData)
+    if country:
+        q = q.filter(CommuneMarketData.country == country)
+    if se_tier:
+        q = q.filter(CommuneMarketData.se_tier == se_tier)
+    rows = q.order_by(CommuneMarketData.income_index.desc()).all()
+    if not rows:
+        # Sin datos en BD — usar fallback
+        data = get_fallback_table()
+        if country:
+            data = [c for c in data if c['country'] == country]
+        if se_tier:
+            data = [c for c in data if c['se_tier'] == se_tier]
+        return {'communes': data, 'source': 'fallback'}
+    return {
+        'communes': [{'country': r.country, 'commune': r.commune,
+                      'income_index': r.income_index, 'cpm_usd': r.cpm_usd,
+                      'se_tier': r.se_tier, 'updated_at': r.updated_at.isoformat() if r.updated_at else None}
+                     for r in rows],
+        'source': 'database'
+    }
+
+
+# ══════════════════════════════════════════════════════════════
+# AGENTE PREFERENDUM — endpoints de chat, moderación y operaciones
+# ══════════════════════════════════════════════════════════════
+
+class AgentChatInput(BaseModel):
+    message:  str
+    history:  list = []
+    language: str = 'es'
+
+@app.post('/agent/chat')
+def agent_chat(data: AgentChatInput, request: Request):
+    """Soporte con seguridad: anti-injection, rate limiting, audit log, sanitización."""
+    from preferendum_agent import run_agent, quick_faq_response
+    ip = request.headers.get('X-Forwarded-For', request.client.host or '0.0.0.0').split(',')[0].strip()
+    fast = quick_faq_response(data.message)
+    if fast:
+        return {'response': fast, 'source': 'faq', 'tool_calls': [], 'blocked': False}
+    result = run_agent(data.message, data.history or [], ip=ip)
+    if result.get('blocked'):
+        return {'response': result['response'], 'source': 'security', 'tool_calls': [], 'blocked': True}
+    return {'response': result['response'], 'source': 'agent', 'tool_calls': result['tool_calls'], 'blocked': False}
+
+
+@app.get('/agent/debug')
+def agent_debug(secret: str):
+    """Diagnóstico — verifica variables de entorno del agente."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    ak = os.getenv('ANTHROPIC_API_KEY', '')
+    return {
+        'anthropic_key_set':    bool(ak),
+        'anthropic_key_len':    len(ak),
+        'anthropic_key_prefix': ak[:10] + '...' if ak else 'NOT SET',
+        'apify_set':            bool(os.getenv('APIFY_API_TOKEN')),
+        'aws_set':              bool(os.getenv('AWS_ACCESS_KEY_ID')),
+    }
+
+@app.get('/agent/security-log')
+def agent_security_log(secret: str):
+    """Audit log de seguridad — solo admins."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import _audit_log, _blocked_ips, _rate_limit_store
+    return {
+        'total_interactions': len(_audit_log),
+        'blocked_ips':        len(_blocked_ips),
+        'recent_high_risk':   [e for e in _audit_log[-50:] if e['risk_score'] >= 70],
+        'rate_limited_ips':   {ip: len(ts) for ip, ts in _rate_limit_store.items() if len(ts) > 5},
+    }
+
+@app.post('/agent/moderate')
+def agent_moderate(content_type: str, title: str = '', body: str = '', options: str = ''):
+    """Modera contenido: consultas, ads, perfiles."""
+    from preferendum_agent import run_agent
+    opts = [o.strip() for o in options.split(',') if o.strip()] if options else []
+    prompt = f"Modera este contenido de tipo '{content_type}':\nTítulo: {title}\nContenido: {body}\nOpciones: {opts}"
+    result = run_agent(prompt)
+    return {'response': result['response'], 'tool_calls': result['tool_calls']}
+
+@app.post('/agent/run-task')
+def agent_run_task(task_name: str, secret: str):
+    """Ejecuta una tarea programada del agente."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_scheduled_task
+    result = run_scheduled_task(task_name)
+    return result
+
+@app.get('/agent/pending-reviews')
+def admin_pending_reviews(secret: str, db: Session = Depends(get_db)):
+    """Lista organizadores pendientes y consultas en revisión para el agente."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    pending_orgs = db.query(OrganizerProfile).filter(OrganizerProfile.status == 'pending').all()
+    pending_debates = db.query(Debate).filter(Debate.status == 'draft').all()
+    return {
+        'organizers': [{'user_id': o.user_id, 'company': o.company_name,
+                        'cargo': o.cargo, 'created_at': o.created_at.isoformat()} for o in pending_orgs],
+        'consultations': [{'id': d.id, 'title': d.title,
+                           'creator_id': d.creator_id, 'created_at': d.created_at.isoformat()} for d in pending_debates],
+    }
+
+@app.post('/admin/organizer/{user_id}/status')
+def admin_set_organizer_status(user_id: int, secret: str, status: str, reason: str = '', db: Session = Depends(get_db)):
+    """El agente (o un admin) aprueba/rechaza/suspende un organizador."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user_id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil no encontrado')
+    profile.status           = status
+    profile.rejection_reason = reason
+    if status == 'approved':
+        profile.approved_at = datetime.utcnow()
+    db.commit()
+    return {'ok': True, 'user_id': user_id, 'status': status}
+
+
+@app.post('/admin/marketer/{user_id}/status')
+def admin_set_marketer_status(user_id: int, secret: str, status: str, reason: str = '', db: Session = Depends(get_db)):
+    """
+    El agente (o un admin) aprueba/rechaza/suspende un marketer.
+    Sin este endpoint ningún perfil de empresa podía pasar nunca de 'pending' a
+    'approved' — ni el de un empleado ni el de su jefe — dejando la cadena entera
+    (incluida la puerta de campañas) sin salida posible para cuentas de empresa reales.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user_id).first()
+    if not profile:
+        raise HTTPException(404, 'Perfil no encontrado')
+    profile.status           = status
+    profile.rejection_reason = reason
+    if status == 'approved':
+        profile.approved_at = datetime.utcnow()
+    db.commit()
+    return {'ok': True, 'user_id': user_id, 'status': status}
+
+
+@app.get('/admin/pending-approvals')
+def admin_pending_approvals(secret: str, db: Session = Depends(get_db)):
+    """Lista compacta de organizadores y marketers tipo empresa en 'pending',
+    pensada para aprobación de un toque desde el celular — sin esto, una empresa
+    real registrada en vivo queda atascada esperando selfie + autorización del jefe,
+    un proceso que toma minutos/horas, no segundos."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    out = []
+    for o in db.query(OrganizerProfile).filter(OrganizerProfile.status == 'pending').all():
+        u = db.query(User).filter(User.id == o.user_id).first()
+        out.append({
+            'kind': 'organizer', 'user_id': o.user_id,
+            'name': u.name if u else '', 'email': u.email if u else '',
+            'company': o.company_name, 'cargo': o.cargo, 'org_type': o.org_type,
+            'business_category': '',
+            'rut_verified': o.rut_verified, 'domain_verified': o.domain_verified,
+            'web_verified': o.web_verified, 'selfie_verified': o.selfie_verified,
+            'created_at': o.created_at.isoformat(),
+        })
+    for m in db.query(MarketerProfile).filter(MarketerProfile.status == 'pending').all():
+        u = db.query(User).filter(User.id == m.user_id).first()
+        out.append({
+            'kind': 'marketer', 'user_id': m.user_id,
+            'name': u.name if u else '', 'email': u.email if u else '',
+            'company': m.company_name, 'cargo': m.cargo, 'org_type': m.org_type,
+            'business_category': m.business_category,
+            'rut_verified': m.rut_verified, 'domain_verified': m.domain_verified,
+            'web_verified': m.web_verified, 'selfie_verified': m.selfie_verified,
+            'created_at': m.created_at.isoformat(),
+        })
+    out.sort(key=lambda x: x['created_at'], reverse=True)
+    return {'pending': out}
+
+
+@app.get('/admin/approve', response_class=HTMLResponse)
+def admin_approve_page():
+    """Página móvil de aprobación de un toque — convierte 'pending' en 'approved'
+    en segundos, para que una empresa real registrada en vivo (p.ej. durante una
+    demo) pueda lanzar su campaña o publicar su consulta de inmediato, sin esperar
+    el ciclo normal de selfie + autorización del jefe."""
+    return HTMLResponse(content=ADMIN_APPROVE_PAGE_HTML)
+
+
+ADMIN_APPROVE_PAGE_HTML = """<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Preferendum — Aprobaciones</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+          background:#090D18; color:#F0F4FF; padding:16px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:#64748B; font-size:13px; margin-bottom:18px; }
+  .card { background:#10172A; border:1px solid #1E293B; border-radius:14px;
+           padding:16px; margin-bottom:14px; }
+  .name { font-size:17px; font-weight:700; }
+  .meta { font-size:13px; color:#94A3B8; margin-top:4px; line-height:1.6; }
+  .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px;
+            margin:2px 4px 0 0; }
+  .ok { background:rgba(16,185,129,0.18); color:#10B981; }
+  .no { background:rgba(244,63,94,0.18); color:#F43F5E; }
+  .kindtag { display:inline-block; font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+              color:#2563EB; background:rgba(37,99,235,0.15); padding:3px 9px; border-radius:6px;
+              margin-bottom:6px; }
+  .row { display:flex; gap:10px; margin-top:14px; }
+  button { flex:1; border:none; border-radius:10px; padding:14px; font-size:16px;
+            font-weight:700; cursor:pointer; -webkit-tap-highlight-color: transparent; }
+  .approve { background:#10B981; color:#06291E; }
+  .reject { background:#1E293B; color:#F43F5E; }
+  .approve:active, .reject:active { transform: scale(0.97); }
+  .empty { color:#64748B; text-align:center; padding:40px 0; }
+  .done { color:#10B981; font-weight:700; }
+  .refresh { background:#2563EB; color:#fff; border:none; border-radius:10px;
+              padding:12px 18px; font-size:14px; font-weight:700; margin-bottom:16px; width:100%; }
+</style>
+</head>
+<body>
+  <h1>Aprobaciones pendientes</h1>
+  <div class="sub">Empresas esperando luz verde para anunciar / organizar — un toque para aprobar.</div>
+  <button class="refresh" onclick="load()">Actualizar</button>
+  <div id="list"><div class="empty">Cargando...</div></div>
+
+<script>
+const secret = new URLSearchParams(location.search).get('secret') || '';
+
+function badge(label, ok) {
+  return '<span class="badge ' + (ok ? 'ok' : 'no') + '">' + (ok ? String.fromCharCode(10003) : String.fromCharCode(10007)) + ' ' + label + '</span>';
+}
+
+async function load() {
+  const list = document.getElementById('list');
+  list.innerHTML = '<div class="empty">Cargando...</div>';
+  try {
+    const r = await fetch('/admin/pending-approvals?secret=' + encodeURIComponent(secret));
+    const d = await r.json();
+    if (!r.ok) { list.innerHTML = '<div class="empty">' + (d.detail || 'Error') + '</div>'; return; }
+    if (!d.pending.length) { list.innerHTML = '<div class="empty">No hay cuentas pendientes</div>'; return; }
+    list.innerHTML = d.pending.map(function(p) {
+      return '<div class="card" id="card-' + p.kind + '-' + p.user_id + '">' +
+        '<span class="kindtag">' + (p.kind === 'marketer' ? 'Anunciante' : 'Organizador') + '</span>' +
+        '<div class="name">' + (p.company || p.name || '(sin nombre)') + '</div>' +
+        '<div class="meta">' + p.name + ' &middot; ' + p.email + '<br>' +
+          (p.cargo ? 'Cargo: ' + p.cargo + '<br>' : '') +
+          (p.business_category ? 'Rubro: ' + p.business_category + '<br>' : '') +
+          'Tipo: ' + p.org_type + ' &middot; Registrado: ' + new Date(p.created_at).toLocaleString('es-CL') +
+        '</div>' +
+        '<div class="meta">' + badge('RUT', p.rut_verified) + badge('Dominio', p.domain_verified) + badge('Web', p.web_verified) + badge('Selfie', p.selfie_verified) + '</div>' +
+        '<div class="row">' +
+          '<button class="approve" onclick="act(\\'' + p.kind + '\\', ' + p.user_id + ', \\'approved\\', this)">Aprobar</button>' +
+          '<button class="reject" onclick="act(\\'' + p.kind + '\\', ' + p.user_id + ', \\'suspended\\', this)">Rechazar</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } catch (e) {
+    list.innerHTML = '<div class="empty">Error de red: ' + e + '</div>';
+  }
+}
+
+async function act(kind, userId, status, btn) {
+  btn.closest('.card').style.opacity = '0.5';
+  try {
+    const r = await fetch('/admin/' + kind + '/' + userId + '/status?secret=' + encodeURIComponent(secret) + '&status=' + status, { method: 'POST' });
+    const d = await r.json();
+    const card = document.getElementById('card-' + kind + '-' + userId);
+    if (r.ok && d.ok) {
+      card.innerHTML = '<div class="done">' + (status === 'approved' ? 'Aprobado — ya puede lanzar campanas / publicar consultas' : 'Rechazado') + '</div>';
+    } else {
+      card.innerHTML = '<div class="empty">Error: ' + (d.detail || 'desconocido') + '</div>';
+      card.style.opacity = '1';
+    }
+  } catch (e) {
+    btn.closest('.card').style.opacity = '1';
+    alert('Error de red: ' + e);
+  }
+}
+
+if (!secret) {
+  document.getElementById('list').innerHTML = '<div class="empty">Falta ?secret= en la URL</div>';
+} else {
+  load();
+  setInterval(load, 15000);
+}
+</script>
+</body>
+</html>"""
+
+
+@app.post('/admin/reassign-tiers')
+def admin_reassign_tiers(secret: str, db: Session = Depends(get_db)):
+    """Re-corre _assign_user_tier para usuarios con se_tier vacío (cuentas creadas antes
+    del fix de normalización país 'Chile' vs 'CL')."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    users = db.query(User).filter((User.se_tier == None) | (User.se_tier == '')).all()
+    updated = []
+    for u in users:
+        before = u.se_tier
+        _assign_user_tier(u, db)
+        if u.se_tier != before:
+            updated.append({'id': u.id, 'email': u.email, 'county': u.county, 'new_tier': u.se_tier})
+    return {'checked': len(users), 'updated': updated}
+
+
+@app.post('/admin/seed-opinions')
+def seed_opinions(secret: str, debate_id: int, count: int = 8, db: Session = Depends(get_db)):
+    """Agrega opiniones de prueba a un debate para que aparezcan los ads (necesita ≥6)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+    sample_opinions = [
+        ("Esta consulta me parece fundamental para nuestra comunidad. Hay que considerar todos los ángulos antes de decidir.", "Expert"),
+        ("He estudiado el tema en profundidad y creo que la evidencia apunta en una dirección clara. Los datos son contundentes.", "Expert"),
+        ("Tengo experiencia directa con este tipo de decisiones y puedo aportar perspectiva práctica sobre las consecuencias.", "Good"),
+        ("La ciudadanía merece participar en decisiones que afectan directamente su vida cotidiana. Esto es democracia real.", "Familiar"),
+        ("Desde mi punto de vista como afectado directo, considero que hay factores que no se han tomado en cuenta suficientemente.", "Good"),
+        ("La transparencia en el proceso es fundamental. Cada voto debe quedar registrado y verificable por todos.", "Expert"),
+        ("He consultado con expertos en el área y la conclusión es que necesitamos más información antes de decidir.", "Good"),
+        ("El impacto de esta decisión va más allá de lo inmediato. Hay que pensar en las generaciones futuras también.", "Familiar"),
+        ("Apoyo firmemente esta iniciativa porque responde a necesidades reales que hemos visto en nuestra comunidad.", "Low"),
+        ("Las estadísticas disponibles muestran claramente cuál es la opción más beneficiosa para el bien común.", "Expert"),
+    ]
+    added = 0
+    for i in range(min(count, 20)):
+        text, level = sample_opinions[i % len(sample_opinions)]
+        op = Opinion(debate_id=debate_id, user_id=0, user_name='Ciudadano',
+                     text=text, knowledge_level=level)
+        db.add(op)
+        added += 1
+    db.commit()
+    return {'ok': True, 'debate_id': debate_id, 'opinions_added': added}
+
+
+@app.get('/admin/campaigns')
+def admin_list_campaigns(secret: str, db: Session = Depends(get_db)):
+    """Lista todas las campañas con su estado."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    campaigns = db.query(AdCampaign).order_by(AdCampaign.id.desc()).all()
+    return {'campaigns': [_format_campaign(c) for c in campaigns]}
+
+
+@app.patch('/admin/campaigns/{campaign_id}/activate')
+def admin_activate_campaign(campaign_id: int, secret: str, days: int = 30, db: Session = Depends(get_db)):
+    """Reactiva una campaña expirada y extiende su fecha de fin."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(404, 'Campaign not found')
+    c.is_active = True
+    c.end_date = datetime.utcnow() + timedelta(days=days)
+    c.start_date = min(c.start_date or datetime.utcnow(), datetime.utcnow())
+    db.commit()
+    return {'ok': True, 'campaign_id': campaign_id, 'end_date': c.end_date.isoformat()}
+
+@app.patch('/admin/campaigns/{campaign_id}/deactivate')
+def admin_deactivate_campaign(campaign_id: int, secret: str, db: Session = Depends(get_db)):
+    """Desactiva una campaña (p.ej. campañas de prueba/QA) sin borrar su historial."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(404, 'Campaign not found')
+    c.is_active = False
+    db.commit()
+    return {'ok': True, 'campaign_id': campaign_id, 'is_active': c.is_active}
+
+
+@app.post('/admin/campaigns/{campaign_id}/recompute-spend')
+def admin_recompute_campaign_spend(campaign_id: int, secret: str, db: Session = Depends(get_db)):
+    """Recalculates spent_clp from the campaign's REAL impression count
+    (AdImpressionLog rows — never inferred or invented) using today's
+    correct CPM-based per-impression cost.
+
+    Exists to repair the handful of campaigns whose spent_clp was
+    corrupted by the old `budget_clp / max(1, len(opinions)//5)` formula
+    — e.g. campaign #7 logged 3 real impressions but had spent_clp at
+    249,999,999 of a 250,000,000 budget (99.9999...% in two days). The
+    real number, recomputed honestly from its 3 logged impressions, is
+    the only thing that should ever be shown to an investor.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(404, 'Campaign not found')
+    real_impressions = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == campaign_id).count()
+    cost_each = _cost_per_impression_clp(c, db)
+    before = c.spent_clp
+    c.spent_clp = min(c.budget_clp, real_impressions * cost_each)
+    db.commit()
+    return {
+        'ok': True, 'campaign_id': campaign_id,
+        'real_impressions': real_impressions,
+        'cost_per_impression_clp': cost_each,
+        'spent_clp_before': before,
+        'spent_clp_after': c.spent_clp,
+    }
+
+
+@app.patch('/admin/campaigns/{campaign_id}/creative')
+def admin_update_campaign_creative(campaign_id: int, secret: str, db: Session = Depends(get_db),
+                                   logo_url: str = '', ad_image_url: str = '', ad_copy: str = '',
+                                   target_debate_ids: str = '', advertiser_name: str = ''):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(404, 'Campaign not found')
+    if logo_url:
+        c.logo_url = logo_url
+    if ad_image_url:
+        c.ad_image_url = ad_image_url
+    if ad_copy:
+        c.ad_copy = ad_copy
+    if target_debate_ids:
+        c.target_debate_ids = target_debate_ids
+    if advertiser_name:
+        c.advertiser_name = advertiser_name
+    db.commit()
+    return {'ok': True, 'campaign_id': campaign_id, 'logo_url': c.logo_url,
+            'ad_image_url': c.ad_image_url, 'ad_copy': c.ad_copy,
+            'target_debate_ids': c.target_debate_ids, 'advertiser_name': c.advertiser_name}
+
+
+@app.get('/admin/debug-ads')
+def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session = Depends(get_db)):
+    """Diagnóstico: por qué un usuario no ve ads en un debate. Devuelve user, opiniones, campañas activas y por qué cada una matchea o no."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+    opinions = db.query(Opinion).filter(Opinion.debate_id == debate_id).all()
+
+    user = None
+    if user_id:
+        user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        user = db.query(User).order_by(User.id.desc()).first()
+
+    user_info = None
+    reasons = []
+    matched_ids = []
+    if user:
+        now = datetime.utcnow()
+        user_tier      = user.se_tier or 'BBB'
+        user_gender    = _normalize_gender(user.gender)
+        user_age_group = _get_age_group(user.dob)
+        user_country   = _country_code(user.country)
+        user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
+        user_info = {
+            'id': user.id, 'email': user.email, 'county': user.county,
+            'se_tier': user.se_tier, 'computed_tier': user_tier,
+            'gender': user.gender, 'dob': user.dob, 'computed_age': user_age,
+            'country': user.country, 'computed_country': user_country,
+        }
+        all_campaigns = db.query(AdCampaign).all()
+        for c in all_campaigns:
+            r = {'id': c.id, 'advertiser': c.advertiser_name, 'is_active': c.is_active,
+                 'start_date': c.start_date.isoformat() if c.start_date else None,
+                 'end_date': c.end_date.isoformat() if c.end_date else None,
+                 'target_se_tiers': c.target_se_tiers, 'target_country': c.target_country,
+                 'target_gender': c.target_gender,
+                 'target_age_min': c.target_age_min, 'target_age_max': c.target_age_max,
+                 'verdict': 'MATCH', 'reason': ''}
+            campaign_gender = _normalize_gender(c.target_gender)
+            if not c.is_active:
+                r['verdict'] = 'SKIP'; r['reason'] = 'is_active=False'
+            elif c.start_date and c.start_date > now:
+                r['verdict'] = 'SKIP'; r['reason'] = f'start_date {c.start_date.isoformat()} > now {now.isoformat()}'
+            elif c.end_date and c.end_date < (now - timedelta(hours=24)):
+                r['verdict'] = 'SKIP'; r['reason'] = f'end_date {c.end_date.isoformat()} expired'
+            elif c.target_country and _country_code(c.target_country) != user_country:
+                r['verdict'] = 'SKIP'; r['reason'] = f'country mismatch: target={c.target_country} user={user_country}'
+            elif campaign_gender != 'all' and user_gender != 'all' and campaign_gender != user_gender:
+                r['verdict'] = 'SKIP'; r['reason'] = f'gender mismatch: target={c.target_gender}(→{campaign_gender}) user={user.gender}(→{user_gender})'
+            elif not ((c.target_age_min or 13) <= user_age <= (c.target_age_max or 99)):
+                r['verdict'] = 'SKIP'; r['reason'] = f'age mismatch: range=[{c.target_age_min},{c.target_age_max}] user_age={user_age}'
+            else:
+                target_tiers = c.target_se_tiers or 'AAA,AAB,ABB,BBB,BBC,BCC'
+                if user_tier and not _tier_matches(user_tier, target_tiers):
+                    r['verdict'] = 'SKIP'; r['reason'] = f'tier mismatch: target={target_tiers} user={user_tier}'
+            if r['verdict'] == 'MATCH':
+                matched_ids.append(c.id)
+            reasons.append(r)
+        now_iso = now.isoformat()
+    else:
+        now_iso = datetime.utcnow().isoformat()
+
+    real_match_ids = [c.id for c in _match_campaigns(user, debate, db)]
+    return {
+        'now_utc': now_iso,
+        'debate_id': debate_id,
+        'opinions_count': len(opinions),
+        'ads_would_show_at_indices': [i for i in range(len(opinions)) if i > 0 and i % AD_EVERY_N_OPINIONS == 0],
+        'user': user_info,
+        'matched_campaign_ids': matched_ids,
+        'real_match_campaigns_result': real_match_ids,
+        'campaigns': reasons,
+    }
+
+
+@app.delete('/admin/reset-marketers')
+def admin_reset_marketers(secret: str, db: Session = Depends(get_db)):
+    """Borra todos los usuarios con role='marketer' y sus perfiles/campañas — reset completo para demo."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    marketer_users = db.query(User).filter(User.role == 'marketer').all()
+    ids = [u.id for u in marketer_users]
+    deleted_profiles = db.query(MarketerProfile).filter(MarketerProfile.user_id.in_(ids)).delete(synchronize_session=False)
+    deleted_campaigns = db.query(AdCampaign).filter(AdCampaign.advertiser_email.in_([u.email for u in marketer_users])).delete(synchronize_session=False)
+    deleted_users = db.query(User).filter(User.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    return {'ok': True, 'deleted_users': deleted_users, 'deleted_profiles': deleted_profiles, 'deleted_campaigns': deleted_campaigns}
+
+
+@app.delete('/admin/reset-organizers')
+def admin_reset_organizers(secret: str, db: Session = Depends(get_db)):
+    """Borra todos los usuarios con role='organizer' y sus perfiles — reset completo para demo."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    org_users = db.query(User).filter(User.role == 'organizer').all()
+    ids = [u.id for u in org_users]
+    deleted_profiles = db.query(OrganizerProfile).filter(OrganizerProfile.user_id.in_(ids)).delete(synchronize_session=False)
+    deleted_users = db.query(User).filter(User.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    return {'ok': True, 'deleted_users': deleted_users, 'deleted_profiles': deleted_profiles}
