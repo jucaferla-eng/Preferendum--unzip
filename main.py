@@ -4238,28 +4238,13 @@ def admin_ping():
 def blockchain_status(secret: str):
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
-    print('[blockchain-status] endpoint called')
     try:
-        bc = _blockchain
-        live = bool(getattr(bc, 'live', False))
-        contract = str(getattr(bc, 'contract_address', '') or 'not set')
-        wallet   = str(getattr(bc, 'wallet_address',   '') or 'not set')
-        rpc      = str(getattr(bc, 'rpc_url',          '') or 'not set')
-        initialized = bool(getattr(bc, '_initialized', False))
-        print(f'[blockchain-status] live={live} initialized={initialized}')
-        return {
-            'live': live,
-            'initialized': initialized,
-            'network': 'Polygon Mainnet' if live else 'Mock mode',
-            'contract_address': contract,
-            'wallet': wallet,
-            'rpc_url': rpc,
-            'total_anchored': -1,
-            'code_version': 'lazy-init-v2',
-        }
+        _blockchain._ensure_init()
+        result = _blockchain.status()
+        result['code_version'] = 'lazy-init-v3'
+        return result
     except BaseException as e:
         import traceback
-        print(f'[blockchain-status] ERROR: {e}')
         return {'live': False, 'error': str(e), 'traceback': traceback.format_exc()}
 
 @app.post('/admin/agent/daily-debates')
