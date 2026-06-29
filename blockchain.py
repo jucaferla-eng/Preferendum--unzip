@@ -136,7 +136,7 @@ class PreferendumBlockchain:
 
         try:
             from web3 import Web3
-            w3 = Web3(Web3.HTTPProvider(self.rpc_url))
+            w3 = Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs={'timeout': 15}))
             if not w3.is_connected():
                 print(f'[Blockchain] Cannot connect to {self.rpc_url} — using mock mode')
                 return
