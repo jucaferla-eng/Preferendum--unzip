@@ -118,8 +118,8 @@ class PreferendumBlockchain:
         self.rpc_url          = os.getenv('POLYGON_RPC_URL', 'https://1rpc.io/matic')
         try:
             self._init()
-        except Exception as e:
-            print(f'[Blockchain] __init__ error: {e}')
+        except BaseException as e:
+            print(f'[Blockchain] __init__ error (running mock): {e}')
 
     @staticmethod
     def _read_secret(name: str) -> str:
@@ -152,11 +152,8 @@ class PreferendumBlockchain:
             self.live = True
             print(f'[Blockchain] LIVE — Connected to Polygon at {self.contract_address}')
 
-        except ImportError:
-            print('[Blockchain] web3 not installed — using mock mode')
-            print('[Blockchain] Add web3==6.11.1 to requirements.txt to go live')
-        except Exception as e:
-            print(f'[Blockchain] Init error: {e} — using mock mode')
+        except BaseException as e:
+            print(f'[Blockchain] Init error: {type(e).__name__}: {e} — using mock mode')
 
     def _mock_tx(self, vote_hash: str) -> str:
         """Generate a realistic-looking mock transaction hash."""
