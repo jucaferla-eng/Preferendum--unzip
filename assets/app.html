@@ -316,6 +316,16 @@ const {
   useEffect
 } = React;
 
+// Opens URLs in the native system browser (Safari/Chrome) instead of
+// navigating within the WebView, which would trap the user.
+function openExternalLink(url) {
+  if (window.ReactNativeWebView) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'openURL', url }));
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
 // ══ i18n — 10-LANGUAGE MATRIX ══════════════════════════════
 // Columns: en · es · de · ja · ar · pt · fr · id · it · zh
 const SUPPORTED_LANGS = ['en', 'es', 'de', 'ja', 'ar', 'pt', 'fr', 'id', 'it', 'zh'];
@@ -5144,7 +5154,7 @@ function PreferendumV8() {
       /*#__PURE__*/React.createElement("div", {style: {background: debateAdSlots[0].logo_color || "#2563eb", color: "#fff", borderRadius: 8, padding: "7px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0},
         onClick: () => {
           const dest = debateAdSlots[0].link_url || ("https://www.google.com/search?q=" + encodeURIComponent(debateAdSlots[0].brand || ""));
-          window.open(dest, "_blank", "noopener,noreferrer");
+          openExternalLink(dest);
         }
       }, debateAdSlots[0].cta || "Ver m\xE1s")
     )), !opinionsLoading && debateOpinions.length === 0 && /*#__PURE__*/React.createElement("div", {
@@ -5184,7 +5194,7 @@ function PreferendumV8() {
       /*#__PURE__*/React.createElement("div", {style: {background: debateAdSlots[i].logo_color || "#2563eb", color: "#fff", borderRadius: 8, padding: "7px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0},
         onClick: () => {
           const dest = debateAdSlots[i].link_url || ("https://www.google.com/search?q=" + encodeURIComponent(debateAdSlots[i].brand || ""));
-          window.open(dest, "_blank", "noopener,noreferrer");
+          openExternalLink(dest);
         }
       }, debateAdSlots[i].cta || "Ver m\xE1s")
     )), /*#__PURE__*/React.createElement("div", {

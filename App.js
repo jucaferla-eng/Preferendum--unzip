@@ -1,13 +1,13 @@
 import { useState, useEffect } from "react";
 import { StatusBar } from "expo-status-bar";
-import { SafeAreaView, StyleSheet, ActivityIndicator, View, Text } from "react-native";
+import { SafeAreaView, StyleSheet, ActivityIndicator, View, Text, Linking } from "react-native";
 import { WebView } from "react-native-webview";
 import { Asset } from "expo-asset";
 import * as FileSystem from "expo-file-system/legacy";
 import * as SecureStore from "expo-secure-store";
 
 const BG      = "#090D18";
-const APP_URL = "https://preferendum-unzip-d2zd.onrender.com/app";
+const APP_URL = "https://preferendum-unzip.onrender.com/app";
 
 async function getOrCreateDeviceId() {
   try {
@@ -68,6 +68,26 @@ export default function App() {
 
   const injected = `window.DEVICE_ID=${JSON.stringify(deviceId)};window.DEVICE_MODEL="mobile";true;`;
 
+  function handleMessage(event) {
+    try {
+      const msg = JSON.parse(event.nativeEvent.data);
+      if (msg.type === "openURL" && msg.url) {
+        Linking.openURL(msg.url).catch(() => {});
+      }
+    } catch (_) {}
+  }
+
+  function handleNavRequest(request) {
+    const url = request.url;
+    // Allow the initial local HTML load
+    if (!url || url === "about:blank" || url.startsWith("file://") || url.startsWith("blob:")) return true;
+    // Allow navigating within the app (same origin)
+    if (url.startsWith(APP_URL)) return true;
+    // All external URLs: open in system browser, block WebView navigation
+    Linking.openURL(url).catch(() => {});
+    return false;
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" backgroundColor={BG} />
@@ -81,6 +101,8 @@ export default function App() {
         mediaPlaybackRequiresUserAction={false}
         injectedJavaScriptBeforeContentLoaded={injected}
         allowsLinkPreview={false}
+        onMessage={handleMessage}
+        onShouldStartLoadWithRequest={handleNavRequest}
         onError={e => setError("WebView: " + (e.nativeEvent.description || e.nativeEvent.code))}
       />
     </SafeAreaView>

@@ -571,9 +571,12 @@ def _migrate():
         # idempotent (only touches rows that are still empty).
         try:
             for brand, url in [
-                ('BancoEstado',  'https://www.bancoestado.cl/'),
-                ('Toyota Chile', 'https://www.toyota.cl/'),
-                ('Samsung',      'https://www.samsung.com/cl/'),
+                ('BancoEstado',   'https://www.bancoestado.cl/'),
+                ('Toyota Chile',  'https://www.toyota.cl/'),
+                ('Samsung',       'https://www.samsung.com/cl/'),
+                ('Nestlé Chile',  'https://www.nestle.cl/'),
+                ('Nestle',        'https://www.nestle.cl/'),
+                ('Nestle Chile',  'https://www.nestle.cl/'),
             ]:
                 conn.execute(
                     text("UPDATE debate_ads SET link_url = :url WHERE brand = :brand AND (link_url IS NULL OR link_url = '')"),
@@ -1063,6 +1066,7 @@ def seed_demo_data():
             DebateAd(debate_id=1, brand='BancoEstado', copy='Cuenta RUT sin costo para todos los chilenos', cta='Abrir cuenta', logo_color='#10b981', link_url='https://www.bancoestado.cl/'),
             DebateAd(debate_id=1, brand='Toyota Chile', copy='Corolla Cross Hybrid — Eficiencia para el Chile real', cta='Ver modelos', logo_color='#ef4444', link_url='https://www.toyota.cl/'),
             DebateAd(debate_id=2, brand='Samsung', copy='Galaxy S26 Ultra — La camara que lo cambia todo', cta='Descubrir', logo_color='#3b82f6', link_url='https://www.samsung.com/cl/'),
+            DebateAd(debate_id=2, brand='Nestlé Chile', copy='Calidad en cada producto para tu familia', cta='Conocer más', logo_color='#dc2626', link_url='https://www.nestle.cl/'),
         ]
         for ad in ads:
             db.add(ad)
