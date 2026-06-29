@@ -109,17 +109,24 @@ class PreferendumBlockchain:
     """
 
     def __init__(self):
-        self.live             = False  # must be first — status() reads this
+        self.live             = False
         self.web3             = None
         self.contract         = None
+        self._initialized     = False  # lazy: connect on first use, not at import
         self.contract_address = os.getenv('CONTRACT_ADDRESS')
         self.wallet_address   = os.getenv('WALLET_ADDRESS')
         self.private_key      = os.getenv('WALLET_PRIVATE_KEY') or self._read_secret('WALLET_PRIVATE_KEY')
         self.rpc_url          = os.getenv('POLYGON_RPC_URL', 'https://1rpc.io/matic')
+
+    def _ensure_init(self):
+        """Connect to Polygon on first use. Never blocks server startup."""
+        if self._initialized:
+            return
+        self._initialized = True
         try:
             self._init()
         except BaseException as e:
-            print(f'[Blockchain] __init__ error (running mock): {e}')
+            print(f'[Blockchain] connect error ({type(e).__name__}): {e} — running mock')
 
     @staticmethod
     def _read_secret(name: str) -> str:
@@ -196,17 +203,7 @@ class PreferendumBlockchain:
     # ── PUBLIC METHODS ────────────────────────────────────────
 
     def anchor_vote(self, debate_id: int, vote_hash: str, vcode: str) -> dict:
-        """
-        Anchor a single vote on Polygon.
-
-        Args:
-            debate_id:  Database debate ID
-            vote_hash:  SHA-256 hex string of encrypted vote
-            vcode:      Voter's verification code (XXXX-XXXX-XXXX)
-
-        Returns:
-            {'tx_hash': '0x...', 'live': bool, 'success': bool}
-        """
+        self._ensure_init()
         if not self.live:
             tx_hash = self._mock_tx(vote_hash)
             return {'tx_hash': tx_hash, 'live': False, 'success': True}
@@ -243,6 +240,7 @@ class PreferendumBlockchain:
         Returns:
             {'tx_hash': '0x...', 'count': int, 'live': bool}
         """
+        self._ensure_init()
         if not self.live:
             combined = ''.join(v['vote_hash'] for v in votes)
             tx_hash = self._mock_tx(combined)
@@ -267,6 +265,7 @@ class PreferendumBlockchain:
 
     def open_debate(self, debate_id: int, title: str, institution: str) -> dict:
         """Register a debate opening on-chain."""
+        self._ensure_init()
         if not self.live:
             return {'tx_hash': self._mock_tx(f'open-{debate_id}'), 'live': False}
 
@@ -280,6 +279,7 @@ class PreferendumBlockchain:
 
     def close_debate(self, debate_id: int) -> dict:
         """Register a debate closing on-chain."""
+        self._ensure_init()
         if not self.live:
             return {'tx_hash': self._mock_tx(f'close-{debate_id}'), 'live': False}
 
@@ -296,6 +296,7 @@ class PreferendumBlockchain:
         Verify a vote on-chain using its verification code.
         This is a READ operation — free, no gas needed.
         """
+        self._ensure_init()
         if not self.live:
             return {
                 'exists':    True,
@@ -324,6 +325,7 @@ class PreferendumBlockchain:
 
     def get_total_votes(self) -> int:
         """Get total votes anchored across all debates."""
+        self._ensure_init()
         if not self.live:
             return -1
         try:
@@ -333,6 +335,7 @@ class PreferendumBlockchain:
 
     def status(self) -> dict:
         """Return blockchain connection status — never raises."""
+        self._ensure_init()
         try:
             chain = self._chain_id()
             net_name = {137: 'Polygon Mainnet', 80002: 'Polygon Amoy Testnet', 80001: 'Polygon Mumbai (deprecated)'}.get(chain, f'Unknown (chainId {chain})')
