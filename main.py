@@ -4236,7 +4236,11 @@ def aws_check(secret: str):
 def blockchain_status(secret: str):
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
-    return _blockchain.status()
+    try:
+        result = _blockchain.status()
+        return {k: (int(v) if hasattr(v, '__int__') and not isinstance(v, bool) else v) for k, v in result.items()}
+    except Exception as e:
+        return {'live': False, 'error': str(e), 'type': type(e).__name__}
 
 @app.post('/admin/agent/daily-debates')
 def agent_daily_debates(secret: str, bg: BackgroundTasks):
