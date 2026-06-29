@@ -4006,8 +4006,6 @@ def db_info():
         'url_prefix': masked,
     }
 
-from verification import router as verify_router
-app.include_router(verify_router)
 
 # ── ADMIN: email smoke test ──────────────────────────────────────
 @app.post('/admin/test-email')
