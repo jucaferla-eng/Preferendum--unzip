@@ -2897,8 +2897,23 @@ class OrganizerRegisterFullInput(BaseModel):
 
 @app.post('/organizer/register')
 def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == data.email).first():
-        raise HTTPException(400, 'Email ya registrado')
+    existing = db.query(User).filter(User.email == data.email).first()
+    if existing:
+        # Citizen trying to become organizer — verify password then upgrade role
+        if not bcrypt.checkpw(data.password.encode(), existing.password.encode()):
+            raise HTTPException(400, 'Ya tienes cuenta — usa tu contraseña de ciudadano')
+        existing.role = 'organizer'
+        db.commit()
+        profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == existing.id).first()
+        if not profile:
+            profile = OrganizerProfile(
+                user_id=existing.id, org_type=data.org_type or 'person',
+                is_supervisor=True, status='approved', company_name=data.company_name or '',
+            )
+            db.add(profile); db.commit()
+        token = make_token(existing.id, existing.role)
+        return {'token': token, 'user': {'id': existing.id, 'name': existing.name, 'email': existing.email, 'role': existing.role}, 'profile': {'status': profile.status if profile else 'approved'}}
+
 
     # Verificar dominio email corporativo
     if data.org_type == 'company':
@@ -3302,8 +3317,23 @@ class MarketerRegisterInput(BaseModel):
 
 @app.post('/marketer/register')
 def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == data.email).first():
-        raise HTTPException(400, 'Email already registered')
+    existing = db.query(User).filter(User.email == data.email).first()
+    if existing:
+        # Citizen trying to become marketer — verify password then upgrade role
+        if not bcrypt.checkpw(data.password.encode(), existing.password.encode()):
+            raise HTTPException(400, 'Ya tienes cuenta — usa tu contraseña de ciudadano')
+        existing.role = 'marketer'
+        db.commit()
+        mk_profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == existing.id).first()
+        if not mk_profile:
+            mk_profile = MarketerProfile(
+                user_id=existing.id, org_type=data.org_type or 'person',
+                is_supervisor=True, status='approved', company_name=data.company_name or '',
+            )
+            db.add(mk_profile); db.commit()
+        token = make_token(existing.id, existing.role)
+        return {'token': token, 'user': {'id': existing.id, 'name': existing.name, 'email': existing.email, 'role': existing.role}}
+
 
     # Filtro de categoría — corta de raíz antes de cualquier verificación de identidad,
     # tal como un guardia de entrada revisa el rubro antes de pedir documentos.
