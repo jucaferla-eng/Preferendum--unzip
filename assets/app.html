@@ -2939,18 +2939,64 @@ function PreferendumV8() {
     type: "password",
     value: vfPw2,
     onChange: setVfPw2
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: `${T.blue}18`,
-      border: `1px solid ${T.blue}44`,
-      borderRadius: 10,
-      padding: "12px 14px",
-      fontSize: 12,
-      color: "#7ab4ff",
-      marginBottom: 14,
-      lineHeight: 1.8
-    }
-  }, "1\xB7Email OTP \xB7 2\xB7SMS \xB7 3\xB7Documento \xB7 4\xB7Selfie \xB7 5\xB7IMEI \xB7 6\xB7Geolocalizaci\xF3n \xB7 7\xB7Blockchain"), vfError ? /*#__PURE__*/React.createElement("div", {
+  )),
+  /*#__PURE__*/React.createElement(Card, null,
+    /*#__PURE__*/React.createElement(Lbl, null, "🪪 Foto de tu carné (RUT / DNI)"),
+    /*#__PURE__*/React.createElement("div", {style:{fontSize:12,color:T.fog,marginBottom:12,lineHeight:1.6}},
+      "Fotografía el lado de tu carné que tiene tu foto. Buena iluminación, cara visible."),
+    /*#__PURE__*/React.createElement("input", {
+      id:"reg-doc", type:"file", accept:"image/*", style:{display:"none"},
+      onChange: e => { const f=e.target.files[0]; if(f){const r=new FileReader();r.onload=ev=>setDocPrev(ev.target.result);r.readAsDataURL(f);setDocFile(f);} }
+    }),
+    docPrev ? /*#__PURE__*/React.createElement("div", {
+      style:{display:"flex",alignItems:"center",gap:12,marginBottom:10,border:"1px solid "+T.gold,borderRadius:10,padding:10}
+    },
+      /*#__PURE__*/React.createElement("img", {src:docPrev, style:{width:64,height:42,objectFit:"cover",borderRadius:6}}),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", {style:{fontSize:12,fontWeight:700,color:T.gold}}, "✓ Documento cargado"),
+        /*#__PURE__*/React.createElement("div", {style:{fontSize:11,color:T.fog}}, "Toca para cambiar"))
+    ) : null,
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => document.getElementById("reg-doc").click(),
+      style:{width:"100%",padding:"13px",background:docPrev?`${T.gold}22`:T.deep,border:"2px dashed "+(docPrev?T.gold:T.rim),borderRadius:10,color:docPrev?T.gold:T.fog,fontSize:13,fontWeight:700,cursor:"pointer"}
+    }, docPrev ? "📷 Cambiar foto del carné" : "📷 Subir foto de tu carné")
+  ),
+  /*#__PURE__*/React.createElement(Card, {style:{border:"2px solid "+(selfiePrev?T.green:T.coral)+"66",marginTop:14}},
+    /*#__PURE__*/React.createElement(Lbl, null, "🤳 Selfie antifraude — verificación AWS"),
+    /*#__PURE__*/React.createElement("div", {style:{fontSize:12,color:T.fog,marginBottom:12,lineHeight:1.6}},
+      "Tómate una foto mirando directo a la cámara frontal con tu carné debajo del mentón. AWS Rekognition compara tu cara con el documento para evitar fraudes."),
+    /*#__PURE__*/React.createElement("div", {style:{display:"flex",alignItems:"center",justifyContent:"space-around",background:T.deep,borderRadius:12,padding:"14px 6px",marginBottom:14}},
+      /*#__PURE__*/React.createElement("div", {style:{textAlign:"center"}},
+        /*#__PURE__*/React.createElement("div", {style:{fontSize:40}}, "🙂"),
+        /*#__PURE__*/React.createElement("div", {style:{fontSize:10,color:T.fog,marginTop:4}}, "Mira directo\na la cámara")),
+      /*#__PURE__*/React.createElement("div", {style:{textAlign:"center"}},
+        /*#__PURE__*/React.createElement("div", {style:{fontSize:30}}, "➕"),
+        /*#__PURE__*/React.createElement("div", {style:{fontSize:30}}, "🪪"),
+        /*#__PURE__*/React.createElement("div", {style:{fontSize:10,color:T.fog,marginTop:4}}, "Carné bajo\nel mentón")),
+      /*#__PURE__*/React.createElement("div", {style:{textAlign:"center"}},
+        /*#__PURE__*/React.createElement("div", {style:{fontSize:40}}, selfiePrev ? "✅" : "🔒"),
+        /*#__PURE__*/React.createElement("div", {style:{fontSize:10,color:selfiePrev?T.green:T.fog,marginTop:4}}, selfiePrev ? "Lista ✓" : "Pendiente"))
+    ),
+    /*#__PURE__*/React.createElement("input", {
+      id:"reg-selfie", type:"file", accept:"image/*", style:{display:"none"},
+      onChange: e => { const f=e.target.files[0]; if(f){const r=new FileReader();r.onload=ev=>setSelfiePrev(ev.target.result);r.readAsDataURL(f);setSelfieFile(f);} }
+    }),
+    selfiePrev ? /*#__PURE__*/React.createElement("div", {
+      style:{display:"flex",alignItems:"center",gap:12,marginBottom:10,border:"1px solid "+T.green,borderRadius:10,padding:10}
+    },
+      /*#__PURE__*/React.createElement("img", {src:selfiePrev, style:{width:60,height:60,objectFit:"cover",borderRadius:8,border:"2px solid "+T.green}}),
+      /*#__PURE__*/React.createElement("div", null,
+        /*#__PURE__*/React.createElement("div", {style:{fontSize:12,fontWeight:700,color:T.green}}, "✅ Selfie lista"),
+        /*#__PURE__*/React.createElement("div", {style:{fontSize:11,color:T.fog}}, "Toca para cambiar"))
+    ) : null,
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => document.getElementById("reg-selfie").click(),
+      style:{width:"100%",padding:"14px",background:selfiePrev?`${T.green}22`:`${T.coral}22`,border:"2px solid "+(selfiePrev?T.green:T.coral)+"88",borderRadius:10,color:selfiePrev?T.green:T.coral,fontSize:13,fontWeight:700,cursor:"pointer"}
+    }, selfiePrev ? "📷 Cambiar selfie" : "📷 Tomar selfie con carné — requerido")
+  ),
+  /*#__PURE__*/React.createElement("div", {
+    style: {background:`${T.blue}18`,border:`1px solid ${T.blue}44`,borderRadius:10,padding:"12px 14px",fontSize:12,color:"#7ab4ff",marginBottom:14,lineHeight:1.8,marginTop:14}
+  }, "🔐 Tu identidad se verifica: Documento + Selfie AWS · Email · SMS · IMEI · Geolocalización · Blockchain"), vfError ? /*#__PURE__*/React.createElement("div", {
     style: {
       background: `${T.coral}22`,
       border: `1px solid ${T.coral}44`,
@@ -2997,14 +3043,31 @@ function PreferendumV8() {
             })
           });
         } catch (e) {/* candado de aparato: registro silencioso, no bloquea onboarding */}
+        if (docFile) {
+          try {
+            const fd = new FormData(); fd.append('file', docFile); fd.append('doc_type', 'national_id');
+            await fetch(`${API}/verify/document`, {method:'POST', headers:{Authorization:`Bearer ${data.token}`}, body:fd});
+          } catch(e) {}
+        }
+        if (selfieFile) {
+          try {
+            const fs2 = new FormData(); fs2.append('file', selfieFile);
+            const sr = await fetch(`${API}/verify/selfie`, {method:'POST', headers:{Authorization:`Bearer ${data.token}`}, body:fs2});
+            const sd = await sr.json().catch(()=>({}));
+            if (sd.verified) data.user.selfie_verified = true;
+          } catch(e) {}
+        }
+        setVfLoading(false);
+        if (data.user.selfie_verified) {
+          go("debates-splash");
+          setTimeout(() => { setScreen("feed"); setTab("feed"); }, 2200);
+        } else {
+          setVfStep(1); go("verify-identity");
+        }
       } catch (e) {
         setVfError(e.message);
         setVfLoading(false);
-        return;
       }
-      setVfLoading(false);
-      setVfStep(1);
-      go("verify-identity");
     }
   }), /*#__PURE__*/React.createElement("div", {
     style: {
