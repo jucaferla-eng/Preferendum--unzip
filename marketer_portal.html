@@ -532,7 +532,7 @@ async function doLogin() {
   const r = await fetch(`${API}/token`, {method:'POST', body: form});
   const d = await r.json();
   if (!r.ok) { showErr('login-err', d.detail || 'Login failed'); return; }
-  token     = d.access_token;
+  token     = d.access_token || d.token;
   userEmail = email;
   userName  = email.split('@')[0];
   localStorage.setItem('pref_adv_token', token);
@@ -547,15 +547,22 @@ async function doRegister() {
   const pass    = document.getElementById('reg-pass').value;
   const country = document.getElementById('reg-country').value;
   if (!name || !email || !pass) return;
-  const r = await fetch(`${API}/register`, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name, email, password: pass, phone:'', country, dob:''})});
+  const r = await fetch(`${API}/auth/register`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, email, password: pass, phone:'', country, dob:'', county:'', gender:'', national_id:''})});
   const d = await r.json();
   if (!r.ok) { showErr('reg-err', d.detail || 'Registration failed'); return; }
-  // auto-login
-  document.getElementById('login-email').value = email;
-  document.getElementById('login-pass').value  = pass;
-  switchTab('login');
-  await doLogin();
+  if (d.token) {
+    token = d.token; userEmail = email; userName = name;
+    localStorage.setItem('pref_adv_token', token);
+    localStorage.setItem('pref_adv_email', userEmail);
+    localStorage.setItem('pref_adv_name',  userName);
+    showApp();
+  } else {
+    document.getElementById('login-email').value = email;
+    document.getElementById('login-pass').value  = pass;
+    switchTab('login');
+    await doLogin();
+  }
 }
 
 function doLogout() {
