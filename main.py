@@ -4622,6 +4622,7 @@ def payments_history(
 @app.post('/admin/payments/init-tables')
 def payments_admin_init_tables(secret: str, db: Session = Depends(get_db)):
     """Admin: explicitly create payment tables (PostgreSQL-compatible)."""
+    from sqlalchemy import text as _text
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
     results = {}
@@ -4632,7 +4633,7 @@ def payments_admin_init_tables(secret: str, db: Session = Depends(get_db)):
             continue
         try:
             with engine.begin() as conn:
-                conn.execute(text(stmt))
+                conn.execute(_text(stmt))
             results[stmt[:60]] = 'ok'
         except Exception as e:
             results[stmt[:60]] = str(e)
