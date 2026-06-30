@@ -4619,6 +4619,26 @@ def payments_history(
     return {'transactions': [dict(r._mapping) for r in txs]}
 
 
+@app.post('/admin/payments/init-tables')
+def payments_admin_init_tables(secret: str, db: Session = Depends(get_db)):
+    """Admin: explicitly create payment tables (PostgreSQL-compatible)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    results = {}
+    stmts = PAYMENTS_SCHEMA_SQL_PG.strip().split(';')
+    for stmt in stmts:
+        stmt = stmt.strip()
+        if not stmt:
+            continue
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(stmt))
+            results[stmt[:60]] = 'ok'
+        except Exception as e:
+            results[stmt[:60]] = str(e)
+    return {'results': results}
+
+
 @app.post('/admin/payments/manual-credit')
 def payments_admin_manual(
     user_id:     int,
