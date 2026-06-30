@@ -1,5 +1,6 @@
 node_modules/
-ios/
+ios/Pods/
+ios/build/
 dist/
 .git/
 __pycache__/

@@ -29,6 +29,11 @@
         "projectId": "cedfd3c0-28fd-49f1-90c6-8b9c83c61695"
       }
     },
-    "owner": "jifg749090"
+    "owner": "jifg749090",
+    "plugins": [
+      "expo-asset",
+      "expo-font",
+      "expo-secure-store"
+    ]
   }
 }
