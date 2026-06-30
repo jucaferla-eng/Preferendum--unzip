@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Preferendum — Advertiser Portal</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=DM+Mono:wght@300;400;500&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --ink:   #060810;
+  --ink2:  #0d1120;
+  --ink3:  #151b2e;
+  --paper: #f5f3ee;
+  --bone:  #e8e4dc;
+  --blue:  #1a3a8f;
+  --blue2: #2952c4;
+  --gold:  #c49a2a;
+  --gold2: #e8b830;
+  --green: #1a7a4a;
+  --green2:#22a862;
+  --coral: #c43a2a;
+  --muted: #7a7570;
+  --text:  #2a2820;
+  --border:rgba(255,255,255,0.08);
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--ink);color:var(--paper);font-family:'Manrope',sans-serif;min-height:100vh;}
+
+/* NAV */
+nav{display:flex;align-items:center;justify-content:space-between;padding:20px 48px;border-bottom:1px solid var(--border);}
+.nav-logo{font-family:'Playfair Display',serif;font-size:22px;color:var(--paper);}
+.nav-logo span{color:var(--gold2);}
+.nav-tag{font-family:'DM Mono',monospace;font-size:11px;color:var(--gold);letter-spacing:3px;text-transform:uppercase;}
+.nav-user{display:flex;align-items:center;gap:16px;font-size:13px;color:var(--muted);}
+.nav-balance{font-family:'DM Mono',monospace;font-size:13px;color:var(--gold2);background:rgba(196,154,42,0.1);padding:6px 14px;border-radius:4px;border:1px solid rgba(196,154,42,0.3);}
+.btn-logout{background:none;border:1px solid var(--border);color:var(--muted);padding:6px 14px;border-radius:4px;cursor:pointer;font-family:'Manrope',sans-serif;font-size:12px;}
+.btn-logout:hover{border-color:var(--coral);color:var(--coral);}
+
+/* LAYOUT */
+.app{display:none;}
+.app.visible{display:block;}
+.container{max-width:1100px;margin:0 auto;padding:0 32px;}
+
+/* AUTH SCREEN */
+#auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:40px;}
+.auth-box{background:var(--ink2);border:1px solid var(--border);border-radius:16px;padding:48px;width:100%;max-width:440px;}
+.auth-title{font-family:'Playfair Display',serif;font-size:32px;color:var(--paper);margin-bottom:8px;}
+.auth-subtitle{font-size:14px;color:var(--muted);margin-bottom:32px;}
+.tabs{display:flex;gap:0;margin-bottom:32px;border-bottom:1px solid var(--border);}
+.tab{flex:1;padding:12px;text-align:center;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;}
+.tab.active{color:var(--gold2);border-bottom-color:var(--gold2);}
+.field{margin-bottom:20px;}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;}
+.field input,.field select{width:100%;background:var(--ink3);border:1px solid var(--border);border-radius:8px;padding:12px 16px;color:var(--paper);font-family:'Manrope',sans-serif;font-size:14px;outline:none;transition:border-color 0.2s;}
+.field input:focus,.field select:focus{border-color:var(--gold);}
+.field select option{background:var(--ink3);}
+.btn-primary{width:100%;background:var(--gold);color:var(--ink);border:none;padding:14px;border-radius:8px;font-family:'Manrope',sans-serif;font-size:15px;font-weight:700;cursor:pointer;transition:all 0.2s;margin-top:8px;}
+.btn-primary:hover{background:var(--gold2);transform:translateY(-1px);}
+.btn-primary:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
+.auth-err{color:var(--coral);font-size:13px;margin-top:12px;display:none;}
+
+/* MAIN LAYOUT */
+.main-grid{display:grid;grid-template-columns:240px 1fr;gap:32px;padding:40px 0 80px;}
+.sidebar{display:flex;flex-direction:column;gap:4px;}
+.sidebar-item{padding:10px 16px;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;color:var(--muted);transition:all 0.2s;display:flex;align-items:center;gap:10px;}
+.sidebar-item:hover{background:var(--ink2);color:var(--paper);}
+.sidebar-item.active{background:rgba(196,154,42,0.1);color:var(--gold2);border:1px solid rgba(196,154,42,0.2);}
+.sidebar-icon{font-size:16px;}
+.content{min-height:600px;}
+.panel{display:none;}
+.panel.active{display:block;}
+
+/* SECTION HEADERS */
+.section-tag{font-family:'DM Mono',monospace;font-size:10px;color:var(--gold);letter-spacing:3px;text-transform:uppercase;margin-bottom:8px;}
+.section-title{font-family:'Playfair Display',serif;font-size:28px;color:var(--paper);margin-bottom:24px;}
+
+/* CARDS */
+.card{background:var(--ink2);border:1px solid var(--border);border-radius:12px;padding:24px;}
+.card+.card{margin-top:16px;}
+
+/* PACKAGES */
+.packages-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:32px;}
+.pkg-card{background:var(--ink2);border:1px solid var(--border);border-radius:12px;padding:24px;cursor:pointer;transition:all 0.2s;position:relative;}
+.pkg-card:hover{border-color:var(--gold);transform:translateY(-2px);}
+.pkg-card.selected{border-color:var(--gold2);background:rgba(196,154,42,0.05);}
+.pkg-card.featured::before{content:'POPULAR';position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:var(--gold2);color:var(--ink);font-family:'DM Mono',monospace;font-size:9px;font-weight:700;padding:3px 10px;border-radius:20px;letter-spacing:2px;}
+.pkg-name{font-family:'Playfair Display',serif;font-size:20px;color:var(--paper);margin-bottom:4px;}
+.pkg-price{font-size:32px;font-weight:800;color:var(--gold2);margin-bottom:4px;}
+.pkg-price span{font-size:14px;font-weight:400;color:var(--muted);}
+.pkg-credits{font-family:'DM Mono',monospace;font-size:13px;color:var(--green2);margin-bottom:12px;}
+.pkg-bonus{font-size:11px;color:var(--gold);font-weight:600;}
+.pkg-impr{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.6;}
+
+/* PAYMENT METHODS */
+.pay-methods{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px;}
+.pay-method{background:var(--ink3);border:1px solid var(--border);border-radius:10px;padding:16px;text-align:center;cursor:pointer;transition:all 0.2s;}
+.pay-method:hover{border-color:var(--gold);}
+.pay-method.selected{border-color:var(--gold2);background:rgba(196,154,42,0.05);}
+.pay-method-icon{font-size:24px;margin-bottom:6px;}
+.pay-method-name{font-size:12px;font-weight:600;color:var(--paper);}
+.pay-method-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+
+/* CRYPTO INFO */
+#crypto-info{background:var(--ink3);border:1px solid rgba(196,154,42,0.2);border-radius:10px;padding:20px;margin-top:16px;display:none;}
+.crypto-addr{font-family:'DM Mono',monospace;font-size:12px;color:var(--gold2);word-break:break-all;background:rgba(0,0,0,0.3);padding:10px;border-radius:6px;margin:12px 0;}
+.crypto-amount{font-size:24px;font-weight:700;color:var(--paper);margin-bottom:4px;}
+.crypto-usd{font-size:13px;color:var(--muted);}
+.tx-field{margin-top:16px;}
+
+/* STATS */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:32px;}
+.stat-card{background:var(--ink2);border:1px solid var(--border);border-radius:12px;padding:20px;}
+.stat-label{font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:8px;}
+.stat-value{font-family:'Playfair Display',serif;font-size:28px;color:var(--paper);}
+.stat-value.gold{color:var(--gold2);}
+.stat-value.green{color:var(--green2);}
+
+/* CAMPAIGNS TABLE */
+.campaigns-table{width:100%;border-collapse:collapse;}
+.campaigns-table th{text-align:left;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;padding:12px 16px;border-bottom:1px solid var(--border);}
+.campaigns-table td{padding:14px 16px;border-bottom:1px solid var(--border);font-size:13px;}
+.campaigns-table tr:hover td{background:var(--ink2);}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;font-family:'DM Mono',monospace;}
+.badge.active{background:rgba(26,122,74,0.2);color:var(--green2);border:1px solid rgba(26,122,74,0.3);}
+.badge.paused{background:rgba(122,117,112,0.2);color:var(--muted);border:1px solid var(--border);}
+.btn-sm{padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:'Manrope',sans-serif;border:none;}
+.btn-sm.gold{background:var(--gold);color:var(--ink);}
+.btn-sm.outline{background:none;border:1px solid var(--border);color:var(--muted);}
+.btn-sm.outline:hover{border-color:var(--gold);color:var(--gold);}
+
+/* NEW CAMPAIGN FORM */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+.form-full{grid-column:1/-1;}
+.commune-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
+.commune-chip{padding:6px 12px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid var(--border);color:var(--muted);transition:all 0.2s;}
+.commune-chip:hover{border-color:var(--gold);color:var(--gold);}
+.commune-chip.selected{background:rgba(196,154,42,0.15);border-color:var(--gold2);color:var(--gold2);}
+.budget-display{font-family:'DM Mono',monospace;font-size:24px;color:var(--gold2);margin-top:8px;}
+.budget-impr{font-size:12px;color:var(--muted);margin-top:4px;}
+
+/* ALERTS */
+.alert{padding:14px 18px;border-radius:8px;font-size:13px;margin-bottom:20px;display:none;}
+.alert.success{background:rgba(26,122,74,0.15);border:1px solid rgba(26,122,74,0.3);color:var(--green2);}
+.alert.error{background:rgba(196,58,42,0.15);border:1px solid rgba(196,58,42,0.3);color:#ff6b5a;}
+.alert.info{background:rgba(196,154,42,0.1);border:1px solid rgba(196,154,42,0.25);color:var(--gold2);}
+.alert.visible{display:block;}
+
+/* BLOCKCHAIN SECTION */
+.blockchain-card{background:var(--ink3);border:1px solid rgba(41,82,196,0.3);border-radius:12px;padding:24px;margin-bottom:16px;}
+.blockchain-title{font-family:'Playfair Display',serif;font-size:18px;color:var(--paper);margin-bottom:4px;}
+.blockchain-hash{font-family:'DM Mono',monospace;font-size:11px;color:var(--blue2);word-break:break-all;margin-top:8px;}
+.blockchain-live{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--green2);margin-top:8px;}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green2);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
+
+.memorial{font-family:'Playfair Display',serif;font-style:italic;font-size:12px;color:rgba(245,243,238,0.2);text-align:center;padding:40px 0 20px;}
+
+@media(max-width:768px){
+  nav{padding:16px 20px;}
+  .main-grid{grid-template-columns:1fr;gap:20px;padding:20px 0 60px;}
+  .sidebar{flex-direction:row;overflow-x:auto;}
+  .packages-grid,.pay-methods,.stats-grid,.form-grid{grid-template-columns:1fr;}
+}
+</style>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="auth-screen">
+  <div class="auth-box">
+    <p class="section-tag">Advertiser Access</p>
+    <h1 class="auth-title">Preferendum <span style="color:var(--gold2)">Ads</span></h1>
+    <p class="auth-subtitle">Reach verified voters by commune, income tier, and demographics.</p>
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('login')">Sign In</div>
+      <div class="tab" onclick="switchTab('register')">Create Account</div>
+    </div>
+
+    <!-- LOGIN -->
+    <div id="tab-login">
+      <div class="field"><label>Email</label><input type="email" id="login-email" placeholder="agency@company.com"/></div>
+      <div class="field"><label>Password</label><input type="password" id="login-pass" placeholder="••••••••"/></div>
+      <button class="btn-primary" onclick="doLogin()">Sign In</button>
+      <p class="auth-err" id="login-err"></p>
+    </div>
+
+    <!-- REGISTER -->
+    <div id="tab-register" style="display:none;">
+      <div class="field"><label>Company / Agency Name</label><input type="text" id="reg-name" placeholder="Sable Group"/></div>
+      <div class="field"><label>Email</label><input type="email" id="reg-email" placeholder="hello@company.com"/></div>
+      <div class="field"><label>Password</label><input type="password" id="reg-pass" placeholder="Min 8 characters"/></div>
+      <div class="field">
+        <label>Country</label>
+        <select id="reg-country">
+          <option value="CL">Chile</option><option value="AR">Argentina</option>
+          <option value="PE">Peru</option><option value="MX">Mexico</option>
+          <option value="CO">Colombia</option><option value="BR">Brazil</option>
+          <option value="US">United States</option><option value="ES">Spain</option>
+          <option value="GB">United Kingdom</option><option value="DE">Germany</option>
+        </select>
+      </div>
+      <button class="btn-primary" onclick="doRegister()">Create Account</button>
+      <p class="auth-err" id="reg-err"></p>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div class="app" id="main-app">
+  <nav>
+    <div class="nav-logo">Prefer<span>endum</span> <span style="font-size:14px;color:var(--muted);font-family:'DM Mono',monospace;">/ ADS</span></div>
+    <div class="nav-tag">Advertiser Portal</div>
+    <div class="nav-user">
+      <span class="nav-balance" id="nav-balance">⬡ — Credits</span>
+      <span id="nav-name" style="font-size:13px;"></span>
+      <button class="btn-logout" onclick="doLogout()">Sign out</button>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="main-grid">
+
+      <!-- SIDEBAR -->
+      <div class="sidebar">
+        <div class="sidebar-item active" onclick="showPanel('overview')" id="nav-overview">
+          <span class="sidebar-icon">◈</span> Overview
+        </div>
+        <div class="sidebar-item" onclick="showPanel('credits')" id="nav-credits">
+          <span class="sidebar-icon">⬡</span> Buy Credits
+        </div>
+        <div class="sidebar-item" onclick="showPanel('campaigns')" id="nav-campaigns">
+          <span class="sidebar-icon">◎</span> Campaigns
+        </div>
+        <div class="sidebar-item" onclick="showPanel('new-campaign')" id="nav-new-campaign">
+          <span class="sidebar-icon">+</span> New Campaign
+        </div>
+        <div class="sidebar-item" onclick="showPanel('blockchain')" id="nav-blockchain">
+          <span class="sidebar-icon">⬡</span> Blockchain
+        </div>
+      </div>
+
+      <!-- CONTENT -->
+      <div class="content">
+
+        <!-- OVERVIEW PANEL -->
+        <div class="panel active" id="panel-overview">
+          <p class="section-tag">Dashboard</p>
+          <h2 class="section-title">Overview</h2>
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">Credits Balance</div>
+              <div class="stat-value gold" id="ov-balance">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Active Campaigns</div>
+              <div class="stat-value" id="ov-active">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Total Impressions</div>
+              <div class="stat-value green" id="ov-impressions">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Credits Spent</div>
+              <div class="stat-value" id="ov-spent">—</div>
+            </div>
+          </div>
+          <div class="card">
+            <h3 style="font-family:'Playfair Display',serif;font-size:18px;margin-bottom:16px;">How it works</h3>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:20px;">
+              <div>
+                <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--gold);margin-bottom:8px;">01 / BUY</div>
+                <div style="font-size:13px;color:var(--muted);line-height:1.6;">Purchase Credits with card, Apple Pay, Google Pay or crypto (POL/USDC). 1 Credit = $1 USD.</div>
+              </div>
+              <div>
+                <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--gold);margin-bottom:8px;">02 / TARGET</div>
+                <div style="font-size:13px;color:var(--muted);line-height:1.6;">Choose communes, income tier, gender and age. Our AI engine matches your ad to real verified voters.</div>
+              </div>
+              <div>
+                <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--gold);margin-bottom:8px;">03 / PAY PER IMPRESSION</div>
+                <div style="font-size:13px;color:var(--muted);line-height:1.6;">Credits deducted per thousand impressions (CPM). Stop anytime. Real-time dashboard.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CREDITS PANEL -->
+        <div class="panel" id="panel-credits">
+          <p class="section-tag">Payments</p>
+          <h2 class="section-title">Buy Credits</h2>
+
+          <div class="alert" id="credits-alert"></div>
+
+          <p style="font-size:13px;color:var(--muted);margin-bottom:24px;">1 Credit = $1 USD · Credits never expire · All currencies accepted</p>
+
+          <div class="packages-grid" id="packages-grid">
+            <!-- filled by JS -->
+          </div>
+
+          <div class="card">
+            <h3 style="font-family:'Playfair Display',serif;font-size:18px;margin-bottom:20px;">Payment Method</h3>
+            <div class="pay-methods">
+              <div class="pay-method selected" onclick="selectPayMethod('stripe')" id="pm-stripe">
+                <div class="pay-method-icon">💳</div>
+                <div class="pay-method-name">Card</div>
+                <div class="pay-method-sub">Visa · MC · Amex · Apple Pay</div>
+              </div>
+              <div class="pay-method" onclick="selectPayMethod('pol')" id="pm-pol">
+                <div class="pay-method-icon">⬡</div>
+                <div class="pay-method-name">POL Crypto</div>
+                <div class="pay-method-sub">Polygon Network</div>
+              </div>
+              <div class="pay-method" onclick="selectPayMethod('usdc')" id="pm-usdc">
+                <div class="pay-method-icon">◎</div>
+                <div class="pay-method-name">USDC Stablecoin</div>
+                <div class="pay-method-sub">Polygon Network</div>
+              </div>
+            </div>
+
+            <!-- Crypto info -->
+            <div id="crypto-info">
+              <p style="font-size:12px;color:var(--muted);margin-bottom:12px;">Send exactly this amount to the Preferendum wallet:</p>
+              <div class="crypto-amount" id="crypto-amount">—</div>
+              <div class="crypto-usd" id="crypto-usd"></div>
+              <div style="font-size:12px;color:var(--muted);margin-top:12px;">Wallet address (Polygon):</div>
+              <div class="crypto-addr" id="crypto-addr">0x668108Ecfd50993Cf3bCcbeE0ADaedF5Fa306d51</div>
+              <div class="tx-field">
+                <div class="field">
+                  <label>Transaction Hash (after sending)</label>
+                  <input type="text" id="tx-hash" placeholder="0x..."/>
+                </div>
+                <button class="btn-primary" onclick="confirmCrypto()" style="width:auto;padding:12px 32px;">Confirm Payment</button>
+              </div>
+            </div>
+
+            <button class="btn-primary" id="pay-btn" onclick="initiatePayment()" style="margin-top:8px;">
+              Pay with Card
+            </button>
+            <p style="font-size:11px;color:var(--muted);margin-top:12px;text-align:center;">
+              Stripe · 256-bit SSL · PCI DSS compliant
+            </p>
+          </div>
+        </div>
+
+        <!-- CAMPAIGNS PANEL -->
+        <div class="panel" id="panel-campaigns">
+          <p class="section-tag">Your Campaigns</p>
+          <h2 class="section-title">Campaigns</h2>
+          <div class="alert" id="camp-alert"></div>
+          <div class="card" style="padding:0;overflow:hidden;">
+            <table class="campaigns-table">
+              <thead>
+                <tr>
+                  <th>Campaign</th>
+                  <th>Country</th>
+                  <th>Budget (Credits)</th>
+                  <th>Impressions</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="campaigns-tbody">
+                <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:40px;">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- NEW CAMPAIGN PANEL -->
+        <div class="panel" id="panel-new-campaign">
+          <p class="section-tag">Create</p>
+          <h2 class="section-title">New Campaign</h2>
+          <div class="alert" id="newcamp-alert"></div>
+          <div class="card">
+            <div class="form-grid">
+              <div class="field form-full">
+                <label>Campaign Name</label>
+                <input type="text" id="nc-title" placeholder="e.g. Launch Q3 2026"/>
+              </div>
+              <div class="field">
+                <label>Country</label>
+                <select id="nc-country" onchange="loadCommunes()">
+                  <option value="CL">Chile</option>
+                  <option value="AR">Argentina</option>
+                  <option value="PE">Peru</option>
+                  <option value="MX">Mexico</option>
+                  <option value="CO">Colombia</option>
+                  <option value="US">United States</option>
+                  <option value="ES">Spain</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Income Tier Target</label>
+                <select id="nc-tier">
+                  <option value="D">All Income Levels</option>
+                  <option value="C">C and above (mid)</option>
+                  <option value="B">B and above (upper-mid)</option>
+                  <option value="A">A only (premium)</option>
+                </select>
+              </div>
+              <div class="field form-full">
+                <label>Target Communes <span style="color:var(--muted);font-weight:400;">(optional — leave blank for whole country)</span></label>
+                <div class="commune-chips" id="commune-chips"><!-- filled by JS --></div>
+              </div>
+              <div class="field">
+                <label>Gender</label>
+                <select id="nc-gender">
+                  <option value="all">All genders</option>
+                  <option value="F">Women</option>
+                  <option value="M">Men</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Age Range</label>
+                <div style="display:flex;gap:10px;">
+                  <input type="number" id="nc-age-min" value="18" min="13" max="99" style="width:80px;"/>
+                  <span style="line-height:46px;color:var(--muted);">–</span>
+                  <input type="number" id="nc-age-max" value="65" min="13" max="99" style="width:80px;"/>
+                </div>
+              </div>
+              <div class="field">
+                <label>Budget (Credits = USD)</label>
+                <input type="number" id="nc-budget" value="50" min="5" step="5" oninput="updateBudgetPreview()"/>
+                <div class="budget-display" id="budget-display">$50 USD</div>
+                <div class="budget-impr" id="budget-impr">~8,000 impressions (mid-tier communes)</div>
+              </div>
+              <div class="field">
+                <label>Start Date</label>
+                <input type="date" id="nc-start"/>
+              </div>
+              <div class="field">
+                <label>End Date</label>
+                <input type="date" id="nc-end"/>
+              </div>
+              <div class="field form-full">
+                <label>Ad Copy</label>
+                <input type="text" id="nc-copy" placeholder="Your message — 120 chars max" maxlength="120"/>
+              </div>
+              <div class="field form-full">
+                <label>Destination URL</label>
+                <input type="url" id="nc-url" placeholder="https://yoursite.com"/>
+              </div>
+            </div>
+            <button class="btn-primary" onclick="createCampaign()" style="margin-top:8px;">Launch Campaign</button>
+          </div>
+        </div>
+
+        <!-- BLOCKCHAIN PANEL -->
+        <div class="panel" id="panel-blockchain">
+          <p class="section-tag">Transparency</p>
+          <h2 class="section-title">Blockchain Verification</h2>
+          <div class="card" style="margin-bottom:24px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+              <div>
+                <div style="font-family:'Playfair Display',serif;font-size:18px;margin-bottom:4px;">Polygon Mainnet</div>
+                <div style="font-size:13px;color:var(--muted);">Every vote anchored on-chain. Immutable. Verifiable by anyone.</div>
+              </div>
+              <div class="blockchain-live"><span class="dot"></span> LIVE</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px;">
+              <div>
+                <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:6px;">CONTRACT</div>
+                <div class="blockchain-hash">0xB7fCD1aD46eC0a3ABfaddf95961e435C991dfd36</div>
+              </div>
+              <div>
+                <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);margin-bottom:6px;">NETWORK</div>
+                <div style="font-family:'DM Mono',monospace;font-size:13px;color:var(--blue2);">Polygon Mainnet · Chain ID 137</div>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <h3 style="font-family:'Playfair Display',serif;font-size:18px;margin-bottom:16px;">Verify a Vote</h3>
+            <div class="field"><label>Verification Code</label><input type="text" id="vcode-input" placeholder="e.g. PREF-XXXXXX-XXXXXX"/></div>
+            <button class="btn-primary" onclick="verifyVote()" style="width:auto;padding:12px 32px;">Verify on Blockchain</button>
+            <div id="verify-result" style="margin-top:16px;display:none;"></div>
+          </div>
+          <p class="memorial">En memoria de José Ignacio Fernández (1989–2024)</p>
+        </div>
+
+      </div><!-- /content -->
+    </div><!-- /main-grid -->
+  </div><!-- /container -->
+</div><!-- /main-app -->
+
+<script>
+const API = 'https://preferendum-unzip.onrender.com';
+let token = localStorage.getItem('pref_adv_token') || '';
+let userEmail = localStorage.getItem('pref_adv_email') || '';
+let userName  = localStorage.getItem('pref_adv_name')  || '';
+let selectedPkg = 'starter';
+let selectedPayMethod = 'stripe';
+let selectedCommunes = [];
+const COMMUNES = {
+  CL:['Vitacura','Las Condes','Lo Barnechea','Providencia','La Reina','Ñuñoa','Peñalolén','Santiago','Maipú','La Florida','Viña del Mar','Concepción'],
+  AR:['Palermo','Belgrano','Recoleta','Caballito','Nordelta','Pilar','Rosario Centro'],
+  PE:['Miraflores','San Isidro','Barranco','San Borja','La Molina','Surco'],
+  MX:['Polanco','Santa Fe','Condesa','Roma Norte','Coyoacán','San Pedro Garza'],
+  CO:['El Poblado','Laureles','Chapinero','Usaquén','Chía'],
+  US:['Manhattan','Beverly Hills','Miami Beach','Georgetown','Palo Alto'],
+  ES:['Salamanca','Retiro','Goya','Sarrià','Pedralbes'],
+};
+
+// ── INIT ─────────────────────────────────────────────────────
+window.onload = () => {
+  if (token) showApp();
+  else document.getElementById('auth-screen').style.display = 'flex';
+  setDefaultDates();
+  loadPackages();
+  loadCommunes();
+};
+
+function setDefaultDates() {
+  const today = new Date();
+  const end   = new Date();
+  end.setMonth(end.getMonth() + 1);
+  document.getElementById('nc-start').value = today.toISOString().split('T')[0];
+  document.getElementById('nc-end').value   = end.toISOString().split('T')[0];
+}
+
+// ── AUTH ─────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.getElementById('tab-login').style.display    = tab === 'login'    ? '' : 'none';
+  document.getElementById('tab-register').style.display = tab === 'register' ? '' : 'none';
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', (i===0) === (tab==='login')));
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const pass  = document.getElementById('login-pass').value;
+  if (!email || !pass) return;
+  const form = new FormData();
+  form.append('username', email); form.append('password', pass);
+  const r = await fetch(`${API}/token`, {method:'POST', body: form});
+  const d = await r.json();
+  if (!r.ok) { showErr('login-err', d.detail || 'Login failed'); return; }
+  token     = d.access_token;
+  userEmail = email;
+  userName  = email.split('@')[0];
+  localStorage.setItem('pref_adv_token', token);
+  localStorage.setItem('pref_adv_email', userEmail);
+  localStorage.setItem('pref_adv_name',  userName);
+  showApp();
+}
+
+async function doRegister() {
+  const name    = document.getElementById('reg-name').value.trim();
+  const email   = document.getElementById('reg-email').value.trim();
+  const pass    = document.getElementById('reg-pass').value;
+  const country = document.getElementById('reg-country').value;
+  if (!name || !email || !pass) return;
+  const r = await fetch(`${API}/register`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, email, password: pass, phone:'', country, dob:''})});
+  const d = await r.json();
+  if (!r.ok) { showErr('reg-err', d.detail || 'Registration failed'); return; }
+  // auto-login
+  document.getElementById('login-email').value = email;
+  document.getElementById('login-pass').value  = pass;
+  switchTab('login');
+  await doLogin();
+}
+
+function doLogout() {
+  token = userEmail = userName = '';
+  localStorage.clear();
+  location.reload();
+}
+
+function showApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('main-app').classList.add('visible');
+  document.getElementById('nav-name').textContent = userName;
+  refreshBalance();
+  loadOverview();
+  loadCampaigns();
+}
+
+// ── BALANCE ───────────────────────────────────────────────────
+async function refreshBalance() {
+  if (!token) return;
+  const r = await fetch(`${API}/payments/balance`, {headers:{'Authorization':'Bearer '+token}});
+  if (!r.ok) return;
+  const d = await r.json();
+  const bal = (d.balance_credits || 0).toFixed(2);
+  document.getElementById('nav-balance').textContent = `⬡ ${bal} Credits`;
+  document.getElementById('ov-balance').textContent = bal;
+}
+
+// ── OVERVIEW ──────────────────────────────────────────────────
+async function loadOverview() {
+  const r = await fetch(`${API}/advertiser/campaigns?email=${encodeURIComponent(userEmail)}`);
+  if (!r.ok) return;
+  const d = await r.json();
+  const camps = d.campaigns || [];
+  const active = camps.filter(c => c.is_active).length;
+  const totalImp = camps.reduce((s,c) => s + (c.impressions||0), 0);
+  const totalSpent = camps.reduce((s,c) => s + (c.spent_credits||c.spent_clp||0), 0);
+  document.getElementById('ov-active').textContent = active;
+  document.getElementById('ov-impressions').textContent = totalImp.toLocaleString();
+  document.getElementById('ov-spent').textContent = typeof totalSpent === 'number' ? totalSpent.toFixed(2) : '0';
+}
+
+// ── PACKAGES ─────────────────────────────────────────────────
+async function loadPackages() {
+  const r = await fetch(`${API}/payments/packages`);
+  const d = await r.json();
+  const grid = document.getElementById('packages-grid');
+  grid.innerHTML = '';
+  (d.packages || []).forEach((pkg, i) => {
+    const div = document.createElement('div');
+    div.className = 'pkg-card' + (i===1?' featured':'') + (pkg.id===selectedPkg?' selected':'');
+    div.onclick = () => selectPkg(pkg.id);
+    div.id = 'pkg-' + pkg.id;
+    div.innerHTML = `
+      <div class="pkg-name">${pkg.name}</div>
+      <div class="pkg-price">$${pkg.price_usd}<span> USD</span></div>
+      <div class="pkg-credits">⬡ ${pkg.credits} Credits${pkg.bonus_pct>0?` <span style="color:var(--gold)">+${pkg.bonus_pct}% bonus</span>`:''}</div>
+      <div class="pkg-impr">
+        ~${(pkg.estimated_impressions?.mid_communes||0).toLocaleString()} impressions<br/>in mid-tier communes
+      </div>`;
+    grid.appendChild(div);
+  });
+}
+
+function selectPkg(id) {
+  selectedPkg = id;
+  document.querySelectorAll('.pkg-card').forEach(c => c.classList.remove('selected'));
+  const el = document.getElementById('pkg-'+id);
+  if (el) el.classList.add('selected');
+  updatePayBtn();
+  if (selectedPayMethod !== 'stripe') getCryptoQuote();
+}
+
+function updatePayBtn() {
+  const btn = document.getElementById('pay-btn');
+  const prices = {starter:50,growth:200,pro:500,enterprise:2000};
+  const price = prices[selectedPkg] || 50;
+  if (selectedPayMethod === 'stripe') {
+    btn.textContent = `Pay $${price} USD with Card`;
+    btn.style.display = '';
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+// ── PAYMENT METHOD ────────────────────────────────────────────
+function selectPayMethod(m) {
+  selectedPayMethod = m;
+  ['stripe','pol','usdc'].forEach(x => {
+    document.getElementById('pm-'+x).classList.toggle('selected', x===m);
+  });
+  const cryptoInfo = document.getElementById('crypto-info');
+  const btn = document.getElementById('pay-btn');
+  if (m === 'stripe') {
+    cryptoInfo.style.display = 'none';
+    btn.style.display = '';
+    updatePayBtn();
+  } else {
+    btn.style.display = 'none';
+    cryptoInfo.style.display = 'block';
+    getCryptoQuote();
+  }
+}
+
+async function getCryptoQuote() {
+  const prices = {starter:50,growth:200,pro:500,enterprise:2000};
+  const usd = prices[selectedPkg] || 50;
+  const r = await fetch(`${API}/payments/crypto/quote`, {method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({amount_usd: usd, currency: selectedPayMethod.toUpperCase()})});
+  if (!r.ok) return;
+  const d = await r.json();
+  document.getElementById('crypto-amount').textContent = `${d.amount} ${selectedPayMethod.toUpperCase()}`;
+  document.getElementById('crypto-usd').textContent = `≈ $${usd} USD · Rate: 1 ${selectedPayMethod.toUpperCase()} = $${d.rate_usd} USD`;
+}
+
+// ── STRIPE CHECKOUT ───────────────────────────────────────────
+async function initiatePayment() {
+  if (!token) { alert('Please sign in first'); return; }
+  const btn = document.getElementById('pay-btn');
+  btn.disabled = true; btn.textContent = 'Opening Stripe…';
+  const r = await fetch(`${API}/payments/stripe/create-session`, {
+    method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body: JSON.stringify({
+      package_id:   selectedPkg,
+      success_url:  window.location.href + '?payment=success',
+      cancel_url:   window.location.href + '?payment=cancel',
+    })
+  });
+  const d = await r.json();
+  btn.disabled = false; updatePayBtn();
+  if (!r.ok) { showAlert('credits-alert', 'error', d.detail || 'Payment error. Check Stripe is configured.'); return; }
+  if (d.checkout_url) window.location.href = d.checkout_url;
+}
+
+// ── CRYPTO CONFIRM ────────────────────────────────────────────
+async function confirmCrypto() {
+  const txHash = document.getElementById('tx-hash').value.trim();
+  if (!txHash) { showAlert('credits-alert','error','Enter the transaction hash'); return; }
+  const r = await fetch(`${API}/payments/crypto/initiate`, {
+    method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body: JSON.stringify({package_id: selectedPkg, currency: selectedPayMethod.toUpperCase()})
+  });
+  const d = await r.json();
+  if (!r.ok) { showAlert('credits-alert','error',d.detail||'Error'); return; }
+  const r2 = await fetch(`${API}/payments/crypto/confirm`, {
+    method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+    body: JSON.stringify({request_id: d.request_id, tx_hash: txHash})
+  });
+  const d2 = await r2.json();
+  if (r2.ok) {
+    showAlert('credits-alert','success',`✓ ${d2.credits_added} Credits added to your account`);
+    refreshBalance();
+  } else {
+    showAlert('credits-alert','error', d2.detail||'Transaction not confirmed');
+  }
+}
+
+// ── CAMPAIGNS ─────────────────────────────────────────────────
+async function loadCampaigns() {
+  const r = await fetch(`${API}/advertiser/campaigns?email=${encodeURIComponent(userEmail)}`);
+  const d = await r.json();
+  const tbody = document.getElementById('campaigns-tbody');
+  const camps = d.campaigns || [];
+  if (!camps.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:40px;">No campaigns yet. <a href="#" onclick="showPanel(\'new-campaign\')" style="color:var(--gold)">Create your first →</a></td></tr>';
+    return;
+  }
+  tbody.innerHTML = camps.map(c => `
+    <tr>
+      <td><div style="font-weight:600;">${c.title||'—'}</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">${c.target_country||''} ${c.target_communes?'· '+c.target_communes:''}</div></td>
+      <td style="font-family:'DM Mono',monospace;font-size:12px;">${c.target_country||'All'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--gold2);">${(c.budget_clp||0).toLocaleString()}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--green2);">${(c.impressions||0).toLocaleString()}</td>
+      <td><span class="badge ${c.is_active?'active':'paused'}">${c.is_active?'ACTIVE':'PAUSED'}</span></td>
+      <td>
+        <button class="btn-sm outline" onclick="toggleCampaign(${c.id})">${c.is_active?'Pause':'Resume'}</button>
+      </td>
+    </tr>`).join('');
+}
+
+async function toggleCampaign(id) {
+  await fetch(`${API}/advertiser/campaigns/${id}/pause`, {method:'PUT'});
+  loadCampaigns();
+}
+
+// ── NEW CAMPAIGN ──────────────────────────────────────────────
+function loadCommunes() {
+  const country = document.getElementById('nc-country').value;
+  const communes = COMMUNES[country] || [];
+  selectedCommunes = [];
+  const chips = document.getElementById('commune-chips');
+  chips.innerHTML = communes.map(c => `
+    <div class="commune-chip" onclick="toggleCommune(this,'${c}')">${c}</div>`).join('');
+}
+
+function toggleCommune(el, name) {
+  el.classList.toggle('selected');
+  if (el.classList.contains('selected')) selectedCommunes.push(name);
+  else selectedCommunes = selectedCommunes.filter(c => c !== name);
+}
+
+function updateBudgetPreview() {
+  const v = parseFloat(document.getElementById('nc-budget').value) || 0;
+  document.getElementById('budget-display').textContent = `$${v} USD`;
+  const impr = Math.round(v / 6 * 1000);
+  document.getElementById('budget-impr').textContent = `~${impr.toLocaleString()} impressions (mid-tier communes)`;
+}
+
+async function createCampaign() {
+  const title   = document.getElementById('nc-title').value.trim();
+  const country = document.getElementById('nc-country').value;
+  const gender  = document.getElementById('nc-gender').value;
+  const ageMin  = document.getElementById('nc-age-min').value;
+  const ageMax  = document.getElementById('nc-age-max').value;
+  const budget  = parseFloat(document.getElementById('nc-budget').value) || 0;
+  const start   = document.getElementById('nc-start').value;
+  const end     = document.getElementById('nc-end').value;
+  const copy    = document.getElementById('nc-copy').value.trim();
+  const url     = document.getElementById('nc-url').value.trim();
+  const tier    = document.getElementById('nc-tier').value;
+
+  if (!title) { showAlert('newcamp-alert','error','Campaign name is required'); return; }
+  if (budget < 5) { showAlert('newcamp-alert','error','Minimum budget is $5 Credits'); return; }
+
+  const body = {
+    advertiser_email: userEmail,
+    advertiser_name:  userName,
+    campaign_title:   title,
+    budget_clp:       Math.round(budget * 950),  // convert USD to CLP for backend
+    ad_type:          'banner',
+    target_country:   country,
+    target_communes:  selectedCommunes.join(','),
+    target_gender:    gender,
+    target_age_ranges:`${ageMin}-${ageMax}`,
+    target_se_tiers:  tier === 'D' ? 'A,B,C,D' : tier === 'C' ? 'A,B,C' : tier === 'B' ? 'A,B' : 'A',
+    target_categories:'',
+    excluded_categories:'',
+    blocked_competitors:'',
+    start_date:       start + 'T00:00:00',
+    end_date:         end + 'T23:59:59',
+    ad_copy:          copy,
+    link_url:         url,
+  };
+
+  const r = await fetch(`${API}/advertiser/campaigns`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  });
+  const d = await r.json();
+  if (!r.ok) { showAlert('newcamp-alert','error',d.detail||'Error creating campaign'); return; }
+  showAlert('newcamp-alert','success',`✓ Campaign "${title}" created! ID: ${d.campaign_id}`);
+  loadCampaigns();
+  setTimeout(() => showPanel('campaigns'), 2000);
+}
+
+// ── BLOCKCHAIN ────────────────────────────────────────────────
+async function verifyVote() {
+  const vcode = document.getElementById('vcode-input').value.trim();
+  if (!vcode) return;
+  const r = await fetch(`${API}/verify/${vcode}`);
+  const d = await r.json();
+  const el = document.getElementById('verify-result');
+  el.style.display = 'block';
+  if (d.verified || d.exists) {
+    el.innerHTML = `<div style="background:rgba(26,122,74,0.15);border:1px solid rgba(26,122,74,0.3);border-radius:8px;padding:16px;">
+      <div style="color:var(--green2);font-weight:600;margin-bottom:8px;">✓ Vote verified on Polygon</div>
+      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);">Hash: ${d.vote_hash||'—'}</div>
+      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-top:4px;">Tx: ${d.tx_hash||'on-chain'}</div>
+    </div>`;
+  } else {
+    el.innerHTML = `<div style="background:rgba(196,58,42,0.15);border:1px solid rgba(196,58,42,0.3);border-radius:8px;padding:16px;color:#ff6b5a;">Code not found on blockchain.</div>`;
+  }
+}
+
+// ── NAVIGATION ────────────────────────────────────────────────
+function showPanel(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
+  const panel = document.getElementById('panel-' + name);
+  const nav   = document.getElementById('nav-' + name);
+  if (panel) panel.classList.add('active');
+  if (nav)   nav.classList.add('active');
+  if (name === 'campaigns') loadCampaigns();
+  if (name === 'overview')  { loadOverview(); refreshBalance(); }
+  if (name === 'credits')   { loadPackages(); }
+}
+
+// ── HELPERS ───────────────────────────────────────────────────
+function showAlert(id, type, msg) {
+  const el = document.getElementById(id);
+  el.className = 'alert ' + type + ' visible';
+  el.textContent = msg;
+  setTimeout(() => el.classList.remove('visible'), 6000);
+}
+function showErr(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg; el.style.display = 'block';
+  setTimeout(() => el.style.display='none', 5000);
+}
+
+// Handle Stripe redirect
+const params = new URLSearchParams(location.search);
+if (params.get('payment') === 'success') {
+  setTimeout(() => { showPanel('credits'); showAlert('credits-alert','success','✓ Payment successful! Credits have been added to your account.'); refreshBalance(); }, 500);
+}
+</script>
+</body>
+</html>

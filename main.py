@@ -1284,6 +1284,18 @@ try {
 </script>
 </body></html>''')
 
+@app.get('/marketer-portal', response_class=HTMLResponse)
+def serve_marketer_portal():
+    """Portal completo del anunciante — pagos, campañas, dashboard."""
+    try:
+        with open('marketer_portal.html', 'r', encoding='utf-8') as f:
+            content = f.read()
+        return HTMLResponse(content=content, headers={
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+        })
+    except FileNotFoundError:
+        return HTMLResponse(content='<html><body>Portal not found</body></html>', status_code=404)
+
 @app.get('/app', response_class=HTMLResponse)
 def serve_app():
     """Sirve la app web directamente desde el servidor.
