@@ -2269,57 +2269,71 @@ def _normalize_gender(g: str) -> str:
 
 def _match_campaigns(user, debate, db) -> list:
     """
-    Encuentra campañas activas que hagan match con el perfil del votante.
-    Solo la comuna (tier) — nunca datos personales.
-    Works for both authenticated and unauthenticated users.
+    Finds active campaigns for a debate using commune-based targeting optimization.
+    Returns list of dicts (ORM fields + optimization metrics from targeting_agent).
     """
+    from targeting_agent import optimize_campaigns_for_debate, load_matrix
+
     now = datetime.utcnow()
-    campaigns = db.query(AdCampaign).filter(
+    orm_campaigns = db.query(AdCampaign).filter(
         AdCampaign.is_active == True,
         AdCampaign.start_date <= now,
     ).all()
 
-    if user:
-        user_tier      = user.se_tier or 'BBB'
-        user_gender    = _normalize_gender(user.gender)
-        user_age_group = _get_age_group(user.dob)
-        user_country   = _country_code(user.country)
-        user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
-    else:
-        user_tier = None
-        user_gender = 'all'
-        user_country = None
-        user_age = None
-
-    matched = []
-    for c in campaigns:
-        # Check expiry with 24h grace period
+    valid_orm = []
+    for c in orm_campaigns:
         if c.end_date and c.end_date < (now - timedelta(hours=24)):
             continue
-        # Matriz campaña vs. matriz de la consulta — país/comuna/género/edad
-        if not _campaign_matches_debate(c, debate):
+        if (c.budget_clp or 0) > 0 and (c.spent_clp or 0) >= (c.budget_clp or 0):
             continue
-        # País — only filter when both campaign and user have specific countries
-        if user_country and c.target_country and _country_code(c.target_country) != user_country:
-            continue
-        # Género — normalize both sides; only filter when both have a specific gender
-        campaign_gender = _normalize_gender(c.target_gender)
-        if campaign_gender != 'all' and user_gender != 'all' and campaign_gender != user_gender:
-            continue
-        # Edad — only filter when user age is known
-        if user_age is not None:
-            age_min = getattr(c, 'target_age_min', 13) or 13
-            age_max = getattr(c, 'target_age_max', 99) or 99
-            if not (age_min <= user_age <= age_max):
-                continue
-        # Nivel de ingreso — only filter when user tier is known
-        if user_tier:
-            target_tiers = c.target_se_tiers or 'AAA,AAB,ABB,BBB,BBC,BCC'
-            if not _tier_matches(user_tier, target_tiers):
-                continue
-        matched.append(c)
+        valid_orm.append(c)
 
-    return matched
+    if not valid_orm:
+        return []
+
+    def _se_tiers_to_min_tier(se_tiers_str: str) -> str:
+        tiers = [t.strip()[0] for t in (se_tiers_str or 'A,B,C,D').split(',') if t.strip()]
+        valid = [t for t in tiers if t in ('A', 'B', 'C', 'D')]
+        if not valid:
+            return 'D'
+        order = {'A': 4, 'B': 3, 'C': 2, 'D': 1}
+        return min(valid, key=lambda t: order.get(t, 1))
+
+    orm_by_id = {c.id: c for c in valid_orm}
+    campaigns_dicts = [{
+        'id':              c.id,
+        'advertiser_name': c.advertiser_name or '',
+        'title':           c.title or '',
+        'ad_copy':         c.ad_copy or '',
+        'logo_url':        c.logo_url or '',
+        'ad_image_url':    c.ad_image_url or '',
+        'link_url':        c.link_url or '',
+        'target_country':  c.target_country or '',
+        'target_communes': c.target_communes or '',
+        'target_gender':   c.target_gender or 'all',
+        'target_age_min':  c.target_age_min or 13,
+        'target_age_max':  c.target_age_max or 99,
+        'min_income_tier': _se_tiers_to_min_tier(c.target_se_tiers),
+        'min_gni_country': 0,
+        'cpm':             0,
+    } for c in valid_orm]
+
+    debate_dict = {
+        'scope_country':    (debate.scope_country  or 'CL')  if debate else 'CL',
+        'scope_commune':    (debate.scope_commune   or '')    if debate else '',
+        'target_gender':    (debate.target_gender   or 'all') if debate else 'all',
+        'target_age_min':   (debate.target_age_min  or 13)   if debate else 13,
+        'target_age_max':   (debate.target_age_max  or 99)   if debate else 99,
+        'estimated_audience': 0,
+    }
+
+    matrix = load_matrix()
+    ranked = optimize_campaigns_for_debate(debate_dict, campaigns_dicts, matrix, max_ads=5)
+
+    for item in ranked:
+        item['_orm'] = orm_by_id.get(item['id'])
+
+    return ranked
 
 
 def _cost_per_impression_clp(campaign, db) -> int:
@@ -2392,29 +2406,34 @@ def get_opinions(debate_id: int,
         return url or ''
 
     def _append_campaign_ad(campaign):
+        # campaign is a dict with optimization metrics merged in
         result.append({'type': 'ad', 'ad': {
-            'brand':       campaign.advertiser_name,
-            'copy':        campaign.ad_copy or campaign.title,
+            'brand':       campaign.get('advertiser_name', ''),
+            'copy':        campaign.get('ad_copy') or campaign.get('title', ''),
             'cta':         'Ver más',
             'logo_color':  '#2563eb',
-            'logo_url':    _safe_url(campaign.logo_url),
-            'image_url':   _safe_url(campaign.ad_image_url),
-            'link_url':    campaign.link_url or '',
-            'campaign_id': campaign.id,
+            'logo_url':    _safe_url(campaign.get('logo_url', '')),
+            'image_url':   _safe_url(campaign.get('ad_image_url', '')),
+            'link_url':    campaign.get('link_url', ''),
+            'campaign_id': campaign.get('id'),
         }})
-        if user:
-            db.add(AdImpressionLog(
-                campaign_id = campaign.id,
-                debate_id   = debate_id,
-                gender      = user.gender or '',
-                age_group   = _get_age_group(user.dob),
-                county      = user.county or '',
-                country     = user.country or '',
-            ))
-        campaign.spent_clp = min(
-            campaign.budget_clp,
-            (campaign.spent_clp or 0) + _cost_per_impression_clp(campaign, db),
-        )
+        orm = campaign.get('_orm')
+        if orm:
+            if user:
+                db.add(AdImpressionLog(
+                    campaign_id = orm.id,
+                    debate_id   = debate_id,
+                    gender      = user.gender or '',
+                    age_group   = _get_age_group(user.dob),
+                    county      = user.county or '',
+                    country     = user.country or '',
+                ))
+            cpm_usd  = campaign.get('cpm') or 6.0
+            cost_clp = max(1, int(round((cpm_usd * USD_TO_CLP) / 1000.0)))
+            orm.spent_clp = min(
+                orm.budget_clp or 0,
+                (orm.spent_clp or 0) + cost_clp,
+            )
 
     # Show first ad at the top — even with 0 opinions, the campaign is visible
     if matched:
