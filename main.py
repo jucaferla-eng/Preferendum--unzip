@@ -17,7 +17,7 @@ En memoria del Fundador José Ignacio Fernández (1989–2024)
 """
 
 from __future__ import annotations
-import os, json, hashlib, random, string, re, base64, uuid
+import os, json, hashlib, random, string, re, base64, uuid, time
 import urllib.request, urllib.error, smtplib
 import requests as _requests
 import boto3
@@ -28,7 +28,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from fastapi import (FastAPI, HTTPException, Depends, UploadFile,
-                     File, Form, Query, Request, BackgroundTasks)
+                     File, Form, Query, Request, BackgroundTasks, Header)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -40,6 +40,22 @@ from pydantic import BaseModel
 import jwt
 import bcrypt
 from blockchain import blockchain as _blockchain
+from payments import (
+    PAYMENTS_SCHEMA_SQL,
+    CREDIT_PACKAGES,
+    PACKAGE_BY_ID,
+    PREFERENDUM_WALLET,
+    get_or_create_account,
+    add_credits,
+    deduct_credits_for_impression,
+    allocate_budget_to_campaign,
+    return_budget_to_account,
+    create_stripe_checkout,
+    handle_stripe_webhook,
+    get_crypto_quote,
+    create_crypto_payment_request,
+    confirm_crypto_payment,
+)
 
 # ══════════════════════════════════════════════════════════════
 # DATABASE
@@ -485,6 +501,19 @@ class CommuneMarketData(Base):
     updated_at   = Column(DateTime, default=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
+
+# Payment + attribution tables (managed directly in SQL, not via ORM)
+from marketing_agent import ATTRIBUTION_SCHEMA_SQL as _ATTR_SQL
+with engine.connect() as _conn:
+    for _sql_block in [PAYMENTS_SCHEMA_SQL, _ATTR_SQL]:
+        for _stmt in _sql_block.strip().split(';'):
+            _stmt = _stmt.strip()
+            if _stmt:
+                try:
+                    _conn.execute(text(_stmt))
+                except Exception:
+                    pass
+    _conn.commit()
 
 # Column migrations — works for both SQLite and PostgreSQL
 def _migrate():
@@ -2850,6 +2879,58 @@ async def track_ad_view(data: AdViewInput, db: Session = Depends(get_db)):
         'balance_clp': max(0, campaign.budget_clp - spent),
     }
 
+@app.post('/ads/impression')
+def record_impression(
+    campaign_id: int,
+    debate_id:   int,
+    db: Session = Depends(get_db),
+    user: Optional[User] = Depends(lambda: None),  # anonymous ok
+):
+    """
+    Records a paid impression and deducts Credits from campaign budget.
+    Uses CPM from targeting matrix (commune-based).
+    Returns False if campaign ran out of budget (caller should swap to next ad).
+    """
+    from sqlalchemy import text as _text
+    # Get campaign CPM — prefer campaign's negotiated CPM, else use commune rate
+    row = db.execute(
+        _text("SELECT cpm, target_country, scope_commune, remaining_budget, status FROM ad_campaigns WHERE id=:cid"),
+        {'cid': campaign_id}
+    ).fetchone()
+    if not row:
+        return {'ok': False, 'error': 'Campaign not found'}
+    if row['status'] != 'active':
+        return {'ok': False, 'error': 'Campaign not active', 'status': row['status']}
+
+    cpm = float(row['cpm'] or 6.0)
+
+    # Deduct from budget and record impression
+    charged = deduct_credits_for_impression(db, campaign_id, cpm)
+
+    if not charged:
+        return {'ok': False, 'budget_exhausted': True, 'campaign_id': campaign_id}
+
+    return {
+        'ok':          True,
+        'campaign_id': campaign_id,
+        'debate_id':   debate_id,
+        'cost_this_impression': round(cpm / 1000, 5),
+        'cpm':         cpm,
+    }
+
+
+@app.post('/ads/click')
+def record_click(campaign_id: int, debate_id: int, db: Session = Depends(get_db)):
+    """Records a click on an ad. No credit deduction — billing is per impression only."""
+    from sqlalchemy import text as _text
+    db.execute(
+        _text("UPDATE ad_campaigns SET clicks = COALESCE(clicks,0)+1 WHERE id=:cid"),
+        {'cid': campaign_id}
+    )
+    db.commit()
+    return {'ok': True}
+
+
 def _format_campaign(c: AdCampaign) -> dict:
     return {
         'id':                 c.id,
@@ -4246,6 +4327,455 @@ def blockchain_status(secret: str):
     except BaseException as e:
         import traceback
         return {'live': False, 'error': str(e), 'traceback': traceback.format_exc()}
+
+@app.get('/admin/targeting/matrix')
+def targeting_matrix_summary(secret: str):
+    """Returns the current targeting matrix summary: GNI tiers, CPMs, communes per country."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    try:
+        from targeting_agent import get_matrix_summary
+        return {'ok': True, 'matrix': get_matrix_summary()}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
+@app.post('/admin/targeting/update-communes')
+def targeting_update_communes(secret: str, bg: BackgroundTasks):
+    """Trigger monthly commune price update (runs in background)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from targeting_agent import run_monthly_commune_update
+    bg.add_task(run_monthly_commune_update)
+    return {'ok': True, 'message': 'Commune price update started — check logs'}
+
+@app.post('/admin/targeting/update-gni')
+def targeting_update_gni(secret: str, bg: BackgroundTasks):
+    """Trigger annual GNI update from World Bank API (runs in background)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from targeting_agent import run_annual_gni_update
+    bg.add_task(run_annual_gni_update)
+    return {'ok': True, 'message': 'GNI update from World Bank started — check logs'}
+
+@app.get('/admin/targeting/match-debate/{debate_id}')
+def targeting_match_debate(debate_id: int, secret: str, db: Session = Depends(get_db)):
+    """Returns ranked campaigns for a debate. Use to preview/test matching logic."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+    from targeting_agent import match_campaigns_to_debate
+    debate_dict = {
+        'scope_country':  getattr(debate, 'scope_country', ''),
+        'scope_commune':  getattr(debate, 'scope_commune', ''),
+        'target_gender':  getattr(debate, 'target_gender', 'all'),
+        'target_age_min': getattr(debate, 'target_age_min', 13),
+        'target_age_max': getattr(debate, 'target_age_max', 99),
+    }
+    matches = match_campaigns_to_debate(debate_dict, db)
+    return {
+        'debate_id':  debate_id,
+        'debate':     debate_dict,
+        'matches':    matches[:10],
+        'total_candidates': len(matches),
+    }
+
+# ══════════════════════════════════════════════════════════════
+# PAYMENTS — Preferendum Credits
+# 1 Credit = $1 USD | Stripe + POL + USDC
+# ══════════════════════════════════════════════════════════════
+
+class StripeCheckoutBody(BaseModel):
+    package_id:  str
+    success_url: str
+    cancel_url:  str
+
+class CryptoInitBody(BaseModel):
+    amount_usd: float
+    currency:   str = 'POL'
+
+class CryptoConfirmBody(BaseModel):
+    request_id: int
+    tx_hash:    str
+
+class AllocateBudgetBody(BaseModel):
+    campaign_id: int
+    credits:     float
+
+
+@app.get('/payments/packages')
+def payments_list_packages():
+    """Available credit packages with estimated reach per commune tier."""
+    packages = []
+    for pkg in CREDIT_PACKAGES:
+        packages.append({
+            **pkg,
+            'estimated_impressions': {
+                'premium_communes': int(pkg['credits'] / 12.0 * 1000),
+                'mid_communes':     int(pkg['credits'] / 6.0  * 1000),
+                'growth_communes':  int(pkg['credits'] / 3.0  * 1000),
+            }
+        })
+    return {'packages': packages, 'note': '1 Credit = $1 USD. CPM varies by commune income tier.'}
+
+
+@app.get('/payments/balance')
+def payments_balance(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Current credit balance and last 20 transactions."""
+    account = get_or_create_account(db, user.id)
+    txs = db.execute(
+        text("""
+            SELECT t.type, t.amount_credits, t.balance_after, t.payment_method,
+                   t.description, t.created_at, c.title as campaign_title
+            FROM credit_transactions t
+            LEFT JOIN ad_campaigns c ON c.id = t.campaign_id
+            WHERE t.user_id = :uid
+            ORDER BY t.created_at DESC LIMIT 20
+        """),
+        {'uid': user.id}
+    ).fetchall()
+    return {
+        'balance_credits': account['balance_credits'],
+        'total_purchased': account['total_purchased'],
+        'total_spent':     account['total_spent'],
+        'recent_transactions': [dict(r._mapping) for r in txs],
+    }
+
+
+@app.post('/payments/stripe/create-session')
+def payments_stripe_create_session(
+    body: StripeCheckoutBody,
+    user: User = Depends(get_current_user),
+):
+    """Creates a Stripe Checkout session and returns the URL to redirect the advertiser."""
+    return create_stripe_checkout(
+        user_id     = user.id,
+        package_id  = body.package_id,
+        success_url = body.success_url,
+        cancel_url  = body.cancel_url,
+    )
+
+
+@app.post('/payments/stripe/webhook')
+async def payments_stripe_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+    stripe_signature: Optional[str] = Header(None, alias='stripe-signature'),
+):
+    """
+    Stripe webhook receiver. Register this URL in Stripe Dashboard.
+    Stripe sends raw POST — signature verified before any DB changes.
+    """
+    from fastapi.responses import JSONResponse as _JSONResponse
+    payload = await request.body()
+    try:
+        result = handle_stripe_webhook(payload, stripe_signature or '')
+    except HTTPException:
+        raise
+    except Exception as e:
+        return _JSONResponse({'ok': False, 'error': str(e)}, status_code=400)
+
+    if result.get('action') == 'add_credits':
+        add_credits(
+            db             = db,
+            user_id        = result['user_id'],
+            amount_credits = result['credits'],
+            method         = result['method'],
+            ref            = result['ref'],
+            description    = result['desc'],
+            amount_usd     = result.get('amount_usd', 0),
+        )
+    return {'ok': True}
+
+
+@app.post('/payments/crypto/quote')
+def payments_crypto_quote(body: CryptoInitBody):
+    """Returns current POL or USDC price and exact amount to send. No DB write."""
+    quote = get_crypto_quote(body.amount_usd, body.currency)
+    credits = float(body.amount_usd)
+    for pkg in sorted(CREDIT_PACKAGES, key=lambda p: p['price_usd'], reverse=True):
+        if body.amount_usd >= pkg['price_usd']:
+            credits = pkg['credits']
+            break
+    return {**quote, 'credits_to_receive': credits, 'wallet': PREFERENDUM_WALLET}
+
+
+@app.post('/payments/crypto/initiate')
+def payments_crypto_initiate(
+    body: CryptoInitBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Creates a crypto payment request (30-min window).
+    Returns exact amount to send + our wallet address.
+    """
+    return create_crypto_payment_request(db, user.id, body.amount_usd, body.currency)
+
+
+@app.post('/payments/crypto/confirm')
+def payments_crypto_confirm(
+    body: CryptoConfirmBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Advertiser confirms crypto payment with their transaction hash.
+    We verify on Polygon (correct recipient, correct amount ±5%, confirmed).
+    """
+    result = confirm_crypto_payment(db, user.id, body.request_id, body.tx_hash)
+    if result.get('action') == 'add_credits':
+        credit_result = add_credits(
+            db             = db,
+            user_id        = result['user_id'],
+            amount_credits = result['credits'],
+            method         = result['method'],
+            ref            = result['ref'],
+            description    = result['desc'],
+            amount_usd     = result.get('amount_usd', 0),
+        )
+        return {
+            'ok':             True,
+            'credits_added':  result['credits'],
+            'new_balance':    credit_result.get('new_balance', 0),
+            'tx_hash':        body.tx_hash,
+            'payment_method': result['method'],
+        }
+    raise HTTPException(500, 'Unexpected payment result')
+
+
+@app.post('/payments/allocate-to-campaign')
+def payments_allocate_budget(
+    body: AllocateBudgetBody,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Moves Credits from user account to a campaign's running budget."""
+    return allocate_budget_to_campaign(db, user.id, body.campaign_id, body.credits)
+
+
+@app.post('/payments/return-from-campaign/{campaign_id}')
+def payments_return_budget(
+    campaign_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Returns unspent campaign budget to user's credit account (on pause/cancel)."""
+    return return_budget_to_account(db, user.id, campaign_id)
+
+
+@app.get('/payments/history')
+def payments_history(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    limit: int = 50,
+):
+    """Full credit transaction history."""
+    txs = db.execute(
+        text("""
+            SELECT t.*, c.title as campaign_title
+            FROM credit_transactions t
+            LEFT JOIN ad_campaigns c ON c.id = t.campaign_id
+            WHERE t.user_id = :uid
+            ORDER BY t.created_at DESC LIMIT :lim
+        """),
+        {'uid': user.id, 'lim': min(limit, 200)}
+    ).fetchall()
+    return {'transactions': [dict(r._mapping) for r in txs]}
+
+
+@app.post('/admin/payments/manual-credit')
+def payments_admin_manual(
+    user_id:     int,
+    credits:     float,
+    description: str,
+    secret:      str,
+    db: Session = Depends(get_db),
+):
+    """Admin: manually add credits for a user (promos, support refunds, etc.)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    ref = f"admin_{user_id}_{int(time.time())}"
+    return add_credits(db, user_id, credits, 'manual', ref, description, tx_type='bonus')
+
+
+@app.get('/admin/payments/pending-crypto')
+def payments_admin_pending_crypto(secret: str, db: Session = Depends(get_db)):
+    """Admin: list pending crypto payment requests awaiting confirmation."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    rows = db.execute(
+        text("""
+            SELECT r.*, u.email
+            FROM crypto_payment_requests r
+            JOIN users u ON u.id = r.user_id
+            WHERE r.status = 'pending'
+            ORDER BY r.created_at DESC
+        """)
+    ).fetchall()
+    return {'pending': [dict(r._mapping) for r in rows]}
+
+
+# ══════════════════════════════════════════════════════════════
+# MARKETING AGENT — Lado A (anunciantes) + Lado B (adquisición)
+# ══════════════════════════════════════════════════════════════
+
+class MetaCampaignBody(BaseModel):
+    country:      str
+    budget_usd:   float
+    age_min:      int = 18
+    age_max:      int = 55
+    placement:    str = 'both'
+    creative_text: Optional[str] = None
+    objective:    str = 'APP_INSTALLS'
+
+class XCampaignBody(BaseModel):
+    country:    str
+    budget_usd: float
+    keywords:   Optional[list] = None
+    age_min:    int = 18
+    age_max:    int = 55
+
+
+@app.get('/marketing/advertiser/report')
+def marketing_advertiser_report(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Full performance report for the logged-in advertiser: all campaigns, ROI, recommendations."""
+    from marketing_agent import generate_advertiser_report
+    rows = db.execute(text("""
+        SELECT id, title, status, cpm, impressions_served, clicks,
+               target_country, target_communes, target_gender,
+               target_age_min, target_age_max, min_income_tier,
+               remaining_budget, budget_usd
+        FROM ad_campaigns WHERE advertiser_email=:email
+    """), {'email': user.email}).fetchall()
+    campaigns = [dict(r._mapping) for r in rows]
+    return generate_advertiser_report(user.email, campaigns, db)
+
+
+@app.get('/marketing/campaign/{campaign_id}/performance')
+def marketing_campaign_performance(campaign_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Detailed metrics + targeting suggestions for a specific campaign."""
+    from marketing_agent import analyze_campaign_performance, suggest_targeting_improvements
+    from targeting_agent import load_matrix
+    row = db.execute(text("""
+        SELECT id, title, status, cpm, impressions_served, clicks,
+               target_country, target_communes, target_gender,
+               target_age_min, target_age_max, min_income_tier,
+               remaining_budget, budget_usd, advertiser_email
+        FROM ad_campaigns WHERE id=:cid AND advertiser_email=:email
+    """), {'cid': campaign_id, 'email': user.email}).fetchone()
+    if not row:
+        raise HTTPException(404, 'Campaign not found')
+    campaign = dict(row._mapping)
+    perf = analyze_campaign_performance(campaign, db)
+    sug  = suggest_targeting_improvements(campaign, load_matrix())
+    return {**perf, 'recommendations': sug}
+
+
+@app.get('/marketing/channel-performance')
+def marketing_channel_performance(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """User acquisition performance by channel over the last 30 days."""
+    from marketing_agent import get_channel_performance_summary
+    return get_channel_performance_summary(db)
+
+
+@app.get('/marketing/acquisition-budget')
+def marketing_acquisition_budget(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Shows the available acquisition budget and recommended distribution by channel."""
+    from marketing_agent import calculate_acquisition_budget
+    return calculate_acquisition_budget(db)
+
+
+@app.post('/marketing/meta/create-campaign')
+def marketing_meta_create(body: MetaCampaignBody, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Creates a Meta (Facebook/Instagram) acquisition campaign for Preferendum."""
+    from marketing_agent import create_meta_acquisition_campaign
+    return create_meta_acquisition_campaign(
+        country       = body.country,
+        budget_usd    = body.budget_usd,
+        objective     = body.objective,
+        age_min       = body.age_min,
+        age_max       = body.age_max,
+        placement     = body.placement,
+        creative_text = body.creative_text,
+    )
+
+
+@app.post('/marketing/x/create-campaign')
+def marketing_x_create(body: XCampaignBody, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Creates an X/Twitter acquisition campaign for Preferendum."""
+    from marketing_agent import create_x_acquisition_campaign
+    return create_x_acquisition_campaign(
+        country    = body.country,
+        budget_usd = body.budget_usd,
+        keywords   = body.keywords,
+        age_min    = body.age_min,
+        age_max    = body.age_max,
+    )
+
+
+@app.get('/marketing/meta/campaign/{campaign_id}/insights')
+def marketing_meta_insights(campaign_id: str, days: int = 7, user: User = Depends(get_current_user)):
+    """Returns Meta campaign performance: impressions, clicks, spend, CAC."""
+    from marketing_agent import get_meta_campaign_insights
+    return get_meta_campaign_insights(campaign_id, days)
+
+
+@app.post('/marketing/meta/campaign/{campaign_id}/activate')
+def marketing_meta_activate(campaign_id: str, user: User = Depends(get_current_user)):
+    """Activates a paused Meta campaign."""
+    from marketing_agent import activate_meta_campaign
+    return activate_meta_campaign(campaign_id)
+
+
+@app.post('/marketing/meta/campaign/{campaign_id}/pause')
+def marketing_meta_pause(campaign_id: str, user: User = Depends(get_current_user)):
+    """Pauses a Meta campaign."""
+    from marketing_agent import pause_meta_campaign
+    return pause_meta_campaign(campaign_id)
+
+
+@app.post('/marketing/boost-debate/{debate_id}')
+def marketing_boost_debate(debate_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Auto-boosts a trending debate with a Meta campaign if it has >100 votes in 24h."""
+    from marketing_agent import auto_boost_trending_debate
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+    return auto_boost_trending_debate(debate.__dict__, db)
+
+
+# ── Admin endpoints marketing ─────────────────────────────────
+
+@app.get('/admin/marketing/campaigns-attention')
+def marketing_admin_attention(secret: str, db: Session = Depends(get_db)):
+    """Admin: campaigns needing attention (low budget, no impressions, expiring)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from marketing_agent import get_campaigns_needing_attention
+    return get_campaigns_needing_attention(db)
+
+
+@app.post('/admin/marketing/daily-checks')
+def marketing_admin_daily(secret: str, bg: BackgroundTasks, db: Session = Depends(get_db)):
+    """Admin: run daily marketing checks in background."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from marketing_agent import run_daily_marketing_checks
+    bg.add_task(run_daily_marketing_checks, db)
+    return {'ok': True, 'message': 'Daily marketing checks started — check logs'}
+
+
+@app.post('/admin/marketing/weekly-reports')
+def marketing_admin_weekly(secret: str, bg: BackgroundTasks, db: Session = Depends(get_db)):
+    """Admin: generate weekly advertiser reports in background."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from marketing_agent import run_weekly_advertiser_reports
+    bg.add_task(run_weekly_advertiser_reports, db)
+    return {'ok': True, 'message': 'Weekly reports started — check logs'}
+
 
 @app.post('/admin/agent/daily-debates')
 def agent_daily_debates(secret: str, bg: BackgroundTasks):

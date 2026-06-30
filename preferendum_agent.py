@@ -528,6 +528,26 @@ SCHEDULED_TASKS = [
         "schedule": "0 7 * * *",
         "prompt":   "daily_debates",   # handled separately — not routed through the LLM agent loop
     },
+    {
+        "name":     "update_targeting_communes",
+        "schedule": "0 4 1 * *",       # 1st of each month at 4am UTC
+        "prompt":   "update_targeting_communes",   # handled separately
+    },
+    {
+        "name":     "update_targeting_gni",
+        "schedule": "0 4 1 1 *",       # January 1st at 4am UTC (annual)
+        "prompt":   "update_targeting_gni",        # handled separately
+    },
+    {
+        "name":     "marketing_daily_checks",
+        "schedule": "0 8 * * *",        # every day at 8am UTC
+        "prompt":   "marketing_daily_checks",      # handled separately
+    },
+    {
+        "name":     "marketing_weekly_reports",
+        "schedule": "0 9 * * 1",        # every Monday at 9am UTC
+        "prompt":   "marketing_weekly_reports",    # handled separately
+    },
 ]
 
 
@@ -766,6 +786,32 @@ def run_scheduled_task(task_name: str) -> dict:
     print(f'[Agent] Ejecutando tarea: {task_name} — {datetime.utcnow().isoformat()}')
     if task_name == 'daily_debates':
         return run_daily_debates()
+    if task_name == 'update_targeting_communes':
+        from targeting_agent import run_monthly_commune_update
+        run_monthly_commune_update()
+        return {"response": "Commune prices updated", "task": task_name}
+    if task_name == 'update_targeting_gni':
+        from targeting_agent import run_annual_gni_update
+        run_annual_gni_update()
+        return {"response": "GNI data updated from World Bank", "task": task_name}
+    if task_name == 'marketing_daily_checks':
+        from marketing_agent import run_daily_marketing_checks
+        from main import SessionLocal
+        db = SessionLocal()
+        try:
+            result = run_daily_marketing_checks(db)
+        finally:
+            db.close()
+        return {"response": f"Daily checks complete. Attention needed: {sum(len(v) for v in result['campaigns_needing_attention'].values())} campaigns", "task": task_name}
+    if task_name == 'marketing_weekly_reports':
+        from marketing_agent import run_weekly_advertiser_reports
+        from main import SessionLocal
+        db = SessionLocal()
+        try:
+            result = run_weekly_advertiser_reports(db)
+        finally:
+            db.close()
+        return {"response": f"Weekly reports generated for {result.get('reports_generated', 0)} advertisers", "task": task_name}
     result = run_agent(task["prompt"])
     print(f'[Agent] {task_name} completado: {result["response"][:100]}')
     return result

@@ -1,0 +1,971 @@
+{
+  "CL": {
+    "gni_per_capita": 24013,
+    "gni_tier": "mid",
+    "cpm_base": 6.0,
+    "communes": {
+      "Vitacura": {
+        "region": "RM",
+        "income_index": 100,
+        "income_tier": "A",
+        "cpm": 6.0,
+        "population": 92000
+      },
+      "Las Condes": {
+        "region": "RM",
+        "income_index": 96,
+        "income_tier": "A",
+        "cpm": 5.85,
+        "population": 310000
+      },
+      "Lo Barnechea": {
+        "region": "RM",
+        "income_index": 90,
+        "income_tier": "A",
+        "cpm": 5.63,
+        "population": 105000
+      },
+      "Providencia": {
+        "region": "RM",
+        "income_index": 85,
+        "income_tier": "A",
+        "cpm": 5.44,
+        "population": 150000
+      },
+      "La Reina": {
+        "region": "RM",
+        "income_index": 80,
+        "income_tier": "B",
+        "cpm": 5.25,
+        "population": 98000
+      },
+      "Ñuñoa": {
+        "region": "RM",
+        "income_index": 72,
+        "income_tier": "B",
+        "cpm": 4.93,
+        "population": 225000
+      },
+      "Peñalolén": {
+        "region": "RM",
+        "income_index": 68,
+        "income_tier": "B",
+        "cpm": 4.76,
+        "population": 240000
+      },
+      "Macul": {
+        "region": "RM",
+        "income_index": 62,
+        "income_tier": "C",
+        "cpm": 4.5,
+        "population": 130000
+      },
+      "San Miguel": {
+        "region": "RM",
+        "income_index": 60,
+        "income_tier": "C",
+        "cpm": 4.42,
+        "population": 110000
+      },
+      "La Florida": {
+        "region": "RM",
+        "income_index": 58,
+        "income_tier": "C",
+        "cpm": 4.33,
+        "population": 380000
+      },
+      "Santiago": {
+        "region": "RM",
+        "income_index": 52,
+        "income_tier": "C",
+        "cpm": 4.05,
+        "population": 520000
+      },
+      "Maipú": {
+        "region": "RM",
+        "income_index": 50,
+        "income_tier": "C",
+        "cpm": 3.96,
+        "population": 620000
+      },
+      "Quilicura": {
+        "region": "RM",
+        "income_index": 48,
+        "income_tier": "C",
+        "cpm": 3.86,
+        "population": 235000
+      },
+      "Recoleta": {
+        "region": "RM",
+        "income_index": 44,
+        "income_tier": "D",
+        "cpm": 3.67,
+        "population": 175000
+      },
+      "Renca": {
+        "region": "RM",
+        "income_index": 40,
+        "income_tier": "D",
+        "cpm": 3.46,
+        "population": 155000
+      },
+      "El Bosque": {
+        "region": "RM",
+        "income_index": 36,
+        "income_tier": "D",
+        "cpm": 3.25,
+        "population": 185000
+      },
+      "La Pintana": {
+        "region": "RM",
+        "income_index": 30,
+        "income_tier": "D",
+        "cpm": 2.91,
+        "population": 225000
+      },
+      "Cerro Navia": {
+        "region": "RM",
+        "income_index": 28,
+        "income_tier": "D",
+        "cpm": 2.8,
+        "population": 145000
+      },
+      "Viña del Mar": {
+        "region": "V",
+        "income_index": 72,
+        "income_tier": "B",
+        "cpm": 4.93,
+        "population": 390000
+      },
+      "Concón": {
+        "region": "V",
+        "income_index": 85,
+        "income_tier": "A",
+        "cpm": 5.44,
+        "population": 52000
+      },
+      "Valparaíso": {
+        "region": "V",
+        "income_index": 45,
+        "income_tier": "C",
+        "cpm": 3.72,
+        "population": 310000
+      },
+      "Concepción": {
+        "region": "VIII",
+        "income_index": 55,
+        "income_tier": "C",
+        "cpm": 4.19,
+        "population": 230000
+      },
+      "Temuco": {
+        "region": "IX",
+        "income_index": 48,
+        "income_tier": "C",
+        "cpm": 3.86,
+        "population": 280000
+      },
+      "Antofagasta": {
+        "region": "II",
+        "income_index": 60,
+        "income_tier": "C",
+        "cpm": 4.42,
+        "population": 420000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467365",
+    "gni_updated_at": "2026-06-30T00:49:56.467468"
+  },
+  "AR": {
+    "gni_per_capita": 22443,
+    "gni_tier": "mid",
+    "cpm_base": 6.0,
+    "communes": {
+      "Palermo": {
+        "region": "CABA",
+        "income_index": 95,
+        "income_tier": "A",
+        "cpm": 5.82,
+        "population": 230000
+      },
+      "Belgrano": {
+        "region": "CABA",
+        "income_index": 92,
+        "income_tier": "A",
+        "cpm": 5.71,
+        "population": 180000
+      },
+      "Recoleta": {
+        "region": "CABA",
+        "income_index": 90,
+        "income_tier": "A",
+        "cpm": 5.63,
+        "population": 190000
+      },
+      "Núñez": {
+        "region": "CABA",
+        "income_index": 85,
+        "income_tier": "A",
+        "cpm": 5.44,
+        "population": 120000
+      },
+      "Caballito": {
+        "region": "CABA",
+        "income_index": 72,
+        "income_tier": "B",
+        "cpm": 4.93,
+        "population": 250000
+      },
+      "Villa del Parque": {
+        "region": "CABA",
+        "income_index": 65,
+        "income_tier": "B",
+        "cpm": 4.63,
+        "population": 160000
+      },
+      "San Telmo": {
+        "region": "CABA",
+        "income_index": 60,
+        "income_tier": "C",
+        "cpm": 4.42,
+        "population": 100000
+      },
+      "Flores": {
+        "region": "CABA",
+        "income_index": 50,
+        "income_tier": "C",
+        "cpm": 3.96,
+        "population": 300000
+      },
+      "La Boca": {
+        "region": "CABA",
+        "income_index": 35,
+        "income_tier": "D",
+        "cpm": 3.2,
+        "population": 120000
+      },
+      "Nordelta": {
+        "region": "GBA",
+        "income_index": 88,
+        "income_tier": "A",
+        "cpm": 5.56,
+        "population": 80000
+      },
+      "Pilar": {
+        "region": "GBA",
+        "income_index": 65,
+        "income_tier": "B",
+        "cpm": 4.63,
+        "population": 280000
+      },
+      "Tigre": {
+        "region": "GBA",
+        "income_index": 58,
+        "income_tier": "C",
+        "cpm": 4.33,
+        "population": 370000
+      },
+      "Rosario Centro": {
+        "region": "SF",
+        "income_index": 68,
+        "income_tier": "B",
+        "cpm": 4.76,
+        "population": 400000
+      },
+      "Córdoba Nueva": {
+        "region": "CB",
+        "income_index": 65,
+        "income_tier": "B",
+        "cpm": 4.63,
+        "population": 380000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467479",
+    "gni_updated_at": "2026-06-30T00:49:56.467480"
+  },
+  "PE": {
+    "gni_per_capita": 12252,
+    "gni_tier": "growth",
+    "cpm_base": 3.0,
+    "communes": {
+      "Miraflores": {
+        "region": "LIM",
+        "income_index": 92,
+        "income_tier": "A",
+        "cpm": 2.85,
+        "population": 120000
+      },
+      "San Isidro": {
+        "region": "LIM",
+        "income_index": 98,
+        "income_tier": "A",
+        "cpm": 2.96,
+        "population": 90000
+      },
+      "Barranco": {
+        "region": "LIM",
+        "income_index": 85,
+        "income_tier": "A",
+        "cpm": 2.72,
+        "population": 45000
+      },
+      "San Borja": {
+        "region": "LIM",
+        "income_index": 82,
+        "income_tier": "B",
+        "cpm": 2.66,
+        "population": 115000
+      },
+      "La Molina": {
+        "region": "LIM",
+        "income_index": 80,
+        "income_tier": "B",
+        "cpm": 2.62,
+        "population": 180000
+      },
+      "Surco": {
+        "region": "LIM",
+        "income_index": 75,
+        "income_tier": "B",
+        "cpm": 2.52,
+        "population": 380000
+      },
+      "San Miguel": {
+        "region": "LIM",
+        "income_index": 58,
+        "income_tier": "C",
+        "cpm": 2.16,
+        "population": 160000
+      },
+      "Lince": {
+        "region": "LIM",
+        "income_index": 52,
+        "income_tier": "C",
+        "cpm": 2.03,
+        "population": 80000
+      },
+      "Comas": {
+        "region": "LIM",
+        "income_index": 30,
+        "income_tier": "D",
+        "cpm": 1.46,
+        "population": 620000
+      },
+      "Villa El Salvador": {
+        "region": "LIM",
+        "income_index": 22,
+        "income_tier": "D",
+        "cpm": 1.21,
+        "population": 480000
+      },
+      "Arequipa Centro": {
+        "region": "ARE",
+        "income_index": 55,
+        "income_tier": "C",
+        "cpm": 2.1,
+        "population": 280000
+      },
+      "Cusco": {
+        "region": "CUS",
+        "income_index": 48,
+        "income_tier": "C",
+        "cpm": 1.93,
+        "population": 130000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467487",
+    "gni_updated_at": "2026-06-30T00:49:56.467487"
+  },
+  "MX": {
+    "gni_per_capita": 19311,
+    "gni_tier": "mid",
+    "cpm_base": 6.0,
+    "communes": {
+      "Polanco": {
+        "region": "CDMX",
+        "income_index": 98,
+        "income_tier": "A",
+        "cpm": 5.93,
+        "population": 120000
+      },
+      "Santa Fe": {
+        "region": "CDMX",
+        "income_index": 92,
+        "income_tier": "A",
+        "cpm": 5.71,
+        "population": 80000
+      },
+      "Lomas Chapultepec": {
+        "region": "CDMX",
+        "income_index": 95,
+        "income_tier": "A",
+        "cpm": 5.82,
+        "population": 60000
+      },
+      "Condesa": {
+        "region": "CDMX",
+        "income_index": 85,
+        "income_tier": "A",
+        "cpm": 5.44,
+        "population": 110000
+      },
+      "Roma Norte": {
+        "region": "CDMX",
+        "income_index": 82,
+        "income_tier": "B",
+        "cpm": 5.33,
+        "population": 150000
+      },
+      "Coyoacán": {
+        "region": "CDMX",
+        "income_index": 68,
+        "income_tier": "B",
+        "cpm": 4.76,
+        "population": 280000
+      },
+      "Tlalpan": {
+        "region": "CDMX",
+        "income_index": 50,
+        "income_tier": "C",
+        "cpm": 3.96,
+        "population": 720000
+      },
+      "Iztapalapa": {
+        "region": "CDMX",
+        "income_index": 28,
+        "income_tier": "D",
+        "cpm": 2.8,
+        "population": 2000000
+      },
+      "Monterrey Centro": {
+        "region": "NLE",
+        "income_index": 70,
+        "income_tier": "B",
+        "cpm": 4.84,
+        "population": 380000
+      },
+      "San Pedro Garza": {
+        "region": "NLE",
+        "income_index": 90,
+        "income_tier": "A",
+        "cpm": 5.63,
+        "population": 150000
+      },
+      "Zapopan": {
+        "region": "JAL",
+        "income_index": 72,
+        "income_tier": "B",
+        "cpm": 4.93,
+        "population": 560000
+      },
+      "Puerto Vallarta": {
+        "region": "JAL",
+        "income_index": 75,
+        "income_tier": "B",
+        "cpm": 5.05,
+        "population": 180000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467493",
+    "gni_updated_at": "2026-06-30T00:49:56.467494"
+  },
+  "CO": {
+    "gni_per_capita": 14257,
+    "gni_tier": "growth",
+    "cpm_base": 3.0,
+    "communes": {
+      "El Poblado": {
+        "region": "ANT",
+        "income_index": 92,
+        "income_tier": "A",
+        "cpm": 2.85,
+        "population": 120000
+      },
+      "Laureles": {
+        "region": "ANT",
+        "income_index": 75,
+        "income_tier": "B",
+        "cpm": 2.52,
+        "population": 180000
+      },
+      "Envigado": {
+        "region": "ANT",
+        "income_index": 80,
+        "income_tier": "B",
+        "cpm": 2.62,
+        "population": 230000
+      },
+      "Chía": {
+        "region": "CUN",
+        "income_index": 72,
+        "income_tier": "B",
+        "cpm": 2.46,
+        "population": 80000
+      },
+      "Rosales": {
+        "region": "BOG",
+        "income_index": 90,
+        "income_tier": "A",
+        "cpm": 2.82,
+        "population": 80000
+      },
+      "Chapinero": {
+        "region": "BOG",
+        "income_index": 78,
+        "income_tier": "B",
+        "cpm": 2.58,
+        "population": 150000
+      },
+      "Suba": {
+        "region": "BOG",
+        "income_index": 50,
+        "income_tier": "C",
+        "cpm": 1.98,
+        "population": 1200000
+      },
+      "Bosa": {
+        "region": "BOG",
+        "income_index": 28,
+        "income_tier": "D",
+        "cpm": 1.4,
+        "population": 800000
+      },
+      "Barranquilla Norte": {
+        "region": "ATL",
+        "income_index": 65,
+        "income_tier": "B",
+        "cpm": 2.32,
+        "population": 200000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467498",
+    "gni_updated_at": "2026-06-30T00:49:56.467499"
+  },
+  "BR": {
+    "gni_per_capita": 14307,
+    "gni_tier": "growth",
+    "cpm_base": 3.0,
+    "communes": {
+      "Jardins": {
+        "region": "SP",
+        "income_index": 98,
+        "income_tier": "A",
+        "cpm": 2.96,
+        "population": 120000
+      },
+      "Itaim Bibi": {
+        "region": "SP",
+        "income_index": 92,
+        "income_tier": "A",
+        "cpm": 2.85,
+        "population": 180000
+      },
+      "Moema": {
+        "region": "SP",
+        "income_index": 85,
+        "income_tier": "A",
+        "cpm": 2.72,
+        "population": 130000
+      },
+      "Pinheiros": {
+        "region": "SP",
+        "income_index": 80,
+        "income_tier": "B",
+        "cpm": 2.62,
+        "population": 160000
+      },
+      "Leblon": {
+        "region": "RJ",
+        "income_index": 98,
+        "income_tier": "A",
+        "cpm": 2.96,
+        "population": 60000
+      },
+      "Ipanema": {
+        "region": "RJ",
+        "income_index": 95,
+        "income_tier": "A",
+        "cpm": 2.91,
+        "population": 80000
+      },
+      "Barra da Tijuca": {
+        "region": "RJ",
+        "income_index": 80,
+        "income_tier": "B",
+        "cpm": 2.62,
+        "population": 250000
+      },
+      "Lapa": {
+        "region": "RJ",
+        "income_index": 50,
+        "income_tier": "C",
+        "cpm": 1.98,
+        "population": 120000
+      },
+      "Meireles": {
+        "region": "CE",
+        "income_index": 78,
+        "income_tier": "B",
+        "cpm": 2.58,
+        "population": 120000
+      },
+      "Batel": {
+        "region": "PR",
+        "income_index": 82,
+        "income_tier": "B",
+        "cpm": 2.66,
+        "population": 180000
+      },
+      "Savassi": {
+        "region": "MG",
+        "income_index": 75,
+        "income_tier": "B",
+        "cpm": 2.52,
+        "population": 140000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467504",
+    "gni_updated_at": "2026-06-30T00:49:56.467504"
+  },
+  "ES": {
+    "gni_per_capita": 40340,
+    "gni_tier": "premium",
+    "cpm_base": 12.0,
+    "communes": {
+      "Salamanca": {
+        "region": "MAD",
+        "income_index": 95,
+        "income_tier": "A",
+        "cpm": 11.64,
+        "population": 150000
+      },
+      "Chamberí": {
+        "region": "MAD",
+        "income_index": 90,
+        "income_tier": "A",
+        "cpm": 11.26,
+        "population": 170000
+      },
+      "Retiro": {
+        "region": "MAD",
+        "income_index": 88,
+        "income_tier": "A",
+        "cpm": 11.11,
+        "population": 130000
+      },
+      "Carabanchel": {
+        "region": "MAD",
+        "income_index": 45,
+        "income_tier": "C",
+        "cpm": 7.43,
+        "population": 280000
+      },
+      "Eixample": {
+        "region": "BCN",
+        "income_index": 92,
+        "income_tier": "A",
+        "cpm": 11.41,
+        "population": 280000
+      },
+      "Sarrià": {
+        "region": "BCN",
+        "income_index": 88,
+        "income_tier": "A",
+        "cpm": 11.11,
+        "population": 130000
+      },
+      "Gràcia": {
+        "region": "BCN",
+        "income_index": 78,
+        "income_tier": "B",
+        "cpm": 10.34,
+        "population": 120000
+      },
+      "Nou Barris": {
+        "region": "BCN",
+        "income_index": 35,
+        "income_tier": "D",
+        "cpm": 6.39,
+        "population": 180000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467509",
+    "gni_updated_at": "2026-06-30T00:49:56.467509"
+  },
+  "US": {
+    "gni_per_capita": 64765,
+    "gni_tier": "premium",
+    "cpm_base": 12.0,
+    "communes": {
+      "Manhattan": {
+        "region": "NY",
+        "income_index": 98,
+        "income_tier": "A",
+        "cpm": 11.86,
+        "population": 1600000
+      },
+      "Brooklyn Heights": {
+        "region": "NY",
+        "income_index": 88,
+        "income_tier": "A",
+        "cpm": 11.11,
+        "population": 280000
+      },
+      "Beverly Hills": {
+        "region": "CA",
+        "income_index": 98,
+        "income_tier": "A",
+        "cpm": 11.86,
+        "population": 35000
+      },
+      "Santa Monica": {
+        "region": "CA",
+        "income_index": 90,
+        "income_tier": "A",
+        "cpm": 11.26,
+        "population": 92000
+      },
+      "Palo Alto": {
+        "region": "CA",
+        "income_index": 95,
+        "income_tier": "A",
+        "cpm": 11.64,
+        "population": 68000
+      },
+      "Miami Beach": {
+        "region": "FL",
+        "income_index": 88,
+        "income_tier": "A",
+        "cpm": 11.11,
+        "population": 90000
+      },
+      "Coral Gables": {
+        "region": "FL",
+        "income_index": 85,
+        "income_tier": "A",
+        "cpm": 10.89,
+        "population": 50000
+      },
+      "Highland Park": {
+        "region": "TX",
+        "income_index": 92,
+        "income_tier": "A",
+        "cpm": 11.41,
+        "population": 48000
+      },
+      "River Oaks": {
+        "region": "TX",
+        "income_index": 95,
+        "income_tier": "A",
+        "cpm": 11.64,
+        "population": 28000
+      },
+      "Lincoln Park": {
+        "region": "IL",
+        "income_index": 85,
+        "income_tier": "A",
+        "cpm": 10.89,
+        "population": 170000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467514",
+    "gni_updated_at": "2026-06-30T00:49:56.467514"
+  },
+  "DE": {
+    "gni_per_capita": 54534,
+    "gni_tier": "premium",
+    "cpm_base": 12.0,
+    "communes": {
+      "Mitte": {
+        "region": "BER",
+        "income_index": 82,
+        "income_tier": "B",
+        "cpm": 10.65,
+        "population": 380000
+      },
+      "Prenzlauer Berg": {
+        "region": "BER",
+        "income_index": 78,
+        "income_tier": "B",
+        "cpm": 10.34,
+        "population": 160000
+      },
+      "Schwabing": {
+        "region": "MUN",
+        "income_index": 92,
+        "income_tier": "A",
+        "cpm": 11.41,
+        "population": 110000
+      },
+      "Maxvorstadt": {
+        "region": "MUN",
+        "income_index": 88,
+        "income_tier": "A",
+        "cpm": 11.11,
+        "population": 90000
+      },
+      "Sachsenhausen": {
+        "region": "FRA",
+        "income_index": 80,
+        "income_tier": "B",
+        "cpm": 10.5,
+        "population": 120000
+      },
+      "HafenCity": {
+        "region": "HAM",
+        "income_index": 90,
+        "income_tier": "A",
+        "cpm": 11.26,
+        "population": 80000
+      },
+      "Winterhude": {
+        "region": "HAM",
+        "income_index": 82,
+        "income_tier": "B",
+        "cpm": 10.65,
+        "population": 100000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467518",
+    "gni_updated_at": "2026-06-30T00:49:56.467518"
+  },
+  "GB": {
+    "gni_per_capita": 45225,
+    "gni_tier": "premium",
+    "cpm_base": 12.0,
+    "communes": {
+      "Kensington": {
+        "region": "LON",
+        "income_index": 98,
+        "income_tier": "A",
+        "cpm": 11.86,
+        "population": 80000
+      },
+      "Chelsea": {
+        "region": "LON",
+        "income_index": 96,
+        "income_tier": "A",
+        "cpm": 11.71,
+        "population": 65000
+      },
+      "Shoreditch": {
+        "region": "LON",
+        "income_index": 82,
+        "income_tier": "B",
+        "cpm": 10.65,
+        "population": 180000
+      },
+      "Hackney": {
+        "region": "LON",
+        "income_index": 62,
+        "income_tier": "C",
+        "cpm": 9.01,
+        "population": 280000
+      },
+      "Clifton": {
+        "region": "BRS",
+        "income_index": 78,
+        "income_tier": "B",
+        "cpm": 10.34,
+        "population": 40000
+      },
+      "Didsbury": {
+        "region": "MCR",
+        "income_index": 72,
+        "income_tier": "B",
+        "cpm": 9.85,
+        "population": 60000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467522",
+    "gni_updated_at": "2026-06-30T00:49:56.467522"
+  },
+  "FR": {
+    "gni_per_capita": 43518,
+    "gni_tier": "premium",
+    "cpm_base": 12.0,
+    "communes": {
+      "16ème": {
+        "region": "PAR",
+        "income_index": 98,
+        "income_tier": "A",
+        "cpm": 11.86,
+        "population": 170000
+      },
+      "7ème": {
+        "region": "PAR",
+        "income_index": 95,
+        "income_tier": "A",
+        "cpm": 11.64,
+        "population": 60000
+      },
+      "Marais": {
+        "region": "PAR",
+        "income_index": 85,
+        "income_tier": "A",
+        "cpm": 10.89,
+        "population": 30000
+      },
+      "Belleville": {
+        "region": "PAR",
+        "income_index": 48,
+        "income_tier": "C",
+        "cpm": 7.73,
+        "population": 80000
+      },
+      "Uccle": {
+        "region": "LYO",
+        "income_index": 72,
+        "income_tier": "B",
+        "cpm": 9.85,
+        "population": 80000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467525",
+    "gni_updated_at": "2026-06-30T00:49:56.467525"
+  },
+  "IT": {
+    "gni_per_capita": 38985,
+    "gni_tier": "mid",
+    "cpm_base": 6.0,
+    "communes": {
+      "Parioli": {
+        "region": "ROM",
+        "income_index": 92,
+        "income_tier": "A",
+        "cpm": 5.71,
+        "population": 80000
+      },
+      "Trastevere": {
+        "region": "ROM",
+        "income_index": 78,
+        "income_tier": "B",
+        "cpm": 5.17,
+        "population": 60000
+      },
+      "Brera": {
+        "region": "MIL",
+        "income_index": 95,
+        "income_tier": "A",
+        "cpm": 5.82,
+        "population": 80000
+      },
+      "Navigli": {
+        "region": "MIL",
+        "income_index": 75,
+        "income_tier": "B",
+        "cpm": 5.05,
+        "population": 120000
+      },
+      "Chiaia": {
+        "region": "NAP",
+        "income_index": 80,
+        "income_tier": "B",
+        "cpm": 5.25,
+        "population": 90000
+      }
+    },
+    "communes_updated": "2026-06-30T00:49:56.467528",
+    "gni_updated_at": "2026-06-30T00:49:56.467528"
+  }
+}
