@@ -527,9 +527,7 @@ async function doLogin() {
   const email = document.getElementById('login-email').value.trim();
   const pass  = document.getElementById('login-pass').value;
   if (!email || !pass) return;
-  const form = new FormData();
-  form.append('username', email); form.append('password', pass);
-  const r = await fetch(`${API}/token`, {method:'POST', body: form});
+  const r = await fetch(`${API}/auth/login`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, password: pass})});
   const d = await r.json();
   if (!r.ok) { showErr('login-err', d.detail || 'Login failed'); return; }
   token     = d.access_token || d.token;
