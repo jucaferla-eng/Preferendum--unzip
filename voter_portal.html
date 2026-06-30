@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>Preferendum — Voter</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+:root{
+  --bg:#0a0d14;--bg2:#111827;--bg3:#1a2332;
+  --blue:#2d6eff;--blue2:#3b7fff;
+  --green:#10b981;--gold:#e8b830;
+  --text:#f0f4ff;--muted:rgba(240,244,255,0.45);
+  --border:rgba(255,255,255,0.08);
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overflow-x:hidden;}
+
+/* ── AUTH SCREEN ── */
+#auth-screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;}
+.logo{font-family:'Playfair Display',serif;font-size:28px;font-weight:900;letter-spacing:-1px;margin-bottom:8px;}
+.logo span{color:var(--blue);}
+.logo-sub{font-size:12px;color:var(--muted);letter-spacing:0.2em;text-transform:uppercase;margin-bottom:40px;}
+.auth-card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:28px;width:100%;max-width:400px;}
+.auth-tabs{display:flex;gap:0;margin-bottom:24px;border-bottom:1px solid var(--border);}
+.auth-tab{flex:1;text-align:center;padding:12px;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;}
+.auth-tab.active{color:var(--text);border-bottom-color:var(--blue);}
+.field{margin-bottom:16px;}
+.field label{display:block;font-size:12px;font-weight:500;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em;}
+.field input,.field select{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px 14px;color:var(--text);font-size:15px;outline:none;transition:border .2s;}
+.field input:focus,.field select:focus{border-color:var(--blue);}
+.field select option{background:var(--bg2);}
+.btn{width:100%;padding:14px;background:var(--blue);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:background .2s;}
+.btn:hover{background:var(--blue2);}
+.btn:disabled{opacity:0.5;cursor:not-allowed;}
+.auth-err{color:#f87171;font-size:13px;margin-top:10px;text-align:center;min-height:18px;}
+
+/* ── MAIN APP ── */
+#main-app{display:none;flex-direction:column;min-height:100vh;}
+#main-app.visible{display:flex;}
+.topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+.topbar-brand{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;}
+.topbar-brand span{color:var(--blue);}
+.topbar-user{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:10px;}
+.logout-btn{font-size:12px;color:var(--blue);cursor:pointer;text-decoration:underline;}
+.content{flex:1;padding:16px;max-width:600px;margin:0 auto;width:100%;}
+
+/* ── DEBATES LIST ── */
+.section-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;margin-bottom:6px;}
+.section-sub{font-size:13px;color:var(--muted);margin-bottom:20px;}
+.debate-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:12px;cursor:pointer;transition:border-color .2s,transform .1s;}
+.debate-card:hover{border-color:var(--blue);transform:translateY(-1px);}
+.debate-status{display:inline-block;font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em;}
+.status-live{background:rgba(16,185,129,0.15);color:#10b981;}
+.status-closed{background:rgba(45,110,255,0.15);color:#60a5fa;}
+.debate-title{font-size:16px;font-weight:600;line-height:1.4;margin-bottom:8px;}
+.debate-meta{font-size:12px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;}
+.debate-votes{color:var(--blue);font-weight:600;}
+.no-debates{text-align:center;padding:40px 20px;color:var(--muted);}
+
+/* ── DEBATE DETAIL / VOTE ── */
+#debate-detail{display:none;}
+.back-btn{display:flex;align-items:center;gap:6px;color:var(--blue);font-size:14px;cursor:pointer;margin-bottom:20px;}
+.detail-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;}
+.detail-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;line-height:1.3;margin-bottom:10px;}
+.detail-context{font-size:14px;color:rgba(240,244,255,0.65);line-height:1.6;margin-bottom:14px;}
+.options-title{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;}
+.option-btn{width:100%;text-align:left;background:var(--bg3);border:2px solid var(--border);border-radius:10px;padding:16px;margin-bottom:10px;color:var(--text);font-size:15px;font-weight:500;cursor:pointer;transition:all .2s;}
+.option-btn:hover{border-color:var(--blue);background:rgba(45,110,255,0.08);}
+.option-btn.selected{border-color:var(--blue);background:rgba(45,110,255,0.15);}
+.option-btn:disabled{opacity:0.5;cursor:not-allowed;}
+.vote-btn{margin-top:8px;}
+.vote-err{color:#f87171;font-size:13px;margin-top:8px;text-align:center;min-height:18px;}
+
+/* ── RESULTS BAR ── */
+.results-section{margin-top:16px;}
+.result-row{margin-bottom:14px;}
+.result-label{display:flex;justify-content:space-between;font-size:14px;margin-bottom:5px;}
+.result-bar-bg{background:var(--bg3);border-radius:4px;height:8px;overflow:hidden;}
+.result-bar-fill{height:100%;border-radius:4px;transition:width 0.6s ease;}
+
+/* ── VOTE SUCCESS ── */
+.success-card{background:linear-gradient(135deg,rgba(16,185,129,0.1),rgba(45,110,255,0.1));border:1px solid rgba(16,185,129,0.3);border-radius:16px;padding:24px;text-align:center;margin-bottom:16px;}
+.success-icon{font-size:48px;margin-bottom:12px;}
+.success-title{font-family:'Playfair Display',serif;font-size:20px;font-weight:700;color:#10b981;margin-bottom:8px;}
+.success-text{font-size:14px;color:var(--muted);line-height:1.6;margin-bottom:16px;}
+.vcode-box{background:var(--bg3);border:1px solid rgba(45,110,255,0.3);border-radius:10px;padding:14px;font-family:'Courier New',monospace;font-size:13px;word-break:break-all;color:#60a5fa;text-align:center;margin-bottom:12px;}
+.vcode-label{font-size:11px;color:var(--muted);text-align:center;margin-bottom:16px;}
+.verify-link{display:block;text-align:center;color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer;margin-bottom:8px;}
+
+/* ── SPINNER ── */
+.spinner{display:inline-block;width:20px;height:20px;border:2px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.loading{text-align:center;padding:40px;color:var(--muted);}
+</style>
+</head>
+<body>
+
+<!-- AUTH -->
+<div id="auth-screen">
+  <div class="logo">prefer<span>endum</span></div>
+  <div class="logo-sub">Verified Digital Democracy</div>
+  <div class="auth-card">
+    <div class="auth-tabs">
+      <div class="auth-tab active" id="tab-login-btn" onclick="switchTab('login')">Sign In</div>
+      <div class="auth-tab" id="tab-reg-btn" onclick="switchTab('register')">Register</div>
+    </div>
+    <!-- LOGIN -->
+    <div id="tab-login">
+      <div class="field"><label>Email</label><input type="email" id="l-email" placeholder="your@email.com" autocomplete="email"/></div>
+      <div class="field"><label>Password</label><input type="password" id="l-pass" placeholder="••••••••" autocomplete="current-password"/></div>
+      <button class="btn" onclick="doLogin()">Sign In</button>
+      <p class="auth-err" id="l-err"></p>
+    </div>
+    <!-- REGISTER -->
+    <div id="tab-register" style="display:none;">
+      <div class="field"><label>Full Name</label><input type="text" id="r-name" placeholder="Your full name"/></div>
+      <div class="field"><label>Email</label><input type="email" id="r-email" placeholder="your@email.com" autocomplete="email"/></div>
+      <div class="field"><label>Password</label><input type="password" id="r-pass" placeholder="Min 6 characters" autocomplete="new-password"/></div>
+      <div class="field"><label>Country</label>
+        <select id="r-country">
+          <option value="CL">Chile</option>
+          <option value="US">United States</option>
+          <option value="MX">Mexico</option>
+          <option value="AR">Argentina</option>
+          <option value="CO">Colombia</option>
+          <option value="PE">Peru</option>
+          <option value="BR">Brazil</option>
+          <option value="ES">Spain</option>
+          <option value="GB">United Kingdom</option>
+          <option value="OTHER">Other</option>
+        </select>
+      </div>
+      <button class="btn" onclick="doRegister()">Create Account & Vote</button>
+      <p class="auth-err" id="r-err"></p>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="main-app">
+  <div class="topbar">
+    <div class="topbar-brand">prefer<span>endum</span></div>
+    <div class="topbar-user">
+      <span id="user-name-display"></span>
+      <span class="logout-btn" onclick="doLogout()">Sign out</span>
+    </div>
+  </div>
+  <div class="content">
+    <!-- DEBATES LIST -->
+    <div id="debates-view">
+      <div class="section-title">Active Consultations</div>
+      <div class="section-sub">Select a consultation to cast your verified vote</div>
+      <div id="debates-list"><div class="loading"><span class="spinner"></span></div></div>
+    </div>
+    <!-- DEBATE DETAIL -->
+    <div id="debate-detail">
+      <div class="back-btn" onclick="showDebatesList()">← All consultations</div>
+      <div id="detail-content"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let token = localStorage.getItem('pref_voter_token') || '';
+let userName = localStorage.getItem('pref_voter_name') || '';
+let selectedOption = null;
+let currentDebate = null;
+
+// ── INIT ──
+if (token) showApp();
+
+// ── AUTH ──
+function switchTab(tab) {
+  document.getElementById('tab-login').style.display    = tab === 'login'    ? '' : 'none';
+  document.getElementById('tab-register').style.display = tab === 'register' ? '' : 'none';
+  document.getElementById('tab-login-btn').classList.toggle('active', tab === 'login');
+  document.getElementById('tab-reg-btn').classList.toggle('active', tab === 'register');
+}
+
+async function doLogin() {
+  const email = document.getElementById('l-email').value.trim();
+  const pass  = document.getElementById('l-pass').value;
+  if (!email || !pass) return;
+  document.getElementById('l-err').textContent = '';
+  try {
+    const r = await fetch(`${API}/auth/login`, {method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email, password: pass})});
+    const d = await r.json();
+    if (!r.ok) { document.getElementById('l-err').textContent = d.detail || 'Login failed'; return; }
+    token = d.token || d.access_token;
+    userName = d.user?.name || email.split('@')[0];
+    localStorage.setItem('pref_voter_token', token);
+    localStorage.setItem('pref_voter_name', userName);
+    showApp();
+  } catch(e) { document.getElementById('l-err').textContent = 'Connection error'; }
+}
+
+async function doRegister() {
+  const name    = document.getElementById('r-name').value.trim();
+  const email   = document.getElementById('r-email').value.trim();
+  const pass    = document.getElementById('r-pass').value;
+  const country = document.getElementById('r-country').value;
+  if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'All fields required'; return; }
+  if (pass.length < 6) { document.getElementById('r-err').textContent = 'Password min 6 characters'; return; }
+  document.getElementById('r-err').textContent = '';
+  try {
+    const r = await fetch(`${API}/voter/register`, {method:'POST',headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name, email, password: pass, country})});
+    const d = await r.json();
+    if (!r.ok) { document.getElementById('r-err').textContent = d.detail || 'Registration failed'; return; }
+    token = d.token;
+    userName = name;
+    localStorage.setItem('pref_voter_token', token);
+    localStorage.setItem('pref_voter_name', userName);
+    showApp();
+  } catch(e) { document.getElementById('r-err').textContent = 'Connection error'; }
+}
+
+function doLogout() {
+  token = ''; userName = ''; selectedOption = null; currentDebate = null;
+  localStorage.removeItem('pref_voter_token');
+  localStorage.removeItem('pref_voter_name');
+  document.getElementById('main-app').classList.remove('visible');
+  document.getElementById('main-app').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'flex';
+}
+
+// ── APP ──
+function showApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('main-app').style.display = 'flex';
+  document.getElementById('main-app').classList.add('visible');
+  document.getElementById('user-name-display').textContent = userName;
+  loadDebates();
+}
+
+function showDebatesList() {
+  document.getElementById('debates-view').style.display = '';
+  document.getElementById('debate-detail').style.display = 'none';
+  selectedOption = null;
+  currentDebate = null;
+}
+
+// ── DEBATES ──
+async function loadDebates() {
+  const list = document.getElementById('debates-list');
+  list.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  try {
+    const r = await fetch(`${API}/debates?limit=20`);
+    const d = await r.json();
+    const debates = d.debates || [];
+    if (!debates.length) { list.innerHTML = '<div class="no-debates">No active consultations at the moment.</div>'; return; }
+    list.innerHTML = debates.map(db => `
+      <div class="debate-card" onclick="openDebate(${db.id})">
+        <span class="debate-status ${db.status === 'live' ? 'status-live' : 'status-closed'}">${db.status === 'live' ? '● Live' : 'Closed'}</span>
+        <div class="debate-title">${esc(db.title)}</div>
+        <div class="debate-meta">
+          <span class="debate-votes">⬡ ${db.total_votes || 0} votes</span>
+          <span>${db.scope_country || 'Global'}</span>
+          ${db.closes_at ? `<span>Closes ${fmtDate(db.closes_at)}</span>` : ''}
+        </div>
+      </div>`).join('');
+  } catch(e) { list.innerHTML = '<div class="no-debates">Error loading consultations.</div>'; }
+}
+
+async function openDebate(id) {
+  document.getElementById('debates-view').style.display = 'none';
+  document.getElementById('debate-detail').style.display = '';
+  const content = document.getElementById('detail-content');
+  content.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  selectedOption = null;
+  try {
+    const [dr, rr] = await Promise.all([
+      fetch(`${API}/debates/${id}`),
+      fetch(`${API}/debates/${id}/results`)
+    ]);
+    const db = await dr.json();
+    const res = await rr.json();
+    currentDebate = db;
+    renderDebate(db, res);
+  } catch(e) { content.innerHTML = '<div class="no-debates">Error loading consultation.</div>'; }
+}
+
+function renderDebate(db, res) {
+  const content = document.getElementById('detail-content');
+  const opts = db.options || [];
+  const isLive = db.status === 'live';
+  const counts = res.vote_counts || {};
+  const total  = res.total_votes || 0;
+  const COLORS = ['#2d6eff','#10b981','#f59e0b','#f43f5e','#8b5cf6','#06b6d4'];
+
+  // Results bars
+  const barsHtml = opts.map((opt, i) => {
+    const cnt = counts[opt] || 0;
+    const pct = total > 0 ? Math.round(cnt / total * 100) : 0;
+    const color = COLORS[i % COLORS.length];
+    return `<div class="result-row">
+      <div class="result-label"><span>${esc(opt)}</span><span style="color:${color};font-weight:700;">${pct}%</span></div>
+      <div class="result-bar-bg"><div class="result-bar-fill" style="width:${pct}%;background:${color};"></div></div>
+    </div>`;
+  }).join('');
+
+  // Option buttons (only if live)
+  const optBtns = isLive ? `
+    <div class="options-title">Cast your vote</div>
+    ${opts.map((opt, i) => `
+      <button class="option-btn" id="opt-${i}" onclick="selectOption(${i})">${esc(opt)}</button>
+    `).join('')}
+    <button class="btn vote-btn" id="vote-submit-btn" onclick="castVote()" disabled>Select an option to vote</button>
+    <div class="vote-err" id="vote-err"></div>
+  ` : '';
+
+  content.innerHTML = `
+    <div class="detail-card">
+      <span class="debate-status ${isLive ? 'status-live' : 'status-closed'}">${isLive ? '● Live' : 'Closed'}</span>
+      <div class="detail-title">${esc(db.title)}</div>
+      ${db.context ? `<div class="detail-context">${esc(db.context)}</div>` : ''}
+      <div class="debate-meta">
+        <span class="debate-votes">⬡ ${total} votes</span>
+        <span>${db.scope_country || 'Global'}</span>
+        ${db.closes_at ? `<span>Closes ${fmtDate(db.closes_at)}</span>` : ''}
+      </div>
+    </div>
+    ${isLive ? `<div class="detail-card">${optBtns}</div>` : ''}
+    <div class="detail-card">
+      <div class="options-title">Current results</div>
+      <div class="results-section">${barsHtml || '<div style="color:var(--muted);font-size:14px;">No votes yet — be the first!</div>'}</div>
+    </div>
+  `;
+}
+
+function selectOption(idx) {
+  selectedOption = idx;
+  const opts = currentDebate?.options || [];
+  opts.forEach((_, i) => {
+    const btn = document.getElementById(`opt-${i}`);
+    if (btn) btn.classList.toggle('selected', i === idx);
+  });
+  const submitBtn = document.getElementById('vote-submit-btn');
+  if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = `Vote: "${esc(opts[idx])}"` ; }
+}
+
+async function castVote() {
+  if (selectedOption === null || !currentDebate) return;
+  const submitBtn = document.getElementById('vote-submit-btn');
+  const errEl = document.getElementById('vote-err');
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<span class="spinner"></span> Anchoring to blockchain…';
+  errEl.textContent = '';
+  try {
+    const r = await fetch(`${API}/debates/${currentDebate.id}/vote`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify({option_index: selectedOption})
+    });
+    const d = await r.json();
+    if (!r.ok) { errEl.textContent = d.detail || 'Vote failed'; submitBtn.disabled = false; submitBtn.textContent = 'Try again'; return; }
+    showVoteSuccess(d);
+  } catch(e) { errEl.textContent = 'Connection error'; submitBtn.disabled = false; submitBtn.textContent = 'Retry'; }
+}
+
+function showVoteSuccess(data) {
+  const content = document.getElementById('detail-content');
+  const vcode = data.verify_code || data.vcode || '';
+  const option = (currentDebate?.options || [])[selectedOption] || '';
+  content.innerHTML = `
+    <div class="success-card">
+      <div class="success-icon">✓</div>
+      <div class="success-title">Vote recorded on blockchain</div>
+      <div class="success-text">Your vote for <strong>"${esc(option)}"</strong> has been anchored to Polygon Mainnet. Your identity is verified — your privacy is protected.</div>
+      <div class="vcode-box">${esc(vcode)}</div>
+      <div class="vcode-label">Your verification code — use this to prove your vote without revealing your identity</div>
+      ${data.blockchain_tx ? `<div class="verify-link" onclick="window.open('https://polygonscan.com/tx/${data.blockchain_tx}','_blank')">View on Polygon blockchain ↗</div>` : ''}
+    </div>
+    <button class="btn" style="background:var(--bg3);color:var(--text);margin-bottom:12px;" onclick="openDebate(${currentDebate.id})">See live results</button>
+    <button class="btn" onclick="showDebatesList()">← All consultations</button>
+  `;
+}
+
+// ── UTILS ──
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmtDate(s) { try { return new Date(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); } catch{ return s; } }
+</script>
+</body>
+</html>

@@ -5,7 +5,7 @@ import { useState, useRef } from 'react';
 
 const BG      = '#0a0d14';
 const ACCENT  = '#2d6eff';
-const APP_URL = 'https://preferendum-unzip.onrender.com/app';
+const APP_URL = 'https://preferendum-unzip.onrender.com/';
 
 export default function App() {
   const [ready, setReady] = useState(false);

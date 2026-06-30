@@ -1216,7 +1216,7 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
     Choose your path to get started.
   </p>
   <div class="roles">
-    <a href="/app" class="role-card">
+    <a href="/voter" class="role-card">
       <span class="role-arrow">→</span>
       <div class="role-name">I'm a Voter</div>
       <div class="role-phrase">"Your voice, verified. Your identity, never."</div>
@@ -1313,6 +1313,48 @@ def serve_app():
         })
     except FileNotFoundError:
         return HTMLResponse(content='<html><body>App not found</body></html>', status_code=404)
+
+@app.get('/voter', response_class=HTMLResponse)
+def serve_voter_portal():
+    """Portal web de votante — funciona en móvil y desktop."""
+    try:
+        with open('voter_portal.html', 'r', encoding='utf-8') as f:
+            content = f.read()
+        return HTMLResponse(content=content, headers={'Cache-Control': 'no-cache, no-store, must-revalidate'})
+    except FileNotFoundError:
+        return HTMLResponse(content='<html><body>Voter portal not found</body></html>', status_code=404)
+
+
+class VoterRegisterInput(BaseModel):
+    name:     str
+    email:    str
+    password: str
+    country:  str = 'CL'
+
+
+@app.post('/voter/register')
+def voter_register(data: VoterRegisterInput, db: Session = Depends(get_db)):
+    """Register a voter — auto-verifies email so they can vote immediately."""
+    existing = db.query(User).filter(User.email == data.email).first()
+    if existing:
+        # If already registered, just log them in
+        if not bcrypt.checkpw(data.password.encode(), existing.password.encode()):
+            raise HTTPException(400, 'Email already registered with a different password')
+        existing.email_verified = True
+        db.commit()
+        return {'token': make_token(existing.id), 'user': {'id': existing.id, 'name': existing.name, 'email': existing.email}}
+    hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+    user = User(
+        email=data.email, name=data.name, password=hashed,
+        country=data.country, email_verified=True,
+        phone='', county='', gender='', dob='', national_id='',
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    _assign_user_tier(user, db)
+    return {'token': make_token(user.id), 'user': {'id': user.id, 'name': user.name, 'email': user.email}}
+
 
 @app.get('/r/{debate_id}', response_class=HTMLResponse)
 def public_results_page(debate_id: int, db: Session = Depends(get_db)):
