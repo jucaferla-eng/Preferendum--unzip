@@ -507,16 +507,16 @@ Base.metadata.create_all(bind=engine)
 from marketing_agent import ATTRIBUTION_SCHEMA_SQL as _ATTR_SQL
 _is_pg = 'postgresql' in DATABASE_URL
 _payment_schema = PAYMENTS_SCHEMA_SQL_PG if _is_pg else PAYMENTS_SCHEMA_SQL
-with engine.connect() as _conn:
-    for _sql_block in [_payment_schema, _ATTR_SQL]:
-        for _stmt in _sql_block.strip().split(';'):
-            _stmt = _stmt.strip()
-            if _stmt:
-                try:
+# Each statement in its own transaction so a failure in one doesn't abort the rest
+for _sql_block in [_payment_schema, _ATTR_SQL]:
+    for _stmt in _sql_block.strip().split(';'):
+        _stmt = _stmt.strip()
+        if _stmt:
+            try:
+                with engine.begin() as _conn:
                     _conn.execute(text(_stmt))
-                except Exception:
-                    pass
-    _conn.commit()
+            except Exception:
+                pass
 
 # Column migrations — works for both SQLite and PostgreSQL
 def _migrate():
