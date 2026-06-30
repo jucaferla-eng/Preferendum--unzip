@@ -137,6 +137,53 @@ CREATE INDEX IF NOT EXISTS idx_credit_tx_ref    ON credit_transactions(payment_r
 CREATE INDEX IF NOT EXISTS idx_crypto_req_user  ON crypto_payment_requests(user_id, status);
 """
 
+PAYMENTS_SCHEMA_SQL_PG = """
+CREATE TABLE IF NOT EXISTS credit_accounts (
+    id               SERIAL PRIMARY KEY,
+    user_id          INTEGER NOT NULL UNIQUE REFERENCES users(id),
+    balance_credits  FLOAT   NOT NULL DEFAULT 0,
+    total_purchased  FLOAT   NOT NULL DEFAULT 0,
+    total_spent      FLOAT   NOT NULL DEFAULT 0,
+    created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS credit_transactions (
+    id               SERIAL PRIMARY KEY,
+    user_id          INTEGER NOT NULL REFERENCES users(id),
+    campaign_id      INTEGER REFERENCES ad_campaigns(id),
+    type             TEXT    NOT NULL,
+    amount_credits   FLOAT   NOT NULL,
+    balance_after    FLOAT   NOT NULL DEFAULT 0,
+    amount_usd       FLOAT,
+    payment_method   TEXT,
+    payment_ref      TEXT    UNIQUE,
+    description      TEXT,
+    status           TEXT    NOT NULL DEFAULT 'completed',
+    created_at       TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS crypto_payment_requests (
+    id               SERIAL PRIMARY KEY,
+    user_id          INTEGER NOT NULL REFERENCES users(id),
+    amount_usd       FLOAT   NOT NULL,
+    credits_to_add   FLOAT   NOT NULL,
+    currency         TEXT    NOT NULL DEFAULT 'POL',
+    expected_amount  FLOAT   NOT NULL,
+    usd_rate         FLOAT   NOT NULL,
+    wallet_to        TEXT    NOT NULL,
+    tx_hash          TEXT,
+    status           TEXT    NOT NULL DEFAULT 'pending',
+    expires_at       TIMESTAMP NOT NULL,
+    created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    confirmed_at     TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_credit_tx_user   ON credit_transactions(user_id);
+CREATE INDEX IF NOT EXISTS idx_credit_tx_ref    ON credit_transactions(payment_ref);
+CREATE INDEX IF NOT EXISTS idx_crypto_req_user  ON crypto_payment_requests(user_id, status);
+"""
+
 
 # ══════════════════════════════════════════════════════════════
 # HELPERS DE CUENTA
@@ -192,7 +239,7 @@ def add_credits(
             UPDATE credit_accounts
             SET balance_credits = :bal,
                 total_purchased = total_purchased + :purchased,
-                updated_at = datetime('now')
+                updated_at = CURRENT_TIMESTAMP
             WHERE user_id = :uid
         """),
         {
@@ -264,7 +311,7 @@ def allocate_budget_to_campaign(db: Session, user_id: int, campaign_id: int, cre
 
     new_balance = account['balance_credits'] - credits
     db.execute(
-        text("UPDATE credit_accounts SET balance_credits=:bal, updated_at=datetime('now') WHERE user_id=:uid"),
+        text("UPDATE credit_accounts SET balance_credits=:bal, updated_at=CURRENT_TIMESTAMP WHERE user_id=:uid"),
         {'bal': new_balance, 'uid': user_id}
     )
     db.execute(
@@ -303,7 +350,7 @@ def return_budget_to_account(db: Session, user_id: int, campaign_id: int) -> dic
         {'cid': campaign_id}
     )
     db.execute(
-        text("UPDATE credit_accounts SET balance_credits=:bal, updated_at=datetime('now') WHERE user_id=:uid"),
+        text("UPDATE credit_accounts SET balance_credits=:bal, updated_at=CURRENT_TIMESTAMP WHERE user_id=:uid"),
         {'bal': new_balance, 'uid': user_id}
     )
     db.execute(
