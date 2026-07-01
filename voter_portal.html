@@ -88,6 +88,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter'
 .vcode-label{font-size:11px;color:var(--muted);text-align:center;margin-bottom:16px;}
 .verify-link{display:block;text-align:center;color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer;margin-bottom:8px;}
 
+/* ── ERROR BANNER ── */
+#global-error{display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#dc2626;color:#fff;padding:16px 20px;font-size:14px;font-weight:600;text-align:center;line-height:1.4;}
+#global-error span{display:block;font-size:12px;font-weight:400;margin-top:4px;opacity:0.85;}
+
 /* ── SPINNER ── */
 .spinner{display:inline-block;width:20px;height:20px;border:2px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;}
 @keyframes spin{to{transform:rotate(360deg);}}
@@ -95,6 +99,13 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter'
 </style>
 </head>
 <body>
+
+<!-- GLOBAL ERROR BANNER -->
+<div id="global-error" onclick="this.style.display='none'">
+  <span id="global-error-msg">Error</span>
+  <span id="global-error-detail"></span>
+  <span style="font-size:11px;opacity:0.6;margin-top:6px;display:block;">Tap to dismiss</span>
+</div>
 
 <!-- AUTH -->
 <div id="auth-screen">
@@ -375,6 +386,7 @@ async function castVote() {
     try { d = await r.json(); } catch(_) {}
     if (!r.ok) {
       const msg = d.detail || 'Vote failed — please try again';
+      showError(msg, `HTTP ${r.status}`);
       const errEl2 = document.getElementById('vote-err');
       if (errEl2) errEl2.textContent = msg;
       const btn2 = document.getElementById('vote-submit-btn');
@@ -383,6 +395,8 @@ async function castVote() {
     }
     showVoteSuccess(d, optIdx);
   } catch(e) {
+    const msg = e.message || 'Connection error — check your internet';
+    showError('Connection error', msg);
     const errEl2 = document.getElementById('vote-err');
     if (errEl2) errEl2.textContent = 'Connection error — check your internet';
     const btn2 = document.getElementById('vote-submit-btn');
@@ -411,6 +425,13 @@ function showVoteSuccess(data, optIdx) {
 }
 
 // ── UTILS ──
+function showError(msg, detail) {
+  const el = document.getElementById('global-error');
+  document.getElementById('global-error-msg').textContent = msg;
+  document.getElementById('global-error-detail').textContent = detail || '';
+  if (el) { el.style.display = 'block'; window.scrollTo(0,0); }
+}
+
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtDate(s) { try { return new Date(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); } catch{ return s; } }
 </script>
