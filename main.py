@@ -5595,7 +5595,7 @@ def admin_recompute_campaign_spend(campaign_id: int, secret: str, db: Session = 
 @app.patch('/admin/campaigns/{campaign_id}/creative')
 def admin_update_campaign_creative(campaign_id: int, secret: str, db: Session = Depends(get_db),
                                    logo_url: str = '', ad_image_url: str = '', ad_copy: str = '',
-                                   target_debate_ids: str = '', advertiser_name: str = ''):
+                                   link_url: str = '', target_debate_ids: str = '', advertiser_name: str = ''):
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
     c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
@@ -5607,13 +5607,15 @@ def admin_update_campaign_creative(campaign_id: int, secret: str, db: Session = 
         c.ad_image_url = ad_image_url
     if ad_copy:
         c.ad_copy = ad_copy
+    if link_url:
+        c.link_url = link_url
     if target_debate_ids:
         c.target_debate_ids = target_debate_ids
     if advertiser_name:
         c.advertiser_name = advertiser_name
     db.commit()
     return {'ok': True, 'campaign_id': campaign_id, 'logo_url': c.logo_url,
-            'ad_image_url': c.ad_image_url, 'ad_copy': c.ad_copy,
+            'ad_image_url': c.ad_image_url, 'ad_copy': c.ad_copy, 'link_url': c.link_url,
             'target_debate_ids': c.target_debate_ids, 'advertiser_name': c.advertiser_name}
 
 
