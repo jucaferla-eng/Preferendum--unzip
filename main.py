@@ -2890,6 +2890,34 @@ def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, 'Campaign not found')
     return _format_campaign(campaign)
 
+@app.patch('/advertiser/campaigns/{campaign_id}')
+def update_campaign(campaign_id: int, data: CampaignCreate, db: Session = Depends(get_db), user: User = Depends(get_verified_user)):
+    campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(404, 'Campaign not found')
+    campaign.title               = data.campaign_title
+    campaign.budget_clp          = data.budget_clp
+    campaign.target_country      = data.target_country
+    campaign.target_communes     = data.target_communes
+    campaign.target_gender       = data.target_gender
+    campaign.target_age_ranges   = data.target_age_ranges
+    campaign.target_se_tiers     = data.target_se_tiers
+    campaign.excluded_categories = data.excluded_categories
+    campaign.blocked_competitors = data.blocked_competitors
+    campaign.ad_copy             = data.ad_copy
+    campaign.link_url            = data.link_url
+    campaign.logo_url            = data.logo_url
+    campaign.ad_image_url        = data.ad_image_url
+    if data.start_date:
+        try: campaign.start_date = datetime.fromisoformat(data.start_date)
+        except: pass
+    if data.end_date:
+        try: campaign.end_date = datetime.fromisoformat(data.end_date)
+        except: pass
+    db.commit()
+    db.refresh(campaign)
+    return {'message': 'Campaign updated', 'campaign': _format_campaign(campaign)}
+
 @app.put('/advertiser/campaigns/{campaign_id}/pause')
 def pause_campaign(campaign_id: int, db: Session = Depends(get_db)):
     campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()

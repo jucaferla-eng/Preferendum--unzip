@@ -771,7 +771,8 @@ async function loadCampaigns() {
       <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--gold2);">${(c.budget_clp||0).toLocaleString()}</td>
       <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--green2);">${(c.impressions||0).toLocaleString()}</td>
       <td><span class="badge ${c.is_active?'active':'paused'}">${c.is_active?'ACTIVE':'PAUSED'}</span></td>
-      <td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button class="btn-sm gold" onclick="editCampaign(${c.id})">Edit</button>
         <button class="btn-sm outline" onclick="toggleCampaign(${c.id})">${c.is_active?'Pause':'Resume'}</button>
       </td>
     </tr>`).join('');
@@ -780,6 +781,43 @@ async function loadCampaigns() {
 async function toggleCampaign(id) {
   await fetch(`${API}/advertiser/campaigns/${id}/pause`, {method:'PUT'});
   loadCampaigns();
+}
+
+let _editingCampaignId = null;
+async function editCampaign(id) {
+  const r = await fetch(`${API}/advertiser/campaigns?email=${encodeURIComponent(userEmail)}`);
+  const d = await r.json();
+  const c = (d.campaigns||[]).find(x => x.id === id);
+  if (!c) return;
+  _editingCampaignId = id;
+  // Pre-fill form
+  document.getElementById('nc-title').value        = c.title || '';
+  document.getElementById('nc-country').value      = c.target_country || 'CL';
+  document.getElementById('nc-gender').value       = c.target_gender || 'all';
+  document.getElementById('nc-budget').value       = Math.round((c.budget_clp||0)/950);
+  document.getElementById('nc-copy').value         = c.ad_copy || '';
+  document.getElementById('nc-url').value          = c.link_url || '';
+  document.getElementById('nc-logo-url').value     = c.logo_url || '';
+  document.getElementById('nc-image-url').value    = c.ad_image_url || '';
+  document.getElementById('nc-excluded').value     = c.excluded_categories || '';
+  document.getElementById('nc-competitors').value  = c.blocked_competitors || '';
+  if (c.start_date) document.getElementById('nc-start').value = c.start_date.slice(0,10);
+  if (c.end_date)   document.getElementById('nc-end').value   = c.end_date.slice(0,10);
+  // Show logo/banner preview if set
+  if (c.logo_url) { document.getElementById('nc-logo-img').src = c.logo_url; document.getElementById('nc-logo-preview').style.display='block'; }
+  if (c.ad_image_url) { document.getElementById('nc-banner-img').src = c.ad_image_url; document.getElementById('nc-banner-preview').style.display='block'; }
+  // Load communes then select matching ones
+  loadCommunes();
+  setTimeout(() => {
+    (c.target_communes||'').split(',').filter(Boolean).forEach(com => {
+      document.querySelectorAll('.commune-chip').forEach(chip => {
+        if (chip.dataset.code === com) chip.click();
+      });
+    });
+  }, 300);
+  // Change button text
+  document.querySelector('[onclick="createCampaign()"]').textContent = 'Save Changes';
+  showPanel('new-campaign');
 }
 
 // ── NEW CAMPAIGN ──────────────────────────────────────────────
@@ -847,13 +885,26 @@ async function createCampaign() {
     link_url:         url,
   };
 
-  const r = await fetch(`${API}/advertiser/campaigns`, {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(body)
-  });
-  const d = await r.json();
-  if (!r.ok) { showAlert('newcamp-alert','error',d.detail||'Error creating campaign'); return; }
-  showAlert('newcamp-alert','success',`✓ Campaign "${title}" created! ID: ${d.campaign_id}`);
+  let r, d;
+  if (_editingCampaignId) {
+    r = await fetch(`${API}/advertiser/campaigns/${_editingCampaignId}`, {
+      method:'PATCH', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify(body)
+    });
+    d = await r.json();
+    if (!r.ok) { showAlert('newcamp-alert','error',d.detail||'Error saving campaign'); return; }
+    showAlert('newcamp-alert','success',`✓ Campaign "${title}" updated!`);
+    _editingCampaignId = null;
+    document.querySelector('[onclick="createCampaign()"]').textContent = 'Launch Campaign';
+  } else {
+    r = await fetch(`${API}/advertiser/campaigns`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    d = await r.json();
+    if (!r.ok) { showAlert('newcamp-alert','error',d.detail||'Error creating campaign'); return; }
+    showAlert('newcamp-alert','success',`✓ Campaign "${title}" created! ID: ${d.campaign_id}`);
+  }
   loadCampaigns();
   setTimeout(() => showPanel('campaigns'), 2000);
 }
