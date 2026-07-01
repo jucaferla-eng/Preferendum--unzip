@@ -390,15 +390,15 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
               </div>
               <div class="field">
                 <label>Income Tier Target</label>
-                <select id="nc-tier">
-                  <option value="D">All Income Levels</option>
-                  <option value="C">C and above (mid)</option>
-                  <option value="B">B and above (upper-mid)</option>
-                  <option value="A">A only (premium)</option>
+                <select id="nc-tier" onchange="loadCommunes()">
+                  <option value="D">All Income Levels (A+B+C+D)</option>
+                  <option value="C">C and above (mid to premium)</option>
+                  <option value="B">B and above (upper-mid to premium)</option>
+                  <option value="A">A only (premium — highest income)</option>
                 </select>
               </div>
               <div class="field form-full">
-                <label>Target Communes <span style="color:var(--muted);font-weight:400;">(optional — leave blank for whole country)</span></label>
+                <label>Target Communes <span style="color:var(--muted);font-weight:400;">— auto-filled by income tier, click to deselect individual ones</span></label>
                 <div class="commune-chips" id="commune-chips"><!-- filled by JS --></div>
               </div>
               <div class="field">
@@ -821,13 +821,45 @@ async function editCampaign(id) {
 }
 
 // ── NEW CAMPAIGN ──────────────────────────────────────────────
-function loadCommunes() {
+async function loadCommunes() {
   const country = document.getElementById('nc-country').value;
-  const communes = COMMUNES[country] || [];
+  const tier    = document.getElementById('nc-tier').value;
   selectedCommunes = [];
   const chips = document.getElementById('commune-chips');
-  chips.innerHTML = communes.map(c => `
-    <div class="commune-chip" onclick="toggleCommune(this,'${c}')">${c}</div>`).join('');
+  chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">Loading…</span>';
+
+  // Determine which tiers to show based on selection
+  const tierMap = {D:'A,B,C,D', C:'A,B,C', B:'A,B', A:'A'};
+  const tiersToShow = (tierMap[tier] || 'A,B,C,D').split(',');
+
+  try {
+    // Load all communes for country, then filter by tier
+    const r = await fetch(`${API}/marketer/communes?country=${country}`);
+    const d = await r.json();
+    const all = d.communes || [];
+    const filtered = all.filter(c => tiersToShow.includes(c.se_tier));
+
+    if (!filtered.length) {
+      chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">No communes found for this country/tier.</span>';
+      return;
+    }
+
+    // Auto-select all filtered communes and render chips
+    selectedCommunes = filtered.map(c => c.commune);
+    chips.innerHTML = filtered.map(c => `
+      <div class="commune-chip selected" data-code="${c.commune}" onclick="toggleCommune(this,'${c.commune}')">
+        ${c.commune} <span style="font-size:10px;opacity:0.7;">${c.se_tier} · ${c.cpm_usd?.toFixed(2)||'?'}$/CPM</span>
+      </div>`).join('');
+
+    // Update budget preview with tier-aware CPM
+    updateBudgetPreview();
+  } catch(e) {
+    // Fallback to static list if API fails
+    const communes = COMMUNES[country] || [];
+    selectedCommunes = communes;
+    chips.innerHTML = communes.map(c => `
+      <div class="commune-chip selected" data-code="${c}" onclick="toggleCommune(this,'${c}')">${c}</div>`).join('');
+  }
 }
 
 function toggleCommune(el, name) {
