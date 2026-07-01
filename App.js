@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaView, StyleSheet, ActivityIndicator, View, Text } from 'react-native';
+import { SafeAreaView, StyleSheet, ActivityIndicator, View, Text, AppState } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 const BG      = '#0a0d14';
 const ACCENT  = '#2d6eff';
@@ -11,6 +11,15 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
   const webRef = useRef(null);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state === 'active' && webRef.current) {
+        webRef.current.injectJavaScript(`window.location.href = '${APP_URL}'; true;`);
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   return (
     <SafeAreaView style={styles.container}>
