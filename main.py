@@ -4710,6 +4710,26 @@ def payments_admin_init_tables(secret: str, db: Session = Depends(get_db)):
     return {'results': results}
 
 
+@app.get('/admin/users/search')
+def admin_search_users(q: str, secret: str, db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    users = db.query(User).filter(
+        (User.email.ilike(f'%{q}%')) | (User.name.ilike(f'%{q}%'))
+    ).order_by(User.id.desc()).limit(20).all()
+    return {'users': [{'id': u.id, 'email': u.email, 'name': u.name, 'role': u.role, 'created_at': str(u.created_at)} for u in users]}
+
+@app.post('/admin/users/reset-password')
+def admin_reset_password(user_id: int, new_password: str, secret: str, db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, 'User not found')
+    user.password = bcrypt.hashpw(new_password.encode(), bcrypt.gensalt()).decode()
+    db.commit()
+    return {'ok': True, 'email': user.email, 'message': 'Password updated'}
+
 @app.post('/admin/payments/manual-credit')
 def payments_admin_manual(
     user_id:     int,
