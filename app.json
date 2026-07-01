@@ -2,7 +2,7 @@
   "expo": {
     "name": "Preferendum",
     "slug": "preferendum",
-    "version": "6.0.34",
+    "version": "6.0.35",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "splash": {
@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.caip.preferendumapp",
-      "buildNumber": "67",
+      "buildNumber": "70",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
