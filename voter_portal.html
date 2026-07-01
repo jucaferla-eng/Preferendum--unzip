@@ -169,7 +169,16 @@ let selectedOption = null;
 let currentDebate = null;
 
 // ── INIT ──
-if (token) showApp();
+if (token) validateAndShowApp();
+
+// ── INIT ──
+async function validateAndShowApp() {
+  try {
+    const r = await fetch(`${API}/auth/me`, {headers:{'Authorization':'Bearer '+token}});
+    if (r.ok) { const d = await r.json(); userName = d.name || userName; showApp(); }
+    else { token=''; localStorage.removeItem('pref_voter_token'); }
+  } catch(e) { showApp(); } // offline — try anyway
+}
 
 // ── AUTH ──
 function switchTab(tab) {
@@ -287,8 +296,11 @@ function renderDebate(db, res) {
   const content = document.getElementById('detail-content');
   const opts = db.options || [];
   const isLive = db.status === 'live';
-  const counts = res.vote_counts || {};
-  const total  = res.total_votes || 0;
+  // API returns res.debate.results = [{option, count, pct}]
+  const resultsList = (res.debate || res).results || [];
+  const counts = {};
+  resultsList.forEach(r => { counts[r.option] = r.count || 0; });
+  const total = (res.debate || res).total_votes || db.total_votes || 0;
   const COLORS = ['#2d6eff','#10b981','#f59e0b','#f43f5e','#8b5cf6','#06b6d4'];
 
   // Results bars
@@ -344,27 +356,46 @@ function selectOption(idx) {
 
 async function castVote() {
   if (selectedOption === null || !currentDebate) return;
+  // Capture references before async operation
+  const debateId  = currentDebate.id;
+  const optIdx    = selectedOption;
   const submitBtn = document.getElementById('vote-submit-btn');
-  const errEl = document.getElementById('vote-err');
+  const errEl     = document.getElementById('vote-err');
+  if (!submitBtn) return;
   submitBtn.disabled = true;
   submitBtn.innerHTML = '<span class="spinner"></span> Anchoring to blockchain…';
-  errEl.textContent = '';
+  if (errEl) errEl.textContent = '';
   try {
-    const r = await fetch(`${API}/debates/${currentDebate.id}/vote`, {
+    const r = await fetch(`${API}/debates/${debateId}/vote`, {
       method: 'POST',
       headers: {'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body: JSON.stringify({option_index: selectedOption})
+      body: JSON.stringify({option_index: optIdx})
     });
-    const d = await r.json();
-    if (!r.ok) { errEl.textContent = d.detail || 'Vote failed'; submitBtn.disabled = false; submitBtn.textContent = 'Try again'; return; }
-    showVoteSuccess(d);
-  } catch(e) { errEl.textContent = 'Connection error'; submitBtn.disabled = false; submitBtn.textContent = 'Retry'; }
+    let d = {};
+    try { d = await r.json(); } catch(_) {}
+    if (!r.ok) {
+      const msg = d.detail || 'Vote failed — please try again';
+      const errEl2 = document.getElementById('vote-err');
+      if (errEl2) errEl2.textContent = msg;
+      const btn2 = document.getElementById('vote-submit-btn');
+      if (btn2) { btn2.disabled = false; btn2.textContent = 'Try again'; }
+      return;
+    }
+    showVoteSuccess(d, optIdx);
+  } catch(e) {
+    const errEl2 = document.getElementById('vote-err');
+    if (errEl2) errEl2.textContent = 'Connection error — check your internet';
+    const btn2 = document.getElementById('vote-submit-btn');
+    if (btn2) { btn2.disabled = false; btn2.textContent = 'Retry'; }
+  }
 }
 
-function showVoteSuccess(data) {
+function showVoteSuccess(data, optIdx) {
   const content = document.getElementById('detail-content');
-  const vcode = data.verify_code || data.vcode || '';
-  const option = (currentDebate?.options || [])[selectedOption] || '';
+  if (!content) return;
+  const vcode  = data.verify_code || data.vcode || '';
+  const option = data.option || (currentDebate?.options || [])[optIdx] || '';
+  const debId  = currentDebate?.id;
   content.innerHTML = `
     <div class="success-card">
       <div class="success-icon">✓</div>
@@ -372,9 +403,9 @@ function showVoteSuccess(data) {
       <div class="success-text">Your vote for <strong>"${esc(option)}"</strong> has been anchored to Polygon Mainnet. Your identity is verified — your privacy is protected.</div>
       <div class="vcode-box">${esc(vcode)}</div>
       <div class="vcode-label">Your verification code — use this to prove your vote without revealing your identity</div>
-      ${data.blockchain_tx ? `<div class="verify-link" onclick="window.open('https://polygonscan.com/tx/${data.blockchain_tx}','_blank')">View on Polygon blockchain ↗</div>` : ''}
+      ${data.blockchain_tx ? `<a class="verify-link" href="https://polygonscan.com/tx/${data.blockchain_tx}" target="_blank" rel="noopener">View on Polygon blockchain ↗</a>` : ''}
     </div>
-    <button class="btn" style="background:var(--bg3);color:var(--text);margin-bottom:12px;" onclick="openDebate(${currentDebate.id})">See live results</button>
+    ${debId ? `<button class="btn" style="background:var(--bg3);color:var(--text);margin-bottom:12px;" onclick="openDebate(${debId})">See live results</button>` : ''}
     <button class="btn" onclick="showDebatesList()">← All consultations</button>
   `;
 }
