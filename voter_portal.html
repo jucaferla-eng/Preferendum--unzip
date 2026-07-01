@@ -287,7 +287,7 @@ async function loadDebates() {
 
 async function openDebate(id) {
   document.getElementById('debates-view').style.display = 'none';
-  document.getElementById('debate-detail').style.display = '';
+  document.getElementById('debate-detail').style.display = 'block';
   const content = document.getElementById('detail-content');
   content.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   selectedOption = null;
