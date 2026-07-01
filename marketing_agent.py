@@ -20,7 +20,7 @@ CICLO DE NEGOCIO:
   Anunciante paga → Revenue → 15% a adquisición → Nuevos usuarios →
   Más debates → Más inventario → Más revenue para anunciantes → loop
 
-En memoria de José Ignacio Fernández (1989-2024)
+En memoria del Socio Fundador José Ignacio Fernández (1989–2024)
 """
 
 import os, json, math, time

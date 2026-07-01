@@ -16,7 +16,7 @@ Ciclos de actualización:
   - Precios m² por comuna: 1 vez por mes (tablas curadas)
   - Matching debate→campaña: en tiempo real
 
-En memoria de José Ignacio Fernández (1989-2024)
+En memoria del Socio Fundador José Ignacio Fernández (1989–2024)
 """
 
 import os, json, requests, math

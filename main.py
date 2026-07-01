@@ -13,7 +13,7 @@ Todos los módulos integrados en un solo archivo para Render:
   ✅ Privacy: /privacy
 
 Run: uvicorn main:app --host 0.0.0.0 --port 10000
-En memoria del Fundador José Ignacio Fernández (1989–2024)
+En memoria del Socio Fundador José Ignacio Fernández (1989–2024)
 """
 
 from __future__ import annotations
@@ -634,7 +634,7 @@ _migrate()
 app = FastAPI(
     title='Preferendum API',
     version='3.0.0',
-    description='En memoria del Fundador José Ignacio Fernández (1989–2024)'
+    description='En memoria del Socio Fundador José Ignacio Fernández (1989–2024)'
 )
 
 app.add_middleware(CORSMiddleware,
@@ -788,7 +788,7 @@ def send_email_otp(email, code, name=''):
         f'<div style="background:#1e2a3d;padding:24px;text-align:center;border-radius:8px;">'
         f'<span style="font-size:40px;font-weight:bold;letter-spacing:10px;color:#2563eb;">{code}</span></div>'
         f'<p style="color:#94a3b8;">Válido por 10 minutos. No lo compartas con nadie.</p>'
-        f'<p style="color:#475569;font-size:12px;">En memoria del Fundador José Ignacio Fernández (1989–2024)</p>'
+        f'<p style="color:#475569;font-size:12px;">En memoria del Socio Fundador José Ignacio Fernández (1989–2024)</p>'
         f'</div>'
     )
 
@@ -868,7 +868,7 @@ def send_welcome_certificate(email, name, user_id):
         f'</div>'
         f'</div>'
         f'<div style="padding:16px 32px;border-top:1px solid #1e2d4a;text-align:center;">'
-        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria del Fundador José Ignacio Fernández (1989–2024)</p>'
+        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria del Socio Fundador José Ignacio Fernández (1989–2024)</p>'
         f'</div>'
         f'</div>'
     )
@@ -1233,7 +1233,7 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
     </a>
   </div>
   <button class="back-btn" onclick="showPage1()">← Back</button>
-  <div class="p2-memo">In memory of Founder José Ignacio Fernández (1989–2024)</div>
+  <div class="p2-memo">En memoria del Socio Fundador José Ignacio Fernández (1989–2024)</div>
 </div>
 
 <script>
@@ -1490,7 +1490,7 @@ body{{background:#090D18;color:#f0f4ff;font-family:-apple-system,BlinkMacSystemF
   <div class="footer">
     <div class="footer-logo">prefer<span>endum</span></div>
     <div class="footer-sub">Plataforma de decisiones verificadas · preferendum.com</div>
-    <div class="footer-mem">En memoria del Fundador José Ignacio Fernández (1989–2024)</div>
+    <div class="footer-mem">En memoria del Socio Fundador José Ignacio Fernández (1989–2024)</div>
   </div>
 </div>
 </body>
@@ -1528,7 +1528,7 @@ Ads are targeted using anonymous demographic data only.</p>
 <h2>Contact</h2>
 <p>privacy@preferendum.com — CAIP Task Force, Santiago, Chile</p>
 <p style="margin-top:48px;color:#4a5568;font-size:13px;font-style:italic;">
-En memoria del Fundador José Ignacio Fernández (1989–2024), quien demostró que era posible.</p>
+En memoria del Socio Fundador José Ignacio Fernández (1989–2024), quien demostró que era posible.</p>
 </body></html>"""
     return HTMLResponse(content=html)
 
@@ -1855,7 +1855,7 @@ def _send_supervisor_authorization_email(supervisor_email, employee_name, employ
         f'padding:14px;border-radius:10px;text-align:center;font-size:14px;">Rechazar</a>'
         f'</div></div>'
         f'<div style="padding:16px 32px;border-top:1px solid #1e2d4a;text-align:center;">'
-        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria del Fundador José Ignacio Fernández (1989–2024)</p>'
+        f'<p style="color:#475569;font-size:11px;margin:0;">En memoria del Socio Fundador José Ignacio Fernández (1989–2024)</p>'
         f'</div></div>'
     )
     resend_key = os.getenv('RESEND_API_KEY')

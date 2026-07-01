@@ -25,7 +25,7 @@ Flujo Crypto:
   Anunciante envía al wallet de Preferendum
   POST /payments/crypto/confirm → verificamos TX en Polygon → acreditamos Credits
 
-En memoria de José Ignacio Fernández (1989-2024)
+En memoria del Socio Fundador José Ignacio Fernández (1989–2024)
 """
 
 import os, json, hashlib, time

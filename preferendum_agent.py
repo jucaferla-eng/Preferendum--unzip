@@ -18,7 +18,7 @@ ARQUITECTURA DE SEGURIDAD DEL AGENTE:
 - Tool restrictions: el agente solo puede llamar tools aprobados, nunca código arbitrario
 - Output sanitization: nunca devuelve API keys, tokens ni datos sensibles
 
-En memoria de José Ignacio Fernández (1989–2024)
+En memoria del Socio Fundador José Ignacio Fernández (1989–2024)
 """
 
 import os, json, hashlib, time, re, xml.etree.ElementTree as ET

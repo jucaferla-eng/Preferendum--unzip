@@ -124,7 +124,7 @@ CMTS=["Esta decisión nos afecta a todos directamente.",
 
 # ══════════════════════════════════════════════════════════════
 hdr("PREFERENDUM — COMPLETE SIMULATION")
-print(f"  {DIM}En memoria de José Ignacio Fernández (1989-2024){RST}\n")
+print(f"  {DIM}En memoria del Socio Fundador José Ignacio Fernández (1989–2024){RST}\n")
 
 # STEP 1: VOTERS
 sec("STEP 1 — Registering 100 voters")

@@ -16,5 +16,5 @@ def global_stats(db: Session = Depends(get_db)):
         "active_campaigns":db.query(AdCampaign).filter(AdCampaign.is_active == True).count(),
         "system":          "Preferendum v1.0",
         "blockchain":      "Polygon Mainnet",
-        "dedication":      "En memoria de José Ignacio Fernández (1989–2024)",
+        "dedication":      "En memoria del Socio Fundador José Ignacio Fernández (1989–2024)",
     }

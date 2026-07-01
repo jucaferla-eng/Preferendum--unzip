@@ -10,7 +10,7 @@ Este agente:
 4. Se puede ejecutar periódicamente para mantener datos actualizados
 
 Fuente de datos: INE Chile, SII, datos municipales públicos
-En memoria de José Ignacio Fernández (1989-2024)
+En memoria del Socio Fundador José Ignacio Fernández (1989–2024)
 """
 
 import json
@@ -297,5 +297,5 @@ if __name__ == "__main__":
     with open("communes_cpm_table.json", "w", encoding="utf-8") as f:
         json.dump(all_communes, f, ensure_ascii=False, indent=2)
     print(f"\n✅ Tabla guardada en communes_cpm_table.json ({len(all_communes)} comunas)")
-    print("\nEn memoria de José Ignacio Fernández (1989-2024)")
+    print("\nEn memoria del Socio Fundador José Ignacio Fernández (1989–2024)")
 

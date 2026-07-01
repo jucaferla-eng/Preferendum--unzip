@@ -8,7 +8,7 @@ Usage:
   1. Start server: uvicorn main:app --reload
   2. Run tests:    python test_system.py
 
-In memory of José Ignacio Fernández (1989–2024)
+En memoria del Socio Fundador José Ignacio Fernández (1989–2024)
 """
 
 import requests
@@ -315,7 +315,7 @@ else:
     for n,c in failed:
         print(f"     · {n} [{c}]")
 print("="*55)
-print("  En memoria de José Ignacio Fernández (1989–2024)")
+print("  En memoria del Socio Fundador José Ignacio Fernández (1989–2024)")
 print("="*55 + "\n")
 
 sys.exit(0 if passed == total else 1)

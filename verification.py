@@ -77,7 +77,7 @@ def send_email_otp(email, code):
             <span style="font-size:36px;font-weight:bold;letter-spacing:8px;color:#3b82f6;">{code}</span>
         </div>
         <p style="color:#94a3b8;font-size:14px;">Valid for 10 minutes. Do not share this code.</p>
-        <p style="color:#4a5568;font-size:12px;font-style:italic;">In memory of Jose Ignacio Fernandez (1989-2024)</p>
+        <p style="color:#4a5568;font-size:12px;font-style:italic;">En memoria del Socio Fundador José Ignacio Fernández (1989–2024)</p>
     </div>
     """
 

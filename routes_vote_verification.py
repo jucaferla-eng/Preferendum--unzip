@@ -33,5 +33,5 @@ def verify_vote(vcode: str, db: Session = Depends(get_db)):
         "verified_at":record.verified_at.isoformat(),
         "message":    "Your vote was recorded and anchored to the Polygon blockchain.",
         "check_on":   f"https://polygonscan.com/tx/{record.tx_hash}",
-        "dedication": "In memory of José Ignacio Fernández (1989–2024) — who designed this verification system.",
+        "dedication": "En memoria del Socio Fundador José Ignacio Fernández (1989–2024) — who designed this verification system.",
     }
