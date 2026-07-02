@@ -90,6 +90,17 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 .vcode-label{font-size:11px;color:var(--muted);text-align:center;margin-bottom:16px;}
 .verify-link{display:block;text-align:center;color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer;margin-bottom:8px;}
 
+/* ── OPINION CARDS ── */
+.opinions-section{margin-bottom:16px;}
+.opinion-card{background:var(--bg3);border-left:3px solid rgba(45,110,255,0.4);border-radius:0 10px 10px 0;padding:14px 16px;margin-bottom:10px;}
+.opinion-text{font-size:14px;color:rgba(240,244,255,0.85);line-height:1.6;margin-bottom:6px;}
+.opinion-meta{font-size:11px;color:rgba(240,244,255,0.4);display:flex;gap:12px;}
+.opinion-level{font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:rgba(45,110,255,0.12);color:#7dd3fc;text-transform:uppercase;letter-spacing:0.05em;}
+.no-opinions{font-size:13px;color:rgba(240,244,255,0.4);font-style:italic;padding:8px 0 16px;}
+.phase-divider{display:flex;align-items:center;gap:12px;margin:20px 0 16px;}
+.phase-divider-line{flex:1;height:1px;background:rgba(255,255,255,0.08);}
+.phase-label{font-size:11px;font-weight:700;color:#4d8aff;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;}
+
 /* ── AD CARD ── */
 .ad-card{background:linear-gradient(135deg,rgba(45,110,255,0.08),rgba(0,0,0,0));border:1px solid rgba(45,110,255,0.25);border-radius:12px;padding:16px;margin-bottom:16px;display:flex;gap:14px;align-items:flex-start;}
 .ad-logo{width:48px;height:48px;flex-shrink:0;border-radius:8px;background:rgba(45,110,255,0.1);display:flex;align-items:center;justify-content:center;overflow:hidden;}
@@ -311,10 +322,12 @@ async function openDebate(id) {
     ]);
     const db  = await dr.json();
     const res = await rr.json();
-    const ads = ar.ok ? await ar.json() : {};
+    const opinions_data = ar.ok ? await ar.json() : {};
     currentDebate = db;
-    const firstAd = (ads.items || []).find(it => it.type === 'ad')?.ad || null;
-    renderDebate(db, res, firstAd);
+    const items = opinions_data.items || [];
+    const firstAd  = items.find(it => it.type === 'ad')?.ad || null;
+    const opinions = items.filter(it => it.type === 'opinion').map(it => it.opinion);
+    renderDebate(db, res, firstAd, opinions);
   } catch(e) { content.innerHTML = '<div class="no-debates">Error loading consultation.</div>'; }
 }
 
@@ -337,37 +350,48 @@ function renderAdCard(ad) {
   </div>`;
 }
 
-function renderDebate(db, res, ad) {
+function renderDebate(db, res, ad, opinions) {
   const content = document.getElementById('detail-content');
-  const opts = db.options || [];
-  const isLive = db.status === 'live';
-  // API returns res.debate.results = [{option, count, pct}]
+  const opts    = db.options || [];
+  const isLive  = db.status === 'live';
   const resultsList = (res.debate || res).results || [];
-  const counts = {};
+  const counts  = {};
   resultsList.forEach(r => { counts[r.option] = r.count || 0; });
-  const total = (res.debate || res).total_votes || db.total_votes || 0;
-  const COLORS = ['#2d6eff','#10b981','#f59e0b','#f43f5e','#8b5cf6','#06b6d4'];
+  const total   = (res.debate || res).total_votes || db.total_votes || 0;
+  const COLORS  = ['#2d6eff','#10b981','#f59e0b','#f43f5e','#8b5cf6','#06b6d4'];
 
-  // Results bars
+  // ── PHASE 1: DEBATE — opinions from others ──
+  const levelLabel = { expert: 'Experto', good: 'Informado', familiar: 'Conoce el tema' };
+  const opinionsHtml = (opinions && opinions.length > 0)
+    ? opinions.slice(0, 5).map(op => `
+        <div class="opinion-card">
+          <div class="opinion-text">${esc(op.text)}</div>
+          <div class="opinion-meta">
+            <span>${esc(op.user_name || 'Anónimo')}</span>
+            ${op.knowledge_level ? `<span class="opinion-level">${levelLabel[op.knowledge_level] || op.knowledge_level}</span>` : ''}
+          </div>
+        </div>`).join('')
+    : `<div class="no-opinions">Sé el primero en compartir tu perspectiva después de votar.</div>`;
+
+  // ── PHASE 2: PREFERENCE — vote options ──
+  const optBtns = isLive ? `
+    ${opts.map((opt, i) => `
+      <button class="option-btn" id="opt-${i}" onclick="selectOption(${i})">${esc(opt)}</button>
+    `).join('')}
+    <button class="btn vote-btn" id="vote-submit-btn" onclick="castVote()" disabled>Seleccionar una opción para votar</button>
+    <div class="vote-err" id="vote-err"></div>
+  ` : '';
+
+  // ── RESULTS ──
   const barsHtml = opts.map((opt, i) => {
-    const cnt = counts[opt] || 0;
-    const pct = total > 0 ? Math.round(cnt / total * 100) : 0;
+    const cnt   = counts[opt] || 0;
+    const pct   = total > 0 ? Math.round(cnt / total * 100) : 0;
     const color = COLORS[i % COLORS.length];
     return `<div class="result-row">
       <div class="result-label"><span>${esc(opt)}</span><span style="color:${color};font-weight:700;">${pct}%</span></div>
       <div class="result-bar-bg"><div class="result-bar-fill" style="width:${pct}%;background:${color};"></div></div>
     </div>`;
   }).join('');
-
-  // Option buttons (only if live)
-  const optBtns = isLive ? `
-    <div class="options-title">Cast your vote</div>
-    ${opts.map((opt, i) => `
-      <button class="option-btn" id="opt-${i}" onclick="selectOption(${i})">${esc(opt)}</button>
-    `).join('')}
-    <button class="btn vote-btn" id="vote-submit-btn" onclick="castVote()" disabled>Select an option to vote</button>
-    <div class="vote-err" id="vote-err"></div>
-  ` : '';
 
   content.innerHTML = `
     <div class="detail-card">
@@ -380,11 +404,30 @@ function renderDebate(db, res, ad) {
         ${db.closes_at ? `<span>Closes ${fmtDate(db.closes_at)}</span>` : ''}
       </div>
     </div>
+
+    <div class="phase-divider">
+      <div class="phase-divider-line"></div>
+      <div class="phase-label">01 · Debate</div>
+      <div class="phase-divider-line"></div>
+    </div>
     ${ad ? renderAdCard(ad) : ''}
-    ${isLive ? `<div class="detail-card">${optBtns}</div>` : ''}
+    <div class="opinions-section">${opinionsHtml}</div>
+
+    ${isLive ? `
+    <div class="phase-divider">
+      <div class="phase-divider-line"></div>
+      <div class="phase-label">02 · Tu Preferencia</div>
+      <div class="phase-divider-line"></div>
+    </div>
+    <div class="detail-card">${optBtns}</div>` : ''}
+
+    <div class="phase-divider">
+      <div class="phase-divider-line"></div>
+      <div class="phase-label">03 · Resultados en vivo</div>
+      <div class="phase-divider-line"></div>
+    </div>
     <div class="detail-card">
-      <div class="options-title">Current results</div>
-      <div class="results-section">${barsHtml || '<div style="color:var(--muted);font-size:14px;">No votes yet — be the first!</div>'}</div>
+      <div class="results-section">${barsHtml || '<div style="color:var(--muted);font-size:14px;">Aún no hay votos — ¡sé el primero!</div>'}</div>
     </div>
   `;
 }
