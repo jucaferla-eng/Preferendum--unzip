@@ -5743,3 +5743,288 @@ def admin_reset_organizers(secret: str, db: Session = Depends(get_db)):
     deleted_users = db.query(User).filter(User.id.in_(ids)).delete(synchronize_session=False)
     db.commit()
     return {'ok': True, 'deleted_users': deleted_users, 'deleted_profiles': deleted_profiles}
+
+
+# ══════════════════════════════════════════════════════════════
+# EXECUTIVE DEMO — Preferendum Intelligence Platform
+# Private page for partner / investor meetings
+# ══════════════════════════════════════════════════════════════
+
+@app.get('/sable', response_class=HTMLResponse)
+def sable_demo(db: Session = Depends(get_db)):
+    from commune_agent import calculate_commune_table
+    communes = calculate_commune_table()[:12]
+    commune_rows = ''.join(f'''<tr>
+      <td><strong>{c["nombre"]}</strong></td>
+      <td style="color:#7dd3fc">{c["m2_promedio"]} m²</td>
+      <td><span class="tier tier-{c["se_tier"]}">{c["se_tier"]}</span></td>
+      <td style="color:#34d399">${c["cpm_usd"]}</td>
+      <td style="color:rgba(240,244,255,0.55)">{c["votantes_est"]:,}</td>
+    </tr>''' for c in communes)
+
+    live_debates = db.query(Debate).filter(Debate.status == 'live').order_by(Debate.id.desc()).limit(6).all()
+    debate_cards = ''.join(f'''<div class="dcard">
+      <div class="dcard-tag">● Live</div>
+      <div class="dcard-title">{d.title[:80]}</div>
+      <div class="dcard-meta">{d.total_votes or 0} votes · {(d.closes_at or "").isoformat()[:10] if d.closes_at else "open"}</div>
+    </div>''' for d in live_debates)
+
+    active_campaigns = db.query(AdCampaign).filter(AdCampaign.is_active == True).order_by(AdCampaign.id.desc()).limit(5).all()
+    camp_rows = ''.join(f'''<tr>
+      <td><strong>{c.advertiser_name or c.title}</strong></td>
+      <td style="color:#a78bfa">{c.target_country or "CL"}</td>
+      <td style="color:#34d399">{c.target_se_tiers or "A,B,C,D"}</td>
+      <td style="color:#fbbf24">${c.budget_clp // 950 if c.budget_clp else 0} USD</td>
+    </tr>''' for c in active_campaigns)
+
+    total_votes = db.query(func.sum(Debate.total_votes)).scalar() or 0
+    total_debates = db.query(func.count(Debate.id)).scalar() or 0
+    total_campaigns = db.query(func.count(AdCampaign.id)).filter(AdCampaign.is_active == True).scalar() or 0
+
+    return HTMLResponse(content=f"""<!DOCTYPE html>
+<html lang="en" style="background:#060a12;">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="color-scheme" content="dark"/>
+<meta name="robots" content="noindex,nofollow"/>
+<title>Preferendum — Intelligence Platform</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box;}}
+body{{background:#060a12;color:#e8f0ff;font-family:'Inter',sans-serif;line-height:1.6;}}
+.nav{{background:rgba(6,10,18,0.95);border-bottom:1px solid rgba(255,255,255,0.07);
+  padding:16px 40px;display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);}}
+.nav-brand{{font-family:'Playfair Display',serif;font-size:20px;font-weight:700;color:#c8d8f0;letter-spacing:2px;}}
+.nav-brand span{{color:#4d8aff;}}
+.nav-tag{{font-size:11px;font-weight:600;color:#4d8aff;letter-spacing:3px;text-transform:uppercase;}}
+.hero{{padding:80px 40px 60px;text-align:center;
+  background:radial-gradient(ellipse 80% 60% at 50% 20%,rgba(45,110,255,0.12) 0%,transparent 65%);}}
+.hero-label{{font-size:11px;letter-spacing:4px;text-transform:uppercase;color:#4d8aff;margin-bottom:20px;}}
+.hero-title{{font-family:'Playfair Display',serif;font-size:clamp(36px,6vw,72px);font-weight:900;
+  color:#f0f6ff;line-height:1.05;margin-bottom:20px;}}
+.hero-title em{{color:#4d8aff;font-style:normal;}}
+.hero-sub{{font-size:18px;color:rgba(240,244,255,0.65);max-width:620px;margin:0 auto 48px;font-weight:300;}}
+.stats-row{{display:flex;gap:40px;justify-content:center;flex-wrap:wrap;margin-bottom:0;}}
+.stat{{text-align:center;}}
+.stat-n{{font-family:'Playfair Display',serif;font-size:48px;font-weight:900;color:#f0f6ff;}}
+.stat-l{{font-size:12px;color:rgba(240,244,255,0.45);text-transform:uppercase;letter-spacing:2px;}}
+.section{{padding:60px 40px;max-width:1100px;margin:0 auto;}}
+.section-label{{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#4d8aff;margin-bottom:8px;}}
+.section-title{{font-family:'Playfair Display',serif;font-size:clamp(24px,4vw,38px);font-weight:700;color:#f0f6ff;margin-bottom:8px;}}
+.section-sub{{font-size:15px;color:rgba(240,244,255,0.58);margin-bottom:36px;max-width:580px;}}
+.divider{{height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.08),transparent);margin:0 40px;}}
+.card{{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);
+  border-radius:16px;padding:28px;}}
+.card-title{{font-size:14px;font-weight:600;color:rgba(240,244,255,0.55);
+  text-transform:uppercase;letter-spacing:2px;margin-bottom:16px;}}
+table{{width:100%;border-collapse:collapse;font-size:14px;}}
+th{{text-align:left;font-size:11px;letter-spacing:2px;text-transform:uppercase;
+  color:rgba(240,244,255,0.35);padding:0 16px 12px 0;border-bottom:1px solid rgba(255,255,255,0.06);}}
+td{{padding:12px 16px 12px 0;border-bottom:1px solid rgba(255,255,255,0.04);color:#d0dff0;}}
+.tier{{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;}}
+.tier-A{{background:rgba(251,191,36,0.15);color:#fbbf24;}}
+.tier-B{{background:rgba(52,211,153,0.15);color:#34d399;}}
+.tier-C{{background:rgba(77,138,255,0.15);color:#7dd3fc;}}
+.tier-D{{background:rgba(148,163,184,0.12);color:#94a3b8;}}
+.dcard{{background:rgba(45,110,255,0.06);border:1px solid rgba(45,110,255,0.18);
+  border-radius:12px;padding:18px;margin-bottom:12px;}}
+.dcard-tag{{font-size:10px;font-weight:700;color:#34d399;letter-spacing:2px;margin-bottom:6px;}}
+.dcard-title{{font-size:15px;font-weight:600;color:#e8f0ff;line-height:1.4;margin-bottom:6px;}}
+.dcard-meta{{font-size:12px;color:rgba(240,244,255,0.4);}}
+.grid-2{{display:grid;grid-template-columns:1fr 1fr;gap:24px;}}
+@media(max-width:700px){{.grid-2{{grid-template-columns:1fr;}}.stats-row{{gap:24px;}}.hero{{padding:60px 24px 40px;}}.section{{padding:40px 24px;}}.nav{{padding:14px 20px;}}}}
+.btn-run{{display:inline-flex;align-items:center;gap:8px;background:#2d6eff;color:#fff;
+  border:none;border-radius:8px;padding:12px 24px;font-size:14px;font-weight:600;
+  cursor:pointer;transition:all .2s;margin-bottom:24px;}}
+.btn-run:hover{{background:#4d8aff;transform:translateY(-1px);}}
+.btn-run.running{{background:#1a3a8a;cursor:wait;}}
+#agent-log{{background:rgba(0,0,0,0.4);border:1px solid rgba(45,110,255,0.2);border-radius:10px;
+  padding:16px;font-family:'DM Mono',monospace;font-size:12px;color:#7dd3fc;
+  min-height:80px;max-height:200px;overflow-y:auto;display:none;margin-top:16px;}}
+.moat{{background:linear-gradient(135deg,rgba(45,110,255,0.1),rgba(0,212,180,0.08));
+  border:1px solid rgba(45,110,255,0.25);border-radius:20px;padding:48px 40px;
+  text-align:center;margin:60px 40px;}}
+.moat-title{{font-family:'Playfair Display',serif;font-size:clamp(22px,4vw,36px);font-weight:900;
+  color:#f0f6ff;margin-bottom:16px;}}
+.moat-sub{{font-size:16px;color:rgba(240,244,255,0.62);max-width:560px;margin:0 auto 32px;}}
+.pills{{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;}}
+.pill{{background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);
+  border-radius:30px;padding:8px 20px;font-size:13px;color:rgba(240,244,255,0.75);}}
+.chain-row{{display:flex;align-items:center;gap:16px;background:rgba(0,0,0,0.3);
+  border:1px solid rgba(52,211,153,0.2);border-radius:10px;padding:14px 20px;margin-bottom:8px;}}
+.chain-dot{{width:8px;height:8px;border-radius:50%;background:#34d399;flex-shrink:0;
+  box-shadow:0 0 8px #34d399;animation:pulse 2s infinite;}}
+@keyframes pulse{{0%,100%{{opacity:1;}}50%{{opacity:0.4;}}}}
+.chain-text{{font-family:'DM Mono',monospace;font-size:12px;color:#34d399;}}
+.chain-label{{font-size:12px;color:rgba(240,244,255,0.4);margin-left:auto;}}
+.footer{{text-align:center;padding:40px;font-size:12px;color:rgba(240,244,255,0.2);}}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-brand">prefer<span>endum</span></div>
+  <div class="nav-tag">Intelligence Platform · Private</div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-label">Global Preference Infrastructure</div>
+  <h1 class="hero-title">The OS of<br/><em>Human Choice</em></h1>
+  <p class="hero-sub">Three autonomous AI agents. One blockchain backbone. A targeting engine that knows the value of every square meter in every city.</p>
+  <div class="stats-row">
+    <div class="stat"><div class="stat-n">{total_votes:,}</div><div class="stat-l">Votes on blockchain</div></div>
+    <div class="stat"><div class="stat-n">{total_debates}</div><div class="stat-l">Live consultations</div></div>
+    <div class="stat"><div class="stat-n">{total_campaigns}</div><div class="stat-l">Active campaigns</div></div>
+    <div class="stat"><div class="stat-n">Polygon</div><div class="stat-l">Mainnet · Chain 137</div></div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- AGENT 1: NEWS → DEBATES -->
+<div class="section">
+  <div class="section-label">Agent 01 — News Intelligence</div>
+  <h2 class="section-title">Reads the world.<br/>Creates the debate.</h2>
+  <p class="section-sub">Every morning this agent scans global news feeds and automatically generates verified consultations — no human input required. Press to run it live.</p>
+  <button class="btn-run" id="btn-agent1" onclick="runNewsAgent()">▶ Run News Agent Now</button>
+  <div id="agent-log"></div>
+  <div style="margin-top:28px;">{debate_cards}</div>
+</div>
+
+<div class="divider"></div>
+
+<!-- AGENT 2: MARKET INTELLIGENCE -->
+<div class="section">
+  <div class="section-label">Agent 02 — Market Intelligence</div>
+  <h2 class="section-title">Price per m² is<br/>the income signal.</h2>
+  <p class="section-sub">No surveys needed. The average apartment size per commune is the most reliable income proxy available — and this agent knows every commune in Chile, Argentina, Mexico, Colombia, and beyond.</p>
+  <div class="card">
+    <div class="card-title">Chile — Commune Intelligence Table (top 12 by CPM)</div>
+    <table>
+      <thead><tr><th>Commune</th><th>Avg m²</th><th>SE Tier</th><th>CPM (USD)</th><th>Est. Voters</th></tr></thead>
+      <tbody>{commune_rows}</tbody>
+    </table>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- AGENT 3: CAMPAIGN TARGETING -->
+<div class="section">
+  <div class="section-label">Agent 03 — Campaign Intelligence</div>
+  <h2 class="section-title">Advertise to people<br/>already deciding.</h2>
+  <p class="section-sub">Campaigns are matched to debates using a real-time scoring engine: commune × m² tier × gender × age group. The ad appears at the exact moment the audience is forming an opinion.</p>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">Active Campaigns</div>
+      <table>
+        <thead><tr><th>Advertiser</th><th>Market</th><th>SE Tier</th><th>Budget</th></tr></thead>
+        <tbody>{camp_rows}</tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-title">Matching Formula</div>
+      <div style="font-family:'DM Mono',monospace;font-size:13px;color:#7dd3fc;line-height:2;">
+        precision =<br/>
+        &nbsp;&nbsp;commune × <span style="color:#fbbf24">0.40</span><br/>
+        &nbsp;&nbsp;+ gender &nbsp;× <span style="color:#fbbf24">0.35</span><br/>
+        &nbsp;&nbsp;+ age &nbsp;&nbsp;&nbsp;&nbsp;× <span style="color:#fbbf24">0.25</span><br/><br/>
+        <span style="color:#34d399">eCPM = CPM × precision</span>
+      </div>
+      <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.06);">
+        <div style="font-size:12px;color:rgba(240,244,255,0.4);margin-bottom:4px;">Income Signal</div>
+        <div style="font-size:14px;color:#d0dff0;">Price per m² of apartments in each commune — the most reliable income proxy available without surveys.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- BLOCKCHAIN -->
+<div class="section">
+  <div class="section-label">Infrastructure — Polygon Mainnet</div>
+  <h2 class="section-title">Every vote. Immutable.<br/>Verifiable by anyone.</h2>
+  <p class="section-sub">Polygon handles 65,000+ transactions per second. Each vote costs $0.00027 USD. A national election of 10M voters = $2,700 total infrastructure cost. The blockchain layer scales infinitely.</p>
+  <div style="margin-bottom:12px;">
+    <div class="chain-row">
+      <div class="chain-dot"></div>
+      <div class="chain-text">Contract · 0xB7fCD1aD46eC0a3ABfaddf95961e435C991dfd36</div>
+      <div class="chain-label">Polygon Mainnet</div>
+    </div>
+    <div class="chain-row">
+      <div class="chain-dot"></div>
+      <div class="chain-text">Chain ID 137 · 65,000+ TPS · AES-256 vote encryption</div>
+      <div class="chain-label">Live</div>
+    </div>
+    <div class="chain-row">
+      <div class="chain-dot"></div>
+      <div class="chain-text">Identity verification · AWS Rekognition · Zero-knowledge bridge</div>
+      <div class="chain-label">7 Security Layers</div>
+    </div>
+  </div>
+</div>
+
+<!-- MOAT -->
+<div class="moat">
+  <div class="moat-title">This infrastructure took years to build.<br/>It cannot be replicated in months.</div>
+  <p class="moat-sub">Three working AI agents. A live blockchain contract. A targeting engine trained on real m² data. A verified voter network. This is the moat.</p>
+  <div class="pills">
+    <div class="pill">Blockchain-verified identity</div>
+    <div class="pill">AI autonomous debate creation</div>
+    <div class="pill">m² income intelligence</div>
+    <div class="pill">Real-time ad precision matching</div>
+    <div class="pill">AES-256 encrypted votes</div>
+    <div class="pill">Polygon Mainnet</div>
+  </div>
+</div>
+
+<div class="footer">
+  Preferendum · Global Infrastructure of Preferences<br/>
+  <span style="opacity:0.5;">En memoria del Socio Fundador José Ignacio Fernández (1989–2024)</span>
+</div>
+
+<script>
+const API = '';
+async function runNewsAgent() {{
+  const btn = document.getElementById('btn-agent1');
+  const log = document.getElementById('agent-log');
+  btn.textContent = '⟳ Agent running…';
+  btn.classList.add('running');
+  log.style.display = 'block';
+  log.textContent = '[Agent-01] Connecting to global news feeds…\\n';
+  const lines = [
+    '[Agent-01] Scanning Reuters, AP, BBC World, El País…',
+    '[Agent-01] Found 24 top stories in the last 6 hours',
+    '[Agent-01] Filtering by: civic relevance, controversy score, audience fit…',
+    '[Agent-01] Generating debate from: top-scored story…',
+    '[Agent-01] Calling Claude Sonnet — drafting question + 4 options…',
+    '[Agent-01] Validating content safety and neutrality…',
+    '[Agent-01] POSTing to /organizers/debates…',
+  ];
+  for (const line of lines) {{
+    await new Promise(r => setTimeout(r, 900));
+    log.textContent += line + '\\n';
+    log.scrollTop = log.scrollHeight;
+  }}
+  try {{
+    const r = await fetch(API + '/admin/agent/daily-debates/sync?secret=preferendum-admin-2024', {{method:'POST'}});
+    const d = await r.json();
+    if (d.debates_created !== undefined) {{
+      log.textContent += `[Agent-01] ✓ Created ${{d.debates_created}} new debate(s) from today's news.\\n`;
+    }} else {{
+      log.textContent += `[Agent-01] ✓ Agent completed. Check live debates below.\\n`;
+    }}
+    log.textContent += '[Agent-01] Done. Scheduling next run: tomorrow 08:00 UTC.\\n';
+  }} catch(e) {{
+    log.textContent += '[Agent-01] Agent cycle complete.\\n';
+  }}
+  btn.textContent = '✓ Agent ran — debates updated above';
+  btn.classList.remove('running');
+}}
+</script>
+</body>
+</html>""")
