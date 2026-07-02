@@ -1330,34 +1330,56 @@ def serve_voter_portal():
 
 
 class VoterRegisterInput(BaseModel):
-    name:     str
-    email:    str
-    password: str
-    country:  str = 'CL'
+    name:        str
+    email:       str
+    password:    str
+    country:     str = 'CL'
+    phone:       str = ''
+    national_id: str = ''   # RUT para Chile, DNI para otros
+    gender:      str = ''
+    dob:         str = ''   # YYYY-MM-DD
+    commune:     str = ''   # comuna declarada
 
 
 @app.post('/voter/register')
-def voter_register(data: VoterRegisterInput, db: Session = Depends(get_db)):
-    """Register a voter — auto-verifies email so they can vote immediately."""
+def voter_register(data: VoterRegisterInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
+    """Register a voter — sends email OTP for verification."""
     existing = db.query(User).filter(User.email == data.email).first()
     if existing:
-        # If already registered, just log them in
         if not bcrypt.checkpw(data.password.encode(), existing.password.encode()):
-            raise HTTPException(400, 'Email already registered with a different password')
-        existing.email_verified = True
-        db.commit()
-        return {'token': make_token(existing.id), 'user': {'id': existing.id, 'name': existing.name, 'email': existing.email}}
+            raise HTTPException(400, 'Email ya registrado con contraseña diferente')
+        # Re-send OTP if not yet verified
+        if not existing.email_verified:
+            code = gen_otp()
+            db.query(OTPCode).filter(OTPCode.user_id == existing.id, OTPCode.channel == 'email', OTPCode.used == False).update({'used': True})
+            db.add(OTPCode(user_id=existing.id, email=existing.email, code=code, channel='email',
+                           expires_at=datetime.utcnow() + timedelta(minutes=15)))
+            db.commit()
+            bg.add_task(send_email_otp, existing.email, code, existing.name)
+        return {'token': make_token(existing.id), 'user': {
+            'id': existing.id, 'name': existing.name, 'email': existing.email,
+            'email_verified': existing.email_verified, 'phone': existing.phone or ''
+        }}
     hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
     user = User(
         email=data.email, name=data.name, password=hashed,
-        country=data.country, email_verified=True,
-        phone='', county='', gender='', dob='', national_id='',
+        country=data.country, email_verified=False,
+        phone=data.phone, county=data.commune,
+        gender=data.gender, dob=data.dob, national_id=data.national_id,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     _assign_user_tier(user, db)
-    return {'token': make_token(user.id), 'user': {'id': user.id, 'name': user.name, 'email': user.email}}
+    code = gen_otp()
+    db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
+                   expires_at=datetime.utcnow() + timedelta(minutes=15)))
+    db.commit()
+    bg.add_task(send_email_otp, user.email, code, user.name)
+    return {'token': make_token(user.id), 'user': {
+        'id': user.id, 'name': user.name, 'email': user.email,
+        'email_verified': False, 'phone': data.phone
+    }}
 
 
 @app.get('/r/{debate_id}', response_class=HTMLResponse)
@@ -2801,6 +2823,46 @@ def organizer_login(data: LoginInput, db: Session = Depends(get_db)):
         'token': make_token(user.id, user.role),
         'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
     }
+
+@app.get('/debates/search-similar')
+def search_similar_debate(q: str, country: str = 'CL', db: Session = Depends(get_db)):
+    """
+    Before creating a debate, check if a similar one already exists.
+    Returns matching debates so organizers and agents can converge
+    into an existing debate instead of fragmenting the same topic.
+    """
+    STOP_WORDS = {'el','la','los','las','un','una','de','del','en','que','qué',
+                  'y','o','a','al','se','su','sus','por','para','con','es','son',
+                  'the','a','an','of','to','in','is','are','and','or','for','with'}
+    import re as _re
+    def keywords(text):
+        words = _re.findall(r'\b\w{4,}\b', text.lower())
+        return {w for w in words if w not in STOP_WORDS}
+
+    q_kw = keywords(q)
+    if len(q_kw) < 2:
+        return {'similar': [], 'total': 0}
+
+    live = db.query(Debate).filter(
+        Debate.status == 'live',
+        Debate.scope_country == country,
+    ).order_by(Debate.id.desc()).limit(100).all()
+
+    results = []
+    for d in live:
+        d_kw = keywords(d.title or '')
+        overlap = len(q_kw & d_kw)
+        if overlap >= 3:
+            results.append({
+                'id':        d.id,
+                'title':     d.title,
+                'total_votes': d.total_votes or 0,
+                'overlap':   overlap,
+                'closes_at': d.closes_at.isoformat() if d.closes_at else None,
+            })
+    results.sort(key=lambda x: x['overlap'], reverse=True)
+    return {'similar': results[:5], 'total': len(results)}
+
 
 @app.get('/organizers/me/debates')
 def organizer_my_debates(user: User = Depends(get_current_user), db: Session = Depends(get_db)):

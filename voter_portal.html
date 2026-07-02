@@ -137,6 +137,8 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 .verify-status.ok{color:var(--green);}
 .verify-status.err{color:#f87171;}
 .verify-skip{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;text-decoration:underline;width:100%;text-align:center;margin-top:16px;padding:4px;}
+.otp-input{width:100%;text-align:center;letter-spacing:8px;font-size:22px;font-weight:700;background:var(--bg3);border:2px solid var(--border);border-radius:10px;padding:14px;color:var(--text);outline:none;margin-bottom:12px;font-family:'Inter',sans-serif;}
+.otp-input:focus{border-color:var(--blue);}
 </style>
 </head>
 <body>
@@ -166,24 +168,63 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
     </div>
     <!-- REGISTER -->
     <div id="tab-register" style="display:none;">
-      <div class="field"><label>Full Name</label><input type="text" id="r-name" placeholder="Your full name"/></div>
-      <div class="field"><label>Email</label><input type="email" id="r-email" placeholder="your@email.com" autocomplete="email"/></div>
-      <div class="field"><label>Password</label><input type="password" id="r-pass" placeholder="Min 6 characters" autocomplete="new-password"/></div>
+      <div class="field"><label>Full Name</label><input type="text" id="r-name" placeholder="Your full name" autocomplete="name"/></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="field"><label>Email</label><input type="email" id="r-email" placeholder="your@email.com" autocomplete="email"/></div>
+        <div class="field"><label>Password</label><input type="password" id="r-pass" placeholder="Min 6 chars" autocomplete="new-password"/></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="field"><label>Phone</label><input type="tel" id="r-phone" placeholder="+56 9 1234 5678" autocomplete="tel"/></div>
+        <div class="field"><label>RUT / National ID</label><input type="text" id="r-rut" placeholder="12.345.678-9"/></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div class="field"><label>Date of Birth</label><input type="date" id="r-dob"/></div>
+        <div class="field"><label>Gender</label>
+          <select id="r-gender">
+            <option value="">— select —</option>
+            <option value="M">Male</option>
+            <option value="F">Female</option>
+            <option value="NB">Non-binary</option>
+            <option value="NA">Prefer not to say</option>
+          </select>
+        </div>
+      </div>
       <div class="field"><label>Country</label>
-        <select id="r-country">
+        <select id="r-country" onchange="toggleCommuneField()">
           <option value="CL">Chile</option>
-          <option value="US">United States</option>
-          <option value="MX">Mexico</option>
           <option value="AR">Argentina</option>
-          <option value="CO">Colombia</option>
           <option value="PE">Peru</option>
+          <option value="MX">Mexico</option>
+          <option value="CO">Colombia</option>
           <option value="BR">Brazil</option>
+          <option value="US">United States</option>
           <option value="ES">Spain</option>
           <option value="GB">United Kingdom</option>
           <option value="OTHER">Other</option>
         </select>
       </div>
-      <button class="btn" onclick="doRegister()">Create Account & Vote</button>
+      <div class="field" id="commune-field">
+        <label>Commune / City</label>
+        <input type="text" id="r-commune" placeholder="e.g. Las Condes" list="communes-list" autocomplete="off"/>
+        <datalist id="communes-list">
+          <option value="Vitacura"/><option value="Las Condes"/><option value="Lo Barnechea"/>
+          <option value="Providencia"/><option value="La Reina"/><option value="Ñuñoa"/>
+          <option value="Peñalolén"/><option value="Macul"/><option value="San Miguel"/>
+          <option value="La Florida"/><option value="Santiago"/><option value="Independencia"/>
+          <option value="Recoleta"/><option value="Quinta Normal"/><option value="Renca"/>
+          <option value="Lo Espejo"/><option value="El Bosque"/><option value="San Ramón"/>
+          <option value="La Pintana"/><option value="Pudahuel"/><option value="Cerro Navia"/>
+          <option value="Lo Prado"/><option value="Cerrillos"/><option value="Estación Central"/>
+          <option value="Maipú"/><option value="Quilicura"/><option value="Huechuraba"/>
+          <option value="Conchalí"/><option value="Valparaíso"/><option value="Viña del Mar"/>
+          <option value="Concón"/><option value="Quilpué"/><option value="Concepción"/>
+          <option value="Talcahuano"/><option value="San Pedro de la Paz"/>
+          <option value="Antofagasta"/><option value="La Serena"/><option value="Coquimbo"/>
+          <option value="Rancagua"/><option value="Temuco"/><option value="Puerto Montt"/>
+          <option value="Iquique"/><option value="Arica"/><option value="Punta Arenas"/>
+        </datalist>
+      </div>
+      <button class="btn" onclick="doRegister()">Create Account →</button>
       <p class="auth-err" id="r-err"></p>
     </div>
   </div>
@@ -197,11 +238,49 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
     <div class="verify-progress">
       <div class="verify-step-dot active" id="vdot-1"></div>
       <div class="verify-step-dot" id="vdot-2"></div>
+      <div class="verify-step-dot" id="vdot-3"></div>
+      <div class="verify-step-dot" id="vdot-4"></div>
     </div>
 
-    <!-- Step 1: ID Document -->
+    <!-- Step 1: Email OTP -->
     <div id="verify-step-1">
-      <div class="verify-step-num">Step 1 of 2</div>
+      <div class="verify-step-num">Step 1 of 4</div>
+      <div class="verify-step-title">📧 Confirm your email</div>
+      <div class="verify-step-sub" id="email-otp-sub">We sent a 6-digit code to your email. Enter it below.</div>
+      <input type="text" id="email-otp-input" maxlength="6" inputmode="numeric" pattern="[0-9]*"
+        placeholder="— — — — — —"
+        style="width:100%;text-align:center;letter-spacing:8px;font-size:22px;font-weight:700;
+               background:var(--bg3);border:2px solid var(--border);border-radius:10px;
+               padding:14px;color:var(--text);outline:none;margin-bottom:12px;"/>
+      <button class="btn" onclick="confirmEmailOTP()">Verify Email →</button>
+      <div class="verify-status" id="email-otp-status"></div>
+      <div style="text-align:center;margin-top:12px;">
+        <button class="verify-skip" onclick="resendEmailOTP()" style="color:var(--blue);text-decoration:none;">Resend code</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Phone OTP -->
+    <div id="verify-step-2" style="display:none;">
+      <div class="verify-step-num">Step 2 of 4</div>
+      <div class="verify-step-title">📱 Verify your phone</div>
+      <div class="verify-step-sub" id="phone-otp-sub">We will send an SMS to your phone number.</div>
+      <div id="phone-send-section">
+        <button class="btn" onclick="sendPhoneOTP()">Send SMS code →</button>
+      </div>
+      <div id="phone-confirm-section" style="display:none;">
+        <input type="text" id="phone-otp-input" maxlength="6" inputmode="numeric" pattern="[0-9]*"
+          placeholder="— — — — — —"
+          style="width:100%;text-align:center;letter-spacing:8px;font-size:22px;font-weight:700;
+                 background:var(--bg3);border:2px solid var(--border);border-radius:10px;
+                 padding:14px;color:var(--text);outline:none;margin-bottom:12px;"/>
+        <button class="btn" onclick="confirmPhoneOTP()">Verify Phone →</button>
+      </div>
+      <div class="verify-status" id="phone-otp-status"></div>
+    </div>
+
+    <!-- Step 3: ID Document -->
+    <div id="verify-step-3" style="display:none;">
+      <div class="verify-step-num">Step 3 of 4</div>
       <div class="verify-step-title">📄 Upload your ID</div>
       <div class="verify-step-sub">Take a clear photo of your national ID card or passport — the side that shows your photo.</div>
       <label class="upload-btn" for="doc-file-input">
@@ -211,9 +290,9 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
       <div class="verify-status" id="doc-status"></div>
     </div>
 
-    <!-- Step 2: Selfie -->
-    <div id="verify-step-2" style="display:none;">
-      <div class="verify-step-num">Step 2 of 2</div>
+    <!-- Step 4: Selfie -->
+    <div id="verify-step-4" style="display:none;">
+      <div class="verify-step-num">Step 4 of 4</div>
       <div class="verify-step-title">🤳 Take a selfie</div>
       <div class="verify-step-sub">Hold your ID card under your chin so both your face and the document are visible in the same photo.</div>
       <label class="upload-btn" for="selfie-file-input">
@@ -223,14 +302,14 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
       <div class="verify-status" id="selfie-status"></div>
     </div>
 
-    <!-- Step 3: Success -->
-    <div id="verify-step-3" style="display:none;text-align:center;padding:12px 0;">
+    <!-- Step 5: Complete -->
+    <div id="verify-step-5" style="display:none;text-align:center;padding:12px 0;">
       <div style="font-size:48px;margin-bottom:12px;">✅</div>
-      <div style="font-size:18px;font-weight:700;color:var(--green);margin-bottom:8px;">Identity Verified</div>
-      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Your account is now secured with biometric verification.</div>
+      <div style="font-size:18px;font-weight:700;color:var(--green);margin-bottom:8px;">Identidad Verificada</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Tu cuenta está asegurada con verificación biométrica.</div>
     </div>
 
-    <button class="verify-skip" id="verify-skip-btn" onclick="showApp()">Skip verification for now →</button>
+    <button class="verify-skip" id="verify-skip-btn" onclick="showApp()">Saltar verificación por ahora →</button>
   </div>
 </div>
 
@@ -303,32 +382,161 @@ async function doLogin() {
   } catch(e) { document.getElementById('l-err').textContent = 'Connection error'; }
 }
 
+function toggleCommuneField() {
+  const country = document.getElementById('r-country').value;
+  document.getElementById('commune-field').style.display = country === 'CL' ? '' : '';
+}
+
 async function doRegister() {
   const name    = document.getElementById('r-name').value.trim();
   const email   = document.getElementById('r-email').value.trim();
   const pass    = document.getElementById('r-pass').value;
+  const phone   = document.getElementById('r-phone').value.trim();
+  const rut     = document.getElementById('r-rut').value.trim();
+  const dob     = document.getElementById('r-dob').value;
+  const gender  = document.getElementById('r-gender').value;
   const country = document.getElementById('r-country').value;
-  if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'All fields required'; return; }
-  if (pass.length < 6) { document.getElementById('r-err').textContent = 'Password min 6 characters'; return; }
+  const commune = document.getElementById('r-commune').value.trim();
+
+  if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'Name, email and password are required'; return; }
+  if (pass.length < 6) { document.getElementById('r-err').textContent = 'Password minimum 6 characters'; return; }
   document.getElementById('r-err').textContent = '';
+
+  const btn = document.querySelector('#tab-register .btn');
+  btn.disabled = true; btn.textContent = 'Creating account…';
+
   try {
-    const r = await fetch(`${API}/voter/register`, {method:'POST',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({name, email, password: pass, country})});
+    const r = await fetch(`${API}/voter/register`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name, email, password: pass, country,
+        phone, national_id: rut, dob, gender, commune})
+    });
     const d = await r.json();
+    btn.disabled = false; btn.textContent = 'Create Account →';
     if (!r.ok) { document.getElementById('r-err').textContent = d.detail || 'Registration failed'; return; }
     token = d.token;
     userName = name;
     localStorage.setItem('pref_voter_token', token);
     localStorage.setItem('pref_voter_name', userName);
+    // Update phone hint in wizard step 2
+    if (phone) document.getElementById('phone-otp-sub').textContent = `We will send an SMS to ${phone}`;
+    document.getElementById('email-otp-sub').textContent = `We sent a 6-digit code to ${email}`;
     showVerifyScreen();
-  } catch(e) { document.getElementById('r-err').textContent = 'Connection error'; }
+  } catch(e) {
+    btn.disabled = false; btn.textContent = 'Create Account →';
+    document.getElementById('r-err').textContent = 'Connection error';
+  }
 }
 
 function showVerifyScreen() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('verify-screen').classList.add('visible');
+  // Reset to step 1
+  ['verify-step-1','verify-step-2','verify-step-3','verify-step-4','verify-step-5'].forEach((id,i) => {
+    document.getElementById(id).style.display = i === 0 ? '' : 'none';
+  });
+  ['vdot-1','vdot-2','vdot-3','vdot-4'].forEach((id,i) => {
+    document.getElementById(id).className = 'verify-step-dot' + (i === 0 ? ' active' : '');
+  });
+  document.getElementById('verify-skip-btn').style.display = '';
 }
 
+function _advanceVerifyStep(fromStep, toStep) {
+  document.getElementById(`vdot-${fromStep}`).className = 'verify-step-dot done';
+  if (toStep <= 4) document.getElementById(`vdot-${toStep}`).className = 'verify-step-dot active';
+  setTimeout(() => {
+    document.getElementById(`verify-step-${fromStep}`).style.display = 'none';
+    document.getElementById(`verify-step-${toStep}`).style.display = '';
+  }, 600);
+}
+
+// ── STEP 1: Email OTP ──
+async function confirmEmailOTP() {
+  const code = document.getElementById('email-otp-input').value.trim();
+  if (code.length !== 6) return;
+  const status = document.getElementById('email-otp-status');
+  status.className = 'verify-status';
+  status.innerHTML = '<span class="spinner"></span> Verifying…';
+  try {
+    const r = await fetch(`${API}/verify/email/confirm`, {
+      method: 'POST', headers: {'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify({code})
+    });
+    const d = await r.json();
+    if (r.ok && d.verified) {
+      status.className = 'verify-status ok';
+      status.textContent = '✓ Email verified';
+      _advanceVerifyStep(1, 2);
+    } else {
+      status.className = 'verify-status err';
+      status.textContent = d.detail || '✗ Invalid code. Check your email and try again.';
+    }
+  } catch(e) {
+    status.className = 'verify-status err';
+    status.textContent = '✗ Connection error.';
+  }
+}
+
+async function resendEmailOTP() {
+  try {
+    await fetch(`${API}/verify/email/send`, {method:'POST', headers:{'Authorization':'Bearer '+token}});
+    document.getElementById('email-otp-status').className = 'verify-status ok';
+    document.getElementById('email-otp-status').textContent = '✓ Code resent — check your inbox';
+  } catch(e) {}
+}
+
+// ── STEP 2: Phone OTP ──
+async function sendPhoneOTP() {
+  const status = document.getElementById('phone-otp-status');
+  status.className = 'verify-status';
+  status.innerHTML = '<span class="spinner"></span> Sending SMS…';
+  try {
+    const r = await fetch(`${API}/verify/phone/send`, {
+      method: 'POST', headers: {'Authorization': 'Bearer ' + token}
+    });
+    const d = await r.json();
+    if (r.ok) {
+      status.className = 'verify-status ok';
+      status.textContent = '✓ SMS sent';
+      document.getElementById('phone-send-section').style.display = 'none';
+      document.getElementById('phone-confirm-section').style.display = '';
+    } else {
+      status.className = 'verify-status err';
+      status.textContent = d.detail || '✗ Could not send SMS. Check your phone number.';
+    }
+  } catch(e) {
+    status.className = 'verify-status err';
+    status.textContent = '✗ Connection error.';
+  }
+}
+
+async function confirmPhoneOTP() {
+  const code = document.getElementById('phone-otp-input').value.trim();
+  if (code.length !== 6) return;
+  const status = document.getElementById('phone-otp-status');
+  status.className = 'verify-status';
+  status.innerHTML = '<span class="spinner"></span> Verifying…';
+  try {
+    const r = await fetch(`${API}/verify/phone/confirm`, {
+      method: 'POST', headers: {'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify({code})
+    });
+    const d = await r.json();
+    if (r.ok && d.verified) {
+      status.className = 'verify-status ok';
+      status.textContent = '✓ Phone verified';
+      _advanceVerifyStep(2, 3);
+    } else {
+      status.className = 'verify-status err';
+      status.textContent = d.detail || '✗ Invalid code. Try again.';
+    }
+  } catch(e) {
+    status.className = 'verify-status err';
+    status.textContent = '✗ Connection error.';
+  }
+}
+
+// ── STEP 3: ID Document ──
 async function handleDocUpload(input) {
   const file = input.files[0];
   if (!file) return;
@@ -340,23 +548,16 @@ async function handleDocUpload(input) {
   fd.append('doc_type', 'national_id');
   try {
     const r = await fetch(`${API}/verify/document`, {
-      method: 'POST',
-      headers: {'Authorization': 'Bearer ' + token},
-      body: fd
+      method: 'POST', headers: {'Authorization': 'Bearer ' + token}, body: fd
     });
     const d = await r.json();
     if (r.ok && d.verified) {
       status.className = 'verify-status ok';
       status.textContent = '✓ Document accepted';
-      document.getElementById('vdot-1').className = 'verify-step-dot done';
-      document.getElementById('vdot-2').className = 'verify-step-dot active';
-      setTimeout(() => {
-        document.getElementById('verify-step-1').style.display = 'none';
-        document.getElementById('verify-step-2').style.display = '';
-      }, 700);
+      _advanceVerifyStep(3, 4);
     } else {
       status.className = 'verify-status err';
-      status.textContent = d.detail || '✗ No face detected in document. Try a clearer photo.';
+      status.textContent = d.detail || '✗ No face detected. Use a clearer photo.';
     }
   } catch(e) {
     status.className = 'verify-status err';
@@ -364,6 +565,7 @@ async function handleDocUpload(input) {
   }
 }
 
+// ── STEP 4: Selfie ──
 async function handleSelfieUpload(input) {
   const file = input.files[0];
   if (!file) return;
@@ -374,23 +576,21 @@ async function handleSelfieUpload(input) {
   fd.append('file', file);
   try {
     const r = await fetch(`${API}/verify/selfie`, {
-      method: 'POST',
-      headers: {'Authorization': 'Bearer ' + token},
-      body: fd
+      method: 'POST', headers: {'Authorization': 'Bearer ' + token}, body: fd
     });
     const d = await r.json();
     if (r.ok && d.verified) {
       status.className = 'verify-status ok';
-      status.textContent = '✓ Identity confirmed! Similarity: ' + (d.match_score ? d.match_score.toFixed(0) + '%' : '✓');
-      document.getElementById('vdot-2').className = 'verify-step-dot done';
-      document.getElementById('verify-step-2').style.display = 'none';
-      document.getElementById('verify-step-3').style.display = '';
+      status.textContent = `✓ Identidad confirmada — coincidencia ${d.match_score || ''}%`;
+      document.getElementById('vdot-4').className = 'verify-step-dot done';
+      document.getElementById('verify-step-4').style.display = 'none';
+      document.getElementById('verify-step-5').style.display = '';
       document.getElementById('verify-skip-btn').style.display = 'none';
       setTimeout(() => showApp(), 1800);
     } else {
       status.className = 'verify-status err';
-      const score = d.match_score ? ` (score: ${d.match_score.toFixed(0)}%)` : '';
-      status.textContent = `✗ Face match failed${score}. Make sure your ID is clearly visible under your chin.`;
+      const score = d.match_score ? ` (${d.match_score}%)` : '';
+      status.textContent = `✗ La cara no coincide${score}. Asegúrate de que el carné sea visible bajo tu mentón.`;
     }
   } catch(e) {
     status.className = 'verify-status err';
@@ -410,7 +610,9 @@ function doLogout() {
 // ── APP ──
 function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
-  document.getElementById('verify-screen').classList.remove('visible');
+  const vs = document.getElementById('verify-screen');
+  vs.classList.remove('visible');
+  vs.style.display = 'none';
   document.getElementById('main-app').style.display = 'flex';
   document.getElementById('main-app').classList.add('visible');
   document.getElementById('user-name-display').textContent = userName;
