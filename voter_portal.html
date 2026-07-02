@@ -119,6 +119,24 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 .spinner{display:inline-block;width:20px;height:20px;border:2px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;}
 @keyframes spin{to{transform:rotate(360deg);}}
 .loading{text-align:center;padding:40px;color:var(--muted);}
+
+/* ── VERIFY SCREEN ── */
+#verify-screen{display:none;min-height:100vh;flex-direction:column;align-items:center;justify-content:center;padding:24px;}
+#verify-screen.visible{display:flex;}
+.verify-card{background:var(--bg2);border:1px solid var(--border);border-radius:16px;padding:28px;width:100%;max-width:400px;}
+.verify-progress{display:flex;gap:8px;margin-bottom:24px;}
+.verify-step-dot{flex:1;height:4px;border-radius:2px;background:var(--bg3);transition:background .3s;}
+.verify-step-dot.done{background:var(--green);}
+.verify-step-dot.active{background:var(--blue);}
+.verify-step-num{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px;}
+.verify-step-title{font-size:18px;font-weight:700;margin-bottom:8px;}
+.verify-step-sub{font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:20px;}
+.upload-btn{display:block;width:100%;padding:16px;background:var(--bg3);border:2px dashed rgba(45,110,255,0.4);border-radius:12px;color:var(--text);font-size:15px;font-weight:500;cursor:pointer;text-align:center;transition:border-color .2s,background .2s;margin-bottom:12px;}
+.upload-btn:hover{border-color:var(--blue);background:rgba(45,110,255,.06);}
+.verify-status{font-size:14px;padding:10px 0;min-height:24px;color:var(--muted);}
+.verify-status.ok{color:var(--green);}
+.verify-status.err{color:#f87171;}
+.verify-skip{background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;text-decoration:underline;width:100%;text-align:center;margin-top:16px;padding:4px;}
 </style>
 </head>
 <body>
@@ -168,6 +186,51 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
       <button class="btn" onclick="doRegister()">Create Account & Vote</button>
       <p class="auth-err" id="r-err"></p>
     </div>
+  </div>
+</div>
+
+<!-- IDENTITY VERIFICATION WIZARD -->
+<div id="verify-screen">
+  <div class="logo">prefer<span>endum</span></div>
+  <div class="logo-sub" style="margin-bottom:24px;">Identity Verification</div>
+  <div class="verify-card">
+    <div class="verify-progress">
+      <div class="verify-step-dot active" id="vdot-1"></div>
+      <div class="verify-step-dot" id="vdot-2"></div>
+    </div>
+
+    <!-- Step 1: ID Document -->
+    <div id="verify-step-1">
+      <div class="verify-step-num">Step 1 of 2</div>
+      <div class="verify-step-title">📄 Upload your ID</div>
+      <div class="verify-step-sub">Take a clear photo of your national ID card or passport — the side that shows your photo.</div>
+      <label class="upload-btn" for="doc-file-input">
+        📷 Open Camera / Choose Photo
+        <input type="file" id="doc-file-input" accept="image/jpeg,image/png,image/webp" capture="environment" style="display:none" onchange="handleDocUpload(this)"/>
+      </label>
+      <div class="verify-status" id="doc-status"></div>
+    </div>
+
+    <!-- Step 2: Selfie -->
+    <div id="verify-step-2" style="display:none;">
+      <div class="verify-step-num">Step 2 of 2</div>
+      <div class="verify-step-title">🤳 Take a selfie</div>
+      <div class="verify-step-sub">Hold your ID card under your chin so both your face and the document are visible in the same photo.</div>
+      <label class="upload-btn" for="selfie-file-input">
+        📸 Take Selfie
+        <input type="file" id="selfie-file-input" accept="image/jpeg,image/png,image/webp" capture="user" style="display:none" onchange="handleSelfieUpload(this)"/>
+      </label>
+      <div class="verify-status" id="selfie-status"></div>
+    </div>
+
+    <!-- Step 3: Success -->
+    <div id="verify-step-3" style="display:none;text-align:center;padding:12px 0;">
+      <div style="font-size:48px;margin-bottom:12px;">✅</div>
+      <div style="font-size:18px;font-weight:700;color:var(--green);margin-bottom:8px;">Identity Verified</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Your account is now secured with biometric verification.</div>
+    </div>
+
+    <button class="verify-skip" id="verify-skip-btn" onclick="showApp()">Skip verification for now →</button>
   </div>
 </div>
 
@@ -257,8 +320,82 @@ async function doRegister() {
     userName = name;
     localStorage.setItem('pref_voter_token', token);
     localStorage.setItem('pref_voter_name', userName);
-    showApp();
+    showVerifyScreen();
   } catch(e) { document.getElementById('r-err').textContent = 'Connection error'; }
+}
+
+function showVerifyScreen() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('verify-screen').classList.add('visible');
+}
+
+async function handleDocUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const status = document.getElementById('doc-status');
+  status.className = 'verify-status';
+  status.innerHTML = '<span class="spinner"></span> Analyzing document…';
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('doc_type', 'national_id');
+  try {
+    const r = await fetch(`${API}/verify/document`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token},
+      body: fd
+    });
+    const d = await r.json();
+    if (r.ok && d.verified) {
+      status.className = 'verify-status ok';
+      status.textContent = '✓ Document accepted';
+      document.getElementById('vdot-1').className = 'verify-step-dot done';
+      document.getElementById('vdot-2').className = 'verify-step-dot active';
+      setTimeout(() => {
+        document.getElementById('verify-step-1').style.display = 'none';
+        document.getElementById('verify-step-2').style.display = '';
+      }, 700);
+    } else {
+      status.className = 'verify-status err';
+      status.textContent = d.detail || '✗ No face detected in document. Try a clearer photo.';
+    }
+  } catch(e) {
+    status.className = 'verify-status err';
+    status.textContent = '✗ Upload failed. Check your connection.';
+  }
+}
+
+async function handleSelfieUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const status = document.getElementById('selfie-status');
+  status.className = 'verify-status';
+  status.innerHTML = '<span class="spinner"></span> Comparing faces…';
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch(`${API}/verify/selfie`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token},
+      body: fd
+    });
+    const d = await r.json();
+    if (r.ok && d.verified) {
+      status.className = 'verify-status ok';
+      status.textContent = '✓ Identity confirmed! Similarity: ' + (d.match_score ? d.match_score.toFixed(0) + '%' : '✓');
+      document.getElementById('vdot-2').className = 'verify-step-dot done';
+      document.getElementById('verify-step-2').style.display = 'none';
+      document.getElementById('verify-step-3').style.display = '';
+      document.getElementById('verify-skip-btn').style.display = 'none';
+      setTimeout(() => showApp(), 1800);
+    } else {
+      status.className = 'verify-status err';
+      const score = d.match_score ? ` (score: ${d.match_score.toFixed(0)}%)` : '';
+      status.textContent = `✗ Face match failed${score}. Make sure your ID is clearly visible under your chin.`;
+    }
+  } catch(e) {
+    status.className = 'verify-status err';
+    status.textContent = '✗ Upload failed. Check your connection.';
+  }
 }
 
 function doLogout() {
@@ -273,6 +410,7 @@ function doLogout() {
 // ── APP ──
 function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('verify-screen').classList.remove('visible');
   document.getElementById('main-app').style.display = 'flex';
   document.getElementById('main-app').classList.add('visible');
   document.getElementById('user-name-display').textContent = userName;

@@ -53,6 +53,14 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:8px;}
 @keyframes spin{to{transform:rotate(360deg);}}
 #main-app{display:none;}
+.similar-banner{display:none;background:rgba(45,110,255,.1);border:1px solid rgba(45,110,255,.35);border-radius:10px;padding:14px 16px;margin-top:10px;}
+.similar-banner.visible{display:block;}
+.similar-banner-title{font-size:12px;font-weight:600;color:#93c5fd;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;}
+.similar-item{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid rgba(45,110,255,.2);}
+.similar-item:last-child{border-bottom:none;padding-bottom:0;}
+.similar-item-text{font-size:13px;color:var(--text);flex:1;line-height:1.4;}
+.similar-item-badge{font-size:10px;font-weight:700;color:#10b981;background:rgba(16,185,129,.12);border-radius:20px;padding:2px 7px;white-space:nowrap;margin-top:1px;}
+.similar-dismiss{margin-top:12px;font-size:12px;color:var(--muted);cursor:pointer;text-decoration:underline;background:none;border:none;padding:0;}
 </style>
 </head>
 <body>
@@ -96,7 +104,15 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
     <div class="new-debate-form" id="create-form">
       <div class="form-title">+ New Consultation</div>
       <div class="alert" id="create-alert"></div>
-      <div class="field"><label>Title</label><input type="text" id="c-title" placeholder="What should your community decide?"/></div>
+      <div class="field">
+        <label>Title</label>
+        <input type="text" id="c-title" placeholder="What should your community decide?"/>
+        <div class="similar-banner" id="similar-banner">
+          <div class="similar-banner-title">Similar debates already exist — join instead of duplicating?</div>
+          <div id="similar-list"></div>
+          <button class="similar-dismiss" onclick="document.getElementById('similar-banner').classList.remove('visible')">Create new anyway →</button>
+        </div>
+      </div>
       <div class="field"><label>Context / Description</label><textarea id="c-context" placeholder="Provide background information…"></textarea></div>
       <div class="field">
         <label>Options (minimum 2)</label>
@@ -186,6 +202,7 @@ function showApp() {
   document.getElementById('main-app').style.display = 'block';
   setDefaultDate();
   loadDebates();
+  initConvergenceCheck();
 }
 
 function setDefaultDate() {
@@ -248,10 +265,44 @@ async function createDebate() {
 
   if (!r.ok) { showAlert('create-alert','error', d.detail || 'Error creating consultation'); return; }
   showAlert('create-alert','success','✓ Consultation created and published!');
+  hideSimilar();
   document.getElementById('c-title').value = '';
   document.getElementById('c-context').value = '';
   document.querySelectorAll('.opt-input').forEach((el,i) => { el.value = ''; el.placeholder = `Option ${i+1}`; });
   loadDebates();
+}
+
+let _similarTimer = null;
+function initConvergenceCheck() {
+  const titleInput = document.getElementById('c-title');
+  titleInput.addEventListener('input', () => {
+    clearTimeout(_similarTimer);
+    const q = titleInput.value.trim();
+    if (q.length < 12) { hideSimilar(); return; }
+    _similarTimer = setTimeout(() => checkSimilarDebates(q), 500);
+  });
+}
+
+function hideSimilar() {
+  document.getElementById('similar-banner').classList.remove('visible');
+  document.getElementById('similar-list').innerHTML = '';
+}
+
+async function checkSimilarDebates(q) {
+  const country = document.getElementById('c-country').value || 'CL';
+  try {
+    const r = await fetch(`${API}/debates/search-similar?q=${encodeURIComponent(q)}&country=${country}`);
+    if (!r.ok) { hideSimilar(); return; }
+    const data = await r.json();
+    const similar = data.similar || [];
+    if (!similar.length) { hideSimilar(); return; }
+    document.getElementById('similar-list').innerHTML = similar.slice(0,3).map(db => `
+      <div class="similar-item">
+        <div class="similar-item-text">${db.title}</div>
+        <span class="similar-item-badge">● Live · ${db.total_votes||0} votes</span>
+      </div>`).join('');
+    document.getElementById('similar-banner').classList.add('visible');
+  } catch(e) { hideSimilar(); }
 }
 
 async function loadDebates() {
