@@ -1120,10 +1120,12 @@ seed_demo_data()
 @app.get('/', response_class=HTMLResponse)
 def root():
     return HTMLResponse(content="""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" style="background:#090D18;">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="color-scheme" content="dark"/>
+<meta name="supported-color-schemes" content="dark"/>
 <title>Preferendum</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
 <style>

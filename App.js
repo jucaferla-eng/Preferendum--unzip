@@ -15,7 +15,12 @@ export default function App() {
   useEffect(() => {
     const sub = AppState.addEventListener('change', state => {
       if (state === 'active' && webRef.current) {
-        webRef.current.injectJavaScript(`window.location.href = '${APP_URL}'; true;`);
+        // Only ping to keep the server awake — do NOT reload the page,
+        // as that would reset the user's position in the voting flow.
+        webRef.current.injectJavaScript(`
+          fetch('${APP_URL}health').catch(()=>{});
+          true;
+        `);
       }
     });
     return () => sub.remove();
