@@ -4553,12 +4553,17 @@ def payments_stripe_create_session(
     user: User = Depends(get_current_user),
 ):
     """Creates a Stripe Checkout session and returns the URL to redirect the advertiser."""
-    return create_stripe_checkout(
-        user_id     = user.id,
-        package_id  = body.package_id,
-        success_url = body.success_url,
-        cancel_url  = body.cancel_url,
-    )
+    try:
+        return create_stripe_checkout(
+            user_id     = user.id,
+            package_id  = body.package_id,
+            success_url = body.success_url,
+            cancel_url  = body.cancel_url,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(502, f'Stripe error: {str(e)}')
 
 
 @app.post('/payments/stripe/webhook')
