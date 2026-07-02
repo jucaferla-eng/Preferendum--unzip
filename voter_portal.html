@@ -651,6 +651,7 @@ async function loadDebates() {
 async function openDebate(id) {
   document.getElementById('debates-view').style.display = 'none';
   document.getElementById('debate-detail').style.display = 'block';
+  window.scrollTo(0, 0);
   const content = document.getElementById('detail-content');
   content.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   selectedOption = null;
