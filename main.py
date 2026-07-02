@@ -5754,8 +5754,15 @@ def admin_reset_organizers(secret: str, db: Session = Depends(get_db)):
 def sable_demo(db: Session = Depends(get_db)):
     from commune_agent import calculate_commune_table
     communes = calculate_commune_table()[:12]
+    REGION_NAMES = {
+        'RM': 'Santiago RM', 'V': 'Valparaíso', 'VIII': 'Biobío',
+        'II': 'Antofagasta', 'IV': 'Coquimbo', 'VI': 'O\'Higgins',
+        'IX': 'La Araucanía', 'X': 'Los Lagos', 'I': 'Tarapacá',
+        'XV': 'Arica', 'XII': 'Magallanes',
+    }
     commune_rows = ''.join(f'''<tr>
       <td><strong>{c["nombre"]}</strong></td>
+      <td style="color:rgba(240,244,255,0.5);font-size:12px;">{REGION_NAMES.get(c["region"], c["region"])}</td>
       <td style="color:#7dd3fc">{c["m2_promedio"]} m²</td>
       <td><span class="tier tier-{c["se_tier"]}">{c["se_tier"]}</span></td>
       <td style="color:#34d399">${c["cpm_usd"]}</td>
@@ -5902,9 +5909,9 @@ td{{padding:12px 16px 12px 0;border-bottom:1px solid rgba(255,255,255,0.04);colo
   <h2 class="section-title">Price per m² is<br/>the income signal.</h2>
   <p class="section-sub">No surveys needed. The average apartment size per commune is the most reliable income proxy available — and this agent knows every commune in Chile, Argentina, Mexico, Colombia, and beyond.</p>
   <div class="card">
-    <div class="card-title">Chile — Commune Intelligence Table (top 12 by CPM)</div>
+    <div class="card-title">Chile — Top 12 Communes by Advertising Value (nationwide)</div>
     <table>
-      <thead><tr><th>Commune</th><th>Avg m²</th><th>SE Tier</th><th>CPM (USD)</th><th>Est. Voters</th></tr></thead>
+      <thead><tr><th>Commune</th><th>Region</th><th>Avg m²</th><th>SE Tier</th><th>CPM (USD)</th><th>Est. Voters</th></tr></thead>
       <tbody>{commune_rows}</tbody>
     </table>
   </div>
