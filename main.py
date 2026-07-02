@@ -1498,6 +1498,18 @@ body{{background:#090D18;color:#f0f4ff;font-family:-apple-system,BlinkMacSystemF
     return HTMLResponse(content=html)
 
 
+@app.get('/logo-sable.svg')
+def logo_sable():
+    svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60" width="200" height="60">
+  <rect width="200" height="60" rx="8" fill="#0a0d14"/>
+  <text x="16" y="22" font-family="Georgia,serif" font-size="11" fill="#6b8ca4" letter-spacing="3" font-weight="400">GRUPO</text>
+  <text x="14" y="48" font-family="Georgia,serif" font-size="28" fill="#ffffff" letter-spacing="1" font-weight="700">Sable</text>
+  <rect x="14" y="52" width="40" height="2" rx="1" fill="#2d6eff"/>
+</svg>'''
+    from fastapi.responses import Response
+    return Response(content=svg, media_type='image/svg+xml', headers={'Cache-Control': 'public, max-age=86400'})
+
+
 @app.get('/privacy')
 def privacy():
     html = """<!DOCTYPE html>

@@ -88,6 +88,16 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter'
 .vcode-label{font-size:11px;color:var(--muted);text-align:center;margin-bottom:16px;}
 .verify-link{display:block;text-align:center;color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer;margin-bottom:8px;}
 
+/* ── AD CARD ── */
+.ad-card{background:linear-gradient(135deg,rgba(45,110,255,0.08),rgba(0,0,0,0));border:1px solid rgba(45,110,255,0.25);border-radius:12px;padding:16px;margin-bottom:16px;display:flex;gap:14px;align-items:flex-start;}
+.ad-logo{width:48px;height:48px;flex-shrink:0;border-radius:8px;background:rgba(45,110,255,0.1);display:flex;align-items:center;justify-content:center;overflow:hidden;}
+.ad-logo img{width:100%;height:100%;object-fit:contain;}
+.ad-body{flex:1;min-width:0;}
+.ad-brand{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;}
+.ad-copy{font-size:14px;font-weight:500;color:var(--text);line-height:1.4;margin-bottom:10px;}
+.ad-cta{display:inline-block;background:var(--blue);color:#fff;font-size:12px;font-weight:600;padding:7px 16px;border-radius:6px;text-decoration:none;cursor:pointer;}
+.ad-sponsored{font-size:10px;color:var(--muted);margin-top:8px;opacity:0.6;}
+
 /* ── ERROR BANNER ── */
 #global-error{display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#dc2626;color:#fff;padding:16px 20px;font-size:14px;font-weight:600;text-align:center;line-height:1.4;}
 #global-error span{display:block;font-size:12px;font-weight:400;margin-top:4px;opacity:0.85;}
@@ -292,18 +302,40 @@ async function openDebate(id) {
   content.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   selectedOption = null;
   try {
-    const [dr, rr] = await Promise.all([
+    const [dr, rr, ar] = await Promise.all([
       fetch(`${API}/debates/${id}`),
-      fetch(`${API}/debates/${id}/results`)
+      fetch(`${API}/debates/${id}/results`),
+      fetch(`${API}/debates/${id}/opinions`, {headers: token ? {'Authorization':'Bearer '+token} : {}})
     ]);
-    const db = await dr.json();
+    const db  = await dr.json();
     const res = await rr.json();
+    const ads = ar.ok ? await ar.json() : {};
     currentDebate = db;
-    renderDebate(db, res);
+    const firstAd = (ads.items || []).find(it => it.type === 'ad')?.ad || null;
+    renderDebate(db, res, firstAd);
   } catch(e) { content.innerHTML = '<div class="no-debates">Error loading consultation.</div>'; }
 }
 
-function renderDebate(db, res) {
+function renderAdCard(ad) {
+  if (!ad || (!ad.copy && !ad.brand)) return '';
+  const logoHtml = ad.logo_url
+    ? `<img src="${esc(ad.logo_url)}" alt="${esc(ad.brand)}" onerror="this.parentElement.innerHTML='<span style=\\'font-size:18px;font-weight:700;color:#2d6eff\\'>${esc((ad.brand||'')[0])}</span>'">`
+    : `<span style="font-size:18px;font-weight:700;color:#2d6eff">${esc((ad.brand||'A')[0])}</span>`;
+  const ctaHtml = ad.link_url
+    ? `<a class="ad-cta" href="${esc(ad.link_url)}" target="_blank" rel="noopener">${esc(ad.cta || 'Ver más')}</a>`
+    : `<span class="ad-cta">${esc(ad.cta || 'Ver más')}</span>`;
+  return `<div class="ad-card">
+    <div class="ad-logo">${logoHtml}</div>
+    <div class="ad-body">
+      <div class="ad-brand">${esc(ad.brand || '')}</div>
+      <div class="ad-copy">${esc(ad.copy || '')}</div>
+      ${ctaHtml}
+      <div class="ad-sponsored">Publicidad · Preferendum</div>
+    </div>
+  </div>`;
+}
+
+function renderDebate(db, res, ad) {
   const content = document.getElementById('detail-content');
   const opts = db.options || [];
   const isLive = db.status === 'live';
@@ -346,6 +378,7 @@ function renderDebate(db, res) {
         ${db.closes_at ? `<span>Closes ${fmtDate(db.closes_at)}</span>` : ''}
       </div>
     </div>
+    ${ad ? renderAdCard(ad) : ''}
     ${isLive ? `<div class="detail-card">${optBtns}</div>` : ''}
     <div class="detail-card">
       <div class="options-title">Current results</div>
@@ -404,12 +437,22 @@ async function castVote() {
   }
 }
 
-function showVoteSuccess(data, optIdx) {
+async function showVoteSuccess(data, optIdx) {
   const content = document.getElementById('detail-content');
   if (!content) return;
   const vcode  = data.verify_code || data.vcode || '';
   const option = data.option || (currentDebate?.options || [])[optIdx] || '';
   const debId  = currentDebate?.id;
+  // Fetch a post-vote ad
+  let postAdHtml = '';
+  try {
+    const ar = await fetch(`${API}/debates/${debId}/opinions`, {headers: token ? {'Authorization':'Bearer '+token} : {}});
+    if (ar.ok) {
+      const ads = await ar.json();
+      const ad = (ads.items || []).find(it => it.type === 'ad')?.ad || null;
+      if (ad) postAdHtml = renderAdCard(ad);
+    }
+  } catch(_) {}
   content.innerHTML = `
     <div class="success-card">
       <div class="success-icon">✓</div>
@@ -419,6 +462,7 @@ function showVoteSuccess(data, optIdx) {
       <div class="vcode-label">Your verification code — use this to prove your vote without revealing your identity</div>
       ${data.blockchain_tx ? `<a class="verify-link" href="https://polygonscan.com/tx/${data.blockchain_tx}" target="_blank" rel="noopener">View on Polygon blockchain ↗</a>` : ''}
     </div>
+    ${postAdHtml}
     ${debId ? `<button class="btn" style="background:var(--bg3);color:var(--text);margin-bottom:12px;" onclick="openDebate(${debId})">See live results</button>` : ''}
     <button class="btn" onclick="showDebatesList()">← All consultations</button>
   `;
