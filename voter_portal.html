@@ -842,16 +842,77 @@ async function showVoteSuccess(data, optIdx) {
   content.innerHTML = `
     <div class="success-card">
       <div class="success-icon">✓</div>
-      <div class="success-title">Vote recorded on blockchain</div>
-      <div class="success-text">Your vote for <strong>"${esc(option)}"</strong> has been anchored to Polygon Mainnet. Your identity is verified — your privacy is protected.</div>
+      <div class="success-title">Voto registrado en blockchain</div>
+      <div class="success-text">Tu voto por <strong>"${esc(option)}"</strong> fue anclado en Polygon Mainnet. Tu identidad está verificada — tu privacidad protegida.</div>
       <div class="vcode-box">${esc(vcode)}</div>
-      <div class="vcode-label">Your verification code — use this to prove your vote without revealing your identity</div>
-      ${data.blockchain_tx ? `<a class="verify-link" href="https://polygonscan.com/tx/${data.blockchain_tx}" target="_blank" rel="noopener">View on Polygon blockchain ↗</a>` : ''}
+      <div class="vcode-label">Código de verificación — úsalo para demostrar tu voto sin revelar tu identidad</div>
+      ${data.blockchain_tx ? `<a class="verify-link" href="https://polygonscan.com/tx/${data.blockchain_tx}" target="_blank" rel="noopener">Ver en Polygon blockchain ↗</a>` : ''}
     </div>
     ${postAdHtml}
-    ${debId ? `<button class="btn" style="background:var(--bg3);color:var(--text);margin-bottom:12px;" onclick="openDebate(${debId})">See live results</button>` : ''}
-    <button class="btn" onclick="showDebatesList()">← All consultations</button>
+
+    <div class="phase-divider">
+      <div class="phase-divider-line"></div>
+      <div class="phase-label">01 · Tu Perspectiva</div>
+      <div class="phase-divider-line"></div>
+    </div>
+    <div class="detail-card" id="opinion-form-card">
+      <div style="font-size:14px;font-weight:600;margin-bottom:10px;color:var(--text);">Comparte tu perspectiva con la comunidad</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Tu opinión aparecerá en el debate para que otros la lean antes de votar.</div>
+      <select id="opinion-level" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;outline:none;margin-bottom:10px;">
+        <option value="familiar">Conozco el tema</option>
+        <option value="good">Estoy bien informado/a</option>
+        <option value="expert">Soy experto/a en el área</option>
+      </select>
+      <textarea id="opinion-text" placeholder="Escribe tu opinión aquí (mínimo 20 caracteres)…"
+        style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;
+               padding:12px;color:var(--text);font-size:14px;font-family:'Inter',sans-serif;
+               min-height:90px;resize:vertical;outline:none;margin-bottom:10px;"></textarea>
+      <button class="btn" onclick="submitOpinion(${debId})">Publicar mi perspectiva →</button>
+      <div id="opinion-submit-status" style="font-size:13px;margin-top:8px;min-height:18px;"></div>
+    </div>
+
+    <div style="margin-top:16px;">
+      ${debId ? `<button class="btn" style="background:var(--bg3);color:var(--text);margin-bottom:12px;" onclick="openDebate(${debId})">Ver resultados en vivo</button>` : ''}
+      <button class="btn" onclick="showDebatesList()">← Todas las consultas</button>
+    </div>
   `;
+}
+
+async function submitOpinion(debateId) {
+  const text  = document.getElementById('opinion-text').value.trim();
+  const level = document.getElementById('opinion-level').value;
+  const status = document.getElementById('opinion-submit-status');
+  if (text.length < 20) {
+    status.style.color = '#f87171';
+    status.textContent = 'Escribe al menos 20 caracteres.';
+    return;
+  }
+  const btn = document.querySelector('#opinion-form-card .btn');
+  btn.disabled = true; btn.textContent = 'Publicando…';
+  try {
+    const r = await fetch(`${API}/debates/${debateId}/opinions`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify({text, knowledge_level: level})
+    });
+    const d = await r.json();
+    if (r.ok) {
+      document.getElementById('opinion-form-card').innerHTML =
+        `<div style="text-align:center;padding:12px 0;">
+          <div style="font-size:28px;margin-bottom:8px;">💬</div>
+          <div style="font-size:15px;font-weight:600;color:var(--green);">¡Perspectiva publicada!</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:4px;">Otros la leerán en el debate antes de votar.</div>
+        </div>`;
+    } else {
+      btn.disabled = false; btn.textContent = 'Publicar mi perspectiva →';
+      status.style.color = '#f87171';
+      status.textContent = d.detail || 'Error al publicar. Intenta de nuevo.';
+    }
+  } catch(e) {
+    btn.disabled = false; btn.textContent = 'Publicar mi perspectiva →';
+    status.style.color = '#f87171';
+    status.textContent = 'Error de conexión.';
+  }
 }
 
 // ── UTILS ──
