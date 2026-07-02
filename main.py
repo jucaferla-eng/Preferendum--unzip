@@ -1135,22 +1135,23 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
 #page1{min-height:100vh;display:flex;flex-direction:column;align-items:center;
   justify-content:center;text-align:center;padding:40px 24px;
   background:radial-gradient(ellipse 70% 50% at 50% 40%,rgba(37,99,235,0.12) 0%,transparent 65%);}
-.brand{font-family:'Playfair Display',serif;font-size:clamp(15px,4vw,22px);
-  font-weight:400;color:rgba(240,244,255,0.45);letter-spacing:0.35em;
+.brand{font-family:'Playfair Display',serif;font-size:clamp(18px,4.5vw,26px);
+  font-weight:700;color:#c8d8f0;letter-spacing:0.3em;
   text-transform:uppercase;margin-bottom:48px;}
+.brand span{color:#4d8aff;}
 .headline{font-family:'Playfair Display',serif;font-size:clamp(36px,8vw,96px);
   font-weight:900;color:#F0F4FF;line-height:1.02;letter-spacing:-2px;
   margin-bottom:28px;max-width:820px;}
-.headline em{color:#2563EB;font-style:normal;}
-.nuance{font-size:clamp(15px,2.5vw,20px);color:rgba(240,244,255,0.55);
+.headline em{color:#4d8aff;font-style:normal;}
+.nuance{font-size:clamp(15px,2.5vw,20px);color:rgba(240,244,255,0.72);
   line-height:1.7;max-width:520px;margin:0 auto 56px;font-weight:300;}
-.nuance strong{color:#F0F4FF;font-weight:500;}
+.nuance strong{color:#F0F4FF;font-weight:600;}
 .enter-btn{display:inline-flex;align-items:center;gap:10px;
   background:#2563EB;color:#fff;padding:18px 48px;border-radius:12px;
   font-size:17px;font-weight:600;text-decoration:none;border:none;cursor:pointer;
-  transition:all .25s;box-shadow:0 4px 40px rgba(37,99,235,0.3);}
-.enter-btn:hover{background:#3b82f6;transform:translateY(-2px);box-shadow:0 8px 48px rgba(37,99,235,0.45);}
-.tagline{margin-top:40px;font-size:12px;color:rgba(240,244,255,0.25);
+  transition:all .25s;box-shadow:0 4px 40px rgba(37,99,235,0.35);}
+.enter-btn:hover{background:#3b82f6;transform:translateY(-2px);box-shadow:0 8px 48px rgba(37,99,235,0.5);}
+.tagline{margin-top:40px;font-size:12px;color:rgba(240,244,255,0.45);
   letter-spacing:0.2em;text-transform:uppercase;}
 
 /* PAGE 2 — ROLE SELECTION */
@@ -1158,26 +1159,27 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
   justify-content:center;padding:40px 24px;
   background:radial-gradient(ellipse 60% 60% at 50% 30%,rgba(37,99,235,0.08) 0%,transparent 65%);}
 #page2.active{display:flex;}
-.p2-logo{font-family:'Playfair Display',serif;font-size:20px;color:rgba(240,244,255,0.4);
+.p2-logo{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;color:#c8d8f0;
   letter-spacing:0.3em;text-transform:uppercase;margin-bottom:12px;}
+.p2-logo span{color:#4d8aff;}
 .p2-title{font-family:'Playfair Display',serif;font-size:clamp(24px,5vw,40px);
   font-weight:700;color:#F0F4FF;text-align:center;margin-bottom:8px;}
-.p2-sub{font-size:15px;color:rgba(240,244,255,0.45);text-align:center;
+.p2-sub{font-size:15px;color:rgba(240,244,255,0.70);text-align:center;
   margin-bottom:52px;line-height:1.6;max-width:440px;}
-.p2-sub strong{color:rgba(240,244,255,0.7);font-weight:500;}
+.p2-sub strong{color:#F0F4FF;font-weight:600;}
 .roles{display:flex;flex-direction:column;gap:14px;width:100%;max-width:420px;}
-.role-card{display:block;background:rgba(255,255,255,0.04);
-  border:1px solid rgba(255,255,255,0.09);border-radius:18px;
+.role-card{display:block;background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.12);border-radius:18px;
   padding:24px 28px;text-decoration:none;transition:all .2s;cursor:pointer;}
-.role-card:hover{background:rgba(37,99,235,0.1);border-color:#2563EB;
-  transform:translateY(-2px);box-shadow:0 8px 32px rgba(37,99,235,0.15);}
+.role-card:hover{background:rgba(37,99,235,0.12);border-color:#4d8aff;
+  transform:translateY(-2px);box-shadow:0 8px 32px rgba(37,99,235,0.2);}
 .role-name{font-size:18px;font-weight:700;color:#F0F4FF;margin-bottom:4px;}
-.role-phrase{font-size:13px;color:rgba(240,244,255,0.45);line-height:1.5;font-style:italic;}
-.role-arrow{float:right;color:rgba(240,244,255,0.3);font-size:20px;margin-top:-2px;}
-.back-btn{margin-top:32px;background:none;border:none;color:rgba(240,244,255,0.3);
+.role-phrase{font-size:13px;color:rgba(240,244,255,0.65);line-height:1.5;font-style:italic;}
+.role-arrow{float:right;color:#4d8aff;font-size:20px;margin-top:-2px;}
+.back-btn{margin-top:32px;background:none;border:none;color:rgba(240,244,255,0.45);
   font-size:13px;cursor:pointer;letter-spacing:0.1em;transition:color .2s;}
-.back-btn:hover{color:rgba(240,244,255,0.6);}
-.p2-memo{margin-top:48px;font-size:11px;color:rgba(240,244,255,0.18);
+.back-btn:hover{color:rgba(240,244,255,0.75);}
+.p2-memo{margin-top:48px;font-size:11px;color:rgba(240,244,255,0.28);
   font-style:italic;text-align:center;}
 
 @media(max-width:480px){
@@ -1191,7 +1193,7 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
 
 <!-- PAGE 1: CONCEPT -->
 <div id="page1">
-  <div class="brand">prefer<span style="color:#2563EB">endum</span></div>
+  <div class="brand">prefer<span>endum</span></div>
   <h1 class="headline">
     Anyone.<br/>
     Anywhere.<br/>
@@ -1209,7 +1211,7 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
 
 <!-- PAGE 2: ROLE SELECTION -->
 <div id="page2">
-  <div class="p2-logo">prefer<span style="color:#2563EB">endum</span></div>
+  <div class="p2-logo">prefer<span>endum</span></div>
   <h2 class="p2-title">Who are you?</h2>
   <p class="p2-sub">
     <strong>Every decision begins with a preference.</strong><br/>

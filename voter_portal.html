@@ -11,8 +11,8 @@
   --bg:#0a0d14;--bg2:#111827;--bg3:#1a2332;
   --blue:#2d6eff;--blue2:#3b7fff;
   --green:#10b981;--gold:#e8b830;
-  --text:#f0f4ff;--muted:rgba(240,244,255,0.45);
-  --border:rgba(255,255,255,0.08);
+  --text:#f0f4ff;--muted:rgba(240,244,255,0.68);
+  --border:rgba(255,255,255,0.11);
 }
 html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;overflow-x:hidden;}
 
@@ -46,15 +46,15 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter'
 .content{flex:1;padding:16px;max-width:600px;margin:0 auto;width:100%;}
 
 /* ── DEBATES LIST ── */
-.section-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;margin-bottom:6px;}
-.section-sub{font-size:13px;color:var(--muted);margin-bottom:20px;}
+.section-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;margin-bottom:6px;color:#f0f4ff;}
+.section-sub{font-size:13px;color:rgba(240,244,255,0.6);margin-bottom:20px;}
 .debate-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:12px;cursor:pointer;transition:border-color .2s,transform .1s;}
 .debate-card:hover{border-color:var(--blue);transform:translateY(-1px);}
 .debate-status{display:inline-block;font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em;}
-.status-live{background:rgba(16,185,129,0.15);color:#10b981;}
-.status-closed{background:rgba(45,110,255,0.15);color:#60a5fa;}
-.debate-title{font-size:16px;font-weight:600;line-height:1.4;margin-bottom:8px;}
-.debate-meta{font-size:12px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap;}
+.status-live{background:rgba(16,185,129,0.18);color:#34d399;font-weight:700;}
+.status-closed{background:rgba(148,163,184,0.15);color:#cbd5e1;font-weight:600;}
+.debate-title{font-size:16px;font-weight:600;line-height:1.4;margin-bottom:8px;color:#f0f4ff;}
+.debate-meta{font-size:12px;color:rgba(240,244,255,0.58);display:flex;gap:12px;flex-wrap:wrap;}
 .debate-votes{color:var(--blue);font-weight:600;}
 .no-debates{text-align:center;padding:40px 20px;color:var(--muted);}
 
@@ -63,7 +63,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'Inter'
 .back-btn{display:flex;align-items:center;gap:6px;color:var(--blue);font-size:14px;cursor:pointer;margin-bottom:20px;}
 .detail-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;}
 .detail-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;line-height:1.3;margin-bottom:10px;}
-.detail-context{font-size:14px;color:rgba(240,244,255,0.65);line-height:1.6;margin-bottom:14px;}
+.detail-context{font-size:14px;color:rgba(240,244,255,0.78);line-height:1.6;margin-bottom:14px;}
 .options-title{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;}
 .option-btn{width:100%;text-align:left;background:var(--bg3);border:2px solid var(--border);border-radius:10px;padding:16px;margin-bottom:10px;color:var(--text);font-size:15px;font-weight:500;cursor:pointer;transition:all .2s;}
 .option-btn:hover{border-color:var(--blue);background:rgba(45,110,255,0.08);}
