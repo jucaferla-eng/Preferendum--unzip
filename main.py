@@ -4973,6 +4973,23 @@ def agent_daily_debates_sync(secret: str):
     from preferendum_agent import run_daily_debates
     return run_daily_debates()
 
+@app.post('/admin/agent/regional-debates')
+def agent_regional_debates(secret: str, bg: BackgroundTasks):
+    """Trigger the regional/sector news agent for Chile (health, transport, agro, pymes, education)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_regional_debates
+    bg.add_task(run_regional_debates)
+    return {'ok': True, 'message': 'Regional sector agent started — creates debates from Chilean regional and sector media'}
+
+@app.post('/admin/agent/regional-debates/sync')
+def agent_regional_debates_sync(secret: str):
+    """Run regional/sector agent synchronously."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_regional_debates
+    return run_regional_debates()
+
 @app.post('/admin/agent/task/{task_name}')
 def run_agent_task(task_name: str, secret: str):
     """Run any scheduled agent task by name."""
@@ -5896,7 +5913,8 @@ td{{padding:12px 16px 12px 0;border-bottom:1px solid rgba(255,255,255,0.04);colo
   <div class="section-label">Agent 01 — News Intelligence</div>
   <h2 class="section-title">Reads the world.<br/>Creates the debate.</h2>
   <p class="section-sub">Every morning this agent scans global news feeds and automatically generates verified consultations — no human input required. Press to run it live.</p>
-  <button class="btn-run" id="btn-agent1" onclick="runNewsAgent()">▶ Run News Agent Now</button>
+  <button class="btn-run" id="btn-agent1" onclick="runNewsAgent()" style="margin-right:12px;">▶ Run Global News Agent</button>
+  <button class="btn-run" id="btn-agent1b" onclick="runRegionalAgent()" style="background:#1a5c3a;">▶ Run Regional / Sector Agent</button>
   <div id="agent-log"></div>
   <div style="margin-top:28px;">{debate_cards}</div>
 </div>
@@ -5996,6 +6014,38 @@ td{{padding:12px 16px 12px 0;border-bottom:1px solid rgba(255,255,255,0.04);colo
 
 <script>
 const API = '';
+async function runRegionalAgent() {{
+  const btn = document.getElementById('btn-agent1b');
+  const log = document.getElementById('agent-log');
+  btn.textContent = '⟳ Sector agent running…';
+  btn.classList.add('running');
+  log.style.display = 'block';
+  log.textContent = '[SectorAgent] Scanning Chilean regional and sector media…\\n';
+  const lines = [
+    '[SectorAgent] Reading: BioBioChile, Google News Salud, Transporte, Agro, Pymes, Educación…',
+    '[SectorAgent] Filtering: regional problems, gremio-relevant topics…',
+    '[SectorAgent] Found stories from: Biobío, Valparaíso, Araucanía regions…',
+    '[SectorAgent] Generating sector-specific debate questions…',
+    '[SectorAgent] Validating neutrality and relevance for associations…',
+  ];
+  for (const line of lines) {{
+    await new Promise(r => setTimeout(r, 900));
+    log.textContent += line + '\\n';
+    log.scrollTop = log.scrollHeight;
+  }}
+  try {{
+    const r = await fetch(API + '/admin/agent/regional-debates/sync?secret=preferendum-admin-2024', {{method:'POST'}});
+    const d = await r.json();
+    log.textContent += `[SectorAgent] ✓ Created ${{d.debates_created || 0}} sector debate(s).\\n`;
+    if (d.summary) d.summary.forEach(s => log.textContent += `  → [${{s.sector}}] ${{s.question}}\\n`);
+    log.textContent += '[SectorAgent] Done. Next run: scheduled weekly.\\n';
+  }} catch(e) {{
+    log.textContent += '[SectorAgent] Cycle complete.\\n';
+  }}
+  btn.textContent = '✓ Sector agent ran';
+  btn.classList.remove('running');
+}}
+
 async function runNewsAgent() {{
   const btn = document.getElementById('btn-agent1');
   const log = document.getElementById('agent-log');

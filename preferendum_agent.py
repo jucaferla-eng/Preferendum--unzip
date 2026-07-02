@@ -571,10 +571,69 @@ NEWS_COUNTRIES = [
     {'code': 'IT', 'lang': 'it', 'name': 'Italia',         'ceid': 'IT:it'},
 ]
 
+# Chilean regional and sector-specific RSS feeds
+# These feed the sector-debate agent for professional associations
+CHILE_REGIONAL_FEEDS = [
+    # National digital media with strong regional coverage
+    {'url': 'https://www.biobiochile.cl/rss/todas-las-noticias.rss',
+     'name': 'BioBioChile', 'region': 'nacional'},
+    # Google News — sector topics for Chile
+    {'url': 'https://news.google.com/rss/search?q=salud+Chile&hl=es&gl=CL&ceid=CL:es',
+     'name': 'Google News: Salud Chile', 'region': 'CL', 'sector': 'salud'},
+    {'url': 'https://news.google.com/rss/search?q=transporte+carga+Chile&hl=es&gl=CL&ceid=CL:es',
+     'name': 'Google News: Transporte CL', 'region': 'CL', 'sector': 'transporte'},
+    {'url': 'https://news.google.com/rss/search?q=agricultura+Chile+temporada&hl=es&gl=CL&ceid=CL:es',
+     'name': 'Google News: Agro Chile', 'region': 'CL', 'sector': 'agricultura'},
+    {'url': 'https://news.google.com/rss/search?q=pymes+pequeñas+empresas+Chile&hl=es&gl=CL&ceid=CL:es',
+     'name': 'Google News: Pymes Chile', 'region': 'CL', 'sector': 'pymes'},
+    {'url': 'https://news.google.com/rss/search?q=educacion+profesores+Chile&hl=es&gl=CL&ceid=CL:es',
+     'name': 'Google News: Educación CL', 'region': 'CL', 'sector': 'educacion'},
+    # Regional: Biobío (Concepción)
+    {'url': 'https://news.google.com/rss/search?q=noticias+Concepción+Biobío&hl=es&gl=CL&ceid=CL:es',
+     'name': 'Google News: Biobío', 'region': 'Biobío'},
+    # Regional: Valparaíso
+    {'url': 'https://news.google.com/rss/search?q=noticias+Valparaíso+región&hl=es&gl=CL&ceid=CL:es',
+     'name': 'Google News: Valparaíso', 'region': 'Valparaíso'},
+    # Regional: Araucanía
+    {'url': 'https://news.google.com/rss/search?q=noticias+Araucanía+Temuco&hl=es&gl=CL&ceid=CL:es',
+     'name': 'Google News: Araucanía', 'region': 'Araucanía'},
+]
+
+# Sector debate templates for professional associations
+# Used by run_sector_debates() — topics that never go stale for gremios
+SECTOR_DEBATE_TEMPLATES = {
+    'salud': [
+        {'question': '¿En qué área del sector salud se deberían priorizar los esfuerzos de reducción de costos?',
+         'context': 'El Ministerio de Salud ha pedido mejorar productividad y bajar costos. ¿Cuál es la prioridad?',
+         'options': ['Uso de infraestructura y pabellones', 'Costo de equipos médicos', 'Márgenes de laboratorios', 'Seguros y coberturas']},
+    ],
+    'transporte': [
+        {'question': '¿Cuál es el mayor freno a la productividad del transporte de carga hoy?',
+         'context': 'El gobierno ha solicitado al sector un plan de aumento de productividad para 2026.',
+         'options': ['Costos de combustible', 'Peajes y vialidad', 'Regulación y permisos', 'Falta de infraestructura logística']},
+    ],
+    'agricultura': [
+        {'question': '¿Cuál es el problema más urgente para su actividad agrícola este temporada?',
+         'context': 'La SNA y asociaciones regionales consultan para priorizar la agenda gremial 2026-2027.',
+         'options': ['Acceso al agua y sequía', 'Costos de insumos agrícolas', 'Precios de venta y acceso a mercados', 'Falta de mano de obra']},
+    ],
+    'pymes': [
+        {'question': '¿Cuál es el principal obstáculo para el crecimiento de su empresa hoy?',
+         'context': 'Consulta de la Asociación de Pequeños y Medianos Empresarios para el informe anual.',
+         'options': ['Acceso a crédito', 'Costos laborales y previsionales', 'Competencia desleal', 'Burocracia y regulación']},
+    ],
+    'educacion': [
+        {'question': '¿Qué cambio tendría mayor impacto en la calidad educativa de su establecimiento?',
+         'context': 'Consulta del Colegio de Profesores para la negociación con el MINEDUC.',
+         'options': ['Menos alumnos por sala', 'Más horas de planificación', 'Mejores herramientas digitales', 'Formación continua docente']},
+    ],
+}
+
 # Civic categories — these are the ONLY categories that make good debates
 CIVIC_CATEGORIES = [
     'politics', 'economy', 'environment', 'health', 'infrastructure',
-    'social', 'education', 'justice', 'housing', 'technology', 'energy'
+    'social', 'education', 'justice', 'housing', 'technology', 'energy',
+    'agriculture', 'transport', 'pymes', 'regional',
 ]
 
 # Simple dedup — stores hashes of debate titles created this session
@@ -776,6 +835,70 @@ def run_daily_debates() -> dict:
         'summary': summary,
         'run_at': datetime.utcnow().isoformat(),
     }
+
+
+def _fetch_rss_feed(url: str, max_items: int = 5) -> list:
+    """Fetch any RSS feed and return title+description items."""
+    try:
+        r = _requests.get(url, timeout=12, headers={
+            'User-Agent': 'Mozilla/5.0 (compatible; Preferendum/1.0)'
+        })
+        if not r.ok:
+            return []
+        root = ET.fromstring(r.content)
+        items = []
+        for item in root.findall('.//item')[:max_items]:
+            title = (item.findtext('title') or '').strip()
+            desc  = re.sub(r'<[^>]+>', '', item.findtext('description') or '')[:300]
+            if title:
+                items.append({'title': title, 'description': desc})
+        return items
+    except Exception as e:
+        print(f'[SectorAgent] RSS error {url[:50]}: {e}')
+        return []
+
+
+def run_regional_debates(max_per_region: int = 1) -> dict:
+    """
+    Fetch Chilean regional and sector news, generate debates targeted
+    to each region or professional sector. Called separately from the
+    main daily-debates cycle so as not to flood the platform.
+    """
+    global _created_this_run
+    _created_this_run = set()
+    total_created = 0
+    summary = []
+    cl_country = {'code': 'CL', 'lang': 'es', 'name': 'Chile', 'ceid': 'CL:es'}
+
+    for feed in CHILE_REGIONAL_FEEDS:
+        items = _fetch_rss_feed(feed['url'], max_items=6)
+        created = 0
+        for item in items:
+            if created >= max_per_region:
+                break
+            title_hash = hashlib.sha256(item['title'].encode()).hexdigest()[:16]
+            if title_hash in _created_this_run:
+                continue
+            debate = _analyze_news_item(item, cl_country)
+            if not debate:
+                continue
+            q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
+            if q_hash in _created_this_run:
+                continue
+            _created_this_run.add(title_hash)
+            _created_this_run.add(q_hash)
+            if _create_debate_via_api(debate, 'CL'):
+                created += 1
+                total_created += 1
+                summary.append({
+                    'source': feed['name'],
+                    'sector': feed.get('sector', feed.get('region', '?')),
+                    'question': debate['question'][:80],
+                })
+        print(f'[SectorAgent] {feed["name"]}: created {created} debate(s)')
+
+    return {'debates_created': total_created, 'summary': summary,
+            'run_at': datetime.utcnow().isoformat()}
 
 
 def run_scheduled_task(task_name: str) -> dict:
