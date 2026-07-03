@@ -4561,6 +4561,20 @@ def blockchain_debug(secret: str):
         result['traceback'] = tb.format_exc()
     return result
 
+@app.post('/admin/blockchain-test-anchor')
+def blockchain_test_anchor(secret: str, debate_id: int = 101):
+    """Cast a real test vote hash to the contract via anchor_vote. Verifiable on PolygonScan."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import time
+    test_hash = hashlib.sha256(f'admin-test-{debate_id}-{time.time()}'.encode()).hexdigest()
+    test_vcode = f'TEST-{int(time.time()) % 10000:04d}-ADMN'
+    result = _blockchain.anchor_vote(debate_id, test_hash, test_vcode, debate_title=f'Debate {debate_id}')
+    result['vote_hash'] = test_hash
+    result['vcode'] = test_vcode
+    result['is_mock'] = result['tx_hash'] == '0x' + hashlib.sha256(f'polygon-mock-{test_hash}'.encode()).hexdigest()
+    return result
+
 @app.get('/admin/targeting/matrix')
 def targeting_matrix_summary(secret: str):
     """Returns the current targeting matrix summary: GNI tiers, CPMs, communes per country."""
