@@ -5780,7 +5780,7 @@ def admin_recompute_campaign_spend(campaign_id: int, secret: str, db: Session = 
     }
 
 
-@app.patch('/admin/campaigns/{campaign_id}/creative')
+@app.api_route('/admin/campaigns/{campaign_id}/creative', methods=['GET', 'PATCH'])
 def admin_update_campaign_creative(campaign_id: int, secret: str, db: Session = Depends(get_db),
                                    logo_url: str = '', ad_image_url: str = '', ad_copy: str = '',
                                    link_url: str = '', target_debate_ids: str = '', advertiser_name: str = ''):
