@@ -97,6 +97,22 @@ CONTRACT_ABI = [
         ],
         "stateMutability": "view",
         "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "debateId", "type": "uint256"}],
+        "name": "debates",
+        "outputs": [
+            {"internalType": "uint256", "name": "id",          "type": "uint256"},
+            {"internalType": "string",  "name": "title",       "type": "string"},
+            {"internalType": "string",  "name": "institution", "type": "string"},
+            {"internalType": "uint256", "name": "openedAt",    "type": "uint256"},
+            {"internalType": "uint256", "name": "closedAt",    "type": "uint256"},
+            {"internalType": "bool",    "name": "isOpen",      "type": "bool"},
+            {"internalType": "uint256", "name": "totalVotes",  "type": "uint256"},
+            {"internalType": "bool",    "name": "exists",      "type": "bool"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
     }
 ]
 
@@ -176,54 +192,86 @@ class PreferendumBlockchain:
         return 137
 
     def _send_transaction(self, func) -> Optional[str]:
-        """Sign and send a transaction to Polygon."""
+        """Sign and send a transaction to Polygon. Waits for receipt."""
         try:
             w3 = self.web3
-            nonce = w3.eth.get_transaction_count(
-                w3.to_checksum_address(self.wallet_address)
-            )
-            gas_price = int(w3.eth.gas_price * 1.1)
+            wallet = w3.to_checksum_address(self.wallet_address)
+            nonce = w3.eth.get_transaction_count(wallet)
+            gas_price = int(w3.eth.gas_price * 1.2)
+            pk = self.private_key
+            if pk and not pk.startswith('0x'):
+                pk = '0x' + pk
 
             tx = func.build_transaction({
-                'from':     w3.to_checksum_address(self.wallet_address),
+                'from':     wallet,
                 'nonce':    nonce,
-                'gas':      200000,
+                'gas':      300000,
                 'gasPrice': gas_price,
                 'chainId':  self._chain_id(),
             })
 
-            signed = w3.eth.account.sign_transaction(tx, self.private_key)
+            signed = w3.eth.account.sign_transaction(tx, pk)
             tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+            # Wait up to 30s for receipt so next tx uses correct nonce
+            try:
+                w3.eth.wait_for_transaction_receipt(tx_hash, timeout=30)
+            except Exception:
+                pass
             return tx_hash.hex()
 
         except Exception as e:
             print(f'[Blockchain] Transaction error: {e}')
             return None
 
+    def _debate_exists_on_chain(self, debate_id: int) -> bool:
+        """Read-only check — no gas."""
+        try:
+            result = self.contract.functions.debates(debate_id).call()
+            return result[7]  # 'exists' field (index 7)
+        except Exception as e:
+            print(f'[Blockchain] debate_exists check error: {e}')
+            return False
+
+    def _ensure_debate_open(self, debate_id: int, title: str = '') -> bool:
+        """Open the debate on-chain if not already there. Idempotent."""
+        if self._debate_exists_on_chain(debate_id):
+            return True
+        try:
+            func = self.contract.functions.openDebate(
+                debate_id,
+                title or f'Debate {debate_id}',
+                'Preferendum'
+            )
+            tx = self._send_transaction(func)
+            if tx:
+                print(f'[Blockchain] Debate {debate_id} opened on-chain: {tx}')
+                return True
+            print(f'[Blockchain] Could not open debate {debate_id} on-chain')
+            return False
+        except Exception as e:
+            print(f'[Blockchain] _ensure_debate_open error: {e}')
+            return False
+
     # ── PUBLIC METHODS ────────────────────────────────────────
 
-    def anchor_vote(self, debate_id: int, vote_hash: str, vcode: str) -> dict:
+    def anchor_vote(self, debate_id: int, vote_hash: str, vcode: str,
+                    debate_title: str = '') -> dict:
         self._ensure_init()
         if not self.live:
             tx_hash = self._mock_tx(vote_hash)
             return {'tx_hash': tx_hash, 'live': False, 'success': True}
 
         try:
-            # Convert hex hash string to bytes32
-            hash_bytes = bytes.fromhex(vote_hash)
+            # Auto-open debate on-chain the first time a vote is cast
+            self._ensure_debate_open(debate_id, debate_title)
 
-            func = self.contract.functions.anchorVote(
-                debate_id,
-                hash_bytes,
-                vcode
-            )
+            hash_bytes = bytes.fromhex(vote_hash)
+            func = self.contract.functions.anchorVote(debate_id, hash_bytes, vcode)
             tx_hash = self._send_transaction(func)
 
             if tx_hash:
                 return {'tx_hash': tx_hash, 'live': True, 'success': True}
-            else:
-                # Fallback to mock if tx fails
-                return {'tx_hash': self._mock_tx(vote_hash), 'live': False, 'success': False}
+            return {'tx_hash': self._mock_tx(vote_hash), 'live': False, 'success': False}
 
         except Exception as e:
             print(f'[Blockchain] anchor_vote error: {e}')
