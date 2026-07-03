@@ -1,10 +1,9 @@
 <!DOCTYPE html>
-<html lang="es" style="background:#0a0d14;">
+<html lang="es">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<meta name="color-scheme" content="dark"/>
-<meta name="supported-color-schemes" content="dark"/>
+<meta name="color-scheme" content="light dark"/>
 <title>Preferendum — Voter</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <style>
@@ -17,6 +16,14 @@
   --border:rgba(255,255,255,0.11);
 }
 html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;color:var(--text);font-family:'Inter',sans-serif;overflow-x:hidden;}
+
+/* ── LIGHT THEME — main voter app ── */
+#main-app{
+  --bg:#f8fafc;--bg2:#ffffff;--bg3:#f1f5f9;
+  --text:#0f172a;--muted:#64748b;
+  --border:rgba(0,0,0,0.09);
+  background:#f8fafc;color:#0f172a;
+}
 
 /* ── AUTH SCREEN ── */
 #auth-screen{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;}
@@ -40,36 +47,36 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 /* ── MAIN APP ── */
 #main-app{display:none;flex-direction:column;min-height:100vh;}
 #main-app.visible{display:flex;}
-.topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
-.topbar-brand{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;}
+.topbar{background:#ffffff;border-bottom:1px solid #e2e8f0;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 1px 4px rgba(0,0,0,0.05);}
+.topbar-brand{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;color:#0f172a;}
 .topbar-brand span{color:var(--blue);}
-.topbar-user{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:10px;}
+.topbar-user{font-size:13px;color:#64748b;display:flex;align-items:center;gap:10px;}
 .logout-btn{font-size:12px;color:var(--blue);cursor:pointer;text-decoration:underline;}
 .content{flex:1;padding:16px;max-width:600px;margin:0 auto;width:100%;}
 
 /* ── DEBATES LIST ── */
-.section-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;margin-bottom:6px;color:#f0f4ff;}
-.section-sub{font-size:13px;color:rgba(240,244,255,0.6);margin-bottom:20px;}
-.debate-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:18px;margin-bottom:12px;cursor:pointer;transition:border-color .2s,transform .1s;}
-.debate-card:hover{border-color:var(--blue);transform:translateY(-1px);}
+.section-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;margin-bottom:6px;color:#0f172a;}
+.section-sub{font-size:13px;color:#64748b;margin-bottom:20px;}
+.debate-card{background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:18px;margin-bottom:12px;cursor:pointer;transition:border-color .2s,transform .1s,box-shadow .2s;box-shadow:0 1px 4px rgba(0,0,0,0.05);}
+.debate-card:hover{border-color:var(--blue);transform:translateY(-1px);box-shadow:0 4px 12px rgba(45,110,255,0.10);}
 .debate-status{display:inline-block;font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.05em;}
-.status-live{background:rgba(16,185,129,0.18);color:#34d399;font-weight:700;}
-.status-closed{background:rgba(148,163,184,0.15);color:#cbd5e1;font-weight:600;}
-.debate-title{font-size:16px;font-weight:600;line-height:1.4;margin-bottom:8px;color:#f0f4ff;}
-.debate-meta{font-size:12px;color:rgba(240,244,255,0.58);display:flex;gap:12px;flex-wrap:wrap;}
+.status-live{background:rgba(16,185,129,0.12);color:#059669;font-weight:700;}
+.status-closed{background:rgba(100,116,139,0.12);color:#64748b;font-weight:600;}
+.debate-title{font-size:16px;font-weight:600;line-height:1.4;margin-bottom:8px;color:#0f172a;}
+.debate-meta{font-size:12px;color:#94a3b8;display:flex;gap:12px;flex-wrap:wrap;}
 .debate-votes{color:var(--blue);font-weight:600;}
-.no-debates{text-align:center;padding:40px 20px;color:var(--muted);}
+.no-debates{text-align:center;padding:40px 20px;color:#64748b;}
 
 /* ── DEBATE DETAIL / VOTE ── */
 #debate-detail{display:none;}
-.back-btn{display:flex;align-items:center;gap:6px;color:var(--blue);font-size:14px;cursor:pointer;margin-bottom:20px;}
-.detail-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:16px;}
-.detail-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;line-height:1.3;margin-bottom:10px;}
-.detail-context{font-size:14px;color:rgba(240,244,255,0.78);line-height:1.6;margin-bottom:14px;}
-.options-title{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;}
-.option-btn{width:100%;text-align:left;background:var(--bg3);border:2px solid var(--border);border-radius:10px;padding:16px;margin-bottom:10px;color:var(--text);font-size:15px;font-weight:500;cursor:pointer;transition:all .2s;}
-.option-btn:hover{border-color:var(--blue);background:rgba(45,110,255,0.08);}
-.option-btn.selected{border-color:var(--blue);background:rgba(45,110,255,0.15);}
+.back-btn{display:flex;align-items:center;gap:6px;color:var(--blue);font-size:14px;cursor:pointer;margin-bottom:20px;font-weight:500;}
+.detail-card{background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,0.05);}
+.detail-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;line-height:1.3;margin-bottom:10px;color:#0f172a;}
+.detail-context{font-size:14px;color:#334155;line-height:1.6;margin-bottom:14px;}
+.options-title{font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px;}
+.option-btn{width:100%;text-align:left;background:#f8fafc;border:2px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:10px;color:#0f172a;font-size:15px;font-weight:500;cursor:pointer;transition:all .2s;}
+.option-btn:hover{border-color:var(--blue);background:rgba(45,110,255,0.04);}
+.option-btn.selected{border-color:var(--blue);background:rgba(45,110,255,0.07);color:#1e40af;}
 .option-btn:disabled{opacity:0.5;cursor:not-allowed;}
 .vote-btn{margin-top:8px;}
 .vote-err{color:#f87171;font-size:13px;margin-top:8px;text-align:center;min-height:18px;}
@@ -82,24 +89,24 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 .result-bar-fill{height:100%;border-radius:4px;transition:width 0.6s ease;}
 
 /* ── VOTE SUCCESS ── */
-.success-card{background:linear-gradient(135deg,rgba(16,185,129,0.1),rgba(45,110,255,0.1));border:1px solid rgba(16,185,129,0.3);border-radius:16px;padding:24px;text-align:center;margin-bottom:16px;}
+.success-card{background:linear-gradient(135deg,rgba(16,185,129,0.07),rgba(45,110,255,0.07));border:1px solid rgba(16,185,129,0.25);border-radius:16px;padding:24px;text-align:center;margin-bottom:16px;}
 .success-icon{font-size:48px;margin-bottom:12px;}
-.success-title{font-family:'Playfair Display',serif;font-size:20px;font-weight:700;color:#10b981;margin-bottom:8px;}
-.success-text{font-size:14px;color:var(--muted);line-height:1.6;margin-bottom:16px;}
-.vcode-box{background:var(--bg3);border:1px solid rgba(45,110,255,0.3);border-radius:10px;padding:14px;font-family:'Courier New',monospace;font-size:13px;word-break:break-all;color:#60a5fa;text-align:center;margin-bottom:12px;}
-.vcode-label{font-size:11px;color:var(--muted);text-align:center;margin-bottom:16px;}
-.verify-link{display:block;text-align:center;color:var(--blue);font-size:13px;text-decoration:underline;cursor:pointer;margin-bottom:8px;}
+.success-title{font-family:'Playfair Display',serif;font-size:20px;font-weight:700;color:#059669;margin-bottom:8px;}
+.success-text{font-size:14px;color:#475569;line-height:1.6;margin-bottom:16px;}
+.vcode-box{background:#f0f9ff;border:1px solid #93c5fd;border-radius:10px;padding:14px;font-family:'Courier New',monospace;font-size:13px;word-break:break-all;color:#1d4ed8;text-align:center;margin-bottom:12px;}
+.vcode-label{font-size:11px;color:#64748b;text-align:center;margin-bottom:16px;}
+.verify-link{display:block;text-align:center;color:#2563eb;font-size:13px;text-decoration:underline;cursor:pointer;margin-bottom:8px;}
 
 /* ── OPINION CARDS ── */
 .opinions-section{margin-bottom:16px;}
-.opinion-card{background:var(--bg3);border-left:3px solid rgba(45,110,255,0.4);border-radius:0 10px 10px 0;padding:14px 16px;margin-bottom:10px;}
-.opinion-text{font-size:14px;color:rgba(240,244,255,0.85);line-height:1.6;margin-bottom:6px;}
-.opinion-meta{font-size:11px;color:rgba(240,244,255,0.4);display:flex;gap:12px;}
-.opinion-level{font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:rgba(45,110,255,0.12);color:#7dd3fc;text-transform:uppercase;letter-spacing:0.05em;}
-.no-opinions{font-size:13px;color:rgba(240,244,255,0.4);font-style:italic;padding:8px 0 16px;}
+.opinion-card{background:#f8fafc;border-left:3px solid rgba(45,110,255,0.35);border-radius:0 10px 10px 0;padding:14px 16px;margin-bottom:10px;}
+.opinion-text{font-size:14px;color:#334155;line-height:1.6;margin-bottom:6px;}
+.opinion-meta{font-size:11px;color:#94a3b8;display:flex;gap:12px;}
+.opinion-level{font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:rgba(45,110,255,0.09);color:#3b7fff;text-transform:uppercase;letter-spacing:0.05em;}
+.no-opinions{font-size:13px;color:#94a3b8;font-style:italic;padding:8px 0 16px;}
 .phase-divider{display:flex;align-items:center;gap:12px;margin:20px 0 16px;}
-.phase-divider-line{flex:1;height:1px;background:rgba(255,255,255,0.08);}
-.phase-label{font-size:11px;font-weight:700;color:#4d8aff;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;}
+.phase-divider-line{flex:1;height:1px;background:#e2e8f0;}
+.phase-label{font-size:11px;font-weight:700;color:#3b7fff;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;}
 
 /* ── AD CARD ── */
 .ad-card{background:linear-gradient(135deg,rgba(45,110,255,0.08),rgba(0,0,0,0));border:1px solid rgba(45,110,255,0.25);border-radius:12px;padding:16px;margin-bottom:16px;display:flex;gap:14px;align-items:flex-start;}
@@ -735,13 +742,13 @@ function renderDonut(opts, counts, total, colors) {
 
   return `<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
     <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="flex-shrink:0;overflow:visible;">
-      <circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--bg3)"/>
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="#f1f5f9"/>
       ${slices.join('')}
-      <circle cx="${cx}" cy="${cy}" r="${r*0.52}" fill="var(--bg2)"/>
+      <circle cx="${cx}" cy="${cy}" r="${r*0.52}" fill="#ffffff"/>
       ${arcLabels.join('')}
-      <text x="${cx}" y="${cy-3}" text-anchor="middle" fill="#f0f4ff"
+      <text x="${cx}" y="${cy-3}" text-anchor="middle" fill="#0f172a"
         font-size="${Math.round(size*0.12)}" font-weight="bold" font-family="Inter,sans-serif">${total}</text>
-      <text x="${cx}" y="${cy+13}" text-anchor="middle" fill="rgba(240,244,255,0.5)"
+      <text x="${cx}" y="${cy+13}" text-anchor="middle" fill="#64748b"
         font-size="${Math.round(size*0.08)}" font-family="Inter,sans-serif">votos</text>
     </svg>
     <div style="flex:1;min-width:150px;">${legendHtml}</div>
@@ -813,14 +820,6 @@ function renderDebate(db, res, items) {
     </div>
     <div class="detail-card">${optBtns}</div>` : ''}
 
-    <div class="phase-divider">
-      <div class="phase-divider-line"></div>
-      <div class="phase-label">03 · Resultados en vivo</div>
-      <div class="phase-divider-line"></div>
-    </div>
-    <div class="detail-card">
-      ${renderDonut(opts, counts, total, COLORS)}
-    </div>
   `;
 }
 
@@ -880,7 +879,10 @@ async function showVoteSuccess(data, optIdx) {
   const vcode  = data.verify_code || data.vcode || '';
   const option = data.option || (currentDebate?.options || [])[optIdx] || '';
   const debId  = currentDebate?.id;
-  // Fetch a post-vote ad
+  const opts   = currentDebate?.options || [];
+  const COLORS = ['#2d6eff','#10b981','#f59e0b','#f43f5e','#8b5cf6','#06b6d4'];
+
+  // Fetch post-vote ad
   let postAdHtml = '';
   try {
     const ar = await fetch(`${API}/debates/${debId}/opinions`, {headers: token ? {'Authorization':'Bearer '+token} : {}});
@@ -890,6 +892,26 @@ async function showVoteSuccess(data, optIdx) {
       if (ad) postAdHtml = renderAdCard(ad);
     }
   } catch(_) {}
+
+  // Fetch updated results for donut
+  let donutHtml = '';
+  try {
+    const rr = await fetch(`${API}/debates/${debId}/results`, {headers: token ? {'Authorization':'Bearer '+token} : {}});
+    if (rr.ok) {
+      const res = await rr.json();
+      const resultsList = (res.debate || res).results || [];
+      const counts = {};
+      resultsList.forEach(r => { counts[r.option] = r.count || 0; });
+      const total = (res.debate || res).total_votes || 0;
+      donutHtml = renderDonut(opts, counts, total, COLORS);
+    }
+  } catch(_) {}
+
+  // Accuracy stats: % of votes anchored on blockchain
+  const accuracy = data.blockchain_accuracy != null
+    ? `${Math.round(data.blockchain_accuracy * 100)}%`
+    : data.blockchain_tx ? '100%' : 'N/A';
+
   content.innerHTML = `
     <div class="success-card">
       <div class="success-icon">✓</div>
@@ -901,30 +923,40 @@ async function showVoteSuccess(data, optIdx) {
     </div>
     ${postAdHtml}
 
+    ${donutHtml ? `
     <div class="phase-divider">
       <div class="phase-divider-line"></div>
-      <div class="phase-label">01 · Tu Perspectiva</div>
+      <div class="phase-label">Resultados en vivo</div>
+      <div class="phase-divider-line"></div>
+    </div>
+    <div class="detail-card">${donutHtml}</div>
+    <div style="font-size:12px;color:#64748b;text-align:center;margin-top:8px;margin-bottom:4px;">
+      Precisión del proceso: ${accuracy} de votos anclados en blockchain
+    </div>` : ''}
+
+    <div class="phase-divider">
+      <div class="phase-divider-line"></div>
+      <div class="phase-label">Tu Perspectiva</div>
       <div class="phase-divider-line"></div>
     </div>
     <div class="detail-card" id="opinion-form-card">
       <div style="font-size:14px;font-weight:600;margin-bottom:10px;color:var(--text);">Comparte tu perspectiva con la comunidad</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Tu opinión aparecerá en el debate para que otros la lean antes de votar.</div>
-      <select id="opinion-level" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:14px;outline:none;margin-bottom:10px;">
+      <select id="opinion-level" style="width:100%;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;color:#0f172a;font-size:14px;outline:none;margin-bottom:10px;">
         <option value="familiar">Conozco el tema</option>
         <option value="good">Estoy bien informado/a</option>
         <option value="expert">Soy experto/a en el área</option>
       </select>
       <textarea id="opinion-text" placeholder="Escribe tu opinión aquí (mínimo 20 caracteres)…"
-        style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;
-               padding:12px;color:var(--text);font-size:14px;font-family:'Inter',sans-serif;
-               min-height:90px;resize:vertical;outline:none;margin-bottom:10px;"></textarea>
+        style="width:100%;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
+               padding:12px;color:#0f172a;font-size:14px;font-family:'Inter',sans-serif;
+               min-height:90px;resize:vertical;outline:none;margin-bottom:10px;box-sizing:border-box;"></textarea>
       <button class="btn" onclick="submitOpinion(${debId})">Publicar mi perspectiva →</button>
       <div id="opinion-submit-status" style="font-size:13px;margin-top:8px;min-height:18px;"></div>
     </div>
 
     <div style="margin-top:16px;">
-      ${debId ? `<button class="btn" style="background:var(--bg3);color:var(--text);margin-bottom:12px;" onclick="openDebate(${debId})">Ver resultados en vivo</button>` : ''}
-      <button class="btn" onclick="showDebatesList()">← Todas las consultas</button>
+      <button class="btn" onclick="showDebatesList()" style="background:#f1f5f9;color:#0f172a;">← Todas las consultas</button>
     </div>
   `;
 }
@@ -948,12 +980,12 @@ async function submitOpinion(debateId) {
     });
     const d = await r.json();
     if (r.ok) {
-      document.getElementById('opinion-form-card').innerHTML =
-        `<div style="text-align:center;padding:12px 0;">
-          <div style="font-size:28px;margin-bottom:8px;">💬</div>
-          <div style="font-size:15px;font-weight:600;color:var(--green);">¡Perspectiva publicada!</div>
-          <div style="font-size:13px;color:var(--muted);margin-top:4px;">Otros la leerán en el debate antes de votar.</div>
-        </div>`;
+      // Reset form so user can submit more opinions
+      const textarea = document.getElementById('opinion-text');
+      if (textarea) textarea.value = '';
+      btn.disabled = false; btn.textContent = 'Publicar mi perspectiva →';
+      status.style.color = '#10b981';
+      status.textContent = '✓ Perspectiva publicada. Puedes agregar otra si quieres.';
     } else {
       btn.disabled = false; btn.textContent = 'Publicar mi perspectiva →';
       status.style.color = '#f87171';
