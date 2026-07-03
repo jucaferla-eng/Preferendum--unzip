@@ -4566,19 +4566,19 @@ def blockchain_reinit(secret: str):
     """Force blockchain to re-initialize and return full diagnostic."""
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
-    import os as _os
+    pk_env = (os.getenv('WALLET_PRIVATE_KEY') or '').strip()
     diag = {
-        'env_CONTRACT_ADDRESS': bool(_os.getenv('CONTRACT_ADDRESS')),
-        'env_WALLET_ADDRESS':   bool(_os.getenv('WALLET_ADDRESS')),
-        'env_WALLET_PRIVATE_KEY': bool(_os.getenv('WALLET_PRIVATE_KEY')),
-        'env_POLYGON_RPC_URL':  _os.getenv('POLYGON_RPC_URL', '(not set)'),
-        'pk_from_env_length':   len((_os.getenv('WALLET_PRIVATE_KEY') or '').strip()),
+        'env_CONTRACT_ADDRESS':   bool(os.getenv('CONTRACT_ADDRESS')),
+        'env_WALLET_ADDRESS':     bool(os.getenv('WALLET_ADDRESS')),
+        'env_WALLET_PRIVATE_KEY': bool(pk_env),
+        'pk_from_env_length':     len(pk_env),
+        'env_POLYGON_RPC_URL':    os.getenv('POLYGON_RPC_URL', '(not set)'),
+        'secret_file_exists':     os.path.exists('/etc/secrets/WALLET_PRIVATE_KEY'),
     }
-    import os.path
-    diag['secret_file_exists'] = os.path.exists('/etc/secrets/WALLET_PRIVATE_KEY')
     _blockchain._initialized = False
     _blockchain.live = False
-    _blockchain.private_key = (_os.getenv('WALLET_PRIVATE_KEY') or '').strip()
+    if pk_env:
+        _blockchain.private_key = pk_env
     _blockchain._ensure_init()
     status = _blockchain.status()
     status['diag'] = diag
