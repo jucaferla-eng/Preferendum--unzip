@@ -690,41 +690,61 @@ function renderAdCard(ad) {
 
 function renderDonut(opts, counts, total, colors) {
   if (total === 0 || !opts.length) return '<div style="color:var(--muted);font-size:14px;">Aún no hay votos — ¡sé el primero!</div>';
-  const size = 140, cx = size/2, cy = size/2;
-  const r = size/2 * 0.72, sw = size * 0.14;
+  const size = 164, cx = size/2, cy = size/2;
+  const r = size/2 * 0.70, sw = size * 0.15;
   const circ = 2 * Math.PI * r;
   let offset = 0;
-  const slices = opts.map((opt, i) => {
+  const slices = [], arcLabels = [];
+
+  opts.forEach((opt, i) => {
     const cnt = counts[opt] || 0;
     const pct = cnt / total;
+    const pctInt = Math.round(pct * 100);
     const dash = pct * circ, gap = circ - dash;
     const dashOff = -(offset * circ - circ * 0.25);
-    offset += pct;
-    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="transparent"
-      stroke="${colors[i % colors.length]}" stroke-width="${sw}"
+    const color = colors[i % colors.length];
+
+    slices.push(`<circle cx="${cx}" cy="${cy}" r="${r}" fill="transparent"
+      stroke="${color}" stroke-width="${sw}"
       stroke-dasharray="${dash} ${gap}" stroke-dashoffset="${dashOff}"
-      transform="rotate(-90 ${cx} ${cy})"/>`;
-  }).join('');
+      transform="rotate(-90 ${cx} ${cy})"/>`);
+
+    // % label on the arc midpoint — only for slices ≥ 8%
+    if (pct >= 0.08) {
+      const midAngle = (offset + pct / 2) * 2 * Math.PI - Math.PI / 2;
+      const lx = (cx + r * Math.cos(midAngle)).toFixed(1);
+      const ly = (cy + r * Math.sin(midAngle)).toFixed(1);
+      arcLabels.push(`<text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle"
+        fill="#fff" font-size="${Math.round(size * 0.075)}" font-weight="700"
+        font-family="Inter,sans-serif" stroke="rgba(0,0,0,0.4)" stroke-width="0.8"
+        paint-order="stroke">${pctInt}%</text>`);
+    }
+    offset += pct;
+  });
+
   const legendHtml = opts.map((opt, i) => {
     const cnt = counts[opt] || 0;
     const pct = Math.round(cnt / total * 100);
-    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;">
-      <div style="width:11px;height:11px;border-radius:50%;background:${colors[i%colors.length]};flex-shrink:0;"></div>
-      <span style="font-size:13px;flex:1;color:var(--text);">${esc(opt)}</span>
-      <span style="font-size:14px;font-weight:700;color:${colors[i%colors.length]};">${pct}%</span>
+    const color = colors[i % colors.length];
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+      <div style="width:12px;height:12px;border-radius:50%;background:${color};flex-shrink:0;"></div>
+      <span style="font-size:13px;flex:1;color:var(--text);line-height:1.3;">${esc(opt)}</span>
+      <span style="font-size:14px;font-weight:700;color:${color};min-width:38px;text-align:right;">${pct}%</span>
     </div>`;
   }).join('');
+
   return `<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
-    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="flex-shrink:0;">
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="flex-shrink:0;overflow:visible;">
       <circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--bg3)"/>
-      ${slices}
-      <circle cx="${cx}" cy="${cy}" r="${r*0.55}" fill="var(--bg2)"/>
-      <text x="${cx}" y="${cy-4}" text-anchor="middle" fill="#f0f4ff"
-        font-size="${Math.round(size*0.13)}" font-weight="bold" font-family="Inter,sans-serif">${total}</text>
-      <text x="${cx}" y="${cy+12}" text-anchor="middle" fill="rgba(240,244,255,0.55)"
-        font-size="${Math.round(size*0.09)}" font-family="Inter,sans-serif">votos</text>
+      ${slices.join('')}
+      <circle cx="${cx}" cy="${cy}" r="${r*0.52}" fill="var(--bg2)"/>
+      ${arcLabels.join('')}
+      <text x="${cx}" y="${cy-3}" text-anchor="middle" fill="#f0f4ff"
+        font-size="${Math.round(size*0.12)}" font-weight="bold" font-family="Inter,sans-serif">${total}</text>
+      <text x="${cx}" y="${cy+13}" text-anchor="middle" fill="rgba(240,244,255,0.5)"
+        font-size="${Math.round(size*0.08)}" font-family="Inter,sans-serif">votos</text>
     </svg>
-    <div style="flex:1;min-width:160px;">${legendHtml}</div>
+    <div style="flex:1;min-width:150px;">${legendHtml}</div>
   </div>`;
 }
 
