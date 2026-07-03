@@ -665,10 +665,7 @@ async function openDebate(id) {
     const res = await rr.json();
     const opinions_data = ar.ok ? await ar.json() : {};
     currentDebate = db;
-    const items = opinions_data.items || [];
-    const firstAd  = items.find(it => it.type === 'ad')?.ad || null;
-    const opinions = items.filter(it => it.type === 'opinion').map(it => it.opinion);
-    renderDebate(db, res, firstAd, opinions);
+    renderDebate(db, res, opinions_data.items || []);
   } catch(e) { content.innerHTML = '<div class="no-debates">Error loading consultation.</div>'; }
 }
 
@@ -691,7 +688,47 @@ function renderAdCard(ad) {
   </div>`;
 }
 
-function renderDebate(db, res, ad, opinions) {
+function renderDonut(opts, counts, total, colors) {
+  if (total === 0 || !opts.length) return '<div style="color:var(--muted);font-size:14px;">Aún no hay votos — ¡sé el primero!</div>';
+  const size = 140, cx = size/2, cy = size/2;
+  const r = size/2 * 0.72, sw = size * 0.14;
+  const circ = 2 * Math.PI * r;
+  let offset = 0;
+  const slices = opts.map((opt, i) => {
+    const cnt = counts[opt] || 0;
+    const pct = cnt / total;
+    const dash = pct * circ, gap = circ - dash;
+    const dashOff = -(offset * circ - circ * 0.25);
+    offset += pct;
+    return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="transparent"
+      stroke="${colors[i % colors.length]}" stroke-width="${sw}"
+      stroke-dasharray="${dash} ${gap}" stroke-dashoffset="${dashOff}"
+      transform="rotate(-90 ${cx} ${cy})"/>`;
+  }).join('');
+  const legendHtml = opts.map((opt, i) => {
+    const cnt = counts[opt] || 0;
+    const pct = Math.round(cnt / total * 100);
+    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;">
+      <div style="width:11px;height:11px;border-radius:50%;background:${colors[i%colors.length]};flex-shrink:0;"></div>
+      <span style="font-size:13px;flex:1;color:var(--text);">${esc(opt)}</span>
+      <span style="font-size:14px;font-weight:700;color:${colors[i%colors.length]};">${pct}%</span>
+    </div>`;
+  }).join('');
+  return `<div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap;">
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="flex-shrink:0;">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="var(--bg3)"/>
+      ${slices}
+      <circle cx="${cx}" cy="${cy}" r="${r*0.55}" fill="var(--bg2)"/>
+      <text x="${cx}" y="${cy-4}" text-anchor="middle" fill="#f0f4ff"
+        font-size="${Math.round(size*0.13)}" font-weight="bold" font-family="Inter,sans-serif">${total}</text>
+      <text x="${cx}" y="${cy+12}" text-anchor="middle" fill="rgba(240,244,255,0.55)"
+        font-size="${Math.round(size*0.09)}" font-family="Inter,sans-serif">votos</text>
+    </svg>
+    <div style="flex:1;min-width:160px;">${legendHtml}</div>
+  </div>`;
+}
+
+function renderDebate(db, res, items) {
   const content = document.getElementById('detail-content');
   const opts    = db.options || [];
   const isLive  = db.status === 'live';
@@ -701,17 +738,23 @@ function renderDebate(db, res, ad, opinions) {
   const total   = (res.debate || res).total_votes || db.total_votes || 0;
   const COLORS  = ['#2d6eff','#10b981','#f59e0b','#f43f5e','#8b5cf6','#06b6d4'];
 
-  // ── PHASE 1: DEBATE — opinions from others ──
+  // ── PHASE 1: DEBATE — opinions + ads in sequence ──
   const levelLabel = { expert: 'Experto', good: 'Informado', familiar: 'Conoce el tema' };
-  const opinionsHtml = (opinions && opinions.length > 0)
-    ? opinions.slice(0, 5).map(op => `
-        <div class="opinion-card">
-          <div class="opinion-text">${esc(op.text)}</div>
-          <div class="opinion-meta">
-            <span>${esc(op.user_name || 'Anónimo')}</span>
-            ${op.knowledge_level ? `<span class="opinion-level">${levelLabel[op.knowledge_level] || op.knowledge_level}</span>` : ''}
-          </div>
-        </div>`).join('')
+  const feedHtml = (items && items.length > 0)
+    ? items.map(it => {
+        if (it.type === 'ad')      return renderAdCard(it.ad);
+        if (it.type === 'opinion') {
+          const op = it.opinion;
+          return `<div class="opinion-card">
+            <div class="opinion-text">${esc(op.text)}</div>
+            <div class="opinion-meta">
+              <span>${esc(op.user_name || 'Anónimo')}</span>
+              ${op.knowledge_level ? `<span class="opinion-level">${levelLabel[op.knowledge_level] || op.knowledge_level}</span>` : ''}
+            </div>
+          </div>`;
+        }
+        return '';
+      }).join('')
     : `<div class="no-opinions">Sé el primero en compartir tu perspectiva después de votar.</div>`;
 
   // ── PHASE 2: PREFERENCE — vote options ──
@@ -722,17 +765,6 @@ function renderDebate(db, res, ad, opinions) {
     <button class="btn vote-btn" id="vote-submit-btn" onclick="castVote()" disabled>Seleccionar una opción para votar</button>
     <div class="vote-err" id="vote-err"></div>
   ` : '';
-
-  // ── RESULTS ──
-  const barsHtml = opts.map((opt, i) => {
-    const cnt   = counts[opt] || 0;
-    const pct   = total > 0 ? Math.round(cnt / total * 100) : 0;
-    const color = COLORS[i % COLORS.length];
-    return `<div class="result-row">
-      <div class="result-label"><span>${esc(opt)}</span><span style="color:${color};font-weight:700;">${pct}%</span></div>
-      <div class="result-bar-bg"><div class="result-bar-fill" style="width:${pct}%;background:${color};"></div></div>
-    </div>`;
-  }).join('');
 
   content.innerHTML = `
     <div class="detail-card">
@@ -751,8 +783,7 @@ function renderDebate(db, res, ad, opinions) {
       <div class="phase-label">01 · Debate</div>
       <div class="phase-divider-line"></div>
     </div>
-    ${ad ? renderAdCard(ad) : ''}
-    <div class="opinions-section">${opinionsHtml}</div>
+    <div class="opinions-section">${feedHtml}</div>
 
     ${isLive ? `
     <div class="phase-divider">
@@ -768,7 +799,7 @@ function renderDebate(db, res, ad, opinions) {
       <div class="phase-divider-line"></div>
     </div>
     <div class="detail-card">
-      <div class="results-section">${barsHtml || '<div style="color:var(--muted);font-size:14px;">Aún no hay votos — ¡sé el primero!</div>'}</div>
+      ${renderDonut(opts, counts, total, COLORS)}
     </div>
   `;
 }
