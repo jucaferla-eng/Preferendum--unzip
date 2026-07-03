@@ -327,10 +327,13 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 <!-- MAIN APP -->
 <div id="main-app">
   <div class="topbar">
-    <a href="/" style="text-decoration:none;color:inherit;"><div class="topbar-brand">prefer<span>endum</span></div></a>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <a href="/" style="text-decoration:none;font-size:13px;color:#64748b;">← Inicio</a>
+      <a href="/" style="text-decoration:none;color:inherit;"><div class="topbar-brand">prefer<span>endum</span></div></a>
+    </div>
     <div class="topbar-user">
       <span id="user-name-display"></span>
-      <span class="logout-btn" onclick="doLogout()">Sign out</span>
+      <span class="logout-btn" onclick="doLogout()">Salir</span>
     </div>
   </div>
   <!-- BOTTOM NAV -->
@@ -679,7 +682,7 @@ function navTo(tab) {
       showDetailView();
       setActiveTab('tab-comment');
       setTimeout(() => {
-        const el = document.getElementById('opinion-form-card');
+        const el = document.getElementById('comment-section') || document.getElementById('opinion-form-card');
         if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
       }, 100);
     } else { showDebatesList(); }
@@ -694,8 +697,8 @@ function navTo(tab) {
       showDetailView();
       setActiveTab('tab-vote');
       setTimeout(() => {
-        const el = document.getElementById('vote-submit-btn');
-        if (el) el.scrollIntoView({behavior:'smooth', block:'center'});
+        const el = document.getElementById('vote-section') || document.getElementById('vote-submit-btn');
+        if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
       }, 100);
     } else { showDebatesList(); }
     return;
@@ -873,9 +876,9 @@ function renderDebate(db, res, items) {
         }
         return '';
       }).join('')
-    : `<div class="no-opinions">Sé el primero en compartir tu perspectiva después de votar.</div>`;
+    : `<div class="no-opinions">Aún no hay opiniones — sé el primero en compartir tu perspectiva.</div>`;
 
-  // ── PHASE 2: PREFERENCE — vote options ──
+  // ── PHASE 3: VOTE options ──
   const optBtns = isLive ? `
     ${opts.map((opt, i) => `
       <button class="option-btn" id="opt-${i}" onclick="selectOption(${i})">${esc(opt)}</button>
@@ -884,15 +887,17 @@ function renderDebate(db, res, items) {
     <div class="vote-err" id="vote-err"></div>
   ` : '';
 
+  const debId = db.id;
+
   content.innerHTML = `
     <div class="detail-card">
       <span class="debate-status ${isLive ? 'status-live' : 'status-closed'}">${isLive ? '● Live' : 'Closed'}</span>
       <div class="detail-title">${esc(db.title)}</div>
       ${db.context ? `<div class="detail-context">${esc(db.context)}</div>` : ''}
       <div class="debate-meta">
-        <span class="debate-votes">⬡ ${total} votes</span>
+        <span class="debate-votes">⬡ ${total} votos</span>
         <span>${db.scope_country || 'Global'}</span>
-        ${db.closes_at ? `<span>Closes ${fmtDate(db.closes_at)}</span>` : ''}
+        ${db.closes_at ? `<span>Cierra ${fmtDate(db.closes_at)}</span>` : ''}
       </div>
     </div>
 
@@ -901,16 +906,40 @@ function renderDebate(db, res, items) {
       <div class="phase-label">01 · Debate</div>
       <div class="phase-divider-line"></div>
     </div>
-    <div class="opinions-section">${feedHtml}</div>
+    <div class="opinions-section" id="debate-section">${feedHtml}</div>
+
+    <div id="comment-section">
+      <div class="phase-divider">
+        <div class="phase-divider-line"></div>
+        <div class="phase-label">02 · Tu Perspectiva</div>
+        <div class="phase-divider-line"></div>
+      </div>
+      <div class="detail-card" id="opinion-form-card">
+        <div style="font-size:14px;font-weight:600;margin-bottom:8px;color:#0f172a;">Comparte tu perspectiva con la comunidad</div>
+        <div style="font-size:12px;color:#64748b;margin-bottom:12px;">Lee el debate primero, luego expresa tu postura. Otros la leerán antes de votar.</div>
+        <select id="opinion-level" style="width:100%;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;color:#0f172a;font-size:14px;outline:none;margin-bottom:10px;">
+          <option value="familiar">Conozco el tema</option>
+          <option value="good">Estoy bien informado/a</option>
+          <option value="expert">Soy experto/a en el área</option>
+        </select>
+        <textarea id="opinion-text" placeholder="Escribe tu opinión aquí (mínimo 20 caracteres)…"
+          style="width:100%;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
+                 padding:12px;color:#0f172a;font-size:14px;font-family:'Inter',sans-serif;
+                 min-height:90px;resize:vertical;outline:none;margin-bottom:10px;box-sizing:border-box;"></textarea>
+        <button class="btn" onclick="submitOpinion(${debId})">Publicar mi perspectiva →</button>
+        <div id="opinion-submit-status" style="font-size:13px;margin-top:8px;min-height:18px;"></div>
+      </div>
+    </div>
 
     ${isLive ? `
-    <div class="phase-divider">
-      <div class="phase-divider-line"></div>
-      <div class="phase-label">02 · Tu Preferencia</div>
-      <div class="phase-divider-line"></div>
-    </div>
-    <div class="detail-card">${optBtns}</div>` : ''}
-
+    <div id="vote-section">
+      <div class="phase-divider">
+        <div class="phase-divider-line"></div>
+        <div class="phase-label">03 · Tu Voto</div>
+        <div class="phase-divider-line"></div>
+      </div>
+      <div class="detail-card">${optBtns}</div>
+    </div>` : ''}
   `;
 }
 
@@ -1010,7 +1039,7 @@ async function showVoteSuccess(data, optIdx) {
       <div class="success-title">Voto registrado en blockchain</div>
       <div class="success-text">Tu voto por <strong>"${esc(option)}"</strong> fue anclado en Polygon Mainnet. Tu identidad está verificada — tu privacidad protegida.</div>
       <div class="vcode-box">${esc(vcode)}</div>
-      <div class="vcode-label">Código de verificación — úsalo para demostrar tu voto sin revelar tu identidad</div>
+      <div class="vcode-label">Guarda este código — te permitirá verificar cómo fue contabilizado tu voto cuando termine el período de votación</div>
       ${data.blockchain_tx ? `<a class="verify-link" href="https://polygonscan.com/tx/${data.blockchain_tx}" target="_blank" rel="noopener">Ver en Polygon blockchain ↗</a>` : ''}
     </div>
     ${postAdHtml}
@@ -1026,28 +1055,7 @@ async function showVoteSuccess(data, optIdx) {
       Precisión del proceso: ${accuracy} de votos anclados en blockchain
     </div>` : ''}
 
-    <div class="phase-divider">
-      <div class="phase-divider-line"></div>
-      <div class="phase-label">Tu Perspectiva</div>
-      <div class="phase-divider-line"></div>
-    </div>
-    <div class="detail-card" id="opinion-form-card">
-      <div style="font-size:14px;font-weight:600;margin-bottom:10px;color:var(--text);">Comparte tu perspectiva con la comunidad</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Tu opinión aparecerá en el debate para que otros la lean antes de votar.</div>
-      <select id="opinion-level" style="width:100%;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;color:#0f172a;font-size:14px;outline:none;margin-bottom:10px;">
-        <option value="familiar">Conozco el tema</option>
-        <option value="good">Estoy bien informado/a</option>
-        <option value="expert">Soy experto/a en el área</option>
-      </select>
-      <textarea id="opinion-text" placeholder="Escribe tu opinión aquí (mínimo 20 caracteres)…"
-        style="width:100%;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;
-               padding:12px;color:#0f172a;font-size:14px;font-family:'Inter',sans-serif;
-               min-height:90px;resize:vertical;outline:none;margin-bottom:10px;box-sizing:border-box;"></textarea>
-      <button class="btn" onclick="submitOpinion(${debId})">Publicar mi perspectiva →</button>
-      <div id="opinion-submit-status" style="font-size:13px;margin-top:8px;min-height:18px;"></div>
-    </div>
-
-    <div style="margin-top:16px;">
+    <div style="margin-top:20px;display:flex;flex-direction:column;gap:10px;">
       <button class="btn" onclick="showDebatesList()" style="background:#f1f5f9;color:#0f172a;">← Todas las consultas</button>
     </div>
   `;
