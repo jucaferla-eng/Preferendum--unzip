@@ -52,12 +52,13 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 .topbar-brand span{color:var(--blue);}
 .topbar-user{font-size:13px;color:#64748b;display:flex;align-items:center;gap:10px;}
 .logout-btn{font-size:12px;color:var(--blue);cursor:pointer;text-decoration:underline;}
-/* ── NAV TABS ── */
-.navtabs{background:#ffffff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-around;padding:0;position:sticky;top:49px;z-index:99;}
-.navtab{flex:1;display:flex;flex-direction:column;align-items:center;padding:10px 0;cursor:pointer;border-bottom:3px solid transparent;color:#9ca3af;transition:color 0.15s,border-color 0.15s;}
-.navtab.active{border-bottom-color:#2196f3;color:#1e293b;}
-.navtab svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
-.content{flex:1;padding:16px;max-width:600px;margin:0 auto;width:100%;}
+/* ── BOTTOM NAV ── */
+.bottomnav{position:fixed;bottom:0;left:0;right:0;background:#1a1a1a;display:flex;align-items:stretch;z-index:200;padding-bottom:env(safe-area-inset-bottom);}
+.bottomtab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 4px 8px;cursor:pointer;color:rgba(255,255,255,0.45);transition:color 0.15s;gap:4px;border:none;background:none;}
+.bottomtab.active{color:#ffffff;}
+.bottomtab svg{width:24px;height:24px;fill:currentColor;}
+.bottomtab-label{font-size:10px;font-weight:500;letter-spacing:0.02em;}
+.content{flex:1;padding:16px;padding-bottom:80px;max-width:600px;margin:0 auto;width:100%;}
 
 /* ── DEBATES LIST ── */
 .section-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;margin-bottom:6px;color:#0f172a;}
@@ -332,20 +333,33 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
       <span class="logout-btn" onclick="doLogout()">Sign out</span>
     </div>
   </div>
-  <!-- NAV TABS -->
-  <div class="navtabs">
-    <div class="navtab active" id="tab-list" onclick="navTo('list')">
-      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>
-    </div>
-    <div class="navtab" id="tab-debate" onclick="navTo('debate')">
-      <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-    </div>
-    <div class="navtab" id="tab-results" onclick="navTo('results')">
-      <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 2v10l6.5 6.5"/></svg>
-    </div>
-    <div class="navtab" id="tab-profile" onclick="navTo('profile')">
-      <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-    </div>
+  <!-- BOTTOM NAV -->
+  <div class="bottomnav">
+    <button class="bottomtab active" id="tab-comment" onclick="navTo('comment')">
+      <!-- Comment: speech bubble with lines -->
+      <svg viewBox="0 0 24 24"><path d="M20 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4l4 4 4-4h4a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-2 9H6v-2h12v2zm0-4H6V5h12v2z"/></svg>
+      <span class="bottomtab-label">Comment</span>
+    </button>
+    <button class="bottomtab" id="tab-debate" onclick="navTo('debate')">
+      <!-- Debate: two people at podium -->
+      <svg viewBox="0 0 24 24"><path d="M17 20h5v-2a4 4 0 0 0-3-3.87M9 20H4v-2a4 4 0 0 1 3-3.87m9-9a4 4 0 1 1-8 0 4 4 0 0 1 8 0zm-9 4a4 4 0 1 0-8 0v2h8V15zm14 0a4 4 0 1 0-8 0v2h8V15z"/></svg>
+      <span class="bottomtab-label">Debate</span>
+    </button>
+    <button class="bottomtab" id="tab-vote" onclick="navTo('vote')">
+      <!-- Vote: hand + ballot box -->
+      <svg viewBox="0 0 24 24"><path d="M18 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zm-1 9H7v-2h10v2zm-3-4H7V7h7v2z"/></svg>
+      <span class="bottomtab-label">Vote</span>
+    </button>
+    <button class="bottomtab" id="tab-results" onclick="navTo('results')">
+      <!-- Results: pie chart -->
+      <svg viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83M22 12A10 10 0 0 0 12 2v10z"/></svg>
+      <span class="bottomtab-label">Results</span>
+    </button>
+    <button class="bottomtab" id="tab-profile" onclick="navTo('profile')">
+      <!-- Profile: person -->
+      <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/></svg>
+      <span class="bottomtab-label">Profile</span>
+    </button>
   </div>
   <div class="content">
     <!-- DEBATES LIST -->
@@ -653,27 +667,42 @@ function showApp() {
 }
 
 function setActiveTab(id) {
-  ['tab-list','tab-debate','tab-results','tab-profile'].forEach(t => {
-    document.getElementById(t).classList.toggle('active', t === id);
+  ['tab-comment','tab-debate','tab-vote','tab-results','tab-profile'].forEach(t => {
+    const el = document.getElementById(t);
+    if (el) el.classList.toggle('active', t === id);
   });
 }
 
 function navTo(tab) {
-  if (tab === 'list') { showDebatesList(); return; }
-  if (tab === 'debate') {
+  if (tab === 'comment') {
     if (currentDebate) {
-      document.getElementById('debates-view').style.display = 'none';
-      document.getElementById('debate-detail').style.display = 'block';
-      document.getElementById('profile-view').style.display = 'none';
-      setActiveTab('tab-debate');
+      showDetailView();
+      setActiveTab('tab-comment');
+      setTimeout(() => {
+        const el = document.getElementById('opinion-form-card');
+        if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+      }, 100);
+    } else { showDebatesList(); }
+    return;
+  }
+  if (tab === 'debate') {
+    showDebatesList();
+    return;
+  }
+  if (tab === 'vote') {
+    if (currentDebate) {
+      showDetailView();
+      setActiveTab('tab-vote');
+      setTimeout(() => {
+        const el = document.getElementById('vote-submit-btn');
+        if (el) el.scrollIntoView({behavior:'smooth', block:'center'});
+      }, 100);
     } else { showDebatesList(); }
     return;
   }
   if (tab === 'results') {
     if (currentDebate) {
-      document.getElementById('debates-view').style.display = 'none';
-      document.getElementById('debate-detail').style.display = 'block';
-      document.getElementById('profile-view').style.display = 'none';
+      showDetailView();
       setActiveTab('tab-results');
       openDebate(currentDebate.id);
     }
@@ -689,11 +718,17 @@ function navTo(tab) {
   }
 }
 
+function showDetailView() {
+  document.getElementById('debates-view').style.display = 'none';
+  document.getElementById('debate-detail').style.display = 'block';
+  document.getElementById('profile-view').style.display = 'none';
+}
+
 function showDebatesList() {
   document.getElementById('debates-view').style.display = '';
   document.getElementById('debate-detail').style.display = 'none';
   document.getElementById('profile-view').style.display = 'none';
-  setActiveTab('tab-list');
+  setActiveTab('tab-debate');
   selectedOption = null;
   currentDebate = null;
 }
@@ -724,7 +759,7 @@ async function openDebate(id) {
   document.getElementById('debates-view').style.display = 'none';
   document.getElementById('debate-detail').style.display = 'block';
   document.getElementById('profile-view').style.display = 'none';
-  setActiveTab('tab-debate');
+  setActiveTab('tab-comment');
   window.scrollTo(0, 0);
   const content = document.getElementById('detail-content');
   content.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
