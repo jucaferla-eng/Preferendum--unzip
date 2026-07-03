@@ -4561,6 +4561,16 @@ def blockchain_debug(secret: str):
         result['traceback'] = tb.format_exc()
     return result
 
+@app.post('/admin/blockchain-reinit')
+def blockchain_reinit(secret: str):
+    """Force blockchain to re-initialize (useful after failed startup)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    _blockchain._initialized = False
+    _blockchain.live = False
+    _blockchain._ensure_init()
+    return _blockchain.status()
+
 @app.post('/admin/blockchain-test-anchor')
 def blockchain_test_anchor(secret: str, debate_id: int = 101):
     """Cast a real test vote hash to the contract via anchor_vote. Verifiable on PolygonScan."""

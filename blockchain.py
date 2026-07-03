@@ -132,7 +132,7 @@ class PreferendumBlockchain:
         self.contract_address = (os.getenv('CONTRACT_ADDRESS') or '').strip()
         self.wallet_address   = (os.getenv('WALLET_ADDRESS') or '').strip()
         self.private_key      = (os.getenv('WALLET_PRIVATE_KEY') or self._read_secret('WALLET_PRIVATE_KEY') or '').strip()
-        self.rpc_url          = (os.getenv('POLYGON_RPC_URL') or 'https://polygon-rpc.com').strip()
+        self.rpc_url          = (os.getenv('POLYGON_RPC_URL') or 'https://1rpc.io/matic').strip()
 
     def _ensure_init(self):
         """Connect to Polygon on first use. Never blocks server startup."""
