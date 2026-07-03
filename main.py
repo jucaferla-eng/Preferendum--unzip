@@ -4511,6 +4511,55 @@ def blockchain_status(secret: str):
         import traceback
         return {'live': False, 'error': str(e), 'traceback': traceback.format_exc()}
 
+@app.post('/admin/blockchain-debug')
+def blockchain_debug(secret: str):
+    """Deep diagnostic: try to build+sign a tx and return the exact error if it fails."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import traceback as tb
+    result = {}
+    _blockchain._ensure_init()
+    result['live'] = _blockchain.live
+    if not _blockchain.live:
+        result['error'] = 'Not in live mode — check CONTRACT_ADDRESS, WALLET_ADDRESS, WALLET_PRIVATE_KEY env vars'
+        return result
+    try:
+        from web3 import Web3
+        w3 = _blockchain.web3
+        wallet = w3.to_checksum_address(_blockchain.wallet_address)
+        result['wallet'] = wallet
+        result['balance_wei'] = str(w3.eth.get_balance(wallet))
+        result['balance_matic'] = float(w3.eth.get_balance(wallet)) / 1e18
+        result['nonce'] = w3.eth.get_transaction_count(wallet)
+        result['gas_price_gwei'] = float(w3.eth.gas_price) / 1e9
+        result['chain_id'] = _blockchain._chain_id()
+        pk = _blockchain.private_key or ''
+        result['pk_length'] = len(pk.strip())
+        result['pk_has_0x'] = pk.strip().startswith('0x')
+        if pk.strip() and not pk.strip().startswith('0x'):
+            pk = '0x' + pk.strip()
+        else:
+            pk = pk.strip()
+        # Try building the transaction
+        gas_price = int(w3.eth.gas_price * 1.2)
+        func = _blockchain.contract.functions.openDebate(9998, 'DebugTest', 'Preferendum')
+        tx = func.build_transaction({
+            'from': wallet, 'nonce': result['nonce'],
+            'gas': 300000, 'gasPrice': gas_price, 'chainId': result['chain_id'],
+        })
+        result['tx_built'] = True
+        signed = w3.eth.account.sign_transaction(tx, pk)
+        result['signed'] = True
+        result['raw_tx_hex'] = signed.raw_transaction.hex()[:20] + '...'
+        # Try sending
+        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+        result['tx_sent'] = True
+        result['tx_hash'] = tx_hash.hex()
+    except Exception as e:
+        result['error'] = str(e)
+        result['traceback'] = tb.format_exc()
+    return result
+
 @app.get('/admin/targeting/matrix')
 def targeting_matrix_summary(secret: str):
     """Returns the current targeting matrix summary: GNI tiers, CPMs, communes per country."""
