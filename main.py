@@ -4576,6 +4576,7 @@ def blockchain_reinit(secret: str):
         'secret_file_exists':     os.path.exists('/etc/secrets/WALLET_PRIVATE_KEY'),
     }
     _blockchain._initialized = False
+    _blockchain._init_attempts = 0
     _blockchain.live = False
     if pk_env:
         _blockchain.private_key = pk_env

@@ -163,6 +163,7 @@ class PreferendumBlockchain:
 
     def _init(self):
         """Try to connect to Polygon. Fall back to mock if not configured."""
+        print(f'[Blockchain] _init: contract={bool(self.contract_address)} wallet={bool(self.wallet_address)} pk={bool(self.private_key)} pk_len={len(self.private_key)} rpc={self.rpc_url}')
         if not all([self.contract_address, self.wallet_address, self.private_key]):
             print('[Blockchain] Running in MOCK mode — set CONTRACT_ADDRESS, WALLET_ADDRESS, WALLET_PRIVATE_KEY to go live')
             return
@@ -170,7 +171,9 @@ class PreferendumBlockchain:
         try:
             from web3 import Web3
             w3 = Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs={'timeout': 15}))
-            if not w3.is_connected():
+            connected = w3.is_connected()
+            print(f'[Blockchain] is_connected={connected}')
+            if not connected:
                 print(f'[Blockchain] Cannot connect to {self.rpc_url} — using mock mode')
                 return
 
