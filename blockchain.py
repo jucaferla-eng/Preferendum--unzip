@@ -129,20 +129,27 @@ class PreferendumBlockchain:
         self.web3             = None
         self.contract         = None
         self._initialized     = False  # lazy: connect on first use, not at import
+        self._init_attempts   = 0      # cap retries at 3
         self.contract_address = (os.getenv('CONTRACT_ADDRESS') or '').strip()
         self.wallet_address   = (os.getenv('WALLET_ADDRESS') or '').strip()
         self.private_key      = (os.getenv('WALLET_PRIVATE_KEY') or self._read_secret('WALLET_PRIVATE_KEY') or '').strip()
         self.rpc_url          = (os.getenv('POLYGON_RPC_URL') or 'https://1rpc.io/matic').strip()
 
     def _ensure_init(self):
-        """Connect to Polygon on first use. Never blocks server startup."""
+        """Connect to Polygon on first use. Retries up to 3 times on transient failures."""
+        if self.live:
+            return  # Already connected — fast path
         if self._initialized:
-            return
-        self._initialized = True
+            return  # Gave up after max retries
+        self._init_attempts += 1
         try:
             self._init()
         except BaseException as e:
             print(f'[Blockchain] connect error ({type(e).__name__}): {e} — running mock')
+        if not self.live and self._init_attempts < 3:
+            pass  # Will retry on next request
+        else:
+            self._initialized = True  # Either connected or gave up
 
     @staticmethod
     def _read_secret(name: str) -> str:
