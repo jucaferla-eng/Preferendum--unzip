@@ -30,8 +30,18 @@ BACKEND_URL  = os.getenv('BACKEND_URL', 'https://preferendum-unzip.onrender.com'
 ADMIN_SECRET = os.getenv('ADMIN_SECRET', 'preferendum-admin-2024')
 
 def get_api_key():
-    """Lee la key en tiempo de ejecución — no al importar el módulo."""
-    return os.getenv('ANTHROPIC_API_KEY', '').strip()
+    """Lee la key en tiempo de ejecución — env var o secret file."""
+    key = os.getenv('ANTHROPIC_API_KEY', '').strip()
+    if not key:
+        for path in ['/etc/secrets/ANTHROPIC_API_KEY', './ANTHROPIC_API_KEY']:
+            try:
+                with open(path) as f:
+                    key = f.read().strip()
+                if key:
+                    break
+            except Exception:
+                pass
+    return key
 
 # ══════════════════════════════════════════════════════════════
 # SEGURIDAD DEL AGENTE

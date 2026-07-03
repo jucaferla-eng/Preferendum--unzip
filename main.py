@@ -5115,7 +5115,16 @@ def agent_test_api(secret: str):
     import requests as _req
     result = {}
     api_key = os.getenv('ANTHROPIC_API_KEY', '').strip()
+    secret_file = os.path.exists('/etc/secrets/ANTHROPIC_API_KEY')
+    if not api_key and secret_file:
+        try:
+            with open('/etc/secrets/ANTHROPIC_API_KEY') as f:
+                api_key = f.read().strip()
+        except Exception:
+            pass
     result['api_key_set'] = bool(api_key)
+    result['api_key_in_env'] = bool(os.getenv('ANTHROPIC_API_KEY', '').strip())
+    result['api_key_in_secret_file'] = secret_file
     result['api_key_prefix'] = api_key[:12] + '...' if api_key else 'NOT SET'
     if api_key:
         try:
