@@ -170,11 +170,28 @@ class PreferendumBlockchain:
 
         try:
             from web3 import Web3
-            w3 = Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs={'timeout': 15}))
-            connected = w3.is_connected()
-            print(f'[Blockchain] is_connected={connected}')
-            if not connected:
-                print(f'[Blockchain] Cannot connect to {self.rpc_url} — using mock mode')
+            # Try configured RPC first, then reliable fallbacks
+            rpc_candidates = [
+                self.rpc_url,
+                'https://rpc.ankr.com/polygon',
+                'https://polygon.llamarpc.com',
+                'https://polygon.drpc.org',
+            ]
+            w3 = None
+            for rpc in rpc_candidates:
+                try:
+                    _w3 = Web3(Web3.HTTPProvider(rpc, request_kwargs={'timeout': 10}))
+                    if _w3.is_connected():
+                        w3 = _w3
+                        if rpc != self.rpc_url:
+                            print(f'[Blockchain] Fallback RPC used: {rpc}')
+                        break
+                    else:
+                        print(f'[Blockchain] RPC not connected: {rpc}')
+                except Exception as rpc_err:
+                    print(f'[Blockchain] RPC error {rpc}: {rpc_err}')
+            if w3 is None:
+                print('[Blockchain] No RPC reachable — using mock mode')
                 return
 
             self.web3     = w3
