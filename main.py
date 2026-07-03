@@ -4563,13 +4563,26 @@ def blockchain_debug(secret: str):
 
 @app.post('/admin/blockchain-reinit')
 def blockchain_reinit(secret: str):
-    """Force blockchain to re-initialize (useful after failed startup)."""
+    """Force blockchain to re-initialize and return full diagnostic."""
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
+    import os as _os
+    diag = {
+        'env_CONTRACT_ADDRESS': bool(_os.getenv('CONTRACT_ADDRESS')),
+        'env_WALLET_ADDRESS':   bool(_os.getenv('WALLET_ADDRESS')),
+        'env_WALLET_PRIVATE_KEY': bool(_os.getenv('WALLET_PRIVATE_KEY')),
+        'env_POLYGON_RPC_URL':  _os.getenv('POLYGON_RPC_URL', '(not set)'),
+        'pk_from_env_length':   len((_os.getenv('WALLET_PRIVATE_KEY') or '').strip()),
+    }
+    import os.path
+    diag['secret_file_exists'] = os.path.exists('/etc/secrets/WALLET_PRIVATE_KEY')
     _blockchain._initialized = False
     _blockchain.live = False
+    _blockchain.private_key = (_os.getenv('WALLET_PRIVATE_KEY') or '').strip()
     _blockchain._ensure_init()
-    return _blockchain.status()
+    status = _blockchain.status()
+    status['diag'] = diag
+    return status
 
 @app.post('/admin/blockchain-test-anchor')
 def blockchain_test_anchor(secret: str, debate_id: int = 101):
