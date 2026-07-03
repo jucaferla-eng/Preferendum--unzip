@@ -744,8 +744,52 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional."""
         return None
 
 
+def _find_similar_debate(question: str, country_code: str) -> dict | None:
+    """
+    Search existing live debates for one that covers the same topic.
+    Uses keyword overlap — if 3+ significant words match an existing title,
+    we consider it the same debate and converge new participants there.
+    Returns the matching debate dict or None.
+    """
+    STOP_WORDS = {'el','la','los','las','un','una','de','del','en','que','qué',
+                  'y','o','a','al','se','su','sus','por','para','con','es','son',
+                  'the','a','an','of','to','in','is','are','and','or','for','with'}
+    def keywords(text: str) -> set:
+        words = re.findall(r'\b\w{4,}\b', text.lower())
+        return {w for w in words if w not in STOP_WORDS}
+
+    q_kw = keywords(question)
+    try:
+        r = _requests.get(f'{BACKEND_URL}/debates?limit=50', timeout=10)
+        if not r.ok:
+            return None
+        debates = r.json().get('debates', [])
+        for d in debates:
+            if d.get('scope_country') != country_code and country_code != 'GL':
+                continue
+            if d.get('status') != 'live':
+                continue
+            d_kw = keywords(d.get('title', ''))
+            overlap = len(q_kw & d_kw)
+            if overlap >= 3:
+                print(f'[Convergence] Merging into existing debate #{d["id"]} (overlap={overlap}): {d["title"][:60]}')
+                return d
+    except Exception as e:
+        print(f'[Convergence] Search error: {e}')
+    return None
+
+
 def _create_debate_via_api(debate_data: dict, country_code: str) -> bool:
-    """POST a new debate to the backend. Returns True on success."""
+    """
+    POST a new debate to the backend — but first check if a similar debate
+    already exists (convergence). Returns True if created OR converged.
+    """
+    # Convergence check: don't fragment the same topic across multiple debates
+    existing = _find_similar_debate(debate_data['question'], country_code)
+    if existing:
+        print(f'[NewsAgent] Converged → debate #{existing["id"]} already covers this topic. Skipping duplicate.')
+        return False   # counted as skipped, not created
+
     closes_at = (datetime.utcnow() + timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%S')
     payload = {
         'title':         debate_data['question'],
@@ -858,15 +902,18 @@ def _fetch_rss_feed(url: str, max_items: int = 5) -> list:
         return []
 
 
-def run_regional_debates(max_per_region: int = 1) -> dict:
+def run_regional_debates(max_per_region: int = 1, force: bool = False) -> dict:
     """
     Fetch Chilean regional and sector news, generate debates targeted
     to each region or professional sector. Called separately from the
     main daily-debates cycle so as not to flood the platform.
+    force=True bypasses dedup (for testing).
     """
     global _created_this_run
     _created_this_run = set()
     total_created = 0
+    total_skipped = 0
+    total_unsuitable = 0
     summary = []
     cl_country = {'code': 'CL', 'lang': 'es', 'name': 'Chile', 'ceid': 'CL:es'}
 
@@ -881,23 +928,47 @@ def run_regional_debates(max_per_region: int = 1) -> dict:
                 continue
             debate = _analyze_news_item(item, cl_country)
             if not debate:
+                total_unsuitable += 1
                 continue
             q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
             if q_hash in _created_this_run:
                 continue
             _created_this_run.add(title_hash)
             _created_this_run.add(q_hash)
-            if _create_debate_via_api(debate, 'CL'):
+            if force:
+                # Bypass dedup — create directly
+                from datetime import timedelta
+                closes_at = (datetime.utcnow() + timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%S')
+                payload = {
+                    'title': debate['question'], 'context': debate.get('context', ''),
+                    'options': debate.get('options', ['Sí', 'No', 'Me es indiferente']),
+                    'scope': 'country', 'scope_country': 'CL',
+                    'category': debate.get('category', 'salud'),
+                    'closes_at': closes_at,
+                }
+                try:
+                    r = _requests.post(f'{BACKEND_URL}/debates/create',
+                                       params={'secret': ADMIN_SECRET}, json=payload, timeout=15)
+                    if r.ok:
+                        created += 1
+                        total_created += 1
+                        summary.append({'source': feed['name'],
+                                        'sector': feed.get('sector', '?'),
+                                        'question': debate['question'][:80]})
+                except Exception as e:
+                    print(f'[SectorAgent] Force-create error: {e}')
+            elif _create_debate_via_api(debate, 'CL'):
                 created += 1
                 total_created += 1
-                summary.append({
-                    'source': feed['name'],
-                    'sector': feed.get('sector', feed.get('region', '?')),
-                    'question': debate['question'][:80],
-                })
+                summary.append({'source': feed['name'],
+                                'sector': feed.get('sector', feed.get('region', '?')),
+                                'question': debate['question'][:80]})
+            else:
+                total_skipped += 1
         print(f'[SectorAgent] {feed["name"]}: created {created} debate(s)')
 
-    return {'debates_created': total_created, 'summary': summary,
+    return {'debates_created': total_created, 'debates_skipped_dedup': total_skipped,
+            'unsuitable_news': total_unsuitable, 'summary': summary,
             'run_at': datetime.utcnow().isoformat()}
 
 

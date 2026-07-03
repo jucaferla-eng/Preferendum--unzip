@@ -5134,12 +5134,12 @@ def agent_regional_debates(secret: str, bg: BackgroundTasks):
     return {'ok': True, 'message': 'Regional sector agent started — creates debates from Chilean regional and sector media'}
 
 @app.post('/admin/agent/regional-debates/sync')
-def agent_regional_debates_sync(secret: str):
-    """Run regional/sector agent synchronously."""
+def agent_regional_debates_sync(secret: str, force: bool = False):
+    """Run regional/sector agent synchronously. force=true bypasses dedup."""
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
     from preferendum_agent import run_regional_debates
-    return run_regional_debates()
+    return run_regional_debates(force=force)
 
 @app.post('/admin/agent/task/{task_name}')
 def run_agent_task(task_name: str, secret: str):
