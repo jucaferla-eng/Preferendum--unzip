@@ -5107,6 +5107,38 @@ def marketing_admin_weekly(secret: str, bg: BackgroundTasks, db: Session = Depen
     return {'ok': True, 'message': 'Weekly reports started — check logs'}
 
 
+@app.get('/admin/agent/test-api')
+def agent_test_api(secret: str):
+    """Test Anthropic API key and RSS feeds. Returns raw status."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import requests as _req
+    result = {}
+    api_key = os.getenv('ANTHROPIC_API_KEY', '').strip()
+    result['api_key_set'] = bool(api_key)
+    result['api_key_prefix'] = api_key[:12] + '...' if api_key else 'NOT SET'
+    if api_key:
+        try:
+            r = _req.post('https://api.anthropic.com/v1/messages',
+                headers={'x-api-key': api_key, 'anthropic-version': '2023-06-01',
+                         'content-type': 'application/json'},
+                json={'model': 'claude-haiku-4-5-20251001', 'max_tokens': 30,
+                      'messages': [{'role': 'user', 'content': 'Reply: {"ok":true}'}]},
+                timeout=15)
+            result['anthropic_status'] = r.status_code
+            result['anthropic_response'] = r.text[:200]
+        except Exception as e:
+            result['anthropic_error'] = str(e)
+    # Test one RSS feed
+    try:
+        import feedparser
+        rss = feedparser.parse('https://news.google.com/rss/search?q=Chile+salud&hl=es&gl=CL&ceid=CL:es')
+        result['rss_items'] = len(rss.entries)
+        result['rss_first_title'] = rss.entries[0].title if rss.entries else 'none'
+    except Exception as e:
+        result['rss_error'] = str(e)
+    return result
+
 @app.post('/admin/agent/daily-debates')
 def agent_daily_debates(secret: str, bg: BackgroundTasks):
     """Trigger the news agent to create debates from world news."""
