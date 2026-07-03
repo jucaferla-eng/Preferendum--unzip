@@ -4550,9 +4550,10 @@ def blockchain_debug(secret: str):
         result['tx_built'] = True
         signed = w3.eth.account.sign_transaction(tx, pk)
         result['signed'] = True
-        result['raw_tx_hex'] = signed.raw_transaction.hex()[:20] + '...'
+        raw_tx = getattr(signed, 'raw_transaction', None) or getattr(signed, 'rawTransaction', None)
+        result['raw_tx_hex'] = raw_tx.hex()[:20] + '...'
         # Try sending
-        tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+        tx_hash = w3.eth.send_raw_transaction(raw_tx)
         result['tx_sent'] = True
         result['tx_hash'] = tx_hash.hex()
     except Exception as e:

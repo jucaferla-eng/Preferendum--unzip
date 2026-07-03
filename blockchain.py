@@ -211,7 +211,9 @@ class PreferendumBlockchain:
             })
 
             signed = w3.eth.account.sign_transaction(tx, pk)
-            tx_hash = w3.eth.send_raw_transaction(signed.raw_transaction)
+            # web3.py v5 uses rawTransaction, v6 uses raw_transaction
+            raw_tx = getattr(signed, 'raw_transaction', None) or getattr(signed, 'rawTransaction', None)
+            tx_hash = w3.eth.send_raw_transaction(raw_tx)
             # Wait up to 30s for receipt so next tx uses correct nonce
             try:
                 w3.eth.wait_for_transaction_receipt(tx_hash, timeout=30)
