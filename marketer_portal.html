@@ -237,6 +237,9 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
         <div class="sidebar-item" onclick="showPanel('blockchain')" id="nav-blockchain">
           <span class="sidebar-icon">⬡</span> Blockchain
         </div>
+        <div class="sidebar-item" id="nav-deployment" style="display:none;">
+          <span class="sidebar-icon">◎</span> Deployment
+        </div>
       </div>
 
       <!-- CONTENT -->
@@ -352,7 +355,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
                 <tr>
                   <th>Campaign</th>
                   <th>Country</th>
-                  <th>Budget (Credits)</th>
+                  <th>Budget (USD)</th>
                   <th>Impressions</th>
                   <th>Status</th>
                   <th></th>
@@ -360,6 +363,64 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
               </thead>
               <tbody id="campaigns-tbody">
                 <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:40px;">Loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- DEPLOYMENT PANEL -->
+        <div class="panel" id="panel-deployment">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:24px;">
+            <button onclick="showPanel('campaigns')" style="background:none;border:1px solid var(--border);color:var(--muted);padding:8px 14px;border-radius:6px;cursor:pointer;font-family:'Manrope',sans-serif;font-size:13px;">← Back</button>
+            <div>
+              <p class="section-tag" style="margin-bottom:2px;">Deployment Report</p>
+              <h2 class="section-title" id="dep-title" style="margin-bottom:0;">—</h2>
+            </div>
+          </div>
+
+          <!-- KPI row -->
+          <div class="stats-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:24px;">
+            <div class="stat-card">
+              <div class="stat-label">Status</div>
+              <div class="stat-value" id="dep-status" style="font-size:18px;">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Total Impressions</div>
+              <div class="stat-value green" id="dep-impressions">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Budget Used</div>
+              <div class="stat-value gold" id="dep-spent">—</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Debates Reached</div>
+              <div class="stat-value" id="dep-debates">—</div>
+            </div>
+          </div>
+
+          <!-- Ad preview -->
+          <div class="card" id="dep-ad-preview" style="margin-bottom:20px;">
+            <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--gold);letter-spacing:2px;margin-bottom:12px;">AD PREVIEW</div>
+            <div style="background:#f5a623;border-radius:10px;padding:18px 20px;">
+              <div id="dep-ad-copy" style="font-size:16px;font-weight:700;color:#fff;text-transform:uppercase;margin-bottom:6px;">—</div>
+              <div id="dep-ad-link" style="font-size:12px;color:rgba(255,255,255,0.8);">—</div>
+              <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:8px;">Publicidad · Preferendum</div>
+            </div>
+          </div>
+
+          <!-- Debates table -->
+          <div class="card" style="padding:0;overflow:hidden;">
+            <div style="padding:20px 20px 0;font-family:'DM Mono',monospace;font-size:10px;color:var(--gold);letter-spacing:2px;">DEBATES WHERE YOUR AD APPEARED</div>
+            <table class="campaigns-table" style="margin-top:8px;">
+              <thead>
+                <tr>
+                  <th>Debate / Consultation</th>
+                  <th>Impressions</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody id="dep-debates-tbody">
+                <tr><td colspan="3" style="text-align:center;color:var(--muted);padding:32px;">Loading…</td></tr>
               </tbody>
             </table>
           </div>
@@ -766,13 +827,14 @@ async function loadCampaigns() {
   }
   tbody.innerHTML = camps.map(c => `
     <tr>
-      <td><div style="font-weight:600;">${c.title||'—'}</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">${c.target_country||''} ${c.target_communes?'· '+c.target_communes:''}</div></td>
+      <td><div style="font-weight:600;">${c.title||'—'}</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">${c.target_country||''} · ${c.ad_copy ? c.ad_copy.slice(0,50)+'…' : 'No copy'}</div></td>
       <td style="font-family:'DM Mono',monospace;font-size:12px;">${c.target_country||'All'}</td>
-      <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--gold2);">${(c.budget_clp||0).toLocaleString()}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--gold2);">$${Math.round((c.budget_clp||0)/950).toLocaleString()} USD</td>
       <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--green2);">${(c.impressions||0).toLocaleString()}</td>
       <td><span class="badge ${c.is_active?'active':'paused'}">${c.is_active?'ACTIVE':'PAUSED'}</span></td>
       <td style="display:flex;gap:6px;flex-wrap:wrap;">
-        <button class="btn-sm gold" onclick="editCampaign(${c.id})">Edit</button>
+        <button class="btn-sm gold" onclick="viewDeployment(${c.id})">Ver consultas</button>
+        <button class="btn-sm outline" onclick="editCampaign(${c.id})">Edit</button>
         <button class="btn-sm outline" onclick="toggleCampaign(${c.id})">${c.is_active?'Pause':'Resume'}</button>
       </td>
     </tr>`).join('');
@@ -781,6 +843,56 @@ async function loadCampaigns() {
 async function toggleCampaign(id) {
   await fetch(`${API}/advertiser/campaigns/${id}/pause`, {method:'PUT'});
   loadCampaigns();
+}
+
+async function viewDeployment(id) {
+  showPanel('deployment');
+  document.getElementById('dep-title').textContent = 'Loading…';
+  document.getElementById('dep-debates-tbody').innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:32px;">Loading…</td></tr>';
+
+  const r = await fetch(`${API}/marketer/campaigns/${id}/metrics`);
+  if (!r.ok) {
+    document.getElementById('dep-title').textContent = 'Error loading data';
+    return;
+  }
+  const d = await r.json();
+
+  document.getElementById('dep-title').textContent = d.title || 'Campaign';
+  document.getElementById('dep-status').innerHTML = d.is_active
+    ? '<span style="color:#22a862;">● ACTIVE</span>'
+    : '<span style="color:#7a7570;">● PAUSED</span>';
+  document.getElementById('dep-impressions').textContent = (d.impressions||0).toLocaleString();
+  document.getElementById('dep-spent').textContent = '$' + Math.round((d.spent_clp||0)/950).toLocaleString() + ' USD';
+
+  const byDebate = d.by_debate || {};
+  const debateKeys = Object.keys(byDebate);
+  document.getElementById('dep-debates').textContent = debateKeys.length || '0';
+
+  // Ad preview
+  document.getElementById('dep-ad-copy').textContent = d.ad_copy || d.title || '—';
+  document.getElementById('dep-ad-link').textContent = d.link_url || '';
+
+  // Debates table
+  const tbody = document.getElementById('dep-debates-tbody');
+  if (!debateKeys.length) {
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:32px;">
+      <div style="font-size:24px;margin-bottom:8px;">📡</div>
+      <div style="font-weight:600;margin-bottom:4px;">Aún no hay impresiones</div>
+      <div style="font-size:12px;">Tu campaña está activa y aparecerá en los próximos debates que coincidan con tu targeting.</div>
+    </td></tr>`;
+  } else {
+    tbody.innerHTML = debateKeys.map(debId => {
+      const info = byDebate[debId];
+      const impr = typeof info === 'number' ? info : (info.impressions || 0);
+      const title = typeof info === 'object' ? (info.title || 'Debate #'+debId) : 'Debate #'+debId;
+      const date  = typeof info === 'object' && info.date ? info.date.slice(0,10) : '—';
+      return `<tr>
+        <td><div style="font-weight:600;">${title}</div><div style="font-size:11px;color:var(--muted);margin-top:2px;">ID: ${debId}</div></td>
+        <td style="font-family:'DM Mono',monospace;font-size:13px;color:var(--green2);">${impr.toLocaleString()}</td>
+        <td style="font-family:'DM Mono',monospace;font-size:12px;color:var(--muted);">${date}</td>
+      </tr>`;
+    }).join('');
+  }
 }
 
 let _editingCampaignId = null;
