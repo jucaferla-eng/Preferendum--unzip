@@ -1125,76 +1125,49 @@ def root():
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <meta name="color-scheme" content="dark"/>
-<meta name="supported-color-schemes" content="dark"/>
 <title>Preferendum</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{height:100%;background:#090D18;color:#F0F4FF;
+html,body{min-height:100%;background:#090D18;color:#F0F4FF;
   font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;overflow-x:hidden;}
-
-/* PAGE 1 — CONCEPT */
-#page1{min-height:100vh;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;text-align:center;padding:40px 24px;
-  background:radial-gradient(ellipse 70% 50% at 50% 40%,rgba(37,99,235,0.12) 0%,transparent 65%);}
-.brand{font-family:'Playfair Display',serif;font-size:clamp(18px,4.5vw,26px);
-  font-weight:700;color:#c8d8f0;letter-spacing:0.3em;
-  text-transform:uppercase;margin-bottom:48px;}
+.page{min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;text-align:center;padding:48px 24px;
+  background:radial-gradient(ellipse 70% 55% at 50% 30%,rgba(37,99,235,0.11) 0%,transparent 65%);}
+.brand{font-family:'Playfair Display',serif;font-size:clamp(16px,4vw,22px);
+  font-weight:700;color:#c8d8f0;letter-spacing:0.3em;text-transform:uppercase;margin-bottom:40px;}
 .brand span{color:#4d8aff;}
-.headline{font-family:'Playfair Display',serif;font-size:clamp(36px,8vw,96px);
+.headline{font-family:'Playfair Display',serif;font-size:clamp(34px,8vw,88px);
   font-weight:900;color:#F0F4FF;line-height:1.02;letter-spacing:-2px;
-  margin-bottom:28px;max-width:820px;}
+  margin-bottom:24px;max-width:820px;}
 .headline em{color:#4d8aff;font-style:normal;}
-.nuance{font-size:clamp(15px,2.5vw,20px);color:rgba(240,244,255,0.72);
-  line-height:1.7;max-width:520px;margin:0 auto 56px;font-weight:300;}
+.nuance{font-size:clamp(14px,2.2vw,18px);color:rgba(240,244,255,0.68);
+  line-height:1.7;max-width:480px;margin:0 auto 48px;font-weight:300;}
 .nuance strong{color:#F0F4FF;font-weight:600;}
-.enter-btn{display:inline-flex;align-items:center;gap:10px;
-  background:#2563EB;color:#fff;padding:18px 48px;border-radius:12px;
-  font-size:17px;font-weight:600;text-decoration:none;border:none;cursor:pointer;
-  transition:all .25s;box-shadow:0 4px 40px rgba(37,99,235,0.35);}
-.enter-btn:hover{background:#3b82f6;transform:translateY(-2px);box-shadow:0 8px 48px rgba(37,99,235,0.5);}
-.tagline{margin-top:40px;font-size:12px;color:rgba(240,244,255,0.45);
-  letter-spacing:0.2em;text-transform:uppercase;}
-
-/* PAGE 2 — ROLE SELECTION */
-#page2{display:none;min-height:100vh;flex-direction:column;align-items:center;
-  justify-content:center;padding:40px 24px;
-  background:radial-gradient(ellipse 60% 60% at 50% 30%,rgba(37,99,235,0.08) 0%,transparent 65%);}
-#page2.active{display:flex;}
-.p2-logo{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;color:#c8d8f0;
-  letter-spacing:0.3em;text-transform:uppercase;margin-bottom:12px;}
-.p2-logo span{color:#4d8aff;}
-.p2-title{font-family:'Playfair Display',serif;font-size:clamp(24px,5vw,40px);
-  font-weight:700;color:#F0F4FF;text-align:center;margin-bottom:8px;}
-.p2-sub{font-size:15px;color:rgba(240,244,255,0.70);text-align:center;
-  margin-bottom:52px;line-height:1.6;max-width:440px;}
-.p2-sub strong{color:#F0F4FF;font-weight:600;}
-.roles{display:flex;flex-direction:column;gap:14px;width:100%;max-width:420px;}
+.who{font-family:'Playfair Display',serif;font-size:clamp(18px,3.5vw,26px);
+  font-weight:700;color:#F0F4FF;margin-bottom:6px;}
+.who-sub{font-size:14px;color:rgba(240,244,255,0.55);margin-bottom:28px;}
+.roles{display:flex;flex-direction:column;gap:12px;width:100%;max-width:420px;}
 .role-card{display:block;background:rgba(255,255,255,0.05);
-  border:1px solid rgba(255,255,255,0.12);border-radius:18px;
-  padding:24px 28px;text-decoration:none;transition:all .2s;cursor:pointer;}
-.role-card:hover{background:rgba(37,99,235,0.12);border-color:#4d8aff;
-  transform:translateY(-2px);box-shadow:0 8px 32px rgba(37,99,235,0.2);}
-.role-name{font-size:18px;font-weight:700;color:#F0F4FF;margin-bottom:4px;}
-.role-phrase{font-size:13px;color:rgba(240,244,255,0.65);line-height:1.5;font-style:italic;}
-.role-arrow{float:right;color:#4d8aff;font-size:20px;margin-top:-2px;}
-.back-btn{margin-top:32px;background:none;border:none;color:rgba(240,244,255,0.45);
-  font-size:13px;cursor:pointer;letter-spacing:0.1em;transition:color .2s;}
-.back-btn:hover{color:rgba(240,244,255,0.75);}
-.p2-memo{margin-top:48px;font-size:11px;color:rgba(240,244,255,0.28);
-  font-style:italic;text-align:center;}
-
+  border:1px solid rgba(255,255,255,0.12);border-radius:16px;
+  padding:22px 26px;text-decoration:none;transition:all .2s;cursor:pointer;text-align:left;}
+.role-card:hover{background:rgba(37,99,235,0.13);border-color:#4d8aff;
+  transform:translateY(-2px);box-shadow:0 8px 32px rgba(37,99,235,0.18);}
+.role-name{font-size:17px;font-weight:700;color:#F0F4FF;margin-bottom:3px;}
+.role-phrase{font-size:12px;color:rgba(240,244,255,0.60);line-height:1.5;font-style:italic;}
+.role-arrow{float:right;color:#4d8aff;font-size:20px;margin-top:2px;}
+.memo{margin-top:52px;font-size:11px;color:rgba(240,244,255,0.25);font-style:italic;}
+.tagline{margin-top:16px;font-size:11px;color:rgba(240,244,255,0.35);
+  letter-spacing:0.18em;text-transform:uppercase;}
 @media(max-width:480px){
   .headline{letter-spacing:-1px;}
   .roles{max-width:100%;}
-  .role-card{padding:20px 22px;}
+  .role-card{padding:18px 20px;}
 }
 </style>
 </head>
 <body>
-
-<!-- PAGE 1: CONCEPT -->
-<div id="page1">
+<div class="page">
   <div class="brand">prefer<span>endum</span></div>
   <h1 class="headline">
     Anyone.<br/>
@@ -1205,20 +1178,10 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
     <strong>Global decisions. Define your path.</strong><br/>
     When everyone expresses their preference, the nuance appears.
   </p>
-  <button class="enter-btn" onclick="showPage2()">
-    Enter →
-  </button>
-  <div class="tagline">Freedom to choose goes global</div>
-</div>
 
-<!-- PAGE 2: ROLE SELECTION -->
-<div id="page2">
-  <div class="p2-logo">prefer<span>endum</span></div>
-  <h2 class="p2-title">Who are you?</h2>
-  <p class="p2-sub">
-    <strong>Every decision begins with a preference.</strong><br/>
-    Choose your path to get started.
-  </p>
+  <div class="who">Who are you?</div>
+  <div class="who-sub">Choose your path to get started</div>
+
   <div class="roles">
     <a href="/voter" class="role-card">
       <span class="role-arrow">→</span>
@@ -1228,29 +1191,18 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
     <a href="/organizers" class="role-card">
       <span class="role-arrow">→</span>
       <div class="role-name">I want to run a consultation</div>
-      <div class="role-phrase">"Do you want to ask your peers to express their preferences?"</div>
+      <div class="role-phrase">"Ask your peers to express their preferences — with full verification."</div>
     </a>
     <a href="/marketers" class="role-card">
       <span class="role-arrow">→</span>
       <div class="role-name">I'm an Advertiser</div>
-      <div class="role-phrase">"Benefit from reaching people who are actively deciding."</div>
+      <div class="role-phrase">"Reach people who are actively deciding — define your audience."</div>
     </a>
   </div>
-  <button class="back-btn" onclick="showPage1()">← Back</button>
-  <div class="p2-memo">En memoria del Socio Fundador José Ignacio Fernández (1989–2024)</div>
+
+  <div class="tagline">Freedom to choose goes global</div>
+  <div class="memo">En memoria del Socio Fundador José Ignacio Fernández (1989–2024)</div>
 </div>
-
-<script>
-function showPage2(){
-  document.getElementById('page1').style.display='none';
-  document.getElementById('page2').classList.add('active');
-}
-function showPage1(){
-  document.getElementById('page2').classList.remove('active');
-  document.getElementById('page1').style.display='flex';
-}
-</script>
-
 </body>
 </html>""")
 
