@@ -85,6 +85,13 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 .q3-section{margin-top:8px;padding-left:12px;border-left:2px solid rgba(45,110,255,0.4);display:none;}
 .q3-section.visible{display:block;}
 .q3-section input{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:'Inter',sans-serif;margin-bottom:6px;}
+/* Targeting chips */
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;margin-bottom:4px;}
+.chip{padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:1px solid var(--border);background:var(--bg2);color:var(--muted);transition:all .15s;user-select:none;}
+.chip.selected{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600;}
+.targeting-block{margin-top:16px;border-top:1px solid var(--border);padding-top:16px;margin-bottom:12px;}
+.targeting-header{font-size:14px;font-weight:600;margin-bottom:4px;}
+.targeting-sub{font-size:12px;color:var(--muted);margin-bottom:16px;}
 </style>
 </head>
 <body>
@@ -160,6 +167,39 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
       <div class="branch-section" id="branch-section">
         <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Para cada opción de Q1, activa la pregunta de seguimiento que verá quien la elija:</div>
         <div id="branch-config"><!-- filled by JS --></div>
+      </div>
+
+      <!-- TARGETING VECTOR -->
+      <div class="targeting-block">
+        <div class="targeting-header">Segmentación de audiencia</div>
+        <div class="targeting-sub">Define quién participa y cómo se asigna la publicidad</div>
+        <div class="field">
+          <label>Tipo de institución</label>
+          <div class="chip-row">
+            <div class="chip selected" data-value="gov"   onclick="selectChip('c-inst-type',this)">🏛 Gobierno</div>
+            <div class="chip"          data-value="priv"  onclick="selectChip('c-inst-type',this)">🏢 Empresa</div>
+            <div class="chip"          data-value="union" onclick="selectChip('c-inst-type',this)">⚙️ Sindicato</div>
+            <div class="chip"          data-value="ngo"   onclick="selectChip('c-inst-type',this)">🌿 ONG</div>
+          </div>
+          <input type="hidden" id="c-inst-type" value="gov"/>
+        </div>
+        <div class="field">
+          <label>Género objetivo</label>
+          <div class="chip-row">
+            <div class="chip selected" data-value="all" onclick="selectChip('c-gender',this)">Todos</div>
+            <div class="chip"          data-value="F"   onclick="selectChip('c-gender',this)">Femenino</div>
+            <div class="chip"          data-value="M"   onclick="selectChip('c-gender',this)">Masculino</div>
+          </div>
+          <input type="hidden" id="c-gender" value="all"/>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="field" style="margin-bottom:0;"><label>Edad mínima</label><input type="number" id="c-age-min" value="13" min="13" max="99"/></div>
+          <div class="field" style="margin-bottom:0;"><label>Edad máxima</label><input type="number" id="c-age-max" value="99" min="13" max="99"/></div>
+        </div>
+        <div class="field" style="margin-top:12px;margin-bottom:0;">
+          <label>Comuna / Ciudad (dejar vacío = todo el país)</label>
+          <input type="text" id="c-commune" placeholder="Ej: Las Condes, Providencia, Santiago Centro…"/>
+        </div>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px;">
@@ -284,8 +324,13 @@ function showAlert(id, type, msg) {
 async function createDebate() {
   const title   = document.getElementById('c-title').value.trim();
   const context = document.getElementById('c-context').value.trim();
-  const closes  = document.getElementById('c-closes').value;
-  const country = document.getElementById('c-country').value;
+  const closes   = document.getElementById('c-closes').value;
+  const country  = document.getElementById('c-country').value;
+  const instType = document.getElementById('c-inst-type').value;
+  const gender   = document.getElementById('c-gender').value;
+  const ageMin   = parseInt(document.getElementById('c-age-min').value) || 13;
+  const ageMax   = parseInt(document.getElementById('c-age-max').value) || 99;
+  const commune  = document.getElementById('c-commune').value.trim();
   const options = [...document.querySelectorAll('.opt-input')].map(i => i.value.trim()).filter(Boolean);
 
   if (!title)          { showAlert('create-alert','error','Title is required'); return; }
@@ -306,7 +351,12 @@ async function createDebate() {
       closes_at: closes + 'T23:59:59',
       creator_type: 'organization',
       inst_name: userName,
+      debate_type: instType,
       scope_country: country,
+      scope_commune: commune,
+      target_gender: gender,
+      target_age_min: ageMin,
+      target_age_max: ageMax,
       verify_days: 7,
       follow_up_questions: followUpQuestions,
     })
@@ -414,6 +464,12 @@ function buildFollowUpQuestions() {
     return { title: q2Title, options: q2Opts, branches };
   });
   return JSON.stringify(tree);
+}
+
+function selectChip(hiddenId, el) {
+  el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById(hiddenId).value = el.dataset.value;
 }
 
 let _similarTimer = null;
