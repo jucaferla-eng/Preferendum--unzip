@@ -652,7 +652,7 @@ function doLogout() {
   token = ''; userName = ''; selectedOption = null; currentDebate = null;
   localStorage.removeItem('pref_voter_token');
   localStorage.removeItem('pref_voter_name');
-  window.location.href = '/';
+  window.location.replace('/');
 }
 
 // ── APP ──
