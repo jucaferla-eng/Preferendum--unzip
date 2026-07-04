@@ -2393,16 +2393,72 @@ def _match_campaigns(user, debate, db) -> list:
         AdCampaign.start_date <= now,
     ).all()
 
+    # Debate context for brand-safety filtering
+    debate_category  = (debate.category or '').lower().strip() if debate else ''
+    debate_country   = (debate.scope_country or 'CL').upper() if debate else 'CL'
+    debate_tags      = {debate_category} if debate_category else set()
+    # Also add title-based keyword tags for safety matching
+    debate_title_low = (debate.title or '').lower() if debate else ''
+    SENSITIVE_KEYWORDS = {
+        'religion': {'religión','religion','iglesia','church','dios','god','fe','faith','islam','cristian','catholic','budis','hindu','jewish','judío'},
+        'política': {'política','politica','election','elección','partido','gobierno','gobierno','president','alcalde','senado','congreso','diputado'},
+        'sexual': {'sexual','sexo','sex','género','genero','lgbt','trans','homosex','hetero','gay','orientación','aborto','abortion','reproductive'},
+        'conflicto_armado': {'guerra','war','conflicto','conflict','armas','weapons','militar','military','ejército','army','bomba','bomb','ataque','attack','terroris'},
+        'sindicatos': {'sindicato','huelga','strike','laboral','gremio','union','trabajador','obrero'},
+        'drogas': {'droga','drug','narcótico','narcotic','cannabis','cocaína','alcohol','bebida','licor'},
+        'apuestas': {'apuesta','casino','juego','gambling','lotería','lottery','bet'},
+        'menores': {'menor','niño','infan','child','adolescen','escolar'},
+        'litigios': {'juicio','tribunal','corte','demanda','lawsuit','litig','arbitraj'},
+        'crisis': {'crisis','catástrofe','desastre','disaster','terremoto','inundación','refugee','refugiado'},
+    }
+    # Derive debate's sensitive tags from category + title keywords
+    for tag, keywords in SENSITIVE_KEYWORDS.items():
+        if any(kw in debate_category for kw in keywords) or any(kw in debate_title_low for kw in keywords):
+            debate_tags.add(tag)
+
     valid_orm = []
     for c in orm_campaigns:
         if c.end_date and c.end_date < (now - timedelta(hours=24)):
             continue
         if (c.budget_clp or 0) > 0 and (c.spent_clp or 0) >= (c.budget_clp or 0):
             continue
+
+        # ── BRAND SAFETY: excluded_categories ──
+        if c.excluded_categories:
+            excluded = {e.strip().lower() for e in c.excluded_categories.split(',') if e.strip()}
+            # Map to canonical tags
+            campaign_excluded_tags = set()
+            for excl in excluded:
+                for tag, keywords in SENSITIVE_KEYWORDS.items():
+                    if excl == tag or any(kw in excl for kw in keywords):
+                        campaign_excluded_tags.add(tag)
+                campaign_excluded_tags.add(excl)  # also keep raw value
+            if debate_tags & campaign_excluded_tags:
+                continue  # debate matches an excluded category — skip this campaign
+
+        # ── COUNTRY FILTER ──
+        if c.target_country and c.target_country.upper() not in ('ALL', '', debate_country):
+            continue
+
         valid_orm.append(c)
 
     if not valid_orm:
         return []
+
+    # ── BLOCKED COMPETITORS: remove conflicting advertiser pairs ──
+    # If campaign A blocks advertiser X, remove X from valid_orm for this slot
+    blocked_names: set[str] = set()
+    for c in valid_orm:
+        if c.blocked_competitors:
+            for name in c.blocked_competitors.split(','):
+                n = name.strip().lower()
+                if n:
+                    blocked_names.add(n)
+    if blocked_names:
+        valid_orm = [
+            c for c in valid_orm
+            if (c.advertiser_name or '').lower() not in blocked_names
+        ]
 
     def _se_tiers_to_min_tier(se_tiers_str: str) -> str:
         tiers = [t.strip()[0] for t in (se_tiers_str or 'A,B,C,D').split(',') if t.strip()]

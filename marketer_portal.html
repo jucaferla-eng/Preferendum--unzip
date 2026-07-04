@@ -154,6 +154,15 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.4;}}
 
 .memorial{font-family:'Playfair Display',serif;font-style:italic;font-size:12px;color:rgba(245,243,238,0.2);text-align:center;padding:40px 0 20px;}
+/* Brand safety chips */
+.safety-chip{padding:7px 13px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1.5px solid var(--border);color:var(--muted);background:var(--ink3);transition:all 0.15s;user-select:none;}
+.safety-chip:hover{border-color:rgba(196,58,42,0.5);color:#ff8070;}
+.safety-chip.excluded{background:rgba(196,58,42,0.15);border-color:rgba(196,58,42,0.6);color:#ff6b5a;text-decoration:line-through;}
+.appear-chip{padding:7px 13px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1.5px solid var(--border);color:var(--muted);background:var(--ink3);transition:all 0.15s;user-select:none;}
+.appear-chip:hover{border-color:rgba(26,122,74,0.5);color:var(--green2);}
+.appear-chip.selected{background:rgba(26,122,74,0.15);border-color:rgba(26,122,74,0.5);color:var(--green2);}
+.comp-tag{display:flex;align-items:center;gap:6px;background:rgba(196,154,42,0.12);border:1px solid rgba(196,154,42,0.3);border-radius:20px;padding:5px 12px;font-size:12px;color:var(--gold2);}
+.comp-tag button{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0;line-height:1;}
 
 @media(max-width:768px){
   nav{padding:16px 20px;}
@@ -522,18 +531,47 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
                 </div>
                 <div id="nc-banner-preview" style="margin-top:8px;display:none;"><img id="nc-banner-img" style="max-height:80px;border-radius:6px;border:1px solid var(--border);" /></div>
               </div>
+              <!-- ── BRAND SAFETY ── -->
               <div class="field form-full" style="border-top:1px solid var(--border);padding-top:20px;margin-top:4px;">
-                <label style="color:var(--muted);font-size:12px;letter-spacing:1px;">BRAND SAFETY</label>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                  <label style="color:var(--gold);font-size:12px;letter-spacing:1px;">BRAND SAFETY</label>
+                  <span style="font-size:11px;color:var(--muted);">Tu marca nunca aparecerá en debates de estas categorías</span>
+                </div>
+                <div style="background:rgba(196,58,42,0.06);border:1px solid rgba(196,58,42,0.2);border-radius:10px;padding:16px;">
+                  <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Selecciona las categorías donde tu marca <strong style="color:#ff6b5a;">NO</strong> debe aparecer:</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;" id="exclude-chips">
+                    <!-- filled by JS -->
+                  </div>
+                  <input type="hidden" id="nc-excluded"/>
+                </div>
               </div>
+
+              <!-- ── TARGETING POSITIVO — dónde SÍ apareces ── -->
               <div class="field form-full">
-                <label>Excluded Topics <span style="color:var(--muted);font-weight:400;">(debates where your brand will NOT appear)</span></label>
-                <input type="text" id="nc-excluded" placeholder="e.g. religion, política, violencia" />
-                <div style="font-size:12px;color:var(--muted);margin-top:4px;">Separate with commas</div>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+                  <label>Categorías preferidas <span style="color:var(--muted);font-weight:400;">(donde tu marca sí quiere aparecer)</span></label>
+                  <span style="font-size:11px;color:var(--muted);">Opcional</span>
+                </div>
+                <div style="background:rgba(26,122,74,0.06);border:1px solid rgba(26,122,74,0.2);border-radius:10px;padding:16px;">
+                  <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">Selecciona las categorías donde tu marca <strong style="color:var(--green2);">SÍ</strong> quiere aparecer:</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;" id="appear-chips">
+                    <!-- filled by JS -->
+                  </div>
+                  <input type="hidden" id="nc-categories"/>
+                </div>
               </div>
+
+              <!-- ── BLOQUEO DE COMPETIDORES ── -->
               <div class="field form-full">
-                <label>Blocked Competitors <span style="color:var(--muted);font-weight:400;">(your ad won't appear next to these brands)</span></label>
-                <input type="text" id="nc-competitors" placeholder="e.g. Samsung, Apple, Sony" />
-                <div style="font-size:12px;color:var(--muted);margin-top:4px;">Separate with commas</div>
+                <label>Marcas competidoras bloqueadas <span style="color:var(--muted);font-weight:400;">(tu ad no aparece junto a estas marcas)</span></label>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;" id="competitor-tags"></div>
+                <div style="display:flex;gap:8px;margin-top:8px;">
+                  <input type="text" id="competitor-input" placeholder="Nombre de marca competidora…"
+                    style="flex:1;background:var(--ink3);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--paper);font-size:13px;outline:none;"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();addCompetitor();}"/>
+                  <button type="button" onclick="addCompetitor()" style="background:var(--ink3);border:1px solid var(--border);border-radius:8px;padding:10px 16px;color:var(--muted);cursor:pointer;font-size:13px;">+ Agregar</button>
+                </div>
+                <input type="hidden" id="nc-competitors"/>
               </div>
             </div>
             <button class="btn-primary" onclick="createCampaign()" style="margin-top:8px;">Launch Campaign</button>
@@ -1011,16 +1049,16 @@ async function createCampaign() {
     advertiser_email: userEmail,
     advertiser_name:  userName,
     campaign_title:   title,
-    budget_clp:       Math.round(budget * 950),  // convert USD to CLP for backend
+    budget_clp:       Math.round(budget * 950),
     ad_type:          'banner',
     target_country:   country,
     target_communes:  selectedCommunes.join(','),
     target_gender:    gender,
     target_age_ranges:`${ageMin}-${ageMax}`,
     target_se_tiers:  tier === 'D' ? 'A,B,C,D' : tier === 'C' ? 'A,B,C' : tier === 'B' ? 'A,B' : 'A',
-    target_categories:'',
-    excluded_categories: excluded,
-    blocked_competitors: competitors,
+    target_categories:   document.getElementById('nc-categories')?.value || '',
+    excluded_categories: document.getElementById('nc-excluded')?.value || '',
+    blocked_competitors: document.getElementById('nc-competitors')?.value || '',
     logo_url:            logoUrl,
     ad_image_url:        imageUrl,
     start_date:       start + 'T00:00:00',
@@ -1048,6 +1086,7 @@ async function createCampaign() {
     d = await r.json();
     if (!r.ok) { showAlert('newcamp-alert','error',d.detail||'Error creating campaign'); return; }
     showAlert('newcamp-alert','success',`✓ Campaign "${title}" created! ID: ${d.campaign_id}`);
+    resetBrandSafety();
   }
   loadCampaigns();
   setTimeout(() => showPanel('campaigns'), 2000);
@@ -1131,6 +1170,117 @@ function showErr(id, msg) {
   el.textContent = msg; el.style.display = 'block';
   setTimeout(() => el.style.display='none', 5000);
 }
+
+// ── BRAND SAFETY CHIPS ──────────────────────────────────────
+const CATS_EXCLUDE = [
+  {id:'política',    label:'🏛 Política'},
+  {id:'religión',    label:'⛪ Religión'},
+  {id:'sexual',      label:'🔞 Contenido adulto / sexual'},
+  {id:'conflicto_armado', label:'🛡 Conflicto armado / guerra'},
+  {id:'orientación', label:'🌈 Conflictos sociales / orientación'},
+  {id:'sindicatos',  label:'⚙️ Sindicatos / huelgas'},
+  {id:'drogas',      label:'💊 Drogas / alcohol'},
+  {id:'apuestas',    label:'🎰 Apuestas / juegos de azar'},
+  {id:'menores',     label:'👶 Contenido sobre menores'},
+  {id:'litigios',    label:'⚖️ Litigios activos / juicios'},
+  {id:'crisis',      label:'🌍 Crisis humanitaria / desastres'},
+  {id:'inmigración', label:'🚷 Inmigración / fronteras'},
+];
+const CATS_APPEAR = [
+  {id:'deportes',    label:'⚽ Deportes'},
+  {id:'cultura',     label:'🎬 Cultura / entretenimiento'},
+  {id:'música',      label:'🎵 Música'},
+  {id:'tecnología',  label:'💻 Tecnología'},
+  {id:'salud',       label:'❤️ Salud / bienestar'},
+  {id:'educación',   label:'📚 Educación'},
+  {id:'economía',    label:'💰 Economía / finanzas'},
+  {id:'ambiente',    label:'🌿 Medio ambiente'},
+  {id:'gastronomía', label:'🍕 Gastronomía'},
+  {id:'automóviles', label:'🚗 Automóviles / movilidad'},
+];
+
+let selectedExclude = new Set();
+let selectedAppear  = new Set();
+let competitorList  = [];
+
+function initBrandSafetyChips() {
+  // Exclude chips
+  const excContainer = document.getElementById('exclude-chips');
+  if (excContainer) {
+    excContainer.innerHTML = CATS_EXCLUDE.map(cat => `
+      <div class="safety-chip" id="exc-${cat.id}" onclick="toggleExclude('${cat.id}')">${cat.label}</div>
+    `).join('');
+  }
+  // Appear chips
+  const appContainer = document.getElementById('appear-chips');
+  if (appContainer) {
+    appContainer.innerHTML = CATS_APPEAR.map(cat => `
+      <div class="appear-chip" id="app-${cat.id}" onclick="toggleAppear('${cat.id}')">${cat.label}</div>
+    `).join('');
+  }
+}
+
+function toggleExclude(id) {
+  if (selectedExclude.has(id)) selectedExclude.delete(id);
+  else selectedExclude.add(id);
+  document.getElementById('exc-'+id)?.classList.toggle('excluded', selectedExclude.has(id));
+  document.getElementById('nc-excluded').value = [...selectedExclude].join(',');
+}
+
+function toggleAppear(id) {
+  if (selectedAppear.has(id)) selectedAppear.delete(id);
+  else selectedAppear.add(id);
+  document.getElementById('app-'+id)?.classList.toggle('selected', selectedAppear.has(id));
+  document.getElementById('nc-categories').value = [...selectedAppear].join(',');
+}
+
+function addCompetitor() {
+  const input = document.getElementById('competitor-input');
+  const name = input.value.trim();
+  if (!name || competitorList.includes(name)) { input.value = ''; return; }
+  competitorList.push(name);
+  input.value = '';
+  renderCompetitorTags();
+}
+
+function removeCompetitor(name) {
+  competitorList = competitorList.filter(c => c !== name);
+  renderCompetitorTags();
+}
+
+function renderCompetitorTags() {
+  const container = document.getElementById('competitor-tags');
+  if (!container) return;
+  container.innerHTML = competitorList.map(name => `
+    <div class="comp-tag">${name} <button onclick="removeCompetitor('${name.replace(/'/g,"\\'")}')">×</button></div>
+  `).join('');
+  document.getElementById('nc-competitors').value = competitorList.join(',');
+}
+
+function resetBrandSafety() {
+  selectedExclude.clear();
+  selectedAppear.clear();
+  competitorList = [];
+  document.querySelectorAll('.safety-chip').forEach(el => el.classList.remove('excluded'));
+  document.querySelectorAll('.appear-chip').forEach(el => el.classList.remove('selected'));
+  renderCompetitorTags();
+  document.getElementById('nc-excluded').value = '';
+  document.getElementById('nc-categories').value = '';
+}
+
+// Initialize chips when campaign panel opens
+const _origShowPanel = showPanel;
+function showPanel(name) {
+  _origShowPanel(name);
+  if (name === 'new-campaign') initBrandSafetyChips();
+}
+
+// Also init on first load if panel is already visible
+document.addEventListener('DOMContentLoaded', () => {
+  if (document.getElementById('panel-new-campaign')?.classList.contains('active')) {
+    initBrandSafetyChips();
+  }
+});
 
 // Handle Stripe redirect
 const params = new URLSearchParams(location.search);
