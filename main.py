@@ -1536,6 +1536,24 @@ def logo_sable():
     return Response(content=svg, media_type='image/svg+xml', headers={'Cache-Control': 'public, max-age=86400'})
 
 
+@app.get('/logo-transfernet.svg')
+def logo_transfernet():
+    svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <rect width="100" height="100" rx="16" fill="#1a3a5c"/>
+  <polygon points="15,75 35,35 55,75" fill="none" stroke="#4a9edd" stroke-width="3" stroke-linejoin="round"/>
+  <polygon points="40,75 62,28 84,75" fill="none" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>
+  <ellipse cx="62" cy="24" rx="6" ry="4" fill="#ffffff"/>
+  <circle cx="68" cy="20" r="4" fill="#ffffff"/>
+  <path d="M67,17 L65,12 M69,16 L72,11" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+  <line x1="59" y1="27" x2="57" y2="32" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="65" y1="27" x2="67" y2="32" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="10" y1="75" x2="90" y2="75" stroke="#4a9edd" stroke-width="2"/>
+  <text x="50" y="90" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" font-weight="bold" fill="#4a9edd" letter-spacing="1">TRANSFERNET</text>
+</svg>'''
+    from fastapi.responses import Response
+    return Response(content=svg, media_type='image/svg+xml', headers={'Cache-Control': 'public, max-age=86400'})
+
+
 @app.get('/privacy')
 def privacy():
     html = """<!DOCTYPE html>
@@ -5847,6 +5865,40 @@ def admin_update_campaign_creative(campaign_id: int, secret: str, db: Session = 
     return {'ok': True, 'campaign_id': campaign_id, 'logo_url': c.logo_url,
             'ad_image_url': c.ad_image_url, 'ad_copy': c.ad_copy, 'link_url': c.link_url,
             'target_debate_ids': c.target_debate_ids, 'advertiser_name': c.advertiser_name}
+
+
+@app.post('/admin/campaigns/create')
+def admin_create_campaign(secret: str, advertiser_name: str, ad_copy: str,
+                          logo_url: str = '', link_url: str = '',
+                          budget_clp: int = 250000000,
+                          db: Session = Depends(get_db)):
+    """Create a campaign directly from admin without requiring full CampaignCreate schema."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    now = datetime.utcnow()
+    c = AdCampaign(
+        advertiser_name  = advertiser_name,
+        advertiser_email = f'admin@{advertiser_name.lower().replace(" ","")}.com',
+        title            = f'{advertiser_name} · Preferendum',
+        ad_copy          = ad_copy,
+        logo_url         = logo_url,
+        link_url         = link_url,
+        budget_clp       = budget_clp,
+        spent_clp        = 0,
+        ad_type          = 'brand',
+        target_country   = 'CL',
+        target_gender    = 'all',
+        target_se_tiers  = 'A,B,C,D',
+        target_age_min   = 13,
+        target_age_max   = 99,
+        start_date       = now,
+        end_date         = now.replace(year=now.year + 1),
+        is_active        = True,
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return {'ok': True, 'campaign_id': c.id, 'advertiser_name': c.advertiser_name}
 
 
 @app.get('/admin/debug-ads')
