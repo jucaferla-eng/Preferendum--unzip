@@ -53,6 +53,7 @@ class Debate(Base):
     end_dt       = Column(DateTime)
     is_closed    = Column(Boolean, default=False)
     is_closed_list = Column(Boolean, default=False)       # members-only
+    follow_up_questions = Column(Text, default='')        # JSON: branching Q2/Q3 tree per Q1 option
 
     options  = relationship("DebateOption", back_populates="debate", cascade="all,delete")
     comments = relationship("DebateComment", back_populates="debate", cascade="all,delete")
@@ -101,6 +102,8 @@ class AnonymousVoteRecord(Base):
     vote_hash      = Column(String, nullable=False)       # SHA-256 of encrypted
     tx_hash        = Column(String)                       # Polygon blockchain tx
     vcode          = Column(String, unique=True)          # Voter's verification code
+
+    vote_chain = Column(Text, default='[]')               # JSON: full Q1→Q2→Q3 answer path
 
     # Anonymous demographics only
     gender     = Column(String)                           # F / M / O

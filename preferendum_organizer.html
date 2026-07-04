@@ -61,6 +61,30 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 .similar-item-text{font-size:13px;color:var(--text);flex:1;line-height:1.4;}
 .similar-item-badge{font-size:10px;font-weight:700;color:#10b981;background:rgba(16,185,129,.12);border-radius:20px;padding:2px 7px;white-space:nowrap;margin-top:1px;}
 .similar-dismiss{margin-top:12px;font-size:12px;color:var(--muted);cursor:pointer;text-decoration:underline;background:none;border:none;padding:0;}
+/* Branching questions */
+.branch-toggle-row{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-top:1px solid var(--border);margin-top:4px;}
+.branch-toggle-label{font-size:14px;font-weight:600;color:var(--text);}
+.branch-toggle-sub{font-size:12px;color:var(--muted);margin-top:2px;}
+.toggle-switch{width:44px;height:24px;border-radius:12px;cursor:pointer;background:var(--bg3);border:1px solid var(--border);position:relative;transition:background 0.2s;flex-shrink:0;}
+.toggle-switch.on{background:var(--blue);}
+.toggle-knob{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left 0.2s;}
+.toggle-switch.on .toggle-knob{left:23px;}
+.branch-section{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-top:8px;display:none;}
+.branch-section.visible{display:block;}
+.q1-branch-item{margin-bottom:16px;border-bottom:1px solid var(--border);padding-bottom:16px;}
+.q1-branch-item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}
+.q1-branch-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+.q1-opt-label{font-size:13px;font-weight:600;color:var(--text);}
+.q2-toggle-label{font-size:11px;color:var(--muted);}
+.q2-section{margin-top:10px;padding-left:12px;border-left:2px solid var(--blue);display:none;}
+.q2-section.visible{display:block;}
+.q2-opt-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.q2-opt-row input{flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:13px;outline:none;font-family:'Inter',sans-serif;}
+.q3-toggle{font-size:12px;cursor:pointer;color:var(--muted);flex-shrink:0;padding:4px;}
+.q3-toggle.active{color:var(--blue);}
+.q3-section{margin-top:8px;padding-left:12px;border-left:2px solid rgba(45,110,255,0.4);display:none;}
+.q3-section.visible{display:block;}
+.q3-section input{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:'Inter',sans-serif;margin-bottom:6px;}
 </style>
 </head>
 <body>
@@ -122,7 +146,23 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
         </div>
         <button class="add-opt" onclick="addOpt()">+ Add option</button>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+
+      <!-- BRANCHING QUESTIONS TOGGLE -->
+      <div class="branch-toggle-row">
+        <div>
+          <div class="branch-toggle-label">Preguntas escalonadas</div>
+          <div class="branch-toggle-sub">Q1→Q2→Q3: cada respuesta revela una siguiente pregunta</div>
+        </div>
+        <div class="toggle-switch" id="branch-toggle" onclick="toggleBranching()">
+          <div class="toggle-knob"></div>
+        </div>
+      </div>
+      <div class="branch-section" id="branch-section">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">Para cada opción de Q1, activa la pregunta de seguimiento que verá quien la elija:</div>
+        <div id="branch-config"><!-- filled by JS --></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px;">
         <div class="field"><label>Closes At</label><input type="date" id="c-closes"/></div>
         <div class="field"><label>Country</label>
           <select id="c-country">
@@ -151,6 +191,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 const API = 'https://preferendum-unzip.onrender.com';
 let token = localStorage.getItem('pref_org_token') || '';
 let userName = '';
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 if (token) showApp();
 
@@ -216,7 +257,7 @@ function addOpt() {
   const n = list.children.length + 1;
   const row = document.createElement('div');
   row.className = 'option-row';
-  row.innerHTML = `<input type="text" placeholder="Option ${n}" class="opt-input"/><button class="remove-opt" onclick="removeOpt(this)">×</button>`;
+  row.innerHTML = `<input type="text" placeholder="Option ${n}" class="opt-input" oninput="rebuildBranchConfig()"/><button class="remove-opt" onclick="removeOpt(this)">×</button>`;
   list.appendChild(row);
 }
 
@@ -224,7 +265,15 @@ function removeOpt(btn) {
   const list = document.getElementById('options-list');
   if (list.children.length <= 2) return;
   btn.parentElement.remove();
+  rebuildBranchConfig();
 }
+
+// Also attach oninput to existing opt-inputs on page load
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.opt-input').forEach(el => {
+    el.addEventListener('input', rebuildBranchConfig);
+  });
+});
 
 function showAlert(id, type, msg) {
   const el = document.getElementById(id);
@@ -247,6 +296,8 @@ async function createDebate() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Creating…';
 
+  const followUpQuestions = buildFollowUpQuestions();
+
   const r = await fetch(`${API}/organizers/debates`, {
     method:'POST',
     headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
@@ -257,6 +308,7 @@ async function createDebate() {
       inst_name: userName,
       scope_country: country,
       verify_days: 7,
+      follow_up_questions: followUpQuestions,
     })
   });
   const d = await r.json();
@@ -269,7 +321,99 @@ async function createDebate() {
   document.getElementById('c-title').value = '';
   document.getElementById('c-context').value = '';
   document.querySelectorAll('.opt-input').forEach((el,i) => { el.value = ''; el.placeholder = `Option ${i+1}`; });
+  // Reset branching
+  branchingOn = false;
+  document.getElementById('branch-toggle').classList.remove('on');
+  document.getElementById('branch-section').classList.remove('visible');
+  document.getElementById('branch-config').innerHTML = '';
   loadDebates();
+}
+
+// ── BRANCHING QUESTIONS ──────────────────────────────────────
+let branchingOn = false;
+
+function toggleBranching() {
+  branchingOn = !branchingOn;
+  const toggle = document.getElementById('branch-toggle');
+  const section = document.getElementById('branch-section');
+  toggle.classList.toggle('on', branchingOn);
+  section.classList.toggle('visible', branchingOn);
+  if (branchingOn) rebuildBranchConfig();
+}
+
+function rebuildBranchConfig() {
+  if (!branchingOn) return;
+  const opts = [...document.querySelectorAll('.opt-input')].map(i => i.value.trim() || '(opción)');
+  const cfg = document.getElementById('branch-config');
+  cfg.innerHTML = opts.map((opt, i) => `
+    <div class="q1-branch-item" id="q1-item-${i}">
+      <div class="q1-branch-header">
+        <div class="q1-opt-label">Si responden: <span style="color:var(--blue);">"${esc(opt)}"</span></div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="q2-toggle-label">Activar Q2</span>
+          <div class="toggle-switch" id="q2-toggle-${i}" onclick="toggleQ2(${i})">
+            <div class="toggle-knob"></div>
+          </div>
+        </div>
+      </div>
+      <div class="q2-section" id="q2-section-${i}">
+        <input type="text" placeholder="Pregunta de seguimiento para esta opción…" id="q2-title-${i}"
+          style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:9px 12px;color:var(--text);font-size:13px;outline:none;font-family:'Inter',sans-serif;margin-bottom:8px;"/>
+        ${[0,1,2].map(j => `
+          <div class="q2-opt-row">
+            <input type="text" placeholder="Opción Q2-${j+1}" id="q2-opt-${i}-${j}"/>
+            <span class="q3-toggle" id="q3-toggle-${i}-${j}" onclick="toggleQ3(${i},${j})" title="Agregar Q3 para esta opción">⤷</span>
+          </div>
+          <div class="q3-section" id="q3-section-${i}-${j}">
+            <input type="text" placeholder="Tercera pregunta para '…'" id="q3-title-${i}-${j}"/>
+            ${[0,1].map(k => `<input type="text" placeholder="Opción Q3-${k+1}" id="q3-opt-${i}-${j}-${k}"/>`).join('')}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleQ2(i) {
+  const toggle = document.getElementById(`q2-toggle-${i}`);
+  const section = document.getElementById(`q2-section-${i}`);
+  const on = !toggle.classList.contains('on');
+  toggle.classList.toggle('on', on);
+  section.classList.toggle('visible', on);
+}
+
+function toggleQ3(i, j) {
+  const toggle = document.getElementById(`q3-toggle-${i}-${j}`);
+  const section = document.getElementById(`q3-section-${i}-${j}`);
+  const on = !toggle.classList.contains('active');
+  toggle.classList.toggle('active', on);
+  section.classList.toggle('visible', on);
+}
+
+function buildFollowUpQuestions() {
+  if (!branchingOn) return '';
+  const opts = [...document.querySelectorAll('.opt-input')].map(i => i.value.trim()).filter(Boolean);
+  const tree = opts.map((_, i) => {
+    const q2Toggle = document.getElementById(`q2-toggle-${i}`);
+    if (!q2Toggle || !q2Toggle.classList.contains('on')) return null;
+    const q2Title = document.getElementById(`q2-title-${i}`)?.value.trim();
+    if (!q2Title) return null;
+    const q2Opts = [0,1,2].map(j => document.getElementById(`q2-opt-${i}-${j}`)?.value.trim()).filter(Boolean);
+    if (q2Opts.length < 2) return null;
+    const branches = [0,1,2].map(j => {
+      const q2Opt = document.getElementById(`q2-opt-${i}-${j}`)?.value.trim();
+      if (!q2Opt) return null;
+      const q3Toggle = document.getElementById(`q3-toggle-${i}-${j}`);
+      if (!q3Toggle || !q3Toggle.classList.contains('active')) return null;
+      const q3Title = document.getElementById(`q3-title-${i}-${j}`)?.value.trim();
+      if (!q3Title) return null;
+      const q3Opts = [0,1].map(k => document.getElementById(`q3-opt-${i}-${j}-${k}`)?.value.trim()).filter(Boolean);
+      if (q3Opts.length < 2) return null;
+      return { title: q3Title, options: q3Opts, branches: q3Opts.map(() => null) };
+    });
+    return { title: q2Title, options: q2Opts, branches };
+  });
+  return JSON.stringify(tree);
 }
 
 let _similarTimer = null;

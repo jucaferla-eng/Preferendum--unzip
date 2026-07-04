@@ -393,6 +393,9 @@ let token = localStorage.getItem('pref_voter_token') || '';
 let userName = localStorage.getItem('pref_voter_name') || '';
 let selectedOption = null;
 let currentDebate = null;
+// Branching questions state
+let branchPath = [];       // [{level, option_index, option_text, question}]
+let branchCurrentQ = null; // null = Q1, else {title, options, branches}
 
 // ── INIT ──
 if (token) validateAndShowApp();
@@ -732,6 +735,8 @@ function showDebatesList() {
   setActiveTab('tab-debate');
   selectedOption = null;
   currentDebate = null;
+  branchPath = [];
+  branchCurrentQ = null;
 }
 
 // ── DEBATES ──
@@ -765,6 +770,8 @@ async function openDebate(id) {
   const content = document.getElementById('detail-content');
   content.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   selectedOption = null;
+  branchPath = [];
+  branchCurrentQ = null;
   try {
     const [dr, rr, ar] = await Promise.all([
       fetch(`${API}/debates/${id}`),
@@ -876,14 +883,14 @@ function renderDebate(db, res, items) {
       }).join('')
     : `<div class="no-opinions">Aún no hay opiniones — sé el primero en compartir tu perspectiva.</div>`;
 
-  // ── PHASE 3: VOTE options ──
-  const optBtns = isLive ? `
-    ${opts.map((opt, i) => `
-      <button class="option-btn" id="opt-${i}" onclick="selectOption(${i})">${esc(opt)}</button>
-    `).join('')}
-    <button class="btn vote-btn" id="vote-submit-btn" onclick="castVote()" disabled>Seleccionar una opción para votar</button>
-    <div class="vote-err" id="vote-err"></div>
-  ` : '';
+  // ── PHASE 3: VOTE options (supports branching Q1→Q2→Q3) ──
+  let followUps = [];
+  try { if (db.follow_up_questions) followUps = JSON.parse(db.follow_up_questions); } catch(e) {}
+  const hasQ2 = followUps.some(Boolean);
+  const hasQ3 = followUps.filter(Boolean).some(b => b.branches && b.branches.some(Boolean));
+  const totalQs = hasQ3 ? 3 : hasQ2 ? 2 : 1;
+
+  const optBtns = isLive ? renderVoteSection(opts, followUps, totalQs) : '';
 
   const debId = db.id;
 
@@ -941,22 +948,134 @@ function renderDebate(db, res, items) {
   `;
 }
 
+// ── renderVoteSection — renders Q1, Q2 or Q3 depending on branchCurrentQ ──
+function renderVoteSection(q1Opts, followUps, totalQs) {
+  const isQ1 = branchCurrentQ === null;
+  const currentQ = isQ1 ? { title: currentDebate?.title || '', options: q1Opts, branches: followUps } : branchCurrentQ;
+  const displayOpts = currentQ.options || [];
+  const qLevel = branchPath.length + 1;
+
+  const progressBar = totalQs > 1 ? `
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:14px;">
+      ${Array.from({length: totalQs}, (_, k) => `
+        <div style="flex:1;height:4px;border-radius:4px;background:${k < qLevel ? '#2d6eff' : '#e2e8f0'};"></div>
+      `).join('')}
+      <span style="font-size:11px;color:#64748b;white-space:nowrap;margin-left:4px;">Pregunta ${qLevel}/${totalQs}</span>
+    </div>` : '';
+
+  const backBtn = !isQ1 ? `
+    <button onclick="branchGoBack()" style="background:none;border:none;color:#64748b;font-size:12px;cursor:pointer;padding:0;margin-top:6px;">← Cambiar respuesta anterior</button>
+  ` : '';
+
+  const questionTitle = !isQ1 ? `
+    <div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:12px;">${esc(currentQ.title)}</div>
+  ` : '';
+
+  const pathSummary = branchPath.length > 0 ? `
+    <div style="background:#f1f5f9;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:#64748b;">
+      ${branchPath.map(s => `<span style="color:#2d6eff;font-weight:600;">${esc(s.option_text)}</span>`).join(' → ')} →
+    </div>
+  ` : '';
+
+  return `
+    ${progressBar}
+    ${pathSummary}
+    ${questionTitle}
+    ${displayOpts.map((opt, i) => `
+      <button class="option-btn" id="opt-${i}" onclick="selectOption(${i})">${esc(opt)}</button>
+    `).join('')}
+    <button class="btn vote-btn" id="vote-submit-btn" onclick="castVote()" disabled>Seleccionar una opción</button>
+    ${backBtn}
+    <div class="vote-err" id="vote-err"></div>
+  `;
+}
+
 function selectOption(idx) {
   selectedOption = idx;
-  const opts = currentDebate?.options || [];
-  opts.forEach((_, i) => {
+  const isQ1 = branchCurrentQ === null;
+  const currentQ = isQ1
+    ? { options: currentDebate?.options || [], branches: (() => { try { return JSON.parse(currentDebate?.follow_up_questions || '[]'); } catch(e) { return []; } })() }
+    : branchCurrentQ;
+  const displayOpts = currentQ.options || [];
+
+  displayOpts.forEach((_, i) => {
     const btn = document.getElementById(`opt-${i}`);
     if (btn) btn.classList.toggle('selected', i === idx);
   });
   const submitBtn = document.getElementById('vote-submit-btn');
-  if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = `Vote: "${esc(opts[idx])}"` ; }
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    const nextQ = currentQ.branches ? currentQ.branches[idx] : null;
+    submitBtn.textContent = nextQ && nextQ.title ? `Siguiente → "${esc(displayOpts[idx])}"` : `Votar: "${esc(displayOpts[idx])}"`;
+  }
+}
+
+function branchGoBack() {
+  if (branchPath.length === 0) return;
+  branchPath = branchPath.slice(0, -1);
+  if (branchPath.length === 0) {
+    branchCurrentQ = null;
+  } else {
+    // Reconstruct branchCurrentQ from path
+    let followUps = [];
+    try { followUps = JSON.parse(currentDebate?.follow_up_questions || '[]'); } catch(e) {}
+    let q = { branches: followUps };
+    for (const step of branchPath) {
+      q = q.branches ? q.branches[step.option_index] : null;
+      if (!q) break;
+    }
+    branchCurrentQ = q;
+  }
+  selectedOption = null;
+  const voteSection = document.getElementById('vote-section');
+  if (voteSection) {
+    let followUps = [];
+    try { followUps = JSON.parse(currentDebate?.follow_up_questions || '[]'); } catch(e) {}
+    const hasQ2 = followUps.some(Boolean);
+    const hasQ3 = followUps.filter(Boolean).some(b => b.branches && b.branches.some(Boolean));
+    const totalQs = hasQ3 ? 3 : hasQ2 ? 2 : 1;
+    const opts = branchCurrentQ ? (branchCurrentQ.options || []) : (currentDebate?.options || []);
+    voteSection.querySelector('.detail-card').innerHTML = renderVoteSection(opts, followUps, totalQs);
+  }
 }
 
 async function castVote() {
   if (selectedOption === null || !currentDebate) return;
-  // Capture references before async operation
+
+  const isQ1 = branchCurrentQ === null;
+  const currentQ = isQ1
+    ? { options: currentDebate.options || [], branches: (() => { try { return JSON.parse(currentDebate.follow_up_questions || '[]'); } catch(e) { return []; } })() }
+    : branchCurrentQ;
+  const displayOpts = currentQ.options || [];
+  const chosenText  = displayOpts[selectedOption] || '';
+  const qLevel      = branchPath.length + 1;
+
+  // Build step for this answer
+  const newStep = { level: qLevel, option_index: selectedOption, option_text: chosenText, question: currentQ.title || currentDebate.title };
+  const newPath = [...branchPath, newStep];
+
+  // Check if there's a next question
+  const nextQ = currentQ.branches ? currentQ.branches[selectedOption] : null;
+  if (nextQ && nextQ.title) {
+    // More questions to show — advance to next level
+    branchPath = newPath;
+    branchCurrentQ = nextQ;
+    selectedOption = null;
+    const voteSection = document.getElementById('vote-section');
+    if (voteSection) {
+      let followUps = [];
+      try { followUps = JSON.parse(currentDebate.follow_up_questions || '[]'); } catch(e) {}
+      const hasQ2 = followUps.some(Boolean);
+      const hasQ3 = followUps.filter(Boolean).some(b => b.branches && b.branches.some(Boolean));
+      const totalQs = hasQ3 ? 3 : hasQ2 ? 2 : 1;
+      voteSection.querySelector('.detail-card').innerHTML = renderVoteSection(nextQ.options || [], followUps, totalQs);
+    }
+    return;
+  }
+
+  // No more questions — submit vote
   const debateId  = currentDebate.id;
-  const optIdx    = selectedOption;
+  const q1Idx     = newPath.length > 0 ? newPath[0].option_index : selectedOption;
   const submitBtn = document.getElementById('vote-submit-btn');
   const errEl     = document.getElementById('vote-err');
   if (!submitBtn) return;
@@ -967,7 +1086,7 @@ async function castVote() {
     const r = await fetch(`${API}/debates/${debateId}/vote`, {
       method: 'POST',
       headers: {'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body: JSON.stringify({option_index: optIdx})
+      body: JSON.stringify({ option_index: q1Idx, vote_chain: newPath })
     });
     let d = {};
     try { d = await r.json(); } catch(_) {}
@@ -980,7 +1099,8 @@ async function castVote() {
       if (btn2) { btn2.disabled = false; btn2.textContent = 'Try again'; }
       return;
     }
-    showVoteSuccess(d, optIdx);
+    branchPath = []; branchCurrentQ = null;
+    showVoteSuccess(d, q1Idx);
   } catch(e) {
     const msg = e.message || 'Connection error — check your internet';
     showError('Connection error', msg);
