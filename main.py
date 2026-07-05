@@ -194,6 +194,7 @@ class Debate(Base):
     target_age_min   = Column(Integer, default=13)
     target_age_max   = Column(Integer, default=99)
     target_se_tiers  = Column(String, default='A,B,C,D')  # nivel socioeconómico del debate
+    category         = Column(String, default='general')   # deportes / política / economía / salud / etc.
     status           = Column(String, default='live')
     opens_at         = Column(DateTime, default=datetime.utcnow)
     closes_at        = Column(DateTime)
@@ -534,6 +535,7 @@ def _migrate():
             ('reward',              "TEXT DEFAULT ''"),
             ('option_images',       "TEXT DEFAULT '[]'"),
             ('target_se_tiers',     "TEXT DEFAULT 'A,B,C,D'"),
+            ('category',            "TEXT DEFAULT 'general'"),
         ]:
             if col not in existing_debate_cols:
                 try:
@@ -965,6 +967,7 @@ class DebateCreate(BaseModel):
     target_age_min:      int = 13
     target_age_max:      int = 99
     target_se_tiers:     str = 'A,B,C,D'
+    category:            str = 'general'
     closes_at:           str
     verify_days:         int = 14
     follow_up_questions: str = ''
@@ -2280,6 +2283,7 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
         target_gender=data.target_gender,
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
+        category=getattr(data, 'category', 'general') or 'general',
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
@@ -2421,7 +2425,7 @@ def _match_campaigns(user, debate, db) -> list:
     ).all()
 
     # Debate context for brand-safety filtering
-    debate_category  = (debate.category or '').lower().strip() if debate else ''
+    debate_category  = (getattr(debate, 'category', '') or '').lower().strip() if debate else ''
     debate_country   = (debate.scope_country or 'GLOBAL').upper().strip() if debate else 'GLOBAL'
     debate_tags      = {debate_category} if debate_category else set()
     # Also add title-based keyword tags for safety matching
@@ -2478,7 +2482,7 @@ def _match_campaigns(user, debate, db) -> list:
 
     # ── BLOCKED COMPETITORS: remove conflicting advertiser pairs ──
     # If campaign A blocks advertiser X, remove X from valid_orm for this slot
-    blocked_names: set[str] = set()
+    blocked_names = set()
     for c in valid_orm:
         if c.blocked_competitors:
             for name in c.blocked_competitors.split(','):
@@ -2997,6 +3001,7 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
         target_gender=data.target_gender,
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
+        category=getattr(data, 'category', 'general') or 'general',
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
@@ -3588,6 +3593,7 @@ def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_c
         target_gender=data.target_gender,
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
+        category=getattr(data, 'category', 'general') or 'general',
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
