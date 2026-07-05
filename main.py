@@ -193,6 +193,7 @@ class Debate(Base):
     target_gender    = Column(String, default='all')
     target_age_min   = Column(Integer, default=13)
     target_age_max   = Column(Integer, default=99)
+    target_se_tiers  = Column(String, default='A,B,C,D')  # nivel socioeconómico del debate
     status           = Column(String, default='live')
     opens_at         = Column(DateTime, default=datetime.utcnow)
     closes_at        = Column(DateTime)
@@ -530,6 +531,7 @@ def _migrate():
             ('follow_up_questions', "TEXT DEFAULT ''"),
             ('reward',              "TEXT DEFAULT ''"),
             ('option_images',       "TEXT DEFAULT '[]'"),
+            ('target_se_tiers',     "TEXT DEFAULT 'A,B,C,D'"),
         ]:
             if col not in existing_debate_cols:
                 try:
@@ -958,6 +960,7 @@ class DebateCreate(BaseModel):
     target_gender:       str = 'all'
     target_age_min:      int = 13
     target_age_max:      int = 99
+    target_se_tiers:     str = 'A,B,C,D'
     closes_at:           str
     verify_days:         int = 14
     follow_up_questions: str = ''
@@ -2270,6 +2273,7 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
         scope_country=data.scope_country, scope_commune=data.scope_commune,
         target_gender=data.target_gender,
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
+        target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
@@ -2367,6 +2371,11 @@ def _campaign_matches_debate(c, debate) -> bool:
     c_min, c_max = c.target_age_min or 13, c.target_age_max or 99
     d_min, d_max = debate.target_age_min or 13, debate.target_age_max or 99
     if c_max < d_min or d_max < c_min:
+        return False
+    # NSE / Nivel socioeconómico — los conjuntos deben tener al menos un tier en común
+    c_tiers = {t.strip().upper() for t in (c.target_se_tiers or 'A,B,C,D').split(',') if t.strip()}
+    d_tiers = {t.strip().upper() for t in (getattr(debate, 'target_se_tiers', None) or 'A,B,C,D').split(',') if t.strip()}
+    if c_tiers and d_tiers and not c_tiers.intersection(d_tiers):
         return False
     return True
 
@@ -2968,6 +2977,7 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
         scope_country=data.scope_country, scope_commune=data.scope_commune,
         target_gender=data.target_gender,
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
+        target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
@@ -3547,6 +3557,7 @@ def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_c
         scope_country=data.scope_country, scope_commune=data.scope_commune,
         target_gender=data.target_gender,
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
+        target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
         closes_at=closes, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',

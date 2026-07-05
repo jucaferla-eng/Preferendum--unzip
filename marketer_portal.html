@@ -170,6 +170,9 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
   .sidebar{flex-direction:row;overflow-x:auto;}
   .packages-grid,.pay-methods,.stats-grid,.form-grid{grid-template-columns:1fr;}
 }
+.chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
+.chip{padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:1px solid var(--border);background:var(--ink3);color:var(--muted);transition:all .15s;user-select:none;}
+.chip.selected{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600;}
 </style>
 </head>
 <body>
@@ -447,51 +450,59 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
                 <label>Campaign Name</label>
                 <input type="text" id="nc-title" placeholder="e.g. Launch Q3 2026"/>
               </div>
-              <div class="field">
-                <label>Country</label>
-                <select id="nc-country" onchange="loadCommunes()">
-                  <option value="ALL">🌍 Todos los países</option>
-                  <option value="CL">Chile</option>
-                  <option value="AR">Argentina</option>
-                  <option value="PE">Peru</option>
-                  <option value="MX">Mexico</option>
-                  <option value="CO">Colombia</option>
-                  <option value="US">United States</option>
-                  <option value="ES">Spain</option>
-                  <option value="BR">Brasil</option>
-                  <option value="EC">Ecuador</option>
-                  <option value="UY">Uruguay</option>
-                  <option value="PY">Paraguay</option>
-                  <option value="BO">Bolivia</option>
-                  <option value="VE">Venezuela</option>
-                </select>
+              <div class="field form-full">
+                <label>País(es) objetivo</label>
+                <div class="chip-row" id="mc-country-chips" style="flex-wrap:wrap;gap:6px;margin-top:6px;">
+                  <div class="chip selected" data-value="ALL" onclick="toggleMcCountry(this)">🌍 Todos</div>
+                  <div class="chip" data-value="CL" onclick="toggleMcCountry(this)">🇨🇱 Chile</div>
+                  <div class="chip" data-value="AR" onclick="toggleMcCountry(this)">🇦🇷 Argentina</div>
+                  <div class="chip" data-value="PE" onclick="toggleMcCountry(this)">🇵🇪 Peru</div>
+                  <div class="chip" data-value="MX" onclick="toggleMcCountry(this)">🇲🇽 Mexico</div>
+                  <div class="chip" data-value="CO" onclick="toggleMcCountry(this)">🇨🇴 Colombia</div>
+                  <div class="chip" data-value="US" onclick="toggleMcCountry(this)">🇺🇸 USA</div>
+                  <div class="chip" data-value="ES" onclick="toggleMcCountry(this)">🇪🇸 España</div>
+                  <div class="chip" data-value="BR" onclick="toggleMcCountry(this)">🇧🇷 Brasil</div>
+                  <div class="chip" data-value="EC" onclick="toggleMcCountry(this)">🇪🇨 Ecuador</div>
+                  <div class="chip" data-value="UY" onclick="toggleMcCountry(this)">🇺🇾 Uruguay</div>
+                  <div class="chip" data-value="PY" onclick="toggleMcCountry(this)">🇵🇾 Paraguay</div>
+                  <div class="chip" data-value="BO" onclick="toggleMcCountry(this)">🇧🇴 Bolivia</div>
+                  <div class="chip" data-value="VE" onclick="toggleMcCountry(this)">🇻🇪 Venezuela</div>
+                  <div class="chip" data-value="DE" onclick="toggleMcCountry(this)">🇩🇪 Alemania</div>
+                  <div class="chip" data-value="FR" onclick="toggleMcCountry(this)">🇫🇷 Francia</div>
+                  <div class="chip" data-value="CN" onclick="toggleMcCountry(this)">🇨🇳 China</div>
+                  <div class="chip" data-value="JP" onclick="toggleMcCountry(this)">🇯🇵 Japón</div>
+                </div>
+                <input type="hidden" id="nc-country" value="ALL"/>
               </div>
               <div class="field">
-                <label>Income Tier Target</label>
-                <select id="nc-tier" onchange="loadCommunes()">
-                  <option value="D">All Income Levels (A+B+C+D)</option>
-                  <option value="C">C and above (mid to premium)</option>
-                  <option value="B">B and above (upper-mid to premium)</option>
-                  <option value="A">A only (premium — highest income)</option>
-                </select>
+                <label>Nivel de ingresos</label>
+                <div class="chip-row" id="mc-tier-chips" style="margin-top:6px;">
+                  <div class="chip selected" data-value="ALL" onclick="toggleMcTier(this)">Todos</div>
+                  <div class="chip" data-value="A" onclick="toggleMcTier(this)">A — Premium</div>
+                  <div class="chip" data-value="B" onclick="toggleMcTier(this)">B — Medio-alto</div>
+                  <div class="chip" data-value="C" onclick="toggleMcTier(this)">C — Medio</div>
+                  <div class="chip" data-value="D" onclick="toggleMcTier(this)">D — Económico</div>
+                </div>
+                <input type="hidden" id="nc-tier" value="D"/>
               </div>
               <div class="field form-full">
-                <label>Target Communes <span style="color:var(--muted);font-weight:400;">— auto-filled by income tier, click to deselect individual ones</span></label>
+                <label>Comunas objetivo <span style="color:var(--muted);font-weight:400;">— se llenan automáticamente por nivel de ingreso</span></label>
                 <div class="commune-chips" id="commune-chips"><!-- filled by JS --></div>
               </div>
               <div class="field">
-                <label>Gender</label>
-                <select id="nc-gender">
-                  <option value="all">All genders</option>
-                  <option value="F">Women</option>
-                  <option value="M">Men</option>
-                </select>
+                <label>Género</label>
+                <div class="chip-row" id="mc-gender-chips" style="margin-top:6px;">
+                  <div class="chip selected" data-value="all" onclick="toggleMcGender(this)">Todos</div>
+                  <div class="chip" data-value="F" onclick="toggleMcGender(this)">Femenino</div>
+                  <div class="chip" data-value="M" onclick="toggleMcGender(this)">Masculino</div>
+                </div>
+                <input type="hidden" id="nc-gender" value="all"/>
               </div>
               <div class="field">
-                <label>Age Range</label>
-                <div style="display:flex;gap:10px;">
+                <label>Rango de edad</label>
+                <div style="display:flex;gap:10px;align-items:center;">
                   <input type="number" id="nc-age-min" value="18" min="13" max="99" style="width:80px;"/>
-                  <span style="line-height:46px;color:var(--muted);">–</span>
+                  <span style="color:var(--muted);">–</span>
                   <input type="number" id="nc-age-max" value="65" min="13" max="99" style="width:80px;"/>
                 </div>
               </div>
@@ -950,8 +961,27 @@ async function editCampaign(id) {
   _editingCampaignId = id;
   // Pre-fill form
   document.getElementById('nc-title').value        = c.title || '';
-  document.getElementById('nc-country').value      = c.target_country || 'CL';
-  document.getElementById('nc-gender').value       = c.target_gender || 'all';
+  // Restore country chips
+  (function() {
+    const saved = (c.target_country || 'ALL').toUpperCase();
+    const group = document.getElementById('mc-country-chips');
+    group.querySelectorAll('.chip').forEach(ch => ch.classList.remove('selected'));
+    const codes = saved === 'ALL' ? ['ALL'] : saved.split(',').map(x=>x.trim());
+    codes.forEach(code => {
+      const el = group.querySelector(`[data-value="${code}"]`);
+      if (el) el.classList.add('selected');
+    });
+    document.getElementById('nc-country').value = saved;
+  })();
+  // Restore gender chips
+  (function() {
+    const saved = (c.target_gender || 'all');
+    const group = document.getElementById('mc-gender-chips');
+    group.querySelectorAll('.chip').forEach(ch => ch.classList.remove('selected'));
+    const el = group.querySelector(`[data-value="${saved}"]`);
+    if (el) el.classList.add('selected');
+    document.getElementById('nc-gender').value = saved;
+  })();
   document.getElementById('nc-budget').value       = Math.round((c.budget_clp||0)/950);
   document.getElementById('nc-copy').value         = c.ad_copy || '';
   document.getElementById('nc-url').value          = c.link_url || '';
@@ -979,15 +1009,59 @@ async function editCampaign(id) {
 }
 
 // ── NEW CAMPAIGN ──────────────────────────────────────────────
+function toggleMcCountry(el) {
+  const isAll = el.dataset.value === 'ALL';
+  const group = document.getElementById('mc-country-chips');
+  if (isAll) {
+    group.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+  } else {
+    group.querySelector('[data-value="ALL"]').classList.remove('selected');
+    el.classList.toggle('selected');
+    const any = [...group.querySelectorAll('.chip:not([data-value="ALL"])')].some(c => c.classList.contains('selected'));
+    if (!any) group.querySelector('[data-value="ALL"]').classList.add('selected');
+  }
+  const selected = [...group.querySelectorAll('.chip.selected')].map(c => c.dataset.value);
+  document.getElementById('nc-country').value = selected.includes('ALL') ? 'ALL' : selected.join(',');
+  loadCommunes();
+}
+
+function toggleMcTier(el) {
+  const isAll = el.dataset.value === 'ALL';
+  const group = document.getElementById('mc-tier-chips');
+  if (isAll) {
+    group.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+  } else {
+    group.querySelector('[data-value="ALL"]').classList.remove('selected');
+    el.classList.toggle('selected');
+    const any = [...group.querySelectorAll('.chip')].some(c => c.classList.contains('selected'));
+    if (!any) group.querySelector('[data-value="ALL"]').classList.add('selected');
+  }
+  const selected = [...group.querySelectorAll('.chip.selected')].map(c => c.dataset.value);
+  // nc-tier stores the minimum tier for commune loading (lowest tier selected)
+  const order = {A:4,B:3,C:2,D:1,ALL:0};
+  const minTier = selected.includes('ALL') ? 'D' : selected.sort((a,b)=>order[a]-order[b])[0] || 'D';
+  document.getElementById('nc-tier').value = minTier;
+  loadCommunes();
+}
+
+function toggleMcGender(el) {
+  const group = document.getElementById('mc-gender-chips');
+  group.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  document.getElementById('nc-gender').value = el.dataset.value;
+}
+
 async function loadCommunes() {
   const country = document.getElementById('nc-country').value;
   const tier    = document.getElementById('nc-tier').value;
   selectedCommunes = [];
   const chips = document.getElementById('commune-chips');
 
-  // "Todos los países" — la segmentación geográfica no aplica
-  if (country === 'ALL') {
-    chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">Campaña global — se mostrará en debates de todos los países según perfil del votante.</span>';
+  // Global o multi-país — la segmentación por comuni no aplica
+  if (country === 'ALL' || country.includes(',')) {
+    chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">Campaña multi-país — se mostrará según nivel de ingreso y perfil en cada país seleccionado.</span>';
     return;
   }
 

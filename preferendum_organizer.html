@@ -199,9 +199,16 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
           <div class="field" style="margin-bottom:0;"><label>Edad mínima</label><input type="number" id="c-age-min" value="13" min="13" max="99"/></div>
           <div class="field" style="margin-bottom:0;"><label>Edad máxima</label><input type="number" id="c-age-max" value="99" min="13" max="99"/></div>
         </div>
-        <div class="field" style="margin-top:12px;margin-bottom:0;">
-          <label>Comuna / Ciudad (dejar vacío = todo el país)</label>
-          <input type="text" id="c-commune" placeholder="Ej: Las Condes, Providencia, Santiago Centro…"/>
+        <div class="field" style="margin-top:14px;margin-bottom:0;">
+          <label>Nivel de ingresos objetivo</label>
+          <div class="chip-row" id="se-chips">
+            <div class="chip selected" data-value="ALL" onclick="toggleSeChip(this)">Todos los niveles</div>
+            <div class="chip" data-value="A" onclick="toggleSeChip(this)">A — Premium</div>
+            <div class="chip" data-value="B" onclick="toggleSeChip(this)">B — Medio-alto</div>
+            <div class="chip" data-value="C" onclick="toggleSeChip(this)">C — Medio</div>
+            <div class="chip" data-value="D" onclick="toggleSeChip(this)">D — Económico</div>
+          </div>
+          <input type="hidden" id="c-se-tiers" value="A,B,C,D"/>
         </div>
       </div>
 
@@ -343,7 +350,8 @@ async function createDebate() {
   const gender   = document.getElementById('c-gender').value;
   const ageMin   = parseInt(document.getElementById('c-age-min').value) || 13;
   const ageMax   = parseInt(document.getElementById('c-age-max').value) || 99;
-  const commune  = document.getElementById('c-commune').value.trim();
+  const seTiers  = document.getElementById('c-se-tiers').value || 'A,B,C,D';
+  const commune  = document.getElementById('c-commune')?.value?.trim() || '';
   const options = [...document.querySelectorAll('.opt-input')].map(i => i.value.trim()).filter(Boolean);
 
   if (!title)          { showAlert('create-alert','error','Title is required'); return; }
@@ -370,6 +378,7 @@ async function createDebate() {
       target_gender: gender,
       target_age_min: ageMin,
       target_age_max: ageMax,
+      target_se_tiers: seTiers,
       verify_days: 7,
       follow_up_questions: followUpQuestions,
     })
@@ -483,6 +492,22 @@ function selectChip(hiddenId, el) {
   el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
   el.classList.add('selected');
   document.getElementById(hiddenId).value = el.dataset.value;
+}
+
+function toggleSeChip(el) {
+  const isAll = el.dataset.value === 'ALL';
+  const group = document.getElementById('se-chips');
+  if (isAll) {
+    group.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+  } else {
+    group.querySelector('[data-value="ALL"]').classList.remove('selected');
+    el.classList.toggle('selected');
+    const anySelected = [...group.querySelectorAll('.chip')].some(c => c.classList.contains('selected'));
+    if (!anySelected) group.querySelector('[data-value="ALL"]').classList.add('selected');
+  }
+  const selected = [...group.querySelectorAll('.chip.selected')].map(c => c.dataset.value);
+  document.getElementById('c-se-tiers').value = selected.includes('ALL') ? 'A,B,C,D' : selected.join(',');
 }
 
 function toggleCountryChip(el) {
