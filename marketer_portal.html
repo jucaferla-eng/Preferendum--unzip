@@ -173,7 +173,12 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
 .chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;}
 .chip{padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:1px solid var(--border);background:var(--ink3);color:var(--muted);transition:all .15s;user-select:none;}
 .chip.selected{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600;}
+/* Translate widget */
+.goog-te-banner-frame{display:none!important;}body{top:0!important;}
+.goog-te-gadget{font-size:0!important;}
+.goog-te-gadget select{font-size:11px!important;background:var(--ink3)!important;color:var(--paper)!important;border:1px solid var(--border)!important;border-radius:6px!important;padding:3px 6px!important;cursor:pointer!important;}
 </style>
+<script src="/translate.js"></script>
 </head>
 <body>
 
@@ -226,6 +231,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
       <span class="nav-balance" id="nav-balance">⬡ — Credits</span>
       <span id="nav-name" style="font-size:13px;"></span>
       <a href="/" style="background:none;border:1px solid var(--border);color:var(--muted);padding:6px 14px;border-radius:4px;font-size:12px;text-decoration:none;font-family:'Manrope',sans-serif;">← Inicio</a>
+      <div id="gt-widget-mktr" style="display:inline-block;vertical-align:middle;"></div>
       <button class="btn-logout" onclick="doLogout()">Sign out</button>
     </div>
   </nav>

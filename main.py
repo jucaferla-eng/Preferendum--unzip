@@ -30,7 +30,7 @@ from email.mime.multipart import MIMEMultipart
 from fastapi import (FastAPI, HTTPException, Depends, UploadFile,
                      File, Form, Query, Request, BackgroundTasks, Header)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import (create_engine, Column, Integer, String, Boolean,
                         DateTime, Text, Float, func)
@@ -1329,6 +1329,18 @@ def serve_app():
         })
     except FileNotFoundError:
         return HTMLResponse(content='<html><body>App not found</body></html>', status_code=404)
+
+@app.get('/translate.js')
+def serve_translate_js():
+    """Centralized Google Translate config — change languages in one place for all portals."""
+    try:
+        with open('translate.js', 'r', encoding='utf-8') as f:
+            content = f.read()
+        return Response(content=content, media_type='application/javascript', headers={
+            'Cache-Control': 'public, max-age=86400',
+        })
+    except FileNotFoundError:
+        return Response(content='// translate.js not found', media_type='application/javascript', status_code=404)
 
 @app.get('/voter', response_class=HTMLResponse)
 def serve_voter_portal():
