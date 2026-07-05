@@ -222,6 +222,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
     <div class="nav-user">
       <span class="nav-balance" id="nav-balance">⬡ — Credits</span>
       <span id="nav-name" style="font-size:13px;"></span>
+      <a href="/" style="background:none;border:1px solid var(--border);color:var(--muted);padding:6px 14px;border-radius:4px;font-size:12px;text-decoration:none;font-family:'Manrope',sans-serif;">← Inicio</a>
       <button class="btn-logout" onclick="doLogout()">Sign out</button>
     </div>
   </nav>
@@ -826,7 +827,7 @@ async function initiatePayment() {
   });
   const d = await r.json();
   btn.disabled = false; updatePayBtn();
-  if (!r.ok) { showAlert('credits-alert', 'error', d.detail || 'Payment error. Check Stripe is configured.'); return; }
+  if (!r.ok) { showAlert('credits-alert', 'error', d.detail || 'Error de pago — contacte a soporte: jucaferla@preferendum.com'); return; }
   if (d.checkout_url) window.location.href = d.checkout_url;
 }
 
