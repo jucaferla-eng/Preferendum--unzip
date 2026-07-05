@@ -450,6 +450,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
               <div class="field">
                 <label>Country</label>
                 <select id="nc-country" onchange="loadCommunes()">
+                  <option value="ALL">🌍 Todos los países</option>
                   <option value="CL">Chile</option>
                   <option value="AR">Argentina</option>
                   <option value="PE">Peru</option>
@@ -457,6 +458,12 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
                   <option value="CO">Colombia</option>
                   <option value="US">United States</option>
                   <option value="ES">Spain</option>
+                  <option value="BR">Brasil</option>
+                  <option value="EC">Ecuador</option>
+                  <option value="UY">Uruguay</option>
+                  <option value="PY">Paraguay</option>
+                  <option value="BO">Bolivia</option>
+                  <option value="VE">Venezuela</option>
                 </select>
               </div>
               <div class="field">
@@ -977,6 +984,13 @@ async function loadCommunes() {
   const tier    = document.getElementById('nc-tier').value;
   selectedCommunes = [];
   const chips = document.getElementById('commune-chips');
+
+  // "Todos los países" — la segmentación geográfica no aplica
+  if (country === 'ALL') {
+    chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">Campaña global — se mostrará en debates de todos los países según perfil del votante.</span>';
+    return;
+  }
+
   chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">Loading…</span>';
 
   // Determine which tiers to show based on selection
