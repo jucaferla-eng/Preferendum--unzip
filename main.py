@@ -4225,10 +4225,41 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         return {'message': 'Campaign created', 'campaign_id': existing.id,
                 'optimization': optimization, 'campaign': _format_campaign(existing)}
 
+    # Auto-populate target_communes from the income matrix when:
+    # 1. min_per_capita_usd > 0 (country income threshold set) OR target_se_tiers != all
+    # 2. target_communes is empty (not manually specified)
+    # This enables the "Porsche flow": set per-capita + NSE tier → system fills communes automatically.
+    auto_communes = data.target_communes or ''
+    if not auto_communes:
+        min_gni = getattr(data, 'min_per_capita_usd', 0.0) or 0.0
+        se_tiers_raw = data.target_se_tiers or 'A,B,C,D'
+        desired_tiers = {t.strip().upper() for t in se_tiers_raw.split(',') if t.strip()}
+        has_tier_filter = desired_tiers and desired_tiers != {'A','B','C','D'}
+        if min_gni > 0 or has_tier_filter:
+            try:
+                from targeting_agent import load_matrix as _lm_ac
+                _mat = _lm_ac()
+                country_filter = set()
+                if data.target_country and data.target_country.upper() not in ('ALL','GLOBAL',''):
+                    country_filter = {c.strip().upper() for c in data.target_country.split(',') if c.strip()}
+                commune_list = []
+                for iso, cdata in _mat.items():
+                    if country_filter and iso not in country_filter:
+                        continue
+                    if min_gni > 0 and (cdata.get('gni_per_capita') or 0) < min_gni:
+                        continue
+                    for cname, cm in cdata.get('communes', {}).items():
+                        if not has_tier_filter or cm.get('income_tier','') in desired_tiers:
+                            commune_list.append(cname)
+                if commune_list:
+                    auto_communes = ','.join(commune_list)
+            except Exception:
+                pass
+
     optimization = _optimize_campaign(
         budget_clp=data.budget_clp,
         target_country=data.target_country,
-        target_communes=data.target_communes,
+        target_communes=auto_communes,
         target_se_tiers=data.target_se_tiers,
         target_income_min=data.target_income_min,
         target_income_max=data.target_income_max,
@@ -4244,7 +4275,7 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         budget_clp          = data.budget_clp,
         ad_type             = data.ad_type,
         target_country      = data.target_country,
-        target_communes     = data.target_communes,
+        target_communes     = auto_communes,
         target_se_tiers     = data.target_se_tiers,
         target_income_min   = data.target_income_min,
         target_income_max   = data.target_income_max,
