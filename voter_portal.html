@@ -830,6 +830,22 @@ function renderAdCard(ad) {
   const cardAttrs = url ? `onclick="window.open('${esc(url)}','_blank')"` : '';
   const ctaHtml  = url ? `<a class="ad-cta" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(cta)}</a>` : '';
 
+  // Video: convert YouTube/Vimeo watch URLs to embeddable format
+  let videoHtml = '';
+  if (ad.video_url) {
+    let embedUrl = '';
+    const yt = ad.video_url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+    const vm = ad.video_url.match(/vimeo\.com\/(\d+)/);
+    if (yt)      embedUrl = `https://www.youtube.com/embed/${yt[1]}?rel=0`;
+    else if (vm) embedUrl = `https://player.vimeo.com/video/${vm[1]}`;
+    else         embedUrl = ad.video_url; // direct mp4
+    videoHtml = `<div style="margin:0 16px 10px;border-radius:10px;overflow:hidden;">
+      <iframe src="${esc(embedUrl)}" width="100%" height="180" frameborder="0" allowfullscreen
+        allow="accelerometer;autoplay;clipboard-write;encrypted-media;gyroscope;picture-in-picture"
+        onclick="event.stopPropagation()" style="display:block;"></iframe>
+    </div>`;
+  }
+
   return `<div class="ad-card" ${cardAttrs}>
     <div class="ad-card-inner">
       <div class="ad-logo-wrap">${logoHtml}</div>
@@ -840,6 +856,7 @@ function renderAdCard(ad) {
       </div>
       ${url ? '<div class="ad-arrow">›</div>' : ''}
     </div>
+    ${videoHtml}
     <div class="ad-sponsored">Publicidad · Preferendum</div>
   </div>`;
 }

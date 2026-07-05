@@ -326,8 +326,10 @@ class AdCampaign(Base):
     logo_url            = Column(String, default='')   # data URI o URL pública del logo
     ad_copy             = Column(String, default='')   # texto del anuncio
     ad_image_url        = Column(String, default='')   # imagen principal del anuncio
+    video_url           = Column(String, default='')   # URL de video (YouTube/Vimeo/mp4)
     target_debate_ids   = Column(String, default='')   # '4,6,9' — override directo, bypass matrix
     link_url            = Column(String, default='')   # destino al hacer clic en "Ver más"
+    min_per_capita_usd  = Column(Float, default=0.0)   # filtro GNI per cápita mínimo del país
 
 class AdImpressionLog(Base):
     __tablename__ = 'ad_impression_logs'
@@ -584,6 +586,8 @@ def _migrate():
             ('excluded_categories', "TEXT DEFAULT ''"),
             ('blocked_competitors', "TEXT DEFAULT ''"),
             ('spent_clp',           'FLOAT DEFAULT 0.0'),
+            ('video_url',           "TEXT DEFAULT ''"),
+            ('min_per_capita_usd',  'REAL DEFAULT 0.0'),
         ]:
             if col not in existing_ad_cols:
                 try:
@@ -1004,7 +1008,9 @@ class CampaignCreate(BaseModel):
     logo_url:            str = ''
     ad_copy:             str = ''
     ad_image_url:        str = ''
+    video_url:           str = ''
     link_url:            str = ''
+    min_per_capita_usd:  float = 0.0
 
 class AdViewInput(BaseModel):
     campaign_id: int
@@ -2377,6 +2383,17 @@ def _campaign_matches_debate(c, debate) -> bool:
     d_tiers = {t.strip().upper() for t in (getattr(debate, 'target_se_tiers', None) or 'A,B,C,D').split(',') if t.strip()}
     if c_tiers and d_tiers and not c_tiers.intersection(d_tiers):
         return False
+    # PIB per cápita — si la campaña exige un mínimo, al menos un país del debate debe calificarlo
+    min_gni = getattr(c, 'min_per_capita_usd', 0.0) or 0.0
+    if min_gni > 0 and d_countries and not d_countries.intersection({'ALL','GLOBAL'}):
+        try:
+            from targeting_agent import load_matrix as _lm
+            _matrix = _lm()
+            qualifying = any(_matrix.get(code, {}).get('gni_per_capita', 0) >= min_gni for code in d_countries)
+            if not qualifying:
+                return False
+        except Exception:
+            pass  # si la matrix falla, no bloquear
     return True
 
 def _normalize_gender(g: str) -> str:
@@ -2493,12 +2510,13 @@ def _match_campaigns(user, debate, db) -> list:
         'link_url':        c.link_url or '',
         'target_country':  c.target_country or '',
         'target_communes': c.target_communes or '',
-        'target_gender':   c.target_gender or 'all',
-        'target_age_min':  c.target_age_min or 13,
-        'target_age_max':  c.target_age_max or 99,
-        'min_income_tier': _se_tiers_to_min_tier(c.target_se_tiers),
-        'min_gni_country': 0,
-        'cpm':             0,
+        'target_gender':     c.target_gender or 'all',
+        'target_age_min':    c.target_age_min or 13,
+        'target_age_max':    c.target_age_max or 99,
+        'min_income_tier':   _se_tiers_to_min_tier(c.target_se_tiers),
+        'min_gni_country':   getattr(c, 'min_per_capita_usd', 0) or 0,
+        'video_url':         getattr(c, 'video_url', '') or '',
+        'cpm':               0,
     } for c in valid_orm]
 
     debate_dict = {
@@ -2597,6 +2615,7 @@ def get_opinions(debate_id: int,
             'logo_color':  '#2563eb',
             'logo_url':    _safe_url(campaign.get('logo_url', '')),
             'image_url':   _safe_url(campaign.get('ad_image_url', '')),
+            'video_url':   campaign.get('video_url', ''),
             'link_url':    campaign.get('link_url', ''),
             'campaign_id': campaign.get('id'),
         }})
@@ -3076,6 +3095,10 @@ def update_campaign(campaign_id: int, data: CampaignCreate, db: Session = Depend
     campaign.link_url            = data.link_url
     campaign.logo_url            = data.logo_url
     campaign.ad_image_url        = data.ad_image_url
+    campaign.video_url           = getattr(data, 'video_url', '') or ''
+    campaign.min_per_capita_usd  = getattr(data, 'min_per_capita_usd', 0.0) or 0.0
+    campaign.target_age_min      = data.target_age_min
+    campaign.target_age_max      = data.target_age_max
     if data.start_date:
         try: campaign.start_date = datetime.fromisoformat(data.start_date)
         except: pass
@@ -3220,6 +3243,13 @@ def _format_campaign(c: AdCampaign) -> dict:
         'end_date':           c.end_date.isoformat() if c.end_date else None,
         'is_active':          c.is_active,
         'target_se_tiers':    c.target_se_tiers or '',
+        'target_age_min':     c.target_age_min or 13,
+        'target_age_max':     c.target_age_max or 99,
+        'min_per_capita_usd': getattr(c, 'min_per_capita_usd', 0) or 0,
+        'video_url':          getattr(c, 'video_url', '') or '',
+        'logo_url':           getattr(c, 'logo_url', '') or '',
+        'ad_copy':            getattr(c, 'ad_copy', '') or '',
+        'link_url':           getattr(c, 'link_url', '') or '',
         'impressions':        0,
         'created_at':         c.created_at.isoformat() if c.created_at else None,
     }
@@ -4231,7 +4261,9 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         logo_url            = data.logo_url or '',
         ad_copy             = data.ad_copy or '',
         ad_image_url        = data.ad_image_url or '',
+        video_url           = getattr(data, 'video_url', '') or '',
         link_url            = data.link_url or '',
+        min_per_capita_usd  = getattr(data, 'min_per_capita_usd', 0.0) or 0.0,
     )
     db.add(campaign)
     db.commit()
