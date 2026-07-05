@@ -7,6 +7,25 @@
 <title>Preferendum — Voter</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
 <style>
+/* Google Translate overrides */
+.goog-te-banner-frame{display:none!important;}
+body{top:0!important;}
+.goog-te-gadget{font-size:0!important;}
+.goog-te-gadget select{font-size:12px!important;background:#1a2332!important;color:#f0f4ff!important;border:1px solid rgba(255,255,255,0.15)!important;border-radius:6px!important;padding:4px 6px!important;cursor:pointer!important;}
+#gt-bar{display:none!important;}
+</style>
+<script>
+function googleTranslateElementInit(){
+  new google.translate.TranslateElement({
+    pageLanguage:'es',
+    includedLanguages:'en,zh-CN,fr,de,ar,pt,ru,ja,ko,hi,es',
+    layout:google.translate.TranslateElement.InlineLayout.SIMPLE,
+    autoDisplay:false
+  },'gt-widget');
+}
+</script>
+<script src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit" async></script>
+<style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 :root{
   --bg:#0a0d14;--bg2:#111827;--bg3:#1a2332;
@@ -117,10 +136,17 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 .phase-label{font-size:11px;font-weight:700;color:#3b7fff;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;}
 
 /* ── AD CARD ── */
-.ad-card{background:#f5a623;padding:18px 20px;margin-bottom:0;border-bottom:1px solid #e5e7eb;}
-.ad-copy{font-size:16px;font-weight:700;color:#ffffff;line-height:1.35;margin-bottom:10px;text-transform:uppercase;}
-.ad-cta{display:inline-block;background:#ffffff;color:#b97a10;font-size:12px;font-weight:700;padding:7px 16px;border-radius:4px;text-decoration:none;cursor:pointer;letter-spacing:0.03em;}
-.ad-sponsored{font-size:10px;color:rgba(255,255,255,0.75);margin-top:10px;}
+.ad-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;margin:12px 16px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.06);cursor:pointer;}
+.ad-card-inner{display:flex;align-items:center;gap:14px;padding:14px 16px;}
+.ad-logo-wrap{flex-shrink:0;width:52px;height:52px;border-radius:10px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#f3f4f6;}
+.ad-logo-img{width:100%;height:100%;object-fit:contain;}
+.ad-logo-init{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#fff;}
+.ad-body{flex:1;min-width:0;}
+.ad-brand{font-size:13px;font-weight:700;color:#111;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ad-copy{font-size:13px;color:#374151;line-height:1.4;margin-bottom:6px;}
+.ad-cta{display:inline-block;background:#2563eb;color:#fff;font-size:12px;font-weight:700;padding:5px 14px;border-radius:20px;text-decoration:none;}
+.ad-arrow{flex-shrink:0;font-size:18px;color:#9ca3af;}
+.ad-sponsored{font-size:10px;color:#9ca3af;padding:0 16px 8px;}
 
 /* ── ERROR BANNER ── */
 #global-error{display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#dc2626;color:#fff;padding:16px 20px;font-size:14px;font-weight:600;text-align:center;line-height:1.4;}
@@ -333,6 +359,7 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
     </div>
     <div class="topbar-user">
       <span id="user-name-display"></span>
+      <div id="gt-widget" style="display:inline-block;vertical-align:middle;"></div>
       <span class="logout-btn" onclick="doLogout()">Salir</span>
     </div>
   </div>
@@ -788,13 +815,31 @@ async function openDebate(id) {
 
 function renderAdCard(ad) {
   if (!ad || (!ad.copy && !ad.brand)) return '';
-  const copy = ad.copy || (ad.brand ? `${ad.brand.toUpperCase()} — SEEN BY MILLIONS.` : 'YOUR BRAND COULD BE HERE, SEEN BY MILLIONS.');
-  const ctaHtml = ad.link_url
-    ? `<a class="ad-cta" href="${esc(ad.link_url)}" target="_blank" rel="noopener">${esc(ad.cta || 'Ver más →')}</a>`
-    : '';
-  return `<div class="ad-card">
-    <div class="ad-copy">${esc(copy)}</div>
-    ${ctaHtml}
+  const brand  = ad.brand || '';
+  const copy   = ad.copy  || '';
+  const cta    = ad.cta   || 'Ver más →';
+  const url    = ad.link_url || '';
+  const color  = ad.logo_color || '#2563eb';
+  const initial = brand ? brand.charAt(0).toUpperCase() : '★';
+
+  const logoHtml = ad.logo_url
+    ? `<img class="ad-logo-img" src="${esc(ad.logo_url)}" alt="${esc(brand)}" onerror="this.style.display='none';this.nextSibling.style.display='flex'"/>
+       <div class="ad-logo-init" style="background:${esc(color)};display:none;">${initial}</div>`
+    : `<div class="ad-logo-init" style="background:${esc(color)};">${initial}</div>`;
+
+  const cardAttrs = url ? `onclick="window.open('${esc(url)}','_blank')"` : '';
+  const ctaHtml  = url ? `<a class="ad-cta" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(cta)}</a>` : '';
+
+  return `<div class="ad-card" ${cardAttrs}>
+    <div class="ad-card-inner">
+      <div class="ad-logo-wrap">${logoHtml}</div>
+      <div class="ad-body">
+        <div class="ad-brand">${esc(brand)}</div>
+        <div class="ad-copy">${esc(copy)}</div>
+        ${ctaHtml}
+      </div>
+      ${url ? '<div class="ad-arrow">›</div>' : ''}
+    </div>
     <div class="ad-sponsored">Publicidad · Preferendum</div>
   </div>`;
 }

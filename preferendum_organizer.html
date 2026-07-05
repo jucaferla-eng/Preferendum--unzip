@@ -207,26 +207,27 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px;">
         <div class="field"><label>Closes At</label><input type="date" id="c-closes"/></div>
-        <div class="field"><label>Country</label>
-          <select id="c-country">
-            <option value="GLOBAL">🌍 Todos los países (Global)</option>
-            <option value="CL">Chile</option>
-            <option value="AR">Argentina</option>
-            <option value="PE">Peru</option>
-            <option value="MX">Mexico</option>
-            <option value="CO">Colombia</option>
-            <option value="BR">Brasil</option>
-            <option value="EC">Ecuador</option>
-            <option value="UY">Uruguay</option>
-            <option value="PY">Paraguay</option>
-            <option value="BO">Bolivia</option>
-            <option value="VE">Venezuela</option>
-            <option value="US">United States</option>
-            <option value="ES">Spain</option>
-            <option value="GB">United Kingdom</option>
-            <option value="DE">Germany</option>
-            <option value="FR">France</option>
-          </select>
+        <div class="field">
+          <label>País(es) de la consulta</label>
+          <div class="chip-row" id="country-chips" style="margin-bottom:8px;">
+            <div class="chip selected" data-value="GLOBAL" onclick="toggleCountryChip(this)">🌍 Global (todos)</div>
+            <div class="chip" data-value="CL" onclick="toggleCountryChip(this)">🇨🇱 Chile</div>
+            <div class="chip" data-value="AR" onclick="toggleCountryChip(this)">🇦🇷 Argentina</div>
+            <div class="chip" data-value="PE" onclick="toggleCountryChip(this)">🇵🇪 Peru</div>
+            <div class="chip" data-value="MX" onclick="toggleCountryChip(this)">🇲🇽 Mexico</div>
+            <div class="chip" data-value="CO" onclick="toggleCountryChip(this)">🇨🇴 Colombia</div>
+            <div class="chip" data-value="BR" onclick="toggleCountryChip(this)">🇧🇷 Brasil</div>
+            <div class="chip" data-value="EC" onclick="toggleCountryChip(this)">🇪🇨 Ecuador</div>
+            <div class="chip" data-value="UY" onclick="toggleCountryChip(this)">🇺🇾 Uruguay</div>
+            <div class="chip" data-value="US" onclick="toggleCountryChip(this)">🇺🇸 USA</div>
+            <div class="chip" data-value="ES" onclick="toggleCountryChip(this)">🇪🇸 España</div>
+            <div class="chip" data-value="GB" onclick="toggleCountryChip(this)">🇬🇧 UK</div>
+            <div class="chip" data-value="DE" onclick="toggleCountryChip(this)">🇩🇪 Alemania</div>
+            <div class="chip" data-value="FR" onclick="toggleCountryChip(this)">🇫🇷 Francia</div>
+            <div class="chip" data-value="CN" onclick="toggleCountryChip(this)">🇨🇳 China</div>
+            <div class="chip" data-value="JP" onclick="toggleCountryChip(this)">🇯🇵 Japón</div>
+          </div>
+          <input type="hidden" id="c-country" value="GLOBAL"/>
         </div>
       </div>
       <button class="btn" onclick="createDebate()">Launch Consultation</button>
@@ -482,6 +483,27 @@ function selectChip(hiddenId, el) {
   el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
   el.classList.add('selected');
   document.getElementById(hiddenId).value = el.dataset.value;
+}
+
+function toggleCountryChip(el) {
+  const isGlobal = el.dataset.value === 'GLOBAL';
+  const group = document.getElementById('country-chips');
+  if (isGlobal) {
+    // Global deselects all others
+    group.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+  } else {
+    // Deselect Global
+    group.querySelector('[data-value="GLOBAL"]').classList.remove('selected');
+    el.classList.toggle('selected');
+    // If none selected, revert to Global
+    const anySelected = [...group.querySelectorAll('.chip')].some(c => c.classList.contains('selected'));
+    if (!anySelected) group.querySelector('[data-value="GLOBAL"]').classList.add('selected');
+  }
+  // Update hidden input: comma-separated or GLOBAL
+  const selected = [...group.querySelectorAll('.chip.selected')].map(c => c.dataset.value);
+  const val = selected.includes('GLOBAL') ? 'GLOBAL' : selected.join(',');
+  document.getElementById('c-country').value = val;
 }
 
 let _similarTimer = null;

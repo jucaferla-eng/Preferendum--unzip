@@ -2347,10 +2347,11 @@ def _campaign_matches_debate(c, debate) -> bool:
         pinned = [int(x.strip()) for x in c.target_debate_ids.split(',') if x.strip().isdigit()]
         if pinned:
             return debate.id in pinned
-    # País — 'ALL'/'GLOBAL'/vacío en cualquiera de los dos lados = sin restricción
+    # País — 'ALL'/'GLOBAL'/vacío = sin restricción; scope_country puede ser multi-país "CL,AR,PE"
     c_country = _country_code(c.target_country) if c.target_country else ''
-    d_country = _country_code(debate.scope_country) if debate.scope_country else ''
-    if c_country and c_country not in ('ALL', 'GLOBAL') and d_country and d_country not in ('ALL', 'GLOBAL') and c_country != d_country:
+    scope_raw = (debate.scope_country or '').strip().upper()
+    d_countries = {_country_code(x.strip()) for x in scope_raw.split(',') if x.strip()} if scope_raw else set()
+    if c_country and c_country not in ('ALL', 'GLOBAL') and d_countries and not d_countries.intersection({'ALL','GLOBAL'}) and c_country not in d_countries:
         return False
     # Comuna — si la campaña apunta a comunas específicas y la consulta tiene
     # alcance comunal definido, la comuna de la consulta debe estar en la lista
@@ -2437,10 +2438,11 @@ def _match_campaigns(user, debate, db) -> list:
                 continue  # debate matches an excluded category — skip this campaign
 
         # ── COUNTRY FILTER ──
-        # Debates globales (GLOBAL/ALL/vacío) aceptan campañas de cualquier país —
-        # el votante define si califica, no el alcance del debate.
-        if debate_country not in ('GLOBAL', 'ALL', ''):
-            if c.target_country and c.target_country.upper() not in ('ALL', '', debate_country):
+        # scope_country puede ser multi-país "CL,AR" o "GLOBAL" — debates globales aceptan todo
+        debate_countries = {x.strip().upper() for x in debate_country.split(',') if x.strip()} if debate_country else {'GLOBAL'}
+        if not debate_countries.intersection({'GLOBAL','ALL',''}):
+            c_tgt = (c.target_country or '').upper().strip()
+            if c_tgt and c_tgt not in ('ALL', 'GLOBAL', '') and c_tgt not in debate_countries:
                 continue
 
         valid_orm.append(c)
