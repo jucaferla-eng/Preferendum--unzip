@@ -179,8 +179,16 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
 .goog-te-gadget select{font-size:11px!important;background:var(--ink3)!important;color:var(--paper)!important;border:1px solid var(--border)!important;border-radius:6px!important;padding:3px 6px!important;cursor:pointer!important;}
 </style>
 <script src="/translate.js"></script>
+<style>
+#gt-float{position:fixed;top:12px;right:12px;z-index:99999;background:rgba(13,17,32,0.92);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
+</style>
 </head>
 <body>
+
+<!-- TRANSLATE WIDGET — always visible, even on login screen -->
+<div id="gt-float">
+  <div id="gt-widget-mktr" style="display:inline-block;vertical-align:middle;"></div>
+</div>
 
 <!-- AUTH SCREEN -->
 <div id="auth-screen">
@@ -231,7 +239,6 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
       <span class="nav-balance" id="nav-balance">⬡ — Credits</span>
       <span id="nav-name" style="font-size:13px;"></span>
       <a href="/" style="background:none;border:1px solid var(--border);color:var(--muted);padding:6px 14px;border-radius:4px;font-size:12px;text-decoration:none;font-family:'Manrope',sans-serif;">← Inicio</a>
-      <div id="gt-widget-mktr" style="display:inline-block;vertical-align:middle;"></div>
       <button class="btn-logout" onclick="doLogout()">Sign out</button>
     </div>
   </nav>

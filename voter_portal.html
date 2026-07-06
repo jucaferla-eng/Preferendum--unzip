@@ -16,6 +16,9 @@ body{top:0!important;}
 </style>
 <script src="/translate.js"></script>
 <style>
+#gt-float{position:fixed;top:10px;right:10px;z-index:99999;background:rgba(10,13,20,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
+</style>
+<style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 :root{
   --bg:#0a0d14;--bg2:#111827;--bg3:#1a2332;
@@ -169,6 +172,11 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 </style>
 </head>
 <body>
+
+<!-- TRANSLATE — always visible from first screen -->
+<div id="gt-float">
+  <div id="gt-widget" style="display:inline-block;vertical-align:middle;"></div>
+</div>
 
 <!-- GLOBAL ERROR BANNER -->
 <div id="global-error" onclick="this.style.display='none'">
@@ -349,7 +357,6 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
     </div>
     <div class="topbar-user">
       <span id="user-name-display"></span>
-      <div id="gt-widget" style="display:inline-block;vertical-align:middle;"></div>
       <span class="logout-btn" onclick="doLogout()">Salir</span>
     </div>
   </div>

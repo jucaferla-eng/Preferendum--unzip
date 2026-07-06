@@ -97,8 +97,16 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 #gt-widget-org .goog-te-gadget select{font-size:12px;}
 </style>
 <script src="/translate.js"></script>
+<style>
+#gt-float{position:fixed;top:10px;right:10px;z-index:99999;background:rgba(10,13,20,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
+</style>
 </head>
 <body>
+
+<!-- TRANSLATE — always visible from first screen -->
+<div id="gt-float">
+  <div id="gt-widget-org" style="display:inline-block;vertical-align:middle;font-size:12px;"></div>
+</div>
 
 <!-- AUTH -->
 <div id="auth-screen">
@@ -133,7 +141,6 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
   <div class="topbar">
     <a href="/" style="text-decoration:none;color:inherit;"><div class="topbar-brand">prefer<span>endum</span></div></a>
     <div style="display:flex;gap:10px;align-items:center;">
-      <div id="gt-widget-org" style="font-size:12px;"></div>
       <a href="/" style="font-size:12px;color:var(--blue);text-decoration:none;padding:5px 10px;border:1px solid var(--border);border-radius:6px;">← Inicio</a>
       <button class="logout-btn" onclick="doLogout()">Sign out</button>
     </div>
