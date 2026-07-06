@@ -361,6 +361,15 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
               Stripe · 256-bit SSL · PCI DSS compliant
             </p>
           </div>
+
+          <!-- DEMO / TEST CREDITS -->
+          <div class="card" style="border:1px solid rgba(196,154,42,0.3);background:rgba(196,154,42,0.05);">
+            <h3 style="font-family:'Playfair Display',serif;font-size:16px;margin-bottom:8px;color:var(--gold2);">Demo / Testing</h3>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:16px;">Carga 500 créditos de prueba para testear el sistema sin pago real.</p>
+            <button class="btn-primary" id="demo-btn" onclick="loadDemoCredits()" style="background:var(--gold);color:var(--ink);">
+              + 500 Créditos Demo
+            </button>
+          </div>
         </div>
 
         <!-- CAMPAIGNS PANEL -->
@@ -747,6 +756,7 @@ function showApp() {
   refreshBalance();
   loadOverview();
   loadCampaigns();
+  showPanel('overview');
 }
 
 // ── BALANCE ───────────────────────────────────────────────────
@@ -865,6 +875,24 @@ async function initiatePayment() {
   btn.disabled = false; updatePayBtn();
   if (!r.ok) { showAlert('credits-alert', 'error', d.detail || 'Error de pago — contacte a soporte: jucaferla@preferendum.com'); return; }
   if (d.checkout_url) window.location.href = d.checkout_url;
+}
+
+// ── DEMO CREDITS ─────────────────────────────────────────────
+async function loadDemoCredits() {
+  if (!token) { alert('Inicia sesión primero'); return; }
+  const btn = document.getElementById('demo-btn');
+  btn.disabled = true; btn.textContent = 'Cargando…';
+  const r = await fetch(`${API}/payments/demo-credits`, {
+    method:'POST', headers:{'Authorization':'Bearer '+token}
+  });
+  const d = await r.json();
+  btn.disabled = false; btn.textContent = '+ 500 Créditos Demo';
+  if (r.ok) {
+    showAlert('credits-alert','success','✓ 500 créditos de demo agregados. Balance actualizado.');
+    refreshBalance();
+  } else {
+    showAlert('credits-alert','error', d.detail || 'Error al cargar créditos demo');
+  }
 }
 
 // ── CRYPTO CONFIRM ────────────────────────────────────────────
@@ -1237,7 +1265,7 @@ async function createCampaign() {
     _editingCampaignId = null;
     document.querySelector('[onclick="createCampaign()"]').textContent = 'Launch Campaign';
   } else {
-    r = await fetch(`${API}/advertiser/campaigns`, {
+    r = await fetch(`${API}/marketer/campaigns`, {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(body)
     });
@@ -1443,7 +1471,10 @@ document.addEventListener('DOMContentLoaded', () => {
 // Handle Stripe redirect
 const params = new URLSearchParams(location.search);
 if (params.get('payment') === 'success') {
+  history.replaceState({}, '', location.pathname);
   setTimeout(() => { showPanel('credits'); showAlert('credits-alert','success','✓ Payment successful! Credits have been added to your account.'); refreshBalance(); }, 500);
+} else if (params.get('payment') === 'cancel') {
+  history.replaceState({}, '', location.pathname);
 }
 </script>
 </body>

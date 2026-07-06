@@ -3068,11 +3068,21 @@ def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
         budget_clp          = data.budget_clp,
         ad_type             = data.ad_type,
         target_country      = data.target_country,
+        target_communes     = data.target_communes,
+        target_se_tiers     = data.target_se_tiers,
         target_gender       = data.target_gender,
+        target_age_min      = data.target_age_min,
+        target_age_max      = data.target_age_max,
         target_age_ranges   = data.target_age_ranges,
         target_categories   = data.target_categories,
         excluded_categories = data.excluded_categories,
         blocked_competitors = data.blocked_competitors,
+        logo_url            = data.logo_url,
+        ad_copy             = data.ad_copy,
+        ad_image_url        = data.ad_image_url,
+        video_url           = data.video_url,
+        link_url            = data.link_url,
+        min_per_capita_usd  = data.min_per_capita_usd,
         start_date          = datetime.fromisoformat(data.start_date),
         end_date            = datetime.fromisoformat(data.end_date),
         is_active           = True,
@@ -5099,6 +5109,13 @@ def payments_admin_manual(
         raise HTTPException(403, 'Forbidden')
     ref = f"admin_{user_id}_{int(time.time())}"
     return add_credits(db, user_id, credits, 'manual', ref, description, tx_type='bonus')
+
+
+@app.post('/payments/demo-credits')
+def payments_demo_credits(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Add 500 demo credits to the requesting marketer's account (for testing)."""
+    ref = f"demo_{user.id}_{int(time.time())}"
+    return add_credits(db, user.id, 500.0, 'manual', ref, 'Demo credits — testing', tx_type='bonus')
 
 
 @app.get('/admin/payments/pending-crypto')
