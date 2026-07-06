@@ -16,6 +16,10 @@
       "ios": {
         "resourceClass": "m-medium",
         "credentialsSource": "remote"
+      },
+      "android": {
+        "buildType": "app-bundle",
+        "credentialsSource": "remote"
       }
     }
   },
@@ -25,6 +29,10 @@
         "appleId": "jucaferla@preferendum.com",
         "ascAppId": "6765727101",
         "appleTeamId": "94LF36AQDA"
+      },
+      "android": {
+        "serviceAccountKeyPath": "./google-play-service-account.json",
+        "track": "internal"
       }
     }
   }
