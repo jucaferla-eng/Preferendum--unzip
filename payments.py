@@ -31,6 +31,7 @@ En memoria del Socio Fundador José Ignacio Fernández (1989–2024)
 import os, json, hashlib, time
 from typing import Optional
 from datetime import datetime
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
