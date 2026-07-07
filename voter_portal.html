@@ -732,7 +732,12 @@ function navTo(tab) {
     if (currentDebate) {
       showDetailView();
       setActiveTab('tab-results');
-      openDebate(currentDebate.id);
+      openDebate(currentDebate.id).then(() => {
+        setTimeout(() => {
+          const el = document.getElementById('results-section');
+          if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+        }, 200);
+      });
     }
     return;
   }
@@ -1004,6 +1009,15 @@ function renderDebate(db, res, items) {
       </div>
       <div class="detail-card">${optBtns}</div>
     </div>` : ''}
+
+    <div id="results-section">
+      <div class="phase-divider">
+        <div class="phase-divider-line"></div>
+        <div class="phase-label">04 · Resultados</div>
+        <div class="phase-divider-line"></div>
+      </div>
+      <div class="detail-card">${renderDonut(opts, counts, total, COLORS)}</div>
+    </div>
   `;
 }
 
