@@ -370,30 +370,29 @@ def return_budget_to_account(db: Session, user_id: int, campaign_id: int) -> dic
 # STRIPE
 # ══════════════════════════════════════════════════════════════
 
-def _stripe():
+def _stripe(db=None):
     import stripe as _s
     key = (os.getenv('APP_STRIPE_KEY') or os.getenv('STRIPE_SECRET_KEY') or '').strip()
-    if not key:
-        for path in ['/etc/secrets/stripe_key.txt', 'stripe_key.txt']:
-            try:
-                with open(path) as f:
-                    key = f.read().strip()
-                if key:
-                    break
-            except Exception:
-                pass
+    if not key and db is not None:
+        try:
+            from sqlalchemy import text as _text
+            row = db.execute(_text("SELECT value FROM app_config WHERE key='stripe_secret_key'")).fetchone()
+            if row:
+                key = row[0].strip()
+        except Exception:
+            pass
     if not key:
         raise HTTPException(503, 'Stripe not configured — set STRIPE_SECRET_KEY')
     _s.api_key = key
     return _s
 
 
-def create_stripe_checkout(user_id: int, package_id: str, success_url: str, cancel_url: str) -> dict:
+def create_stripe_checkout(user_id: int, package_id: str, success_url: str, cancel_url: str, db=None) -> dict:
     pkg = PACKAGE_BY_ID.get(package_id)
     if not pkg:
         raise HTTPException(400, f'Unknown package: {package_id}')
 
-    stripe = _stripe()
+    stripe = _stripe(db)
 
     session = stripe.checkout.Session.create(
         mode='payment',

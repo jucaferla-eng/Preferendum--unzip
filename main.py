@@ -1266,6 +1266,50 @@ function showPage1(){
 </body>
 </html>""")
 
+@app.get('/admin/stripe-setup', response_class=HTMLResponse)
+def stripe_setup_form():
+    return HTMLResponse(content='''<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stripe Setup</title>
+<style>body{background:#0f172a;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;}
+.box{background:#1e293b;padding:32px;border-radius:12px;width:90%;max-width:480px;}
+h2{margin:0 0 20px;font-size:18px;}
+input{width:100%;padding:12px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#fff;font-size:14px;box-sizing:border-box;margin-bottom:16px;}
+button{width:100%;padding:12px;background:#2d6eff;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;}
+#msg{margin-top:12px;font-size:14px;}</style></head>
+<body><div class="box">
+<h2>Configurar Stripe Secret Key</h2>
+<p style="font-size:13px;color:#94a3b8;margin-bottom:16px;">Ingresa la clave secreta de Stripe. Solo se guarda en la base de datos del servidor.</p>
+<input type="password" id="k" placeholder="sk_test_..." />
+<button onclick="save()">Guardar clave</button>
+<div id="msg"></div>
+</div>
+<script>
+async function save() {
+  const k = document.getElementById('k').value.trim();
+  if (!k.startsWith('sk_')) { document.getElementById('msg').textContent = 'La clave debe empezar con sk_'; return; }
+  const r = await fetch('/admin/stripe-setup', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: k})});
+  const d = await r.json();
+  document.getElementById('msg').style.color = d.ok ? '#10b981' : '#f87171';
+  document.getElementById('msg').textContent = d.ok ? '✓ Clave guardada correctamente' : 'Error: ' + d.error;
+  if (d.ok) document.getElementById('k').value = '';
+}
+</script></body></html>''')
+
+@app.post('/admin/stripe-setup')
+async def stripe_setup_save(request: Request, db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+        key = body.get('key', '').strip()
+        if not key.startswith('sk_'):
+            return {'ok': False, 'error': 'Invalid key format'}
+        db.execute(text("CREATE TABLE IF NOT EXISTS app_config (key VARCHAR PRIMARY KEY, value TEXT)"))
+        db.execute(text("INSERT INTO app_config (key, value) VALUES ('stripe_secret_key', :v) ON CONFLICT (key) DO UPDATE SET value=:v"), {'v': key})
+        db.commit()
+        return {'ok': True}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
 @app.get('/admin/dev-otp/{phone}')
 def dev_otp(phone: str, db: Session = Depends(get_db)):
     try:
@@ -4932,6 +4976,7 @@ def payments_balance(user: User = Depends(get_current_user), db: Session = Depen
 def payments_stripe_create_session(
     body: StripeCheckoutBody,
     user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """Creates a Stripe Checkout session and returns the URL to redirect the advertiser."""
     try:
@@ -4940,6 +4985,7 @@ def payments_stripe_create_session(
             package_id  = body.package_id,
             success_url = body.success_url,
             cancel_url  = body.cancel_url,
+            db          = db,
         )
     except HTTPException:
         raise
