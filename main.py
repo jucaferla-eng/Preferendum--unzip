@@ -1269,7 +1269,14 @@ function showPage1(){
 @app.get('/admin/check-stripe')
 def check_stripe():
     key = os.getenv('STRIPE_SECRET_KEY', '')
-    return {'stripe_configured': bool(key), 'key_prefix': key[:12] if key else 'NOT SET'}
+    all_keys = [k for k in os.environ.keys() if 'STRIPE' in k.upper()]
+    return {
+        'stripe_configured': bool(key),
+        'key_prefix': key[:12] if key else 'NOT SET',
+        'key_length': len(key),
+        'stripe_env_vars_found': all_keys,
+        'total_env_vars': len(os.environ)
+    }
 
 @app.get('/health')
 def health():
