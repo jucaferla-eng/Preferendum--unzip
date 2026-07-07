@@ -1266,6 +1266,11 @@ function showPage1(){
 </body>
 </html>""")
 
+@app.get('/admin/check-stripe')
+def check_stripe():
+    key = os.getenv('STRIPE_SECRET_KEY', '')
+    return {'stripe_configured': bool(key), 'key_prefix': key[:12] if key else 'NOT SET'}
+
 @app.get('/health')
 def health():
     # RENDER_GIT_COMMIT is set automatically by Render for every deploy —
