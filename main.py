@@ -1270,7 +1270,6 @@ function showPage1(){
 def dev_otp(phone: str, db: Session = Depends(get_db)):
     from urllib.parse import unquote
     phone = unquote(phone)
-    from models import User
     user = db.query(User).filter(User.phone == phone).first()
     if not user:
         return {'error': 'user not found', 'phone': phone}
