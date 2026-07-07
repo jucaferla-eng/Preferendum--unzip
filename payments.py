@@ -372,7 +372,16 @@ def return_budget_to_account(db: Session, user_id: int, campaign_id: int) -> dic
 
 def _stripe():
     import stripe as _s
-    key = os.getenv('STRIPE_SECRET_KEY')
+    key = os.getenv('STRIPE_SECRET_KEY', '').strip()
+    if not key:
+        for path in ['/etc/secrets/stripe_key.txt', 'stripe_key.txt']:
+            try:
+                with open(path) as f:
+                    key = f.read().strip()
+                if key:
+                    break
+            except Exception:
+                pass
     if not key:
         raise HTTPException(503, 'Stripe not configured — set STRIPE_SECRET_KEY')
     _s.api_key = key
