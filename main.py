@@ -1288,23 +1288,15 @@ def dev_otp(phone: str, db: Session = Depends(get_db)):
 @app.get('/admin/check-stripe')
 def check_stripe():
     key = (os.getenv('APP_STRIPE_KEY') or os.getenv('STRIPE_SECRET_KEY') or '').strip()
-    file_results = {}
-    for path in ['/etc/secrets/stripe_key.txt', 'stripe_key.txt', '/run/secrets/stripe_key.txt']:
-        try:
-            with open(path) as f:
-                content = f.read().strip()
-            file_results[path] = f'found ({len(content)} chars)'
-            if not key and content:
-                key = content
-        except Exception as e:
-            file_results[path] = f'not found: {str(e)[:50]}'
     all_stripe = [k for k in os.environ.keys() if 'STRIPE' in k.upper()]
+    system_prefixes = ('PATH','HOME','USER','LANG','LC_','TERM','SHELL','PWD','SHLVL','DEBIAN','SSL','XDG','_','VIRTUAL','PYTHON','PIP','OLDPWD','HOSTNAME','LS_')
+    custom_vars = sorted([k for k in os.environ.keys() if not any(k.startswith(p) for p in system_prefixes)])
     return {
         'stripe_configured': bool(key),
         'key_prefix': key[:12] if key else 'NOT SET',
         'stripe_env_vars_found': all_stripe,
-        'secret_files_checked': file_results,
-        'total_env_vars': len(os.environ)
+        'total_env_vars': len(os.environ),
+        'all_custom_vars': custom_vars
     }
 
 @app.get('/health')
