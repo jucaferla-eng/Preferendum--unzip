@@ -1287,7 +1287,7 @@ def dev_otp(phone: str, db: Session = Depends(get_db)):
 
 @app.get('/admin/check-stripe')
 def check_stripe():
-    key = os.getenv('STRIPE_SECRET_KEY', '').strip()
+    key = (os.getenv('APP_STRIPE_KEY') or os.getenv('STRIPE_SECRET_KEY') or '').strip()
     file_results = {}
     for path in ['/etc/secrets/stripe_key.txt', 'stripe_key.txt', '/run/secrets/stripe_key.txt']:
         try:

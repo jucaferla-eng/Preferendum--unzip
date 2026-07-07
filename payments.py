@@ -372,7 +372,7 @@ def return_budget_to_account(db: Session, user_id: int, campaign_id: int) -> dic
 
 def _stripe():
     import stripe as _s
-    key = os.getenv('STRIPE_SECRET_KEY', '').strip()
+    key = (os.getenv('APP_STRIPE_KEY') or os.getenv('STRIPE_SECRET_KEY') or '').strip()
     if not key:
         for path in ['/etc/secrets/stripe_key.txt', 'stripe_key.txt']:
             try:
