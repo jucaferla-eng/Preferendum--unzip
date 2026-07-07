@@ -1268,19 +1268,22 @@ function showPage1(){
 
 @app.get('/admin/dev-otp/{phone}')
 def dev_otp(phone: str, db: Session = Depends(get_db)):
-    from urllib.parse import unquote
-    phone = unquote(phone)
-    user = db.query(User).filter(User.phone == phone).first()
-    if not user:
-        return {'error': 'user not found', 'phone': phone}
-    otp = db.query(OTPCode).filter(
-        OTPCode.user_id == user.id,
-        OTPCode.channel == 'sms',
-        OTPCode.used == False
-    ).order_by(OTPCode.id.desc()).first()
-    if not otp:
-        return {'error': 'no OTP found for this user'}
-    return {'phone': phone, 'code': otp.code, 'expires_at': str(otp.expires_at)}
+    try:
+        from urllib.parse import unquote
+        phone = unquote(phone)
+        user = db.query(User).filter(User.phone == phone).first()
+        if not user:
+            return {'error': 'user not found', 'phone': phone}
+        otp = db.query(OTPCode).filter(
+            OTPCode.user_id == user.id,
+            OTPCode.channel == 'sms',
+            OTPCode.used == False
+        ).order_by(OTPCode.id.desc()).first()
+        if not otp:
+            return {'error': 'no active OTP found', 'user_id': user.id}
+        return {'phone': phone, 'code': otp.code, 'expires_at': str(otp.expires_at)}
+    except Exception as e:
+        return {'error': str(e)}
 
 @app.get('/admin/check-stripe')
 def check_stripe():
