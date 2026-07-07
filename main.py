@@ -1266,6 +1266,23 @@ function showPage1(){
 </body>
 </html>""")
 
+@app.get('/admin/dev-otp/{phone}')
+def dev_otp(phone: str, db: Session = Depends(get_db)):
+    from urllib.parse import unquote
+    phone = unquote(phone)
+    from models import User
+    user = db.query(User).filter(User.phone == phone).first()
+    if not user:
+        return {'error': 'user not found', 'phone': phone}
+    otp = db.query(OTPCode).filter(
+        OTPCode.user_id == user.id,
+        OTPCode.channel == 'sms',
+        OTPCode.used == False
+    ).order_by(OTPCode.id.desc()).first()
+    if not otp:
+        return {'error': 'no OTP found for this user'}
+    return {'phone': phone, 'code': otp.code, 'expires_at': str(otp.expires_at)}
+
 @app.get('/admin/check-stripe')
 def check_stripe():
     key = os.getenv('STRIPE_SECRET_KEY', '')
