@@ -1288,13 +1288,17 @@ def dev_otp(phone: str, db: Session = Depends(get_db)):
 @app.get('/admin/check-stripe')
 def check_stripe():
     key = os.getenv('STRIPE_SECRET_KEY', '')
-    all_keys = [k for k in os.environ.keys() if 'STRIPE' in k.upper()]
+    all_stripe = [k for k in os.environ.keys() if 'STRIPE' in k.upper()]
+    test_var = os.getenv('TEST_VAR_123', 'NOT SET')
+    custom_vars = [k for k in os.environ.keys() if not k.startswith(('PATH', 'HOME', 'USER', 'LANG', 'LC_', 'TERM', 'SHELL', 'PWD', 'SHLVL', 'RENDER', 'PORT', 'PYTHON', 'PIP', 'VIRTUAL', 'DEBIAN', 'SSL', 'XDG', '_'))]
     return {
         'stripe_configured': bool(key),
         'key_prefix': key[:12] if key else 'NOT SET',
         'key_length': len(key),
-        'stripe_env_vars_found': all_keys,
-        'total_env_vars': len(os.environ)
+        'stripe_env_vars_found': all_stripe,
+        'test_var_123': test_var,
+        'total_env_vars': len(os.environ),
+        'custom_vars_sample': sorted(custom_vars)[:30]
     }
 
 @app.get('/health')
