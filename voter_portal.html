@@ -865,28 +865,68 @@ function navTo(tab) {
   }
 }
 
+let _myVotesData = [];
+let _revealedCodes = {};
+
 async function loadMyVotes() {
   const el = document.getElementById('my-votes-list');
   if (!el || !token) return;
   try {
     const r = await fetch(`${API}/users/my-votes`, {headers: {'Authorization': 'Bearer ' + token}});
     const d = await r.json();
-    const votes = d.votes || [];
-    if (!votes.length) {
-      el.innerHTML = '<div style="font-size:14px;color:#94a3b8;padding:16px 0;">Aún no has votado en ninguna consulta.</div>';
-      return;
-    }
-    el.innerHTML = votes.map(v => `
-      <div class="detail-card" style="margin-bottom:12px;">
-        <div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:6px;">${esc(v.debate_title)}</div>
-        <div style="font-size:13px;color:#475569;margin-bottom:10px;">Elegiste: <strong>${esc(v.option)}</strong></div>
-        <div style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Código de verificación</div>
-        <div class="vcode-box" style="font-size:11px;margin-bottom:8px;">${esc(v.verify_code)}</div>
-        <div style="font-size:11px;color:#94a3b8;">${v.voted_at ? new Date(v.voted_at).toLocaleDateString('es-CL', {day:'numeric',month:'long',year:'numeric'}) : ''}</div>
-      </div>
-    `).join('');
+    _myVotesData = d.votes || [];
+    renderMyVotes();
   } catch(e) {
     el.innerHTML = '<div style="font-size:13px;color:#f87171;padding:12px 0;">Error cargando votos.</div>';
+  }
+}
+
+function renderMyVotes() {
+  const el = document.getElementById('my-votes-list');
+  if (!el) return;
+  if (!_myVotesData.length) {
+    el.innerHTML = '<div style="font-size:14px;color:#94a3b8;padding:16px 0;">Aún no has votado en ninguna consulta.</div>';
+    return;
+  }
+  el.innerHTML = _myVotesData.map(v => {
+    const revealed = _revealedCodes[v.debate_id];
+    return `
+    <div class="detail-card" style="margin-bottom:12px;">
+      <div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:6px;">${esc(v.debate_title)}</div>
+      <div style="font-size:13px;color:#475569;margin-bottom:10px;">Elegiste: <strong>${esc(v.option)}</strong></div>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:10px;">${v.voted_at ? new Date(v.voted_at).toLocaleDateString('es-CL',{day:'numeric',month:'long',year:'numeric'}) : ''}</div>
+      ${revealed
+        ? `<div style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">Código de verificación</div>
+           <div class="vcode-box" style="font-size:11px;">${esc(revealed)}</div>`
+        : `<button onclick="requestVoteOTP()" style="width:100%;padding:10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;color:#1d4ed8;font-size:13px;font-weight:600;cursor:pointer;">🔒 Ver código — recibirás un SMS</button>`
+      }
+    </div>`;
+  }).join('');
+}
+
+async function requestVoteOTP() {
+  const el = document.getElementById('my-votes-list');
+  try {
+    const r = await fetch(`${API}/users/request-vote-otp`, {method:'POST', headers:{'Authorization':'Bearer '+token}});
+    const d = await r.json();
+    if (!d.ok) { alert(d.detail || 'Error enviando SMS'); return; }
+    const otp = prompt(`Se envió un SMS a ${d.masked_phone}. Ingresa el código de 6 dígitos:`);
+    if (!otp) return;
+    const r2 = await fetch(`${API}/users/verify-vote-otp`, {
+      method:'POST',
+      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body: JSON.stringify({code: otp.trim()})
+    });
+    const d2 = await r2.json();
+    if (d2.ok) {
+      _revealedCodes = d2.codes;
+      _myVotesData.forEach(v => { if (_revealedCodes[v.debate_id]) v.verify_code = _revealedCodes[v.debate_id]; });
+      renderMyVotes();
+    } else {
+      alert(d2.detail || 'Código incorrecto');
+    }
+  } catch(e) {
+    alert('Error de conexión');
   }
 }
 

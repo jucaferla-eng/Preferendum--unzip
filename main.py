@@ -2957,6 +2957,37 @@ def get_my_vote(debate_id: int,
     }
 
 
+@app.post('/users/request-vote-otp')
+def request_vote_otp(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Sends SMS OTP to reveal vote verify codes."""
+    if not user.phone:
+        raise HTTPException(400, 'No tienes un número de teléfono registrado')
+    code = gen_otp()
+    expires = datetime.utcnow() + timedelta(minutes=10)
+    db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='vote_reveal', used=False, expires_at=expires))
+    db.commit()
+    send_sms_otp(user.phone, code)
+    masked = user.phone[-4:] if user.phone else '????'
+    return {'ok': True, 'masked_phone': f'***{masked}'}
+
+@app.post('/users/verify-vote-otp')
+def verify_vote_otp(body: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Verifies OTP and returns all vote verify codes."""
+    code = (body.get('code') or '').strip()
+    otp = db.query(OTPCode).filter(
+        OTPCode.user_id == user.id,
+        OTPCode.channel == 'vote_reveal',
+        OTPCode.used == False,
+        OTPCode.expires_at > datetime.utcnow()
+    ).order_by(OTPCode.id.desc()).first()
+    if not otp or otp.code != code:
+        raise HTTPException(400, 'Código incorrecto o expirado')
+    otp.used = True
+    db.commit()
+    logs = db.query(HasVotedLog).filter(HasVotedLog.user_id == user.id).all()
+    codes = {log.debate_id: log.verify_code for log in logs}
+    return {'ok': True, 'codes': codes}
+
 @app.get('/users/my-votes')
 def get_my_votes(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Returns all votes cast by the current user with their verify codes."""
