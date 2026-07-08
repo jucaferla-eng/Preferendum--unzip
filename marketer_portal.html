@@ -874,8 +874,8 @@ async function initiatePayment() {
     method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
     body: JSON.stringify({
       package_id:   selectedPkg,
-      success_url:  window.location.href + '?payment=success',
-      cancel_url:   window.location.href + '?payment=cancel',
+      success_url:  window.location.href.split('?')[0],
+      cancel_url:   window.location.href.split('?')[0] + '?payment=cancel',
     })
   });
   const d = await r.json();
@@ -1471,9 +1471,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Handle Stripe redirect
 const params = new URLSearchParams(location.search);
-if (params.get('payment') === 'success') {
+const _stripeSessionId = params.get('session_id');
+if (_stripeSessionId) {
   history.replaceState({}, '', location.pathname);
-  setTimeout(() => { showPanel('credits'); showAlert('credits-alert','success','✓ Payment successful! Credits have been added to your account.'); refreshBalance(); }, 500);
+  setTimeout(async () => {
+    showPanel('credits');
+    showAlert('credits-alert', 'info', '⏳ Verificando pago…');
+    try {
+      const tok = localStorage.getItem('pref_adv_token') || token;
+      const fr = await fetch(`${API}/payments/stripe/fulfill?session_id=${_stripeSessionId}`, {
+        headers: {'Authorization': 'Bearer ' + tok}
+      });
+      const fd = await fr.json();
+      if (fd.ok) {
+        showAlert('credits-alert', 'success', `✓ ${fd.credits_added} créditos agregados a tu cuenta.`);
+        refreshBalance();
+      } else {
+        showAlert('credits-alert', 'error', fd.detail || 'Error al acreditar — contacta soporte.');
+      }
+    } catch(e) {
+      showAlert('credits-alert', 'error', 'Error de conexión al verificar pago.');
+    }
+  }, 600);
 } else if (params.get('payment') === 'cancel') {
   history.replaceState({}, '', location.pathname);
 }

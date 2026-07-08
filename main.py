@@ -5025,6 +5025,45 @@ async def payments_stripe_webhook(
     return {'ok': True}
 
 
+@app.get('/payments/stripe/fulfill')
+async def payments_stripe_fulfill(
+    session_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Called by frontend after Stripe redirects back. Verifies session and credits account."""
+    from payments import _stripe
+    try:
+        stripe = _stripe(db)
+        session = stripe.checkout.Session.retrieve(session_id)
+    except Exception as e:
+        raise HTTPException(502, f'Stripe error: {str(e)}')
+
+    if session.get('payment_status') != 'paid':
+        raise HTTPException(400, 'Payment not completed')
+
+    meta = session.get('metadata', {})
+    meta_user_id = int(meta.get('user_id', 0))
+    if meta_user_id != user.id:
+        raise HTTPException(403, 'Session does not belong to this user')
+
+    credits    = float(meta.get('credits', 0))
+    package_id = meta.get('package_id', '')
+    pkg        = PACKAGE_BY_ID.get(package_id, {})
+    amount_usd = pkg.get('price_usd', 0)
+
+    result = add_credits(
+        db             = db,
+        user_id        = user.id,
+        amount_credits = credits,
+        method         = 'stripe',
+        ref            = session_id,
+        description    = f'Stripe checkout — {package_id}',
+        amount_usd     = amount_usd,
+    )
+    return result
+
+
 @app.post('/payments/crypto/quote')
 def payments_crypto_quote(body: CryptoInitBody):
     """Returns current POL or USDC price and exact amount to send. No DB write."""
