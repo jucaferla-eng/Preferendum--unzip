@@ -1320,7 +1320,6 @@ def dev_otp(phone: str, db: Session = Depends(get_db)):
             return {'error': 'user not found', 'phone': phone}
         otp = db.query(OTPCode).filter(
             OTPCode.user_id == user.id,
-            OTPCode.channel == 'sms',
             OTPCode.used == False
         ).order_by(OTPCode.id.desc()).first()
         if not otp:
