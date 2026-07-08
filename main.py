@@ -2326,7 +2326,7 @@ def list_debates(
 ):
     q = db.query(Debate)
     if country and country != 'ALL':
-        q = q.filter(Debate.scope_country.in_([country, 'ALL']))
+        q = q.filter(Debate.scope_country.in_([country, 'ALL', 'GLOBAL']))
     debates = q.order_by(Debate.created_at.desc()).limit(limit).all()
     safe = []
     for d in debates:
