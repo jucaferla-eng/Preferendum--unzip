@@ -2957,6 +2957,27 @@ def get_my_vote(debate_id: int,
     }
 
 
+@app.get('/users/my-votes')
+def get_my_votes(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Returns all votes cast by the current user with their verify codes."""
+    logs = db.query(HasVotedLog).filter(
+        HasVotedLog.user_id == user.id
+    ).order_by(HasVotedLog.created_at.desc()).all()
+
+    result = []
+    for log in logs:
+        debate = db.query(Debate).filter(Debate.id == log.debate_id).first()
+        vote   = db.query(DebateVote).filter(DebateVote.verify_code == log.verify_code).first()
+        result.append({
+            'debate_id':    log.debate_id,
+            'debate_title': debate.title if debate else '—',
+            'option':       vote.option_text if vote else '—',
+            'verify_code':  log.verify_code,
+            'voted_at':     log.created_at.isoformat() if log.created_at else '',
+        })
+    return {'votes': result}
+
+
 @app.get('/debates/{debate_id}/results')
 def get_results(debate_id: int,
                 user: User = Depends(get_optional_user),
