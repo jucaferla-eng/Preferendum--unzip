@@ -127,6 +127,20 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 .phase-divider{display:flex;align-items:center;gap:12px;margin:20px 0 16px;}
 .phase-divider-line{flex:1;height:1px;background:#e2e8f0;}
 .phase-label{font-size:11px;font-weight:700;color:#3b7fff;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;}
+/* ── WINNER CARD ── */
+.winner-card{background:linear-gradient(160deg,#0a0f1e 0%,#0f2040 100%);border-radius:18px;overflow:hidden;margin-bottom:16px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.15);}
+.winner-img-wrap{width:100%;height:200px;overflow:hidden;position:relative;}
+.winner-img-wrap img{width:100%;height:100%;object-fit:cover;display:block;opacity:0.9;}
+.winner-img-wrap::after{content:'';position:absolute;bottom:0;left:0;right:0;height:70px;background:linear-gradient(transparent,#0f2040);}
+.winner-body{padding:16px 20px 20px;}
+.winner-eyebrow{font-size:10px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#60a5fa;margin-bottom:8px;}
+.winner-name{font-family:'Playfair Display',serif;font-size:22px;font-weight:700;color:#fff;margin-bottom:10px;line-height:1.2;}
+.winner-pct-row{display:flex;align-items:baseline;justify-content:center;gap:4px;margin-bottom:4px;}
+.winner-pct{font-size:58px;font-weight:800;color:#3b82f6;line-height:1;}
+.winner-pct-label{font-size:18px;font-weight:600;color:#93c5fd;}
+.winner-votes-label{font-size:12px;color:#64748b;margin-bottom:16px;}
+.share-result-btn{width:100%;padding:14px;background:linear-gradient(135deg,#2563eb,#4f46e5);border:none;border-radius:12px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;display:flex;align-items:center;justify-content:center;gap:8px;}
+.share-result-btn:active{opacity:0.85;}
 /* ── PRODUCT GALLERY ── */
 .product-gallery{display:flex;gap:12px;overflow-x:auto;padding:4px 2px 16px;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin-bottom:4px;}
 .product-gallery::-webkit-scrollbar{display:none;}
@@ -938,6 +952,14 @@ function renderDebate(db, res, items) {
   const imgs    = db.option_images || [];
   const hasImgs = imgs.some(Boolean);
 
+  let winnerIdx = 0;
+  if (total > 0 && opts.length > 0) {
+    opts.forEach((opt, i) => { if ((counts[opt]||0) > (counts[opts[winnerIdx]]||0)) winnerIdx = i; });
+  }
+  const winnerPct = total > 0 ? Math.round((counts[opts[winnerIdx]]||0) / total * 100) : 0;
+  const winnerOpt = opts[winnerIdx] || '';
+  const winnerImg = imgs[winnerIdx] || '';
+
   // ── PHASE 1: DEBATE — opinions + ads in sequence ──
   const levelLabel = { expert: 'Experto', good: 'Informado', familiar: 'Conoce el tema' };
   const feedHtml = (items && items.length > 0)
@@ -1041,6 +1063,22 @@ function renderDebate(db, res, items) {
         <div class="phase-label">04 · Resultados</div>
         <div class="phase-divider-line"></div>
       </div>
+      ${total > 0 ? `
+      <div class="winner-card">
+        ${winnerImg ? `<div class="winner-img-wrap"><img src="${winnerImg}" alt="${esc(winnerOpt)}"/></div>` : ''}
+        <div class="winner-body">
+          <div class="winner-eyebrow">${isLive ? 'Va ganando' : 'La comunidad decidió'}</div>
+          <div class="winner-name">${esc(winnerOpt)}</div>
+          <div class="winner-pct-row">
+            <div class="winner-pct">${winnerPct}</div>
+            <div class="winner-pct-label">%</div>
+          </div>
+          <div class="winner-votes-label">${total} voto${total !== 1 ? 's' : ''} verificado${total !== 1 ? 's' : ''} · ${db.scope_country || 'Global'}</div>
+          <button class="share-result-btn" onclick="shareResult(${debId})">
+            <span style="font-size:18px;">↑</span> Compartir resultado
+          </button>
+        </div>
+      </div>` : ''}
       <div class="detail-card">${renderDonut(opts, counts, total, COLORS)}</div>
     </div>
   `;
@@ -1108,6 +1146,49 @@ function selectOption(idx) {
     const nextQ = currentQ.branches ? currentQ.branches[idx] : null;
     submitBtn.textContent = nextQ && nextQ.title ? `Siguiente → "${esc(displayOpts[idx])}"` : `Votar: "${esc(displayOpts[idx])}"`;
   }
+}
+
+async function shareResult(debId) {
+  const db = currentDebate;
+  if (!db) return;
+  const opts = db.options || [];
+  let winnerText = opts[0] || '', winnerPct = 0, total = 0;
+  try {
+    const r = await fetch(`${API}/debates/${debId}/results`, {headers: token ? {'Authorization':'Bearer '+token} : {}});
+    if (r.ok) {
+      const res = await r.json();
+      const rl = (res.debate || res).results || [];
+      const cts = {};
+      rl.forEach(row => { cts[row.option] = row.count || 0; });
+      total = (res.debate || res).total_votes || 0;
+      if (total > 0) {
+        winnerText = opts.reduce((best, opt) => (cts[opt]||0) > (cts[best]||0) ? opt : best, opts[0]);
+        winnerPct  = Math.round((cts[winnerText]||0) / total * 100);
+      }
+    }
+  } catch(_) {}
+  const shareText = `"${winnerText}" ganó con ${winnerPct}% de los votos verificados.\n${db.title}`;
+  _doShare('Preferendum · Resultado', shareText, window.location.href);
+}
+
+async function shareMyVote(option, title, debId) {
+  const shareText = `Elegí "${option}" en Preferendum.\n¿Y tú?\n${title}`;
+  _doShare(`Preferendum · ${title}`, shareText, window.location.href);
+}
+
+async function _doShare(title, text, url) {
+  try {
+    if (navigator.share) {
+      await navigator.share({ title, text, url });
+    } else {
+      await navigator.clipboard.writeText(`${text}\n${url}`);
+      const n = document.createElement('div');
+      n.textContent = '✓ Copiado al portapapeles';
+      n.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:10px 20px;border-radius:24px;font-size:14px;font-weight:600;z-index:9999;box-shadow:0 4px 16px rgba(0,0,0,0.3);';
+      document.body.appendChild(n);
+      setTimeout(() => n.remove(), 2500);
+    }
+  } catch(_) {}
 }
 
 function selectProductCard(card, idx) {
@@ -1267,6 +1348,10 @@ async function showVoteSuccess(data, optIdx) {
       <div class="vcode-box">${esc(vcode)}</div>
       <div class="vcode-label">Guarda este código — te permitirá verificar cómo fue contabilizado tu voto cuando termine el período de votación</div>
       ${data.blockchain_tx ? `<a class="verify-link" href="https://polygonscan.com/tx/${data.blockchain_tx}" target="_blank" rel="noopener">Ver en Polygon blockchain ↗</a>` : ''}
+      <button onclick="shareMyVote('${esc(option)}','${esc(currentDebate?.title||'')}',${debId})"
+        style="margin-top:14px;width:100%;padding:13px;background:linear-gradient(135deg,#2563eb,#4f46e5);border:none;border-radius:12px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-family:'Inter',sans-serif;">
+        <span style="font-size:17px;">↑</span> Compartir mi decisión
+      </button>
     </div>
     ${postAdHtml}
 
