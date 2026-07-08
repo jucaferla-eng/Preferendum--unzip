@@ -127,6 +127,29 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 .phase-divider{display:flex;align-items:center;gap:12px;margin:20px 0 16px;}
 .phase-divider-line{flex:1;height:1px;background:#e2e8f0;}
 .phase-label{font-size:11px;font-weight:700;color:#3b7fff;letter-spacing:2px;text-transform:uppercase;white-space:nowrap;}
+/* ── WELCOME MODAL ── */
+#welcome-modal{display:none;position:fixed;inset:0;z-index:10000;background:rgba(10,13,20,0.88);backdrop-filter:blur(6px);align-items:flex-end;justify-content:center;padding:0;}
+#welcome-modal.visible{display:flex;}
+.welcome-sheet{background:#fff;border-radius:24px 24px 0 0;width:100%;max-width:480px;padding:28px 24px 36px;max-height:90vh;overflow-y:auto;}
+.welcome-avatar{width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#1e3a5f,#2d6eff);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 4px 20px rgba(45,110,255,0.35);position:relative;}
+.welcome-avatar::after{content:'';position:absolute;inset:-4px;border-radius:50%;border:2px solid rgba(45,110,255,0.25);animation:pulse-ring 2s ease-out infinite;}
+@keyframes pulse-ring{0%{transform:scale(1);opacity:1;}100%{transform:scale(1.25);opacity:0;}}
+.welcome-avatar svg{width:34px;height:34px;fill:#fff;}
+.welcome-title{font-family:'Playfair Display',serif;font-size:20px;font-weight:700;color:#0f172a;text-align:center;margin-bottom:4px;}
+.welcome-sub{font-size:12px;color:#64748b;text-align:center;letter-spacing:.08em;text-transform:uppercase;font-weight:600;margin-bottom:20px;}
+.welcome-points{display:flex;flex-direction:column;gap:14px;margin-bottom:22px;}
+.welcome-point{display:flex;gap:12px;align-items:flex-start;}
+.welcome-point-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
+.welcome-point-text{flex:1;}
+.welcome-point-title{font-size:14px;font-weight:700;color:#0f172a;margin-bottom:2px;}
+.welcome-point-desc{font-size:13px;color:#475569;line-height:1.5;}
+.welcome-nav{background:#f8fafc;border-radius:12px;padding:14px 16px;margin-bottom:22px;}
+.welcome-nav-title{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;}
+.welcome-nav-steps{display:flex;align-items:center;gap:4px;flex-wrap:wrap;}
+.welcome-step{font-size:11px;font-weight:600;color:#1e40af;background:#dbeafe;border-radius:20px;padding:4px 10px;white-space:nowrap;}
+.welcome-arrow{font-size:10px;color:#94a3b8;}
+.welcome-cta{width:100%;padding:15px;background:linear-gradient(135deg,#1e3a5f,#2d6eff);border:none;border-radius:14px;color:#fff;font-size:16px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;letter-spacing:.02em;}
+.welcome-cta:active{opacity:0.9;}
 /* ── WINNER CARD ── */
 .winner-card{background:linear-gradient(160deg,#0a0f1e 0%,#0f2040 100%);border-radius:18px;overflow:hidden;margin-bottom:16px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.15);}
 .winner-img-wrap{width:100%;height:200px;overflow:hidden;position:relative;}
@@ -194,6 +217,55 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 </style>
 </head>
 <body>
+
+<!-- WELCOME MODAL -->
+<div id="welcome-modal">
+  <div class="welcome-sheet">
+    <div class="welcome-avatar">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg>
+    </div>
+    <div class="welcome-title">Bienvenido a Preferendum</div>
+    <div class="welcome-sub">Digital Verified Decision Making</div>
+    <div class="welcome-points">
+      <div class="welcome-point">
+        <div class="welcome-point-icon" style="background:#fef3c7;">🔐</div>
+        <div class="welcome-point-text">
+          <div class="welcome-point-title">Tu identidad protege el sistema</div>
+          <div class="welcome-point-desc">La selfie y tus datos solo verifican que eres una persona real — no un bot ni una cuenta falsa. Una vez verificado, se eliminan. Sin esto, el resultado vale cero.</div>
+        </div>
+      </div>
+      <div class="welcome-point">
+        <div class="welcome-point-icon" style="background:#f0fdf4;">🗳️</div>
+        <div class="welcome-point-text">
+          <div class="welcome-point-title">Tu voto es 100% anónimo</div>
+          <div class="welcome-point-desc">Nadie sabe cómo votaste — ni nosotros. Tu identidad verifica que votaste una vez, pero qué elegiste es solo tuyo.</div>
+        </div>
+      </div>
+      <div class="welcome-point">
+        <div class="welcome-point-icon" style="background:#eff6ff;">⛓️</div>
+        <div class="welcome-point-text">
+          <div class="welcome-point-title">Los resultados van al blockchain</div>
+          <div class="welcome-point-desc">La misma tecnología que hace a Bitcoin inexpugnable. Una vez registrado, ningún resultado puede ser alterado ni falsificado.</div>
+        </div>
+      </div>
+    </div>
+    <div class="welcome-nav">
+      <div class="welcome-nav-title">Cómo navegar</div>
+      <div class="welcome-nav-steps">
+        <span class="welcome-step">📋 Debates</span>
+        <span class="welcome-arrow">→</span>
+        <span class="welcome-step">💬 Opinar</span>
+        <span class="welcome-arrow">→</span>
+        <span class="welcome-step">🗳️ Votar</span>
+        <span class="welcome-arrow">→</span>
+        <span class="welcome-step">📊 Resultados</span>
+        <span class="welcome-arrow">→</span>
+        <span class="welcome-step">✓ Verificar</span>
+      </div>
+    </div>
+    <button class="welcome-cta" onclick="closeWelcome()">Entendido, comenzar →</button>
+  </div>
+</div>
 
 <!-- TRANSLATE — always visible from first screen -->
 <div id="gt-float">
@@ -714,6 +786,18 @@ function showApp() {
   document.getElementById('main-app').classList.add('visible');
   document.getElementById('user-name-display').textContent = userName;
   loadDebates();
+  if (!localStorage.getItem('pref_seen_welcome')) showWelcomeModal();
+}
+
+function showWelcomeModal() {
+  const m = document.getElementById('welcome-modal');
+  if (m) m.classList.add('visible');
+}
+
+function closeWelcome() {
+  const m = document.getElementById('welcome-modal');
+  if (m) m.classList.remove('visible');
+  localStorage.setItem('pref_seen_welcome', '1');
 }
 
 function setActiveTab(id) {
