@@ -207,6 +207,7 @@ class Debate(Base):
     follow_up_questions = Column(Text, default='')
     reward           = Column(Text, default='')
     option_images    = Column(Text, default='[]')
+    cover_image_url  = Column(Text, default='')
     created_at       = Column(DateTime, default=datetime.utcnow)
 
 class Opinion(Base):
@@ -536,6 +537,7 @@ def _migrate():
             ('option_images',       "TEXT DEFAULT '[]'"),
             ('target_se_tiers',     "TEXT DEFAULT 'A,B,C,D'"),
             ('category',            "TEXT DEFAULT 'general'"),
+            ('cover_image_url',     "TEXT DEFAULT ''"),
         ]:
             if col not in existing_debate_cols:
                 try:
@@ -780,6 +782,7 @@ def format_debate(debate, has_voted=False):
         'verifications_total': debate.verifications_total,
         'follow_up_questions': debate.follow_up_questions or '',
         'reward': debate.reward or '',
+        'cover_image_url': debate.cover_image_url or '',
         'has_voted': has_voted,
         'created_at': debate.created_at.isoformat(),
     }
@@ -973,6 +976,7 @@ class DebateCreate(BaseModel):
     follow_up_questions: str = ''
     reward:              str = ''
     option_images:       List[str] = []
+    cover_image_url:     str = ''
 
 class OpinionCreate(BaseModel):
     text:            str
@@ -2415,7 +2419,7 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
         reward=data.reward or '',
-        option_images=json.dumps(data.option_images or []),
+        option_images=json.dumps(data.option_images or []),\n        cover_image_url=data.cover_image_url or "",
     )
     db.add(debate)
     db.commit()
@@ -3185,7 +3189,7 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
         reward=data.reward or '',
-        option_images=json.dumps(data.option_images or []),
+        option_images=json.dumps(data.option_images or []),\n        cover_image_url=data.cover_image_url or "",
     )
     db.add(debate)
     db.commit()
@@ -3787,7 +3791,7 @@ def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_c
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
         reward=data.reward or '',
-        option_images=json.dumps(data.option_images or []),
+        option_images=json.dumps(data.option_images or []),\n        cover_image_url=data.cover_image_url or "",
     )
     db.add(debate)
     db.commit()

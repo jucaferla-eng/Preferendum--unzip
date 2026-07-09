@@ -1179,6 +1179,7 @@ function renderDebate(db, res, items) {
   const debId = db.id;
 
   content.innerHTML = `
+    ${db.cover_image_url ? `<div style="width:100%;border-radius:14px;overflow:hidden;margin-bottom:12px;max-height:220px;"><img src="${esc(db.cover_image_url)}" alt="${esc(db.inst_name||db.title)}" style="width:100%;height:220px;object-fit:cover;display:block;"/></div>` : ''}
     <div class="detail-card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <span class="debate-status ${isLive ? 'status-live' : 'status-closed'}">${isLive ? '● Live' : 'Closed'}</span>

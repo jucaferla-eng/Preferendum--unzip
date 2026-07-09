@@ -160,6 +160,18 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
         <input type="text" id="c-inst-name" placeholder="Ej: Volkswagen Chile, Nike, Municipalidad de Santiago…"/>
       </div>
       <div class="field">
+        <label>Imagen de portada (logo o banner de la marca)</label>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <label style="cursor:pointer;padding:10px 18px;background:#f1f5f9;border:1.5px dashed #cbd5e1;border-radius:10px;font-size:13px;font-weight:600;color:#475569;">
+            📷 Subir imagen
+            <input type="file" id="c-cover-file" accept="image/*" style="display:none;" onchange="uploadCoverImage(this)"/>
+          </label>
+          <img id="c-cover-preview" style="display:none;height:60px;border-radius:8px;object-fit:cover;border:1px solid #e2e8f0;" alt="preview"/>
+          <span id="c-cover-status" style="font-size:12px;color:#64748b;"></span>
+        </div>
+        <input type="hidden" id="c-cover-url" value=""/>
+      </div>
+      <div class="field">
         <label>Title</label>
         <input type="text" id="c-title" placeholder="What should your community decide?"/>
         <div class="similar-banner" id="similar-banner">
@@ -362,6 +374,34 @@ function showAlert(id, type, msg) {
   el.textContent = msg;
 }
 
+async function uploadCoverImage(fileInput) {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const status = document.getElementById('c-cover-status');
+  const preview = document.getElementById('c-cover-preview');
+  status.textContent = 'Subiendo…';
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch(`${API}/upload/image`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token},
+      body: fd
+    });
+    const d = await r.json();
+    if (d.url) {
+      document.getElementById('c-cover-url').value = d.url;
+      preview.src = d.url;
+      preview.style.display = 'block';
+      status.textContent = '✓ Imagen subida';
+    } else {
+      status.textContent = '❌ Error al subir';
+    }
+  } catch(e) {
+    status.textContent = '❌ Error de conexión';
+  }
+}
+
 async function uploadOptImage(fileInput) {
   const label = fileInput.closest('.opt-img-btn');
   const icon  = label.querySelector('.opt-img-icon');
@@ -424,6 +464,7 @@ async function createDebate() {
       closes_at: closes + 'T23:59:59',
       creator_type: 'organization',
       inst_name: document.getElementById('c-inst-name').value.trim() || userName,
+      cover_image_url: document.getElementById('c-cover-url').value || '',
       debate_type: instType,
       scope_country: country,
       scope_commune: commune,
@@ -444,6 +485,9 @@ async function createDebate() {
   showAlert('create-alert','success','✓ Consultation created and published!');
   hideSimilar();
   document.getElementById('c-inst-name').value = '';
+  document.getElementById('c-cover-url').value = '';
+  document.getElementById('c-cover-preview').style.display = 'none';
+  document.getElementById('c-cover-status').textContent = '';
   document.getElementById('c-title').value = '';
   document.getElementById('c-context').value = '';
   document.querySelectorAll('.opt-input').forEach((el,i) => { el.value = ''; el.placeholder = `Option ${i+1}`; });
