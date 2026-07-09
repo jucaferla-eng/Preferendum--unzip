@@ -956,6 +956,7 @@ function showDebatesList() {
   currentDebate = null;
   branchPath = [];
   branchCurrentQ = null;
+  history.replaceState(null, '', '/');
 }
 
 // ── DEBATES ──
@@ -1001,6 +1002,7 @@ async function openDebate(id) {
   document.getElementById('profile-view').style.display = 'none';
   setActiveTab('tab-comment');
   window.scrollTo(0, 0);
+  history.replaceState(null, '', `/?debate=${id}`);
   const content = document.getElementById('detail-content');
   content.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   selectedOption = null;
