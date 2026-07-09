@@ -2419,7 +2419,8 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
         reward=data.reward or '',
-        option_images=json.dumps(data.option_images or []),\n        cover_image_url=data.cover_image_url or "",
+        option_images=json.dumps(data.option_images or []),
+        cover_image_url=data.cover_image_url or '',
     )
     db.add(debate)
     db.commit()
@@ -3189,7 +3190,8 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
         reward=data.reward or '',
-        option_images=json.dumps(data.option_images or []),\n        cover_image_url=data.cover_image_url or "",
+        option_images=json.dumps(data.option_images or []),
+        cover_image_url=data.cover_image_url or '',
     )
     db.add(debate)
     db.commit()
@@ -3791,7 +3793,8 @@ def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_c
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
         reward=data.reward or '',
-        option_images=json.dumps(data.option_images or []),\n        cover_image_url=data.cover_image_url or "",
+        option_images=json.dumps(data.option_images or []),
+        cover_image_url=data.cover_image_url or '',
     )
     db.add(debate)
     db.commit()
