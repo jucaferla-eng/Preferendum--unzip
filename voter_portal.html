@@ -979,7 +979,10 @@ async function loadDebates() {
     debates.forEach((db, i) => {
       items.push(`
         <div class="debate-card" onclick="openDebate(${db.id})">
-          <span class="debate-status ${db.status === 'live' ? 'status-live' : 'status-closed'}">${db.status === 'live' ? '● Live' : 'Closed'}</span>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <span class="debate-status ${db.status === 'live' ? 'status-live' : 'status-closed'}">${db.status === 'live' ? '● Live' : 'Closed'}</span>
+            ${db.inst_name ? `<span style="font-size:12px;font-weight:600;color:#64748b;background:#f1f5f9;padding:3px 10px;border-radius:20px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(db.inst_name)}</span>` : ''}
+          </div>
           <div class="debate-title">${esc(db.title)}</div>
           <div class="debate-meta">
             <span class="debate-votes">⬡ ${db.total_votes || 0} votes</span>
@@ -1177,7 +1180,10 @@ function renderDebate(db, res, items) {
 
   content.innerHTML = `
     <div class="detail-card">
-      <span class="debate-status ${isLive ? 'status-live' : 'status-closed'}">${isLive ? '● Live' : 'Closed'}</span>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <span class="debate-status ${isLive ? 'status-live' : 'status-closed'}">${isLive ? '● Live' : 'Closed'}</span>
+        ${db.inst_name ? `<span style="font-size:12px;font-weight:700;color:#2d6eff;background:#eff6ff;padding:4px 12px;border-radius:20px;border:1px solid #bfdbfe;">${esc(db.inst_name)}</span>` : ''}
+      </div>
       <div class="detail-title">${esc(db.title)}</div>
       ${db.context ? `<div class="detail-context">${esc(db.context)}</div>` : ''}
       <div class="debate-meta">
