@@ -802,6 +802,9 @@ function showApp() {
   document.getElementById('user-name-display').textContent = userName;
   loadDebates();
   if (!localStorage.getItem('pref_seen_welcome')) showWelcomeModal();
+  // Deep-link: ?debate=ID opens that consultation directly
+  const urlDebateId = new URLSearchParams(location.search).get('debate');
+  if (urlDebateId) setTimeout(() => openDebate(parseInt(urlDebateId)), 600);
 }
 
 function showWelcomeModal() {
@@ -1328,60 +1331,88 @@ function selectOption(idx) {
   }
 }
 
-async function shareTikTokResult(debId) {
-  const db = currentDebate;
-  if (!db) return;
-  const opts = db.options || [];
-  let winnerText = opts[0] || '', winnerPct = 0, total = 0;
+// ── SHARE POSTER — canvas image for social sharing ──
+function _wrapText(ctx, text, x, y, maxW, lineH) {
+  const words = String(text).split(' ');
+  let line = '';
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxW && line) {
+      ctx.fillText(line, x, y);
+      line = w; y += lineH;
+    } else { line = test; }
+  }
+  if (line) { ctx.fillText(line, x, y); y += lineH; }
+  return y;
+}
+
+async function _generatePoster(title, subtitle, instName) {
+  const W = 1080, H = 1350;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#0a1628'); bg.addColorStop(1, '#1a2f5e');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+
+  // Top accent bar
+  ctx.fillStyle = '#2d6eff'; ctx.fillRect(0, 0, W, 16);
+
+  // Preferendum wordmark
+  ctx.fillStyle = '#2d6eff';
+  ctx.font = 'bold 80px Arial'; ctx.fillText('PREFERENDUM', 80, 160);
+  ctx.fillStyle = '#64748b';
+  ctx.font = '38px Arial'; ctx.fillText('Digital Verified Decision Making', 80, 220);
+
+  // Divider
+  ctx.strokeStyle = '#1e3a8a'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(80, 260); ctx.lineTo(W - 80, 260); ctx.stroke();
+
+  // "Participé en la consulta de"
+  ctx.fillStyle = '#94a3b8'; ctx.font = '48px Arial';
+  ctx.fillText('Participé en la consulta de', 80, 370);
+
+  // Institution / convener name
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 96px Arial';
+  _wrapText(ctx, instName || 'Preferendum', 80, 490, W - 160, 110);
+
+  // Consultation title
+  ctx.fillStyle = '#93c5fd'; ctx.font = '52px Arial';
+  _wrapText(ctx, `"${title}"`, 80, 730, W - 160, 64);
+
+  // Choice label + value
+  if (subtitle) {
+    ctx.fillStyle = '#64748b'; ctx.font = '44px Arial';
+    ctx.fillText('Mi elección:', 80, 980);
+    ctx.fillStyle = '#10b981'; ctx.font = 'bold 78px Arial';
+    _wrapText(ctx, subtitle, 80, 1080, W - 160, 90);
+  }
+
+  // Bottom bar
+  ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0, H - 190, W, 190);
+  ctx.fillStyle = '#2d6eff'; ctx.font = 'bold 44px Arial';
+  ctx.fillText('preferendum-unzip.onrender.com', 80, H - 100);
+  ctx.fillStyle = '#64748b'; ctx.font = '34px Arial';
+  ctx.fillText('Voto verificado en blockchain · Participa ya', 80, H - 46);
+
+  return canvas;
+}
+
+async function _shareWithPoster(title, subtitle, instName, debId, fallbackText) {
+  const shareUrl = `${location.origin}/?debate=${debId}`;
   try {
-    const r = await fetch(`${API}/debates/${debId}/results`, {headers: token ? {'Authorization':'Bearer '+token} : {}});
-    if (r.ok) {
-      const res = await r.json();
-      const rl = (res.debate || res).results || [];
-      const cts = {};
-      rl.forEach(row => { cts[row.option] = row.count || 0; });
-      total = (res.debate || res).total_votes || 0;
-      if (total > 0) {
-        winnerText = opts.reduce((best, opt) => (cts[opt]||0) > (cts[best]||0) ? opt : best, opts[0]);
-        winnerPct  = Math.round((cts[winnerText]||0) / total * 100);
-      }
+    const canvas = await _generatePoster(title, subtitle, instName);
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
+    const file = new File([blob], 'preferendum.png', { type: 'image/png' });
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], text: fallbackText, url: shareUrl });
+      return;
     }
   } catch(_) {}
-  const text = `🗳️ ${db.title}\n\n"${winnerText}" ganó con ${winnerPct}% de los votos verificados.\n\n¿Y tú qué opinas?\n👉 preferendum-unzip.onrender.com\n\n#Preferendum #VotoDigital #Democracia`;
-  _doShare('Preferendum · Resultado', text, window.location.href);
-}
-
-async function shareWhatsAppResult(debId) {
-  const db = currentDebate;
-  if (!db) return;
-  const opts = db.options || [];
-  let winnerText = opts[0] || '', winnerPct = 0, total = 0;
-  try {
-    const r = await fetch(`${API}/debates/${debId}/results`, {headers: token ? {'Authorization':'Bearer '+token} : {}});
-    if (r.ok) {
-      const res = await r.json();
-      const rl = (res.debate || res).results || [];
-      const cts = {};
-      rl.forEach(row => { cts[row.option] = row.count || 0; });
-      total = (res.debate || res).total_votes || 0;
-      if (total > 0) {
-        winnerText = opts.reduce((best, opt) => (cts[opt]||0) > (cts[best]||0) ? opt : best, opts[0]);
-        winnerPct  = Math.round((cts[winnerText]||0) / total * 100);
-      }
-    }
-  } catch(_) {}
-  const text = `*${db.title}*\n\n🏆 *"${winnerText}"* ganó con ${winnerPct}% de los votos\n\n¿Y tú qué opinas? 👉 preferendum-unzip.onrender.com`;
-  window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
-}
-
-async function shareTikTokVote(option, title, debId) {
-  const text = `🗳️ Acabo de votar en Preferendum\n\nElegí *"${option}"*\n${title}\n\n¿Y tú?\n👉 preferendum-unzip.onrender.com\n\n#Preferendum #VotoDigital #Democracia`;
-  _doShare(`Preferendum · ${title}`, text, window.location.href);
-}
-
-async function shareWhatsAppVote(option, title) {
-  const text = `🗳️ Voté en *Preferendum*\n\nElegí *"${option}"*\n_${title}_\n\n¿Y tú qué opinas? 👉 preferendum-unzip.onrender.com`;
-  window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank');
+  // Fallback: text-only share
+  _doShare('Preferendum', fallbackText, shareUrl);
 }
 
 async function shareResult(debId) {
@@ -1403,13 +1434,16 @@ async function shareResult(debId) {
       }
     }
   } catch(_) {}
-  const shareText = `"${winnerText}" ganó con ${winnerPct}% de los votos verificados.\n${db.title}`;
-  _doShare('Preferendum · Resultado', shareText, window.location.href);
+  const instName = db.inst_name || 'Preferendum';
+  const subtitle = `"${winnerText}" ganó — ${winnerPct}%`;
+  const fallback = `La consulta de ${instName} en Preferendum ya tiene resultado:\n"${winnerText}" ganó con ${winnerPct}% de los votos.\n¿Y tú qué opinas?`;
+  _shareWithPoster(db.title, subtitle, instName, debId, fallback);
 }
 
 async function shareMyVote(option, title, debId) {
-  const shareText = `Elegí "${option}" en Preferendum.\n¿Y tú?\n${title}`;
-  _doShare(`Preferendum · ${title}`, shareText, window.location.href);
+  const instName = currentDebate?.inst_name || 'Preferendum';
+  const fallback = `Participé en la consulta de ${instName} en Preferendum.\nMi elección: "${option}"\n¿Y tú?`;
+  _shareWithPoster(title, option, instName, debId, fallback);
 }
 
 async function _doShare(title, text, url) {
