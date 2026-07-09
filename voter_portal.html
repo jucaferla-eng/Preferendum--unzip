@@ -956,7 +956,7 @@ function showDebatesList() {
   currentDebate = null;
   branchPath = [];
   branchCurrentQ = null;
-  history.replaceState(null, '', '/');
+  history.replaceState(null, '', '/voter');
 }
 
 // ── DEBATES ──
@@ -1002,7 +1002,7 @@ async function openDebate(id) {
   document.getElementById('profile-view').style.display = 'none';
   setActiveTab('tab-comment');
   window.scrollTo(0, 0);
-  history.replaceState(null, '', `/?debate=${id}`);
+  history.replaceState(null, '', `/voter?debate=${id}`);
   const content = document.getElementById('detail-content');
   content.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   selectedOption = null;
@@ -1403,7 +1403,7 @@ async function _generatePoster(title, subtitle, instName) {
 }
 
 async function _shareWithPoster(title, subtitle, instName, debId, fallbackText) {
-  const shareUrl = `${location.origin}/?debate=${debId}`;
+  const shareUrl = `${location.origin}/voter?debate=${debId}`;
   try {
     const canvas = await _generatePoster(title, subtitle, instName);
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
