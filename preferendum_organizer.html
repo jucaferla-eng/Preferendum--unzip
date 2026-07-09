@@ -156,6 +156,10 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
       <div class="form-title">+ New Consultation</div>
       <div class="alert" id="create-alert"></div>
       <div class="field">
+        <label>Empresa / Marca convocante</label>
+        <input type="text" id="c-inst-name" placeholder="Ej: Volkswagen Chile, Nike, Municipalidad de Santiago…"/>
+      </div>
+      <div class="field">
         <label>Title</label>
         <input type="text" id="c-title" placeholder="What should your community decide?"/>
         <div class="similar-banner" id="similar-banner">
@@ -419,7 +423,7 @@ async function createDebate() {
       title, context, options,
       closes_at: closes + 'T23:59:59',
       creator_type: 'organization',
-      inst_name: userName,
+      inst_name: document.getElementById('c-inst-name').value.trim() || userName,
       debate_type: instType,
       scope_country: country,
       scope_commune: commune,
@@ -439,6 +443,7 @@ async function createDebate() {
   if (!r.ok) { showAlert('create-alert','error', d.detail || 'Error creating consultation'); return; }
   showAlert('create-alert','success','✓ Consultation created and published!');
   hideSimilar();
+  document.getElementById('c-inst-name').value = '';
   document.getElementById('c-title').value = '';
   document.getElementById('c-context').value = '';
   document.querySelectorAll('.opt-input').forEach((el,i) => { el.value = ''; el.placeholder = `Option ${i+1}`; });
