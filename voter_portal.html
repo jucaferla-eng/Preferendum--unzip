@@ -960,20 +960,35 @@ async function loadDebates() {
   const list = document.getElementById('debates-list');
   list.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   try {
-    const r = await fetch(`${API}/debates?limit=20`);
-    const d = await r.json();
-    const debates = d.debates || [];
+    const [dr, ar] = await Promise.all([
+      fetch(`${API}/debates?limit=20`),
+      fetch(`${API}/ads/featured`).catch(() => null),
+    ]);
+    const debates = (await dr.json()).debates || [];
+    const featuredAds = ar && ar.ok ? (await ar.json()).ads || [] : [];
+
     if (!debates.length) { list.innerHTML = '<div class="no-debates">No active consultations at the moment.</div>'; return; }
-    list.innerHTML = debates.map(db => `
-      <div class="debate-card" onclick="openDebate(${db.id})">
-        <span class="debate-status ${db.status === 'live' ? 'status-live' : 'status-closed'}">${db.status === 'live' ? '● Live' : 'Closed'}</span>
-        <div class="debate-title">${esc(db.title)}</div>
-        <div class="debate-meta">
-          <span class="debate-votes">⬡ ${db.total_votes || 0} votes</span>
-          <span>${db.scope_country || 'Global'}</span>
-          ${db.closes_at ? `<span>Closes ${fmtDate(db.closes_at)}</span>` : ''}
-        </div>
-      </div>`).join('');
+
+    const AD_EVERY = 3; // insert one ad every 3 debate cards
+    let adIdx = 0;
+    const items = [];
+    debates.forEach((db, i) => {
+      items.push(`
+        <div class="debate-card" onclick="openDebate(${db.id})">
+          <span class="debate-status ${db.status === 'live' ? 'status-live' : 'status-closed'}">${db.status === 'live' ? '● Live' : 'Closed'}</span>
+          <div class="debate-title">${esc(db.title)}</div>
+          <div class="debate-meta">
+            <span class="debate-votes">⬡ ${db.total_votes || 0} votes</span>
+            <span>${db.scope_country || 'Global'}</span>
+            ${db.closes_at ? `<span>Closes ${fmtDate(db.closes_at)}</span>` : ''}
+          </div>
+        </div>`);
+      if (featuredAds.length && (i + 1) % AD_EVERY === 0) {
+        items.push(renderAdCard(featuredAds[adIdx % featuredAds.length]));
+        adIdx++;
+      }
+    });
+    list.innerHTML = items.join('');
   } catch(e) { list.innerHTML = '<div class="no-debates">Error loading consultations.</div>'; }
 }
 
@@ -1046,7 +1061,7 @@ function renderAdCard(ad) {
       ${url ? '<div class="ad-arrow">›</div>' : ''}
     </div>
     ${videoHtml}
-    <div class="ad-sponsored">Publicidad · Preferendum</div>
+    <div class="ad-sponsored">Patrocinado · Preferendum</div>
   </div>`;
 }
 

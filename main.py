@@ -2349,6 +2349,45 @@ def get_feed(
         'section_title': 'Consultations available to vote',
     }
 
+@app.get('/ads/featured')
+def get_featured_ads(db: Session = Depends(get_db)):
+    """Returns up to 2 active ad campaigns to display in the debates list."""
+    now = datetime.utcnow()
+    campaigns = db.query(AdCampaign).filter(
+        AdCampaign.is_active == True,
+        AdCampaign.budget_clp > AdCampaign.spent_clp,
+    ).filter(
+        (AdCampaign.end_date == None) | (AdCampaign.end_date > now)
+    ).order_by(AdCampaign.created_at.desc()).limit(2).all()
+
+    ads = []
+    for c in campaigns:
+        logo = c.logo_url or ''
+        if logo.startswith('data:') and len(logo) > 200_000:
+            logo = ''
+        ads.append({
+            'brand':     c.advertiser_name or '',
+            'copy':      c.ad_copy or c.title or '',
+            'cta':       'Ver más',
+            'logo_color': '#2563eb',
+            'logo_url':  logo,
+            'image_url': c.ad_image_url or '',
+            'video_url': c.video_url or '',
+            'link_url':  c.link_url or '',
+        })
+
+    # Fallback to static DebateAds if no campaigns
+    if not ads:
+        static = db.query(DebateAd).order_by(DebateAd.impressions.asc()).limit(2).all()
+        for a in static:
+            ads.append({
+                'brand': a.brand, 'copy': a.copy,
+                'cta': a.cta, 'logo_color': a.logo_color,
+                'link_url': a.link_url or '',
+            })
+
+    return {'ads': ads}
+
 @app.get('/debates/{debate_id}')
 def get_debate(debate_id: int, db: Session = Depends(get_db)):
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
