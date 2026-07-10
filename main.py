@@ -2754,9 +2754,11 @@ def get_opinions(debate_id: int,
 
     # Always merge in any active campaign not already in matched
     # so newly created campaigns always appear everywhere ads show
+    # (same filter as /ads/featured so behavior is consistent)
     now_ts = datetime.utcnow()
     recent = db.query(AdCampaign).filter(
         AdCampaign.is_active == True,
+        AdCampaign.budget_clp > AdCampaign.spent_clp,
         (AdCampaign.end_date == None) | (AdCampaign.end_date > now_ts),
     ).order_by(AdCampaign.created_at.desc()).limit(10).all()
     matched_ids = {c.get('id') for c in matched}
