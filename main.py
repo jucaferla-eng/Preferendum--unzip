@@ -2762,9 +2762,10 @@ def get_opinions(debate_id: int,
         (AdCampaign.end_date == None) | (AdCampaign.end_date > now_ts),
     ).order_by(AdCampaign.created_at.desc()).limit(10).all()
     matched_ids = {c.get('id') for c in matched}
+    prepend = []
     for rc in recent:
         if rc.id not in matched_ids:
-            matched.append({
+            prepend.append({
                 'id': rc.id, 'advertiser_name': rc.advertiser_name or '',
                 'ad_copy': rc.ad_copy or '', 'title': rc.title or '',
                 'logo_url': rc.logo_url or '', 'ad_image_url': rc.ad_image_url or '',
@@ -2772,6 +2773,7 @@ def get_opinions(debate_id: int,
                 'link_url': rc.link_url or '',
                 '_orm': rc, 'optimization_rank': 0,
             })
+    matched = prepend + matched  # newest campaigns show first
 
     static_ads = db.query(DebateAd).filter(DebateAd.debate_id == debate_id).all()
 
