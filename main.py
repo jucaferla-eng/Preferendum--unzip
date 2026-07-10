@@ -208,6 +208,7 @@ class Debate(Base):
     reward           = Column(Text, default='')
     option_images    = Column(Text, default='[]')
     cover_image_url  = Column(Text, default='')
+    is_anonymous     = Column(Boolean, default=False)
     created_at       = Column(DateTime, default=datetime.utcnow)
 
 class Opinion(Base):
@@ -547,6 +548,7 @@ def _migrate():
             ('target_se_tiers',     "TEXT DEFAULT 'A,B,C,D'"),
             ('category',            "TEXT DEFAULT 'general'"),
             ('cover_image_url',     "TEXT DEFAULT ''"),
+            ('is_anonymous',        "BOOLEAN DEFAULT FALSE"),
         ]:
             if col not in existing_debate_cols:
                 try:
@@ -792,6 +794,7 @@ def format_debate(debate, has_voted=False):
         'follow_up_questions': debate.follow_up_questions or '',
         'reward': debate.reward or '',
         'cover_image_url': debate.cover_image_url or '',
+        'is_anonymous': bool(debate.is_anonymous),
         'has_voted': has_voted,
         'created_at': debate.created_at.isoformat(),
     }
@@ -971,6 +974,7 @@ class DebateCreate(BaseModel):
     options:        List[str]
     creator_type:   str = 'citizen'
     inst_name:      str = ''
+    is_anonymous:   bool = False
     debate_type:    str = 'gov'
     scope:          str = 'country'
     scope_country:  str = 'CL'
@@ -2430,6 +2434,7 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
         reward=data.reward or '',
         option_images=json.dumps(data.option_images or []),
         cover_image_url=data.cover_image_url or '',
+        is_anonymous=data.is_anonymous,
     )
     db.add(debate)
     db.commit()
@@ -3234,6 +3239,7 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
         reward=data.reward or '',
         option_images=json.dumps(data.option_images or []),
         cover_image_url=data.cover_image_url or '',
+        is_anonymous=data.is_anonymous,
     )
     db.add(debate)
     db.commit()

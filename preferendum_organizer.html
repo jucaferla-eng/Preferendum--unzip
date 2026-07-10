@@ -178,6 +178,21 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
       </div>
 
       <div class="field">
+        <label>¿Cómo quieres aparecer en la consulta?</label>
+        <div style="display:flex;gap:12px;margin-top:6px;">
+          <button type="button" id="btn-anonima" onclick="setAnonymous(true)"
+            style="flex:1;padding:14px;border-radius:12px;border:2px solid #2d6eff;background:#eff6ff;color:#1d4ed8;font-size:14px;font-weight:700;cursor:pointer;">
+            🕵️ Anónima
+          </button>
+          <button type="button" id="btn-con-nombre" onclick="setAnonymous(false)"
+            style="flex:1;padding:14px;border-radius:12px;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:14px;font-weight:700;cursor:pointer;">
+            🪪 Con mi nombre
+          </button>
+        </div>
+        <input type="hidden" id="c-is-anonymous" value="true"/>
+      </div>
+
+      <div class="field">
         <label>Imagen de portada (logo o banner de la marca)</label>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
           <label style="cursor:pointer;padding:10px 18px;background:#f1f5f9;border:1.5px dashed #cbd5e1;border-radius:10px;font-size:13px;font-weight:600;color:#475569;">
@@ -392,6 +407,14 @@ function showAlert(id, type, msg) {
   el.textContent = msg;
 }
 
+function setAnonymous(isAnon) {
+  document.getElementById('c-is-anonymous').value = isAnon ? 'true' : 'false';
+  const activeStyle = 'flex:1;padding:14px;border-radius:12px;border:2px solid #2d6eff;background:#eff6ff;color:#1d4ed8;font-size:14px;font-weight:700;cursor:pointer;';
+  const inactiveStyle = 'flex:1;padding:14px;border-radius:12px;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:14px;font-weight:700;cursor:pointer;';
+  document.getElementById('btn-anonima').style.cssText = isAnon ? activeStyle : inactiveStyle;
+  document.getElementById('btn-con-nombre').style.cssText = isAnon ? inactiveStyle : activeStyle;
+}
+
 function setCreatorType(type) {
   document.getElementById('c-creator-type').value = type;
   const isCitizen = type === 'citizen';
@@ -498,6 +521,7 @@ async function createDebate() {
         ? (document.getElementById('c-inst-name').value.trim() || userName)
         : userName,
       cover_image_url: document.getElementById('c-cover-url').value || '',
+      is_anonymous: document.getElementById('c-is-anonymous').value === 'true',
       debate_type: instType,
       scope_country: country,
       scope_commune: commune,
