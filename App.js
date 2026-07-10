@@ -1,11 +1,12 @@
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaView, StyleSheet, ActivityIndicator, View, Text, AppState } from 'react-native';
+import { SafeAreaView, StyleSheet, ActivityIndicator, View, Text, AppState, Linking } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useState, useRef, useEffect } from 'react';
 
 const BG      = '#0a0d14';
 const ACCENT  = '#2d6eff';
-const APP_URL = 'https://preferendum-unzip.onrender.com/';
+const APP_URL    = 'https://preferendum-unzip.onrender.com/';
+const APP_ORIGIN = 'preferendum-unzip.onrender.com';
 
 export default function App() {
   const [ready, setReady] = useState(false);
@@ -49,6 +50,14 @@ export default function App() {
         domStorageEnabled={true}
         allowsInlineMediaPlayback={true}
         mediaPlaybackRequiresUserAction={false}
+        onShouldStartLoadWithRequest={(req) => {
+          // External links (ads, blockchain explorer, etc.) open in Safari
+          if (!req.url.includes(APP_ORIGIN)) {
+            Linking.openURL(req.url).catch(() => {});
+            return false;
+          }
+          return true;
+        }}
         onLoadEnd={() => { setReady(true); setError(false); }}
         onError={() => setError(true)}
         onHttpError={(e) => {
