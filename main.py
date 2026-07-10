@@ -2682,8 +2682,13 @@ def _match_campaigns(user, debate, db) -> list:
     matrix = load_matrix()
     ranked = optimize_campaigns_for_debate(debate_dict, campaigns_dicts, matrix, max_ads=5)
 
+    # Fallback: if optimizer filtered everything out, use all valid campaigns unscored
+    if not ranked:
+        ranked = [{**c, '_orm': orm_by_id.get(c['id']), 'optimization_rank': 0} for c in campaigns_dicts]
+
     for item in ranked:
-        item['_orm'] = orm_by_id.get(item['id'])
+        if '_orm' not in item:
+            item['_orm'] = orm_by_id.get(item['id'])
 
     return ranked
 
@@ -2746,6 +2751,26 @@ def get_opinions(debate_id: int,
 
     debate    = db.query(Debate).filter(Debate.id == debate_id).first()
     matched   = _match_campaigns(user, debate, db)
+
+    # Always merge in any active campaign not already in matched
+    # so newly created campaigns always appear everywhere ads show
+    now_ts = datetime.utcnow()
+    recent = db.query(AdCampaign).filter(
+        AdCampaign.is_active == True,
+        (AdCampaign.end_date == None) | (AdCampaign.end_date > now_ts),
+    ).order_by(AdCampaign.created_at.desc()).limit(10).all()
+    matched_ids = {c.get('id') for c in matched}
+    for rc in recent:
+        if rc.id not in matched_ids:
+            matched.append({
+                'id': rc.id, 'advertiser_name': rc.advertiser_name or '',
+                'ad_copy': rc.ad_copy or '', 'title': rc.title or '',
+                'logo_url': rc.logo_url or '', 'ad_image_url': rc.ad_image_url or '',
+                'video_url': getattr(rc, 'video_url', '') or '',
+                'link_url': rc.link_url or '',
+                '_orm': rc, 'optimization_rank': 0,
+            })
+
     static_ads = db.query(DebateAd).filter(DebateAd.debate_id == debate_id).all()
 
     result  = []
