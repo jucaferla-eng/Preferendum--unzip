@@ -579,6 +579,46 @@ NEWS_COUNTRIES = [
     {'code': 'GB', 'lang': 'en', 'name': 'Reino Unido',    'ceid': 'GB:en'},
     {'code': 'FR', 'lang': 'fr', 'name': 'Francia',        'ceid': 'FR:fr'},
     {'code': 'IT', 'lang': 'it', 'name': 'Italia',         'ceid': 'IT:it'},
+    {'code': 'JP', 'lang': 'ja', 'name': 'Japón',          'ceid': 'JP:ja'},
+    {'code': 'IN', 'lang': 'en', 'name': 'India',          'ceid': 'IN:en'},
+    {'code': 'AU', 'lang': 'en', 'name': 'Australia',      'ceid': 'AU:en'},
+    {'code': 'CA', 'lang': 'en', 'name': 'Canadá',         'ceid': 'CA:en'},
+    {'code': 'ZA', 'lang': 'en', 'name': 'Sudáfrica',      'ceid': 'ZA:en'},
+    {'code': 'NG', 'lang': 'en', 'name': 'Nigeria',        'ceid': 'NG:en'},
+    {'code': 'KR', 'lang': 'ko', 'name': 'Corea del Sur',  'ceid': 'KR:ko'},
+    {'code': 'VE', 'lang': 'es', 'name': 'Venezuela',      'ceid': 'VE:es'},
+    {'code': 'UY', 'lang': 'es', 'name': 'Uruguay',        'ceid': 'UY:es'},
+    {'code': 'EC', 'lang': 'es', 'name': 'Ecuador',        'ceid': 'EC:es'},
+    {'code': 'BO', 'lang': 'es', 'name': 'Bolivia',        'ceid': 'BO:es'},
+    {'code': 'PY', 'lang': 'es', 'name': 'Paraguay',       'ceid': 'PY:es'},
+]
+
+# International media RSS feeds — produces GLOBAL scope debates (interés mundial)
+GLOBAL_FEEDS = [
+    {'url': 'https://feeds.bbci.co.uk/news/world/rss.xml',
+     'name': 'BBC World News', 'lang': 'en'},
+    {'url': 'https://rss.nytimes.com/services/xml/rss/nyt/World.xml',
+     'name': 'NYT World', 'lang': 'en'},
+    {'url': 'https://www.aljazeera.com/xml/rss/all.xml',
+     'name': 'Al Jazeera', 'lang': 'en'},
+    {'url': 'https://feeds.reuters.com/reuters/topNews',
+     'name': 'Reuters Top News', 'lang': 'en'},
+    {'url': 'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada',
+     'name': 'El País', 'lang': 'es'},
+    {'url': 'https://www.lemonde.fr/rss/une.xml',
+     'name': 'Le Monde', 'lang': 'fr'},
+    {'url': 'https://www.dw.com/es/rss-informacion-de-dw-es/rss-24918',
+     'name': 'DW Español', 'lang': 'es'},
+    {'url': 'https://rss.cnn.com/rss/edition_world.rss',
+     'name': 'CNN World', 'lang': 'en'},
+    {'url': 'https://www.theguardian.com/world/rss',
+     'name': 'The Guardian World', 'lang': 'en'},
+    {'url': 'https://www.latercera.com/feeds/rss.xml',
+     'name': 'La Tercera', 'lang': 'es'},
+    {'url': 'https://www.infobae.com/feeds/rss/',
+     'name': 'Infobae', 'lang': 'es'},
+    {'url': 'https://www.bbc.co.uk/mundo/rss.xml',
+     'name': 'BBC Mundo', 'lang': 'es'},
 ]
 
 # Chilean regional and sector-specific RSS feeds
@@ -650,6 +690,30 @@ CIVIC_CATEGORIES = [
 _created_this_run: set = set()
 
 
+def _fetch_article_body(url: str, max_chars: int = 1500) -> str:
+    """Fetch and extract plain text from a news article URL."""
+    if not url or url.startswith('https://news.google.com'):
+        return ''
+    try:
+        r = _requests.get(url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (compatible; Preferendum/1.0; +https://preferendum.com)',
+            'Accept-Language': 'es,en;q=0.9',
+        }, allow_redirects=True)
+        if not r.ok:
+            return ''
+        html = r.text
+        # Remove script, style, nav, header, footer tags
+        html = re.sub(r'<(script|style|nav|header|footer|aside|iframe)[^>]*>.*?</\1>', '', html, flags=re.DOTALL|re.IGNORECASE)
+        # Strip remaining tags
+        text = re.sub(r'<[^>]+>', ' ', html)
+        # Collapse whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        # Take first max_chars of meaningful content
+        return text[:max_chars]
+    except Exception:
+        return ''
+
+
 def _fetch_google_news_rss(country_code: str, lang: str, ceid: str, max_items: int = 8) -> list:
     """Fetch top news items from Google News RSS for a country."""
     url = f'https://news.google.com/rss?hl={lang}&gl={country_code}&ceid={ceid}'
@@ -664,61 +728,85 @@ def _fetch_google_news_rss(country_code: str, lang: str, ceid: str, max_items: i
         for item in root.findall('.//item')[:max_items]:
             title = (item.findtext('title') or '').strip()
             desc  = (item.findtext('description') or '').strip()
-            # Strip HTML from description
+            link  = (item.findtext('link') or '').strip()
             desc = re.sub(r'<[^>]+>', '', desc)[:300]
             if title:
-                items.append({'title': title, 'description': desc})
+                items.append({'title': title, 'description': desc, 'url': link})
         return items
     except Exception as e:
         print(f'[NewsAgent] RSS error {country_code}: {e}')
         return []
 
 
-def _analyze_news_item(item: dict, country: dict) -> dict | None:
+def _analyze_news_item(item: dict, country: dict, is_global: bool = False) -> dict | None:
     """
-    Call Claude Haiku to decide if news item is debate-worthy and generate debate content.
+    Call Claude to decide if news item is debate-worthy and generate debate content.
+    Fetches the full article body for richer context.
     Returns debate dict or None.
     """
     api_key = get_api_key()
     if not api_key:
         return None
 
-    lang_instructions = {
-        'es': 'Responde en español. La pregunta y las opciones deben estar en español.',
-        'en': 'Respond in English. The question and options must be in English.',
-        'pt': 'Responda em português. A pergunta e as opções devem estar em português.',
-        'de': 'Antworte auf Deutsch. Die Frage und die Optionen müssen auf Deutsch sein.',
-        'fr': 'Répondez en français. La question et les options doivent être en français.',
-        'it': "Rispondi in italiano. La domanda e le opzioni devono essere in italiano.",
-    }
-    lang_note = lang_instructions.get(country['lang'], lang_instructions['es'])
+    # Try to fetch the full article for better context
+    article_body = _fetch_article_body(item.get('url', ''))
+    context_text = article_body if article_body else item.get('description', '')
 
-    prompt = f"""Eres un analista de debates cívicos para Preferendum, plataforma de decisiones democráticas verificadas.
+    scope_instruction = (
+        "Este es un tema de INTERÉS MUNDIAL. Si es adecuado, el scope debe ser 'global' y la pregunta "
+        "debe formularse en español como una consulta que cualquier ciudadano del mundo pueda responder."
+    ) if is_global else (
+        f"Este es un tema de {country['name']}. Si es adecuado, el scope debe ser 'country' y la pregunta "
+        f"debe estar en el idioma de {country['name']} y ser relevante para sus ciudadanos."
+    )
 
-País: {country['name']}
+    lang_note = {
+        'es': 'Responde en español.',
+        'en': 'Respond in Spanish (Preferendum es una plataforma en español).',
+        'pt': 'Responde en español.',
+        'de': 'Responde en español.',
+        'fr': 'Responde en español.',
+        'it': 'Responde en español.',
+        'ja': 'Responde en español.',
+        'ko': 'Responde en español.',
+    }.get(country.get('lang', 'es'), 'Responde en español.')
+
+    prompt = f"""Eres el agente de Preferendum que crea debates cívicos de alta calidad basados en noticias reales del mundo.
+
+Fuente: {country.get('name', 'Internacional')}
 Titular: {item['title']}
-Descripción: {item['description']}
+Contenido del artículo:
+{context_text[:1200]}
 
+{scope_instruction}
 {lang_note}
 
-Decide si este tema es adecuado para una consulta ciudadana. Un buen debate cívico:
-- Pregunta a la ciudadanía sobre políticas públicas, gasto, medio ambiente, salud, economía, justicia social
-- Tiene opciones claras que representan posiciones distintas
-- Afecta la vida de las personas de forma concreta
-- NO es: chismes de famosos, resultados deportivos, entretenimiento, humor, sucesos de crónica roja sin implicación política
+Un buen debate cívico de Preferendum:
+✓ Pregunta sobre políticas públicas, economía, medio ambiente, salud, tecnología, justicia, energía
+✓ Tiene opciones claras y equilibradas que representan posturas reales de la ciudadanía
+✓ Afecta la vida de las personas de forma concreta y actual
+✓ La pregunta empieza con "¿" y es directa (máx 120 caracteres)
+✓ El contexto explica el tema en 2-3 frases neutrales
+✓ Mínimo 3 opciones, máximo 4 — deben ser mutuamente excluyentes y cubrir el espectro de opinión
 
-Si es adecuado, responde con JSON exacto:
+NO es adecuado:
+✗ Chismes de famosos, deportes, entretenimiento
+✗ Sucesos de crónica roja sin implicación política
+✗ Noticias muy locales o sin impacto en políticas públicas
+✗ Preguntas de sí/no triviales
+
+Si ES adecuado para debate cívico, responde con este JSON exacto:
 {{
   "suitable": true,
-  "question": "¿[pregunta de debate en el idioma del país]?",
-  "context": "[2-3 frases de contexto que explican el tema]",
-  "options": ["Opción 1", "Opción 2", "Opción 3"],
-  "scope": "country",
-  "category": "{'/'.join(CIVIC_CATEGORIES)}"
+  "question": "¿[pregunta clara en español, máx 120 caracteres]?",
+  "context": "[2-3 frases de contexto neutral que explican el tema al ciudadano]",
+  "options": ["Opción A", "Opción B", "Opción C"],
+  "scope": "{'global' if is_global else 'country'}",
+  "category": "[una de: politics/economy/environment/health/infrastructure/social/education/justice/housing/technology/energy/agriculture/transport]"
 }}
 
 Si NO es adecuado:
-{{"suitable": false}}
+{{"suitable": false, "reason": "[breve razón]"}}
 
 Responde ÚNICAMENTE con JSON válido, sin texto adicional."""
 
@@ -732,21 +820,21 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional."""
             },
             json={
                 'model':      'claude-haiku-4-5-20251001',
-                'max_tokens': 512,
+                'max_tokens': 600,
                 'messages':   [{'role': 'user', 'content': prompt}],
             },
-            timeout=20,
+            timeout=25,
         )
         if not resp.ok:
             return None
         content = resp.json().get('content', [])
         text = next((c['text'] for c in content if c.get('type') == 'text'), '')
-        # Extract JSON from response
         match = re.search(r'\{.*\}', text, re.DOTALL)
         if not match:
             return None
         data = json.loads(match.group())
         if not data.get('suitable'):
+            print(f'[NewsAgent] Not suitable: {data.get("reason", "?")} — {item["title"][:60]}')
             return None
         return data
     except Exception as e:
@@ -832,10 +920,58 @@ def _create_debate_via_api(debate_data: dict, country_code: str) -> bool:
         return False
 
 
+def run_global_debates(max_per_feed: int = 2) -> dict:
+    """
+    Fetch international media RSS feeds and create GLOBAL scope debates.
+    These are debates of worldwide interest (climate, AI, geopolitics, economy).
+    """
+    global _created_this_run
+    total_created = 0
+    total_skipped = 0
+    summary = []
+    global_country = {'code': 'GL', 'lang': 'es', 'name': 'Global', 'ceid': ''}
+
+    for feed in GLOBAL_FEEDS:
+        print(f'[GlobalAgent] Processing {feed["name"]}...')
+        items = _fetch_rss_feed(feed['url'], max_items=8)
+        created = 0
+        for item in items:
+            if created >= max_per_feed:
+                break
+            title_hash = hashlib.sha256(item['title'].encode()).hexdigest()[:16]
+            if title_hash in _created_this_run:
+                total_skipped += 1
+                continue
+            global_country['lang'] = feed.get('lang', 'es')
+            debate = _analyze_news_item(item, global_country, is_global=True)
+            if not debate:
+                total_skipped += 1
+                continue
+            q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
+            if q_hash in _created_this_run:
+                total_skipped += 1
+                continue
+            _created_this_run.add(title_hash)
+            _created_this_run.add(q_hash)
+            debate['scope'] = 'global'
+            if _create_debate_via_api(debate, 'GL'):
+                created += 1
+                total_created += 1
+                summary.append({
+                    'source': feed['name'],
+                    'question': debate['question'][:80],
+                    'category': debate.get('category', '?'),
+                })
+        print(f'[GlobalAgent] {feed["name"]}: created {created}')
+
+    print(f'[GlobalAgent] Done — created {total_created} global debates')
+    return {'debates_created': total_created, 'debates_skipped': total_skipped, 'summary': summary}
+
+
 def run_daily_debates() -> dict:
     """
-    Main news agent task: fetch news per country, analyze, create civic debates.
-    Creates at most 2 debates per country per run to avoid flooding.
+    Main news agent task: fetch news per country + global feeds, create civic debates.
+    Creates at most 2 debates per country and 3 global debates per run.
     """
     global _created_this_run
     _created_this_run = set()
@@ -844,6 +980,15 @@ def run_daily_debates() -> dict:
     total_skipped = 0
     summary = []
 
+    # 1. Global debates first (international media)
+    print('[NewsAgent] === GLOBAL FEEDS ===')
+    global_result = run_global_debates(max_per_feed=1)
+    total_created += global_result['debates_created']
+    total_skipped += global_result['debates_skipped']
+    summary.extend([{**s, 'country': 'GL'} for s in global_result['summary']])
+
+    # 2. Per-country debates from Google News
+    print('[NewsAgent] === COUNTRY FEEDS ===')
     for country in NEWS_COUNTRIES:
         print(f'[NewsAgent] Processing {country["name"]}...')
         items = _fetch_google_news_rss(country['code'], country['lang'], country['ceid'])
@@ -853,7 +998,6 @@ def run_daily_debates() -> dict:
             if created_for_country >= 2:
                 break
 
-            # Dedup by title hash
             title_hash = hashlib.sha256(item['title'].encode()).hexdigest()[:16]
             if title_hash in _created_this_run:
                 total_skipped += 1
@@ -864,7 +1008,6 @@ def run_daily_debates() -> dict:
                 total_skipped += 1
                 continue
 
-            # Extra dedup on generated question
             q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
             if q_hash in _created_this_run:
                 total_skipped += 1
@@ -892,7 +1035,7 @@ def run_daily_debates() -> dict:
 
 
 def _fetch_rss_feed(url: str, max_items: int = 5) -> list:
-    """Fetch any RSS feed and return title+description items."""
+    """Fetch any RSS feed and return title+description+url items."""
     try:
         r = _requests.get(url, timeout=12, headers={
             'User-Agent': 'Mozilla/5.0 (compatible; Preferendum/1.0)'
@@ -904,8 +1047,9 @@ def _fetch_rss_feed(url: str, max_items: int = 5) -> list:
         for item in root.findall('.//item')[:max_items]:
             title = (item.findtext('title') or '').strip()
             desc  = re.sub(r'<[^>]+>', '', item.findtext('description') or '')[:300]
+            link  = (item.findtext('link') or '').strip()
             if title:
-                items.append({'title': title, 'description': desc})
+                items.append({'title': title, 'description': desc, 'url': link})
         return items
     except Exception as e:
         print(f'[SectorAgent] RSS error {url[:50]}: {e}')
