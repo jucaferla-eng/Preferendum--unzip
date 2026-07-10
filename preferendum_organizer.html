@@ -177,7 +177,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
         <input type="text" id="c-inst-name" placeholder="Ej: Volkswagen Chile, Nike, Municipalidad de Santiago…"/>
       </div>
 
-      <div class="field">
+      <div class="field" id="field-anonymous" style="display:block;">
         <label>¿Cómo quieres aparecer en la consulta?</label>
         <div style="display:flex;gap:12px;margin-top:6px;">
           <button type="button" id="btn-anonima" onclick="setAnonymous(true)"
@@ -418,13 +418,19 @@ function setAnonymous(isAnon) {
 function setCreatorType(type) {
   document.getElementById('c-creator-type').value = type;
   const isCitizen = type === 'citizen';
+  const activeStyle = 'flex:1;padding:14px;border-radius:12px;border:2px solid #2d6eff;background:#eff6ff;color:#1d4ed8;font-size:14px;font-weight:700;cursor:pointer;';
+  const inactiveStyle = 'flex:1;padding:14px;border-radius:12px;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:14px;font-weight:700;cursor:pointer;';
+  document.getElementById('btn-ciudadano').style.cssText = isCitizen ? activeStyle : inactiveStyle;
+  document.getElementById('btn-empresa').style.cssText = isCitizen ? inactiveStyle : activeStyle;
+  // Ciudadano → mostrar toggle anónimo, ocultar nombre empresa
+  // Empresa → mostrar nombre empresa, ocultar toggle anónimo y forzar con-nombre
   document.getElementById('field-inst-name').style.display = isCitizen ? 'none' : '';
-  document.getElementById('btn-ciudadano').style.cssText = isCitizen
-    ? 'flex:1;padding:14px;border-radius:12px;border:2px solid #2d6eff;background:#eff6ff;color:#1d4ed8;font-size:14px;font-weight:700;cursor:pointer;'
-    : 'flex:1;padding:14px;border-radius:12px;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:14px;font-weight:700;cursor:pointer;';
-  document.getElementById('btn-empresa').style.cssText = !isCitizen
-    ? 'flex:1;padding:14px;border-radius:12px;border:2px solid #2d6eff;background:#eff6ff;color:#1d4ed8;font-size:14px;font-weight:700;cursor:pointer;'
-    : 'flex:1;padding:14px;border-radius:12px;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:14px;font-weight:700;cursor:pointer;';
+  document.getElementById('field-anonymous').style.display = isCitizen ? '' : 'none';
+  if (!isCitizen) {
+    document.getElementById('c-is-anonymous').value = 'false';
+  } else {
+    setAnonymous(true); // ciudadano empieza en anónimo por defecto
+  }
 }
 
 async function uploadCoverImage(fileInput) {
