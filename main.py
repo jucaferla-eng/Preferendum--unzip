@@ -3198,6 +3198,23 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
     db.refresh(debate)
     return {'debate': format_debate(debate), 'message': 'Debate created successfully'}
 
+@app.put('/organizers/debates/{debate_id}')
+def organizer_update_debate(debate_id: int, data: DebateCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debate = db.query(Debate).filter(Debate.id == debate_id, Debate.creator_id == user.id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found or not owned by you')
+    # IMMUTABILITY RULE: once any vote has been cast, nothing can be changed
+    if (debate.total_votes or 0) > 0:
+        raise HTTPException(403, 'This consultation has votes and cannot be modified. Votes are immutable records anchored on blockchain.')
+    debate.title = data.title
+    debate.context = data.context or ''
+    debate.inst_name = data.inst_name or user.name
+    debate.cover_image_url = data.cover_image_url or ''
+    db.commit()
+    return {'message': 'Consultation updated', 'debate': format_debate(debate)}
+
 @app.put('/organizers/debates/{debate_id}/close')
 def organizer_close_debate(debate_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if user.role not in ('organizer', 'admin'):
