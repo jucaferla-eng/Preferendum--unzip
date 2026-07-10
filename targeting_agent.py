@@ -474,8 +474,10 @@ def score_and_optimize(campaign: dict, debate: dict, matrix: dict) -> Optional[d
     camp_min_gni      = float(campaign.get('min_gni_country') or 0)
 
     # ── GATE 1: Country ──────────────────────────────────────────
-    if camp_country and camp_country != debate_country:
-        return None
+    # Global debates accept any campaign; campaigns with no country target also match all
+    if camp_country and camp_country not in ('ALL', 'GLOBAL'):
+        if debate_country not in ('ALL', 'GLOBAL', '') and camp_country != debate_country:
+            return None
 
     # ── GATE 2: GNI floor ───────────────────────────────────────
     country_data = matrix.get(debate_country, {})
