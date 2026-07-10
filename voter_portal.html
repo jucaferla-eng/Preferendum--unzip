@@ -1283,7 +1283,30 @@ function renderDebate(db, res, items) {
       </div>` : ''}
       <div class="detail-card">${renderDonut(opts, counts, total, COLORS)}</div>
     </div>
+
+    <div class="phase-divider" style="margin-top:24px;">
+      <div class="phase-divider-line"></div>
+      <div class="phase-label">💬 Comentarios</div>
+      <div class="phase-divider-line"></div>
+    </div>
+    <div id="comments-list-${debId}" style="display:flex;flex-direction:column;gap:12px;margin-bottom:12px;">
+      <div style="color:#7a7570;font-size:13px;text-align:center;padding:12px;">Cargando comentarios…</div>
+    </div>
+    <div class="detail-card" style="padding:14px;">
+      <textarea id="comment-input-${debId}" placeholder="Deja tu opinión sobre esta consulta (solo para quienes votaron)…"
+        style="width:100%;min-height:80px;border:1.5px solid #e8e4dc;border-radius:10px;padding:10px;font-size:14px;font-family:'Manrope',sans-serif;resize:vertical;box-sizing:border-box;color:#060810;background:#ede9e0;"></textarea>
+      <button onclick="submitComment(${debId})"
+        style="margin-top:10px;width:100%;padding:12px;background:#1a3a8f;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:'Manrope',sans-serif;">
+        Publicar comentario
+      </button>
+      <div id="comment-err-${debId}" style="font-size:12px;color:#ef4444;margin-top:6px;display:none;"></div>
+    </div>
+
+    <div style="margin-top:16px;">
+      <button class="btn" onclick="showDebatesList()" style="background:#ede9e0;color:#060810;border:1px solid #e8e4dc;">← Todas las consultas</button>
+    </div>
   `;
+  loadComments(debId);
 }
 
 // ── renderVoteSection — renders Q1, Q2 or Q3 depending on branchCurrentQ ──
