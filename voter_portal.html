@@ -981,7 +981,10 @@ async function loadDebates() {
         <div class="debate-card" onclick="openDebate(${db.id})">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
             <span class="debate-status ${db.status === 'live' ? 'status-live' : 'status-closed'}">${db.status === 'live' ? '● Live' : 'Closed'}</span>
-            ${db.inst_name ? `<span style="display:flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:#1d4ed8;background:#eff6ff;padding:3px 10px;border-radius:20px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid #bfdbfe;">${esc(db.inst_name)}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><circle cx="12" cy="12" r="12" fill="#2d6eff"/><path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>` : ''}
+            ${db.inst_name ? (db.creator_type === 'organization'
+              ? `<span style="display:flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:#1d4ed8;background:#eff6ff;padding:3px 10px;border-radius:20px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid #bfdbfe;">${esc(db.inst_name)}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><circle cx="12" cy="12" r="12" fill="#2d6eff"/><path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
+              : `<span style="font-size:12px;font-weight:600;color:#64748b;background:#f1f5f9;padding:3px 10px;border-radius:20px;border:1px solid #e2e8f0;">👤 ${esc(db.inst_name)}</span>`
+            ) : ''}
           </div>
           <div class="debate-title">${esc(db.title)}</div>
           <div class="debate-meta">
@@ -1183,7 +1186,10 @@ function renderDebate(db, res, items) {
     <div class="detail-card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
         <span class="debate-status ${isLive ? 'status-live' : 'status-closed'}">${isLive ? '● Live' : 'Closed'}</span>
-        ${db.inst_name ? `<span style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:#1d4ed8;background:#eff6ff;padding:4px 12px;border-radius:20px;border:1px solid #bfdbfe;">${esc(db.inst_name)}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><circle cx="12" cy="12" r="12" fill="#2d6eff"/><path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>` : ''}
+        ${db.inst_name ? (db.creator_type === 'organization'
+          ? `<span style="display:flex;align-items:center;gap:5px;font-size:12px;font-weight:700;color:#1d4ed8;background:#eff6ff;padding:4px 12px;border-radius:20px;border:1px solid #bfdbfe;">${esc(db.inst_name)}<svg width="15" height="15" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;"><circle cx="12" cy="12" r="12" fill="#2d6eff"/><path d="M7 12.5l3.5 3.5 6.5-7" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
+          : `<span style="font-size:12px;font-weight:700;color:#64748b;background:#f1f5f9;padding:4px 12px;border-radius:20px;border:1px solid #e2e8f0;">👤 ${esc(db.inst_name)}</span>`
+        ) : ''}
       </div>
       <div class="detail-title">${esc(db.title)}</div>
       ${db.context ? `<div class="detail-context">${esc(db.context)}</div>` : ''}

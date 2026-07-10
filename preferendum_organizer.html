@@ -155,10 +155,28 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
     <div class="new-debate-form" id="create-form">
       <div class="form-title">+ New Consultation</div>
       <div class="alert" id="create-alert"></div>
+
+      <!-- Ciudadano vs Empresa -->
       <div class="field">
-        <label>Empresa / Marca convocante</label>
+        <label>¿Quién convoca esta consulta?</label>
+        <div style="display:flex;gap:12px;margin-top:6px;">
+          <button type="button" id="btn-ciudadano" onclick="setCreatorType('citizen')"
+            style="flex:1;padding:14px;border-radius:12px;border:2px solid #2d6eff;background:#eff6ff;color:#1d4ed8;font-size:14px;font-weight:700;cursor:pointer;">
+            👤 Ciudadano
+          </button>
+          <button type="button" id="btn-empresa" onclick="setCreatorType('organization')"
+            style="flex:1;padding:14px;border-radius:12px;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:14px;font-weight:700;cursor:pointer;">
+            🏢 Empresa / Institución
+          </button>
+        </div>
+        <input type="hidden" id="c-creator-type" value="citizen"/>
+      </div>
+
+      <div class="field" id="field-inst-name" style="display:none;">
+        <label>Nombre de empresa o institución</label>
         <input type="text" id="c-inst-name" placeholder="Ej: Volkswagen Chile, Nike, Municipalidad de Santiago…"/>
       </div>
+
       <div class="field">
         <label>Imagen de portada (logo o banner de la marca)</label>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
@@ -374,6 +392,18 @@ function showAlert(id, type, msg) {
   el.textContent = msg;
 }
 
+function setCreatorType(type) {
+  document.getElementById('c-creator-type').value = type;
+  const isCitizen = type === 'citizen';
+  document.getElementById('field-inst-name').style.display = isCitizen ? 'none' : '';
+  document.getElementById('btn-ciudadano').style.cssText = isCitizen
+    ? 'flex:1;padding:14px;border-radius:12px;border:2px solid #2d6eff;background:#eff6ff;color:#1d4ed8;font-size:14px;font-weight:700;cursor:pointer;'
+    : 'flex:1;padding:14px;border-radius:12px;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:14px;font-weight:700;cursor:pointer;';
+  document.getElementById('btn-empresa').style.cssText = !isCitizen
+    ? 'flex:1;padding:14px;border-radius:12px;border:2px solid #2d6eff;background:#eff6ff;color:#1d4ed8;font-size:14px;font-weight:700;cursor:pointer;'
+    : 'flex:1;padding:14px;border-radius:12px;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:14px;font-weight:700;cursor:pointer;';
+}
+
 async function uploadCoverImage(fileInput) {
   const file = fileInput.files[0];
   if (!file) return;
@@ -463,7 +493,10 @@ async function createDebate() {
       title, context, options,
       closes_at: closes + 'T23:59:59',
       creator_type: 'organization',
-      inst_name: document.getElementById('c-inst-name').value.trim() || userName,
+      creator_type: document.getElementById('c-creator-type').value,
+      inst_name: document.getElementById('c-creator-type').value === 'organization'
+        ? (document.getElementById('c-inst-name').value.trim() || userName)
+        : userName,
       cover_image_url: document.getElementById('c-cover-url').value || '',
       debate_type: instType,
       scope_country: country,
@@ -484,6 +517,7 @@ async function createDebate() {
   if (!r.ok) { showAlert('create-alert','error', d.detail || 'Error creating consultation'); return; }
   showAlert('create-alert','success','✓ Consultation created and published!');
   hideSimilar();
+  setCreatorType('citizen');
   document.getElementById('c-inst-name').value = '';
   document.getElementById('c-cover-url').value = '';
   document.getElementById('c-cover-preview').style.display = 'none';
