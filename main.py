@@ -2562,7 +2562,8 @@ def _match_campaigns(user, debate, db) -> list:
     now = datetime.utcnow()
     orm_campaigns = db.query(AdCampaign).filter(
         AdCampaign.is_active == True,
-        AdCampaign.start_date <= now,
+    ).filter(
+        (AdCampaign.start_date == None) | (AdCampaign.start_date <= now)
     ).all()
 
     # Debate context for brand-safety filtering
