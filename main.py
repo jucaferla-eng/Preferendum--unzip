@@ -2726,7 +2726,7 @@ def _cost_per_impression_clp(campaign, db) -> int:
 # Decisions" — 1 anuncio cada 5 opiniones. (Se usó temporalmente 2 el
 # 2026-06-07 para probar el ciclo de impresiones/métricas de campañas
 # más rápido; revertido a 5 antes del almuerzo con el inversionista.)
-AD_EVERY_N_OPINIONS = 5
+AD_EVERY_N_OPINIONS = 3
 
 # Tipo de cambio usado para traducir CPM (USD por mil impresiones, tabla de
 # comunas) a CLP. Vive aquí — no dentro de _optimize_campaign — porque tanto
@@ -2787,20 +2787,6 @@ def get_opinions(debate_id: int,
                 orm.budget_clp or 0,
                 (orm.spent_clp or 0) + cost_clp,
             )
-
-    # Show first ad at the top — even with 0 opinions, the campaign is visible
-    if matched:
-        _append_campaign_ad(matched[ad_idx % len(matched)])
-        ad_idx += 1
-    elif static_ads:
-        ad = static_ads[0]
-        ad.impressions += 1
-        result.append({'type': 'ad', 'ad': {
-            'brand': ad.brand, 'copy': ad.copy,
-            'cta': ad.cta, 'logo_color': ad.logo_color,
-            'link_url': ad.link_url or '',
-        }})
-        ad_idx += 1
 
     for i, op in enumerate(opinions):
         result.append({'type': 'opinion', 'opinion': {

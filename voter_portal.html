@@ -1159,22 +1159,31 @@ function renderDebate(db, res, items) {
 
   // ── PHASE 1: DEBATE — opinions + ads in sequence ──
   const levelLabel = { expert: 'Experto', good: 'Informado', familiar: 'Conoce el tema' };
-  const feedHtml = (items && items.length > 0)
-    ? items.map(it => {
-        if (it.type === 'ad')      return renderAdCard(it.ad);
-        if (it.type === 'opinion') {
-          const op = it.opinion;
-          return `<div class="opinion-card">
-            <div class="opinion-text">${esc(op.text)}</div>
-            <div class="opinion-meta">
-              <span>by: ${esc(op.user_name || 'Anónimo')}${op.knowledge_level ? ` · <span class="opinion-level">${levelLabel[op.knowledge_level] || op.knowledge_level}</span>` : ''}</span>
-              <span class="opinion-thumbs">👍 👎</span>
-            </div>
-          </div>`;
-        }
-        return '';
-      }).join('')
-    : `<div class="no-opinions">Aún no hay opiniones — sé el primero en compartir tu perspectiva.</div>`;
+  const feedHtml = (() => {
+    if (!items || !items.length) return `<div class="no-opinions">Aún no hay opiniones — sé el primero en compartir tu perspectiva.</div>`;
+    let html = '';
+    let opBuf = [];
+    const flushOps = () => {
+      if (opBuf.length) { html += `<div class="opinions-section">${opBuf.join('')}</div>`; opBuf = []; }
+    };
+    items.forEach(it => {
+      if (it.type === 'ad') {
+        flushOps();
+        html += renderAdCard(it.ad);
+      } else if (it.type === 'opinion') {
+        const op = it.opinion;
+        opBuf.push(`<div class="opinion-card">
+          <div class="opinion-text">${esc(op.text)}</div>
+          <div class="opinion-meta">
+            <span>by: ${esc(op.user_name || 'Anónimo')}${op.knowledge_level ? ` · <span class="opinion-level">${levelLabel[op.knowledge_level] || op.knowledge_level}</span>` : ''}</span>
+            <span class="opinion-thumbs">👍 👎</span>
+          </div>
+        </div>`);
+      }
+    });
+    flushOps();
+    return html;
+  })();
 
   // ── PHASE 3: VOTE options (supports branching Q1→Q2→Q3) ──
   let followUps = [];
@@ -1253,7 +1262,7 @@ function renderDebate(db, res, items) {
       <div class="phase-label">02 · Debate</div>
       <div class="phase-divider-line"></div>
     </div>
-    <div class="opinions-section" id="debate-section">${feedHtml}</div>
+    <div id="debate-section">${feedHtml}</div>
 
     ${isLive ? `
     <div id="vote-section">
