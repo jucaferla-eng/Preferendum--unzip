@@ -2795,8 +2795,8 @@ def get_opinions(debate_id: int,
             'user_name': op.user_name,
             'created_at': op.created_at.isoformat(),
         }})
-        # Ad after every AD_EVERY_N_OPINIONS opinions
-        if (i + 1) % AD_EVERY_N_OPINIONS == 0:
+        # Ad after every 2 opinions starting from the 1st (i=0,2,4,...)
+        if i % 2 == 0:
             if matched:
                 _append_campaign_ad(matched[ad_idx % len(matched)])
                 ad_idx += 1
