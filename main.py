@@ -344,6 +344,15 @@ class AdImpressionLog(Base):
     country     = Column(String, default='')
     created_at  = Column(DateTime, default=datetime.utcnow)
 
+class PostVoteComment(Base):
+    __tablename__ = 'post_vote_comments'
+    id         = Column(Integer, primary_key=True)
+    debate_id  = Column(Integer, index=True)
+    user_id    = Column(Integer, index=True)
+    user_name  = Column(String, default='')
+    text       = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class ClosedListEntry(Base):
     __tablename__ = 'closed_list_entries'
     id               = Column(Integer, primary_key=True)
@@ -2825,6 +2834,38 @@ def post_opinion(debate_id: int, data: OpinionCreate, user: User = Depends(get_v
     db.commit()
     db.refresh(op)
     return {'opinion': {'id': op.id, 'text': op.text, 'created_at': op.created_at.isoformat()}}
+
+@app.get('/debates/{debate_id}/comments')
+def get_comments(debate_id: int, db: Session = Depends(get_db)):
+    comments = db.query(PostVoteComment).filter(
+        PostVoteComment.debate_id == debate_id
+    ).order_by(PostVoteComment.created_at.asc()).all()
+    return {'comments': [
+        {'id': c.id, 'user_name': c.user_name, 'text': c.text,
+         'created_at': c.created_at.isoformat()}
+        for c in comments
+    ]}
+
+@app.post('/debates/{debate_id}/comments')
+def post_comment(debate_id: int, body: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    text = (body.get('text') or '').strip()
+    if len(text) < 3:
+        raise HTTPException(400, 'El comentario es muy corto')
+    if len(text) > 500:
+        raise HTTPException(400, 'Máximo 500 caracteres')
+    voted = db.query(HasVotedLog).filter(
+        HasVotedLog.user_id == user.id,
+        HasVotedLog.debate_id == debate_id
+    ).first()
+    if not voted:
+        raise HTTPException(403, 'Solo pueden comentar personas que hayan votado en esta consulta')
+    c = PostVoteComment(debate_id=debate_id, user_id=user.id,
+                        user_name=user.name or 'Ciudadano', text=text)
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return {'comment': {'id': c.id, 'user_name': c.user_name, 'text': c.text,
+                        'created_at': c.created_at.isoformat()}}
 
 @app.post('/debates/{debate_id}/vote')
 def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_verified_user), db: Session = Depends(get_db)):

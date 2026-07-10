@@ -1430,6 +1430,60 @@ async function _shareWithPoster(title, subtitle, instName, debId, fallbackText) 
   _doShare('Preferendum', fallbackText, shareUrl);
 }
 
+async function loadComments(debId) {
+  const list = document.getElementById(`comments-list-${debId}`);
+  if (!list) return;
+  try {
+    const r = await fetch(`${API}/debates/${debId}/comments`);
+    const d = await r.json();
+    const comments = d.comments || [];
+    if (!comments.length) {
+      list.innerHTML = '<div style="color:#94a3b8;font-size:13px;text-align:center;padding:12px;">Sé el primero en comentar.</div>';
+      return;
+    }
+    list.innerHTML = comments.map(c => {
+      const initial = (c.user_name || '?')[0].toUpperCase();
+      const colors = ['#2d6eff','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4'];
+      const color = colors[c.user_name.charCodeAt(0) % colors.length];
+      return `<div style="display:flex;gap:10px;align-items:flex-start;">
+        <div style="width:36px;height:36px;border-radius:50%;background:${color};color:#fff;font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${initial}</div>
+        <div style="flex:1;background:#f8fafc;border-radius:10px;padding:10px 12px;">
+          <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:4px;">${esc(c.user_name)}</div>
+          <div style="font-size:14px;color:#334155;line-height:1.5;">${esc(c.text)}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(_) {
+    if (list) list.innerHTML = '<div style="color:#ef4444;font-size:13px;text-align:center;">Error cargando comentarios.</div>';
+  }
+}
+
+async function submitComment(debId) {
+  const input = document.getElementById(`comment-input-${debId}`);
+  const errEl = document.getElementById(`comment-err-${debId}`);
+  const text = (input?.value || '').trim();
+  if (!text) return;
+  errEl.style.display = 'none';
+  try {
+    const r = await fetch(`${API}/debates/${debId}/comments`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body: JSON.stringify({ text })
+    });
+    const d = await r.json();
+    if (!r.ok) {
+      errEl.textContent = d.detail || 'Error al publicar';
+      errEl.style.display = 'block';
+      return;
+    }
+    input.value = '';
+    loadComments(debId);
+  } catch(_) {
+    errEl.textContent = 'Error de conexión';
+    errEl.style.display = 'block';
+  }
+}
+
 async function shareResult(debId) {
   const db = currentDebate;
   if (!db) return;
@@ -1651,10 +1705,30 @@ async function showVoteSuccess(data, optIdx) {
       Precisión del proceso: ${accuracy} de votos anclados en blockchain
     </div>` : ''}
 
-    <div style="margin-top:20px;display:flex;flex-direction:column;gap:10px;">
+    <!-- Comentarios post-voto -->
+    <div class="phase-divider" style="margin-top:24px;">
+      <div class="phase-divider-line"></div>
+      <div class="phase-label">💬 Comentarios</div>
+      <div class="phase-divider-line"></div>
+    </div>
+    <div id="comments-list-${debId}" style="display:flex;flex-direction:column;gap:12px;margin-bottom:12px;">
+      <div style="color:#94a3b8;font-size:13px;text-align:center;padding:12px;">Cargando comentarios…</div>
+    </div>
+    <div class="detail-card" style="padding:14px;">
+      <textarea id="comment-input-${debId}" placeholder="Deja tu sugerencia u opinión sobre esta consulta…"
+        style="width:100%;min-height:80px;border:1.5px solid #e2e8f0;border-radius:10px;padding:10px;font-size:14px;font-family:'Inter',sans-serif;resize:vertical;box-sizing:border-box;color:#0f172a;"></textarea>
+      <button onclick="submitComment(${debId})"
+        style="margin-top:10px;width:100%;padding:12px;background:#2d6eff;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;">
+        Publicar comentario
+      </button>
+      <div id="comment-err-${debId}" style="font-size:12px;color:#ef4444;margin-top:6px;display:none;"></div>
+    </div>
+
+    <div style="margin-top:16px;display:flex;flex-direction:column;gap:10px;">
       <button class="btn" onclick="showDebatesList()" style="background:#f1f5f9;color:#0f172a;">← Todas las consultas</button>
     </div>
   `;
+  loadComments(debId);
 }
 
 async function submitOpinion(debateId) {
