@@ -649,6 +649,90 @@ CHILE_REGIONAL_FEEDS = [
      'name': 'Google News: Araucanía', 'region': 'Araucanía'},
 ]
 
+# ── QUORA-STYLE TOPIC FEEDS ──────────────────────────────────────────────────
+# Inspirado en cómo Quora organiza preguntas por categoría temática.
+# Cada feed busca noticias del tema en múltiples países y genera preguntas
+# tipo "¿Debería...?", "¿Cuál es la mejor manera de...?", "¿Es esto bueno para...?"
+# Se procesan en run_topic_debates() — complementa los feeds de noticias diarias.
+
+QUORA_STYLE_TOPIC_FEEDS = [
+    # ── TECNOLOGÍA & IA ──
+    {'url': 'https://news.google.com/rss/search?q=inteligencia+artificial+empleo+trabajo&hl=es&ceid=CL:es',
+     'topic': 'tecnologia', 'scope': 'global', 'lang': 'es',
+     'quora_frame': '¿Debería regularse la IA para proteger empleos?'},
+    {'url': 'https://news.google.com/rss/search?q=artificial+intelligence+regulation+policy&hl=en&ceid=US:en',
+     'topic': 'tecnologia', 'scope': 'global', 'lang': 'en',
+     'quora_frame': 'Should AI be regulated by governments?'},
+    {'url': 'https://news.google.com/rss/search?q=redes+sociales+regulacion+menores&hl=es&ceid=CL:es',
+     'topic': 'tecnologia', 'scope': 'global', 'lang': 'es',
+     'quora_frame': '¿Deben prohibirse las redes sociales para menores de 16?'},
+
+    # ── MEDIO AMBIENTE & CLIMA ──
+    {'url': 'https://news.google.com/rss/search?q=cambio+climatico+politica+carbon&hl=es&ceid=CL:es',
+     'topic': 'medioambiente', 'scope': 'global', 'lang': 'es',
+     'quora_frame': '¿Quién debe pagar la transición energética?'},
+    {'url': 'https://news.google.com/rss/search?q=climate+change+policy+carbon+tax&hl=en&ceid=US:en',
+     'topic': 'medioambiente', 'scope': 'global', 'lang': 'en',
+     'quora_frame': 'Should there be a global carbon tax?'},
+    {'url': 'https://news.google.com/rss/search?q=energia+solar+subsidio+gobierno&hl=es&ceid=CL:es',
+     'topic': 'energia', 'scope': 'country', 'country': 'CL', 'lang': 'es',
+     'quora_frame': '¿Debería el Estado subsidiar la energía solar domiciliaria?'},
+
+    # ── ECONOMÍA & DESIGUALDAD ──
+    {'url': 'https://news.google.com/rss/search?q=salario+minimo+aumento+trabajadores&hl=es&ceid=CL:es',
+     'topic': 'economia', 'scope': 'country', 'country': 'CL', 'lang': 'es',
+     'quora_frame': '¿Cuánto debería subir el salario mínimo este año?'},
+    {'url': 'https://news.google.com/rss/search?q=impuesto+ricos+desigualdad+riqueza&hl=es&ceid=CL:es',
+     'topic': 'economia', 'scope': 'global', 'lang': 'es',
+     'quora_frame': '¿Deben los más ricos pagar más impuestos?'},
+    {'url': 'https://news.google.com/rss/search?q=universal+basic+income+economy&hl=en&ceid=US:en',
+     'topic': 'economia', 'scope': 'global', 'lang': 'en',
+     'quora_frame': 'Should governments implement a universal basic income?'},
+
+    # ── SALUD PÚBLICA ──
+    {'url': 'https://news.google.com/rss/search?q=sistema+salud+publico+privado+reforma&hl=es&ceid=CL:es',
+     'topic': 'salud', 'scope': 'country', 'country': 'CL', 'lang': 'es',
+     'quora_frame': '¿Debe el Estado tener un sistema de salud único?'},
+    {'url': 'https://news.google.com/rss/search?q=salud+mental+jovenes+politica+publica&hl=es&ceid=CL:es',
+     'topic': 'salud', 'scope': 'global', 'lang': 'es',
+     'quora_frame': '¿Es la salud mental la crisis silenciosa de nuestra generación?'},
+    {'url': 'https://news.google.com/rss/search?q=healthcare+universal+coverage+reform&hl=en&ceid=US:en',
+     'topic': 'salud', 'scope': 'global', 'lang': 'en',
+     'quora_frame': 'Should healthcare be free for everyone?'},
+
+    # ── EDUCACIÓN ──
+    {'url': 'https://news.google.com/rss/search?q=educacion+gratuita+universidad+deuda&hl=es&ceid=CL:es',
+     'topic': 'educacion', 'scope': 'country', 'country': 'CL', 'lang': 'es',
+     'quora_frame': '¿Debe la educación universitaria ser completamente gratuita?'},
+    {'url': 'https://news.google.com/rss/search?q=inteligencia+artificial+educacion+colegios&hl=es&ceid=CL:es',
+     'topic': 'educacion', 'scope': 'global', 'lang': 'es',
+     'quora_frame': '¿Deben los colegios permitir el uso de IA en las tareas?'},
+
+    # ── JUSTICIA & SEGURIDAD ──
+    {'url': 'https://news.google.com/rss/search?q=seguridad+ciudadana+crimen+politica&hl=es&ceid=CL:es',
+     'topic': 'justicia', 'scope': 'country', 'country': 'CL', 'lang': 'es',
+     'quora_frame': '¿Más cárceles o más prevención para reducir el crimen?'},
+    {'url': 'https://news.google.com/rss/search?q=migracion+inmigracion+politica+frontera&hl=es&ceid=CL:es',
+     'topic': 'social', 'scope': 'global', 'lang': 'es',
+     'quora_frame': '¿Cómo debe manejar un país la migración masiva?'},
+
+    # ── VIVIENDA ──
+    {'url': 'https://news.google.com/rss/search?q=vivienda+arriendo+precio+crisis&hl=es&ceid=CL:es',
+     'topic': 'vivienda', 'scope': 'global', 'lang': 'es',
+     'quora_frame': '¿Qué debe hacer el Estado ante la crisis de vivienda?'},
+    {'url': 'https://news.google.com/rss/search?q=housing+crisis+rent+affordable&hl=en&ceid=US:en',
+     'topic': 'vivienda', 'scope': 'global', 'lang': 'en',
+     'quora_frame': 'Should governments control rent prices?'},
+
+    # ── DEMOCRACIA & POLÍTICA ──
+    {'url': 'https://news.google.com/rss/search?q=democracia+participacion+ciudadana+voto&hl=es&ceid=CL:es',
+     'topic': 'politics', 'scope': 'global', 'lang': 'es',
+     'quora_frame': '¿Debería el voto ser obligatorio en todas las democracias?'},
+    {'url': 'https://news.google.com/rss/search?q=corrupcion+gobierno+transparencia&hl=es&ceid=CL:es',
+     'topic': 'politics', 'scope': 'global', 'lang': 'es',
+     'quora_frame': '¿Cuál es la forma más efectiva de combatir la corrupción?'},
+]
+
 # Sector debate templates for professional associations
 # Used by run_sector_debates() — topics that never go stale for gremios
 SECTOR_DEBATE_TEMPLATES = {
@@ -968,6 +1052,79 @@ def run_global_debates(max_per_feed: int = 2) -> dict:
     return {'debates_created': total_created, 'debates_skipped': total_skipped, 'summary': summary}
 
 
+def run_topic_debates(max_per_topic: int = 1) -> dict:
+    """
+    Quora-style topic debates: busca noticias por categoría temática y genera
+    preguntas tipo "¿Debería...?", "¿Cuál es la mejor manera de...?" —
+    el mismo formato que hace populares a las preguntas de Quora.
+    """
+    global _created_this_run
+    total_created = 0
+    total_skipped = 0
+    summary = []
+    seen_topics = {}  # topic -> count created
+
+    for feed in QUORA_STYLE_TOPIC_FEEDS:
+        topic = feed['topic']
+        if seen_topics.get(topic, 0) >= max_per_topic:
+            continue
+
+        items = _fetch_rss_feed(feed['url'], max_items=5)
+        if not items:
+            continue
+
+        country_code = feed.get('country', 'GL')
+        is_global = feed.get('scope') == 'global'
+        country_meta = {
+            'code': country_code,
+            'lang': feed.get('lang', 'es'),
+            'name': 'Global' if is_global else country_code,
+            'ceid': '',
+        }
+
+        for item in items:
+            title_hash = hashlib.sha256(item['title'].encode()).hexdigest()[:16]
+            if title_hash in _created_this_run:
+                total_skipped += 1
+                continue
+
+            # Inject the Quora-frame hint into the item so the prompt uses it
+            enriched_item = {
+                **item,
+                'title': item['title'],
+                'description': f"[Ángulo sugerido: {feed['quora_frame']}]\n{item.get('description','')}",
+            }
+
+            debate = _analyze_news_item(enriched_item, country_meta, is_global=is_global)
+            if not debate:
+                total_skipped += 1
+                continue
+
+            q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
+            if q_hash in _created_this_run:
+                total_skipped += 1
+                continue
+
+            _created_this_run.add(title_hash)
+            _created_this_run.add(q_hash)
+            if is_global:
+                debate['scope'] = 'global'
+
+            target_country = country_code if not is_global else 'GL'
+            if _create_debate_via_api(debate, target_country):
+                total_created += 1
+                seen_topics[topic] = seen_topics.get(topic, 0) + 1
+                summary.append({
+                    'topic': topic,
+                    'scope': feed['scope'],
+                    'question': debate['question'][:80],
+                })
+                break  # got one for this feed, move to next topic
+
+    print(f'[TopicAgent] Done — created {total_created} topic debates (Quora-style)')
+    return {'debates_created': total_created, 'debates_skipped': total_skipped, 'summary': summary}
+
+
 def run_daily_debates() -> dict:
     """
     Main news agent task: fetch news per country + global feeds, create civic debates.
@@ -980,14 +1137,21 @@ def run_daily_debates() -> dict:
     total_skipped = 0
     summary = []
 
-    # 1. Global debates first (international media)
+    # 1. Global debates from international media (BBC, Reuters, etc.)
     print('[NewsAgent] === GLOBAL FEEDS ===')
     global_result = run_global_debates(max_per_feed=1)
     total_created += global_result['debates_created']
     total_skipped += global_result['debates_skipped']
     summary.extend([{**s, 'country': 'GL'} for s in global_result['summary']])
 
-    # 2. Per-country debates from Google News
+    # 2. Quora-style topic debates (by category: IA, clima, salud, economía, etc.)
+    print('[NewsAgent] === TOPIC FEEDS (Quora-style) ===')
+    topic_result = run_topic_debates(max_per_topic=1)
+    total_created += topic_result['debates_created']
+    total_skipped += topic_result['debates_skipped']
+    summary.extend(topic_result['summary'])
+
+    # 3. Per-country debates from Google News
     print('[NewsAgent] === COUNTRY FEEDS ===')
     for country in NEWS_COUNTRIES:
         print(f'[NewsAgent] Processing {country["name"]}...')
