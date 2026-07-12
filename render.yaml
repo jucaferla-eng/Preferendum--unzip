@@ -24,3 +24,22 @@ services:
       - key: APP_STRIPE_KEY
         sync: false
     healthCheckPath: /
+
+  - type: cron
+    name: preferendum-daily-debates
+    runtime: python
+    schedule: "0 7 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: >
+      python -c "
+      import requests, os
+      url = os.environ.get('BACKEND_URL', 'https://preferendum-unzip.onrender.com')
+      secret = os.environ.get('ADMIN_SECRET', 'preferendum-admin-2024')
+      r = requests.post(f'{url}/admin/agent/daily-debates-sync?secret={secret}', timeout=300)
+      print(r.json())
+      "
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
