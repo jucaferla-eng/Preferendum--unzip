@@ -2963,7 +2963,14 @@ async def get_face_vote_token(
         SelfieLog.face_bytes != None
     ).order_by(SelfieLog.created_at.desc()).first()
 
-    if aws_key and ref and ref.face_bytes:
+    rekognition_score = None
+    rekognition_mode = 'no_aws'
+
+    if not aws_key:
+        rekognition_mode = 'no_credentials'
+    elif not ref or not ref.face_bytes:
+        rekognition_mode = 'no_reference_selfie'
+    else:
         try:
             rek = _rekognition_client()
             resp = rek.compare_faces(
@@ -2972,10 +2979,18 @@ async def get_face_vote_token(
                 SimilarityThreshold=80.0
             )
             matches = resp.get('FaceMatches', [])
-            if not matches or matches[0]['Similarity'] / 100.0 < 0.90:
+            if matches:
+                rekognition_score = round(matches[0]['Similarity'], 2)
+                rekognition_mode = 'verified'
+                if rekognition_score / 100.0 < 0.90:
+                    raise HTTPException(400, f'Similitud insuficiente ({rekognition_score}%). Intenta con mejor iluminación.')
+            else:
+                rekognition_mode = 'no_match'
                 raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
-        except ClientError:
-            pass  # AWS falló: dejamos pasar en modo demo
+        except HTTPException:
+            raise
+        except ClientError as e:
+            rekognition_mode = f'aws_error: {e.response["Error"]["Code"]}'
 
     token = jwt.encode({
         'sub': user.id,
@@ -2983,7 +2998,12 @@ async def get_face_vote_token(
         'type': 'face_vote',
         'exp': datetime.utcnow() + timedelta(minutes=5)
     }, SECRET, algorithm='HS256')
-    return {'token': token}
+    return {
+        'token': token,
+        'rekognition_score': rekognition_score,
+        'rekognition_mode': rekognition_mode,
+        'message': f'Identidad verificada — similitud {rekognition_score}%' if rekognition_score else 'Verificado (modo demo)'
+    }
 
 
 @app.post('/debates/{debate_id}/vote')
