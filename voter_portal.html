@@ -542,16 +542,17 @@ async function translateText(text, fromLang, toLang) {
   return null;
 }
 
+// Stores {opId: {text, fromLang}} for current debate — avoids data-attribute encoding issues
+let _opTranslationMap = {};
+
 async function autoTranslateOpinions(viewLang) {
-  // Find all opinion text elements that need translation and translate them automatically
-  const els = document.querySelectorAll('[data-op-lang]');
-  for (const el of els) {
-    const fromLang = el.dataset.opLang;
-    if (!fromLang || fromLang === viewLang) continue;
-    const original = el.dataset.original;
-    if (!original) continue;
-    const translated = await translateText(original, fromLang, viewLang);
-    if (translated && translated !== original) {
+  if (!viewLang) return;
+  for (const [opId, info] of Object.entries(_opTranslationMap)) {
+    if (!info.fromLang || info.fromLang === viewLang) continue;
+    const el = document.getElementById('op-text-' + opId);
+    if (!el) continue;
+    const translated = await translateText(info.text, info.fromLang, viewLang);
+    if (translated && translated !== info.text) {
       el.textContent = translated;
       const note = el.nextElementSibling;
       if (note && note.classList.contains('translated-note')) note.style.display = '';
@@ -1271,6 +1272,7 @@ function renderDonut(opts, counts, total, colors) {
 }
 
 function renderDebate(db, res, items) {
+  _opTranslationMap = {}; // reset for each debate
   const content = document.getElementById('detail-content');
   const opts    = db.options || [];
   const isLive  = db.status === 'live';
@@ -1305,10 +1307,11 @@ function renderDebate(db, res, items) {
         html += renderAdCard(it.ad);
       } else if (it.type === 'opinion') {
         const op = it.opinion;
-        const opLang  = LANG_BY_COUNTRY[op.country] || 'es';
-        const flag    = op.country ? countryLabel(op.country).split(' ')[0] : '';
+        const opLang = LANG_BY_COUNTRY[op.country] || 'es';
+        const flag   = op.country ? countryLabel(op.country).split(' ')[0] : '';
+        _opTranslationMap[op.id] = { text: op.text, fromLang: opLang };
         opBuf.push(`<div class="opinion-card">
-          <div class="opinion-text" data-op-lang="${opLang}" data-original="${esc(op.text)}">${esc(op.text)}</div>
+          <div class="opinion-text" id="op-text-${op.id}">${esc(op.text)}</div>
           <div class="translated-note" style="display:none;font-size:10px;color:#aaa;margin-top:2px;">🌐 Traducido automáticamente</div>
           <div class="opinion-meta">
             <span>by: ${esc(op.user_name || 'Anónimo')}${flag ? ` ${flag}` : ''}${op.knowledge_level ? ` · <span class="opinion-level">${levelLabel[op.knowledge_level] || op.knowledge_level}</span>` : ''}</span>
