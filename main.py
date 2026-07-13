@@ -1775,6 +1775,7 @@ def login(data: LoginInput, db: Session = Depends(get_db)):
         'token': make_token(user.id, user.role),
         'user': {
             'id': user.id, 'name': user.name, 'email': user.email,
+            'country': user.country or 'CL',
             'verify_level': user.verify_level, 'is_verified': user.is_verified,
             'email_verified': user.email_verified,
             'phone_verified': user.phone_verified,
@@ -2370,7 +2371,8 @@ def list_debates(
 ):
     q = db.query(Debate)
     if country and country != 'ALL':
-        q = q.filter(Debate.scope_country.in_([country, 'ALL', 'GLOBAL']))
+        # 'GLOBAL' and 'GL' are both used for worldwide debates — show them to everyone
+        q = q.filter(Debate.scope_country.in_([country, 'ALL', 'GLOBAL', 'GL']))
     debates = q.order_by(Debate.created_at.desc()).limit(limit).all()
     safe = []
     for d in debates:

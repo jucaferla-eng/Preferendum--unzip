@@ -526,6 +526,19 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 <script>
 const API = '';
 let token = localStorage.getItem('pref_voter_token') || '';
+let userCountry = localStorage.getItem('pref_voter_country') || 'CL';
+
+const COUNTRY_LABELS = {
+  'CL':'🇨🇱 Chile','AR':'🇦🇷 Argentina','PE':'🇵🇪 Perú','MX':'🇲🇽 México',
+  'CO':'🇨🇴 Colombia','BR':'🇧🇷 Brasil','US':'🇺🇸 Estados Unidos','ES':'🇪🇸 España',
+  'GB':'🇬🇧 Reino Unido','DE':'🇩🇪 Alemania','FR':'🇫🇷 Francia','IT':'🇮🇹 Italia',
+  'AU':'🇦🇺 Australia','CA':'🇨🇦 Canadá','IN':'🇮🇳 India','JP':'🇯🇵 Japón',
+  'KR':'🇰🇷 Corea del Sur','ZA':'🇿🇦 Sudáfrica','NG':'🇳🇬 Nigeria',
+  'VE':'🇻🇪 Venezuela','UY':'🇺🇾 Uruguay','EC':'🇪🇨 Ecuador',
+  'BO':'🇧🇴 Bolivia','PY':'🇵🇾 Paraguay',
+  'GL':'🌍 Global','GLOBAL':'🌍 Global','ALL':'🌍 Global',
+};
+function countryLabel(code) { return COUNTRY_LABELS[code] || code || 'Global'; }
 let userName = localStorage.getItem('pref_voter_name') || '';
 let selectedOption = null;
 let currentDebate = null;
@@ -565,8 +578,10 @@ async function doLogin() {
     if (!r.ok) { document.getElementById('l-err').textContent = d.detail || 'Login failed'; return; }
     token = d.token || d.access_token;
     userName = d.user?.name || email.split('@')[0];
+    userCountry = d.user?.country || 'CL';
     localStorage.setItem('pref_voter_token', token);
     localStorage.setItem('pref_voter_name', userName);
+    localStorage.setItem('pref_voter_country', userCountry);
     showApp();
   } catch(e) { document.getElementById('l-err').textContent = 'Connection error'; }
 }
@@ -605,8 +620,10 @@ async function doRegister() {
     if (!r.ok) { document.getElementById('r-err').textContent = d.detail || 'Registration failed'; return; }
     token = d.token;
     userName = name;
+    userCountry = country;
     localStorage.setItem('pref_voter_token', token);
     localStorage.setItem('pref_voter_name', userName);
+    localStorage.setItem('pref_voter_country', userCountry);
     // Update phone hint in wizard step 2
     if (phone) document.getElementById('phone-otp-sub').textContent = `We will send an SMS to ${phone}`;
     document.getElementById('email-otp-sub').textContent = `We sent a 6-digit code to ${email}`;
@@ -968,7 +985,7 @@ async function loadDebates() {
   list.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   try {
     const [dr, ar] = await Promise.all([
-      fetch(`${API}/debates?limit=20`),
+      fetch(`${API}/debates?limit=20&country=${encodeURIComponent(userCountry)}`),
       fetch(`${API}/ads/featured`).catch(() => null),
     ]);
     const debates = (await dr.json()).debates || [];
@@ -995,7 +1012,7 @@ async function loadDebates() {
           <div class="debate-title">${esc(db.title)}</div>
           <div class="debate-meta">
             <span class="debate-votes">⬡ ${db.total_votes || 0} votos</span>
-            <span>${db.scope_country || 'Global'}</span>
+            <span>${countryLabel(db.scope_country)}</span>
             ${db.created_at ? `<span>🕐 ${fmtDateTime(db.created_at)}</span>` : ''}
             ${db.closes_at ? `<span>Cierra ${fmtDate(db.closes_at)}</span>` : ''}
           </div>
@@ -1216,7 +1233,7 @@ function renderDebate(db, res, items) {
       ${db.context ? `<div class="detail-context">${esc(db.context)}</div>` : ''}
       <div class="debate-meta">
         <span class="debate-votes">⬡ ${total} votos</span>
-        <span>${db.scope_country || 'Global'}</span>
+        <span>${countryLabel(db.scope_country)}</span>
         ${db.created_at ? `<span>🕐 ${fmtDateTime(db.created_at)}</span>` : ''}
         ${db.closes_at ? `<span>Cierra ${fmtDate(db.closes_at)}</span>` : ''}
       </div>
@@ -1303,7 +1320,7 @@ function renderDebate(db, res, items) {
             <div class="winner-pct">${winnerPct}</div>
             <div class="winner-pct-label">%</div>
           </div>
-          <div class="winner-votes-label">${total} voto${total !== 1 ? 's' : ''} verificado${total !== 1 ? 's' : ''} · ${db.scope_country || 'Global'}</div>
+          <div class="winner-votes-label">${total} voto${total !== 1 ? 's' : ''} verificado${total !== 1 ? 's' : ''} · ${countryLabel(db.scope_country)}</div>
           <button class="share-result-btn" onclick="shareResult(${debId})">
             <span style="font-size:18px;">↑</span> Compartir resultado
           </button>

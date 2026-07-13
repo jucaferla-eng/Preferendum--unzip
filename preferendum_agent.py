@@ -593,6 +593,111 @@ NEWS_COUNTRIES = [
     {'code': 'PY', 'lang': 'es', 'name': 'Paraguay',       'ceid': 'PY:es'},
 ]
 
+# ── LOCAL MEDIA FEEDS POR PAÍS ───────────────────────────────────────────────
+# RSS directos de los medios locales más importantes de cada país.
+# Complementa Google News con noticias más específicas y locales.
+LOCAL_MEDIA_FEEDS = {
+    'CL': [
+        {'url': 'https://www.latercera.com/feeds/rss.xml',         'name': 'La Tercera'},
+        {'url': 'https://www.emol.com/rss/noticias.xml',           'name': 'Emol'},
+        {'url': 'https://www.biobiochile.cl/rss/todas-las-noticias.rss', 'name': 'BioBioChile'},
+        {'url': 'https://www.df.cl/rss/df-rss.xml',                'name': 'Diario Financiero'},
+    ],
+    'AR': [
+        {'url': 'https://www.clarin.com/rss/politica/',            'name': 'Clarín Política'},
+        {'url': 'https://www.lanacion.com.ar/arc/outboundfeeds/rss/', 'name': 'La Nación AR'},
+        {'url': 'https://www.infobae.com/feeds/rss/',              'name': 'Infobae AR'},
+        {'url': 'https://www.pagina12.com.ar/rss/portada',         'name': 'Página 12'},
+    ],
+    'MX': [
+        {'url': 'https://www.eluniversal.com.mx/rss.xml',          'name': 'El Universal MX'},
+        {'url': 'https://www.milenio.com/rss',                     'name': 'Milenio'},
+        {'url': 'https://www.proceso.com.mx/rss/feed.rss',         'name': 'Proceso'},
+        {'url': 'https://www.jornada.com.mx/rss/politica.xml',     'name': 'La Jornada'},
+    ],
+    'PE': [
+        {'url': 'https://elcomercio.pe/arcio/rss/',                'name': 'El Comercio PE'},
+        {'url': 'https://rpp.pe/rss/politica.xml',                 'name': 'RPP'},
+        {'url': 'https://larepublica.pe/rss/',                     'name': 'La República PE'},
+    ],
+    'CO': [
+        {'url': 'https://www.eltiempo.com/rss/politica.xml',       'name': 'El Tiempo CO'},
+        {'url': 'https://www.semana.com/rss/',                     'name': 'Semana'},
+        {'url': 'https://www.elespectador.com/arc/outboundfeeds/rss/', 'name': 'El Espectador'},
+    ],
+    'ES': [
+        {'url': 'https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada', 'name': 'El País'},
+        {'url': 'https://e00-elmundo.uecdn.es/rss/portada.xml',    'name': 'El Mundo'},
+        {'url': 'https://www.publico.es/rss/',                     'name': 'Público ES'},
+    ],
+    'US': [
+        {'url': 'https://rss.nytimes.com/services/xml/rss/nyt/US.xml', 'name': 'NYT US News'},
+        {'url': 'https://feeds.washingtonpost.com/rss/politics',   'name': 'Washington Post Politics'},
+        {'url': 'https://rss.politico.com/politics-news.xml',      'name': 'Politico'},
+    ],
+    'BR': [
+        {'url': 'https://feeds.folha.uol.com.br/poder/rss091.xml', 'name': 'Folha Poder'},
+        {'url': 'https://g1.globo.com/rss/g1/politica/feed.xml',   'name': 'G1 Política'},
+        {'url': 'https://agenciabrasil.ebc.com.br/rss/politica/feed.xml', 'name': 'Agência Brasil'},
+    ],
+    'DE': [
+        {'url': 'https://www.spiegel.de/schlagzeilen/index.rss',   'name': 'Der Spiegel'},
+        {'url': 'https://www.faz.net/rss/aktuell/',                'name': 'FAZ'},
+        {'url': 'https://www.dw.com/de/rss-informationen-von-dw/rss-9773',  'name': 'DW Deutsch'},
+    ],
+    'GB': [
+        {'url': 'https://feeds.bbci.co.uk/news/uk/rss.xml',        'name': 'BBC UK'},
+        {'url': 'https://www.theguardian.com/uk-news/rss',          'name': 'Guardian UK'},
+        {'url': 'https://www.independent.co.uk/rss',               'name': 'The Independent'},
+    ],
+    'FR': [
+        {'url': 'https://www.lemonde.fr/rss/une.xml',              'name': 'Le Monde'},
+        {'url': 'https://www.lefigaro.fr/rss/figaro_actualites.xml','name': 'Le Figaro'},
+        {'url': 'https://www.liberation.fr/arc/outboundfeeds/rss/', 'name': 'Libération'},
+    ],
+    'IT': [
+        {'url': 'https://www.corriere.it/rss/homepage.xml',        'name': 'Corriere della Sera'},
+        {'url': 'https://www.repubblica.it/rss/homepage/rss2.0.xml','name': 'La Repubblica'},
+    ],
+    'AU': [
+        {'url': 'https://www.abc.net.au/news/feed/2942460/rss.xml', 'name': 'ABC News AU'},
+        {'url': 'https://www.theguardian.com/australia-news/rss',   'name': 'Guardian Australia'},
+    ],
+    'CA': [
+        {'url': 'https://rss.cbc.ca/lineup/canada.xml',            'name': 'CBC Canada'},
+        {'url': 'https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/politics/', 'name': 'Globe and Mail'},
+    ],
+    'IN': [
+        {'url': 'https://timesofindia.indiatimes.com/rssfeeds/296589292.cms', 'name': 'Times of India'},
+        {'url': 'https://www.thehindu.com/news/national/feeder/default.rss',  'name': 'The Hindu'},
+        {'url': 'https://feeds.ndtv.com/ndtv/rss?feedtype=googlenews&name=topstories', 'name': 'NDTV'},
+    ],
+    'ZA': [
+        {'url': 'https://feeds.news24.com/articles/news24/TopStories/rss', 'name': 'News24 ZA'},
+        {'url': 'https://www.dailymaverick.co.za/feed/',            'name': 'Daily Maverick'},
+    ],
+    'VE': [
+        {'url': 'https://www.elnacional.com/feed/',                'name': 'El Nacional VE'},
+    ],
+    'UY': [
+        {'url': 'https://www.elpais.com.uy/rss/',                  'name': 'El País UY'},
+    ],
+    'EC': [
+        {'url': 'https://www.elcomercio.com/feed/',                'name': 'El Comercio EC'},
+        {'url': 'https://www.eluniverso.com/rss/',                 'name': 'El Universo EC'},
+    ],
+    'BO': [
+        {'url': 'https://www.lostiempos.com/rss.xml',              'name': 'Los Tiempos BO'},
+    ],
+    'PY': [
+        {'url': 'https://www.abc.com.py/rss/',                     'name': 'ABC Color PY'},
+    ],
+    'NG': [
+        {'url': 'https://www.vanguardngr.com/feed/',               'name': 'Vanguard Nigeria'},
+        {'url': 'https://punchng.com/feed/',                       'name': 'Punch Nigeria'},
+    ],
+}
+
 # International media RSS feeds — produces GLOBAL scope debates (interés mundial)
 GLOBAL_FEEDS = [
     {'url': 'https://feeds.bbci.co.uk/news/world/rss.xml',
@@ -1189,6 +1294,13 @@ def run_daily_debates() -> dict:
                     'category': debate.get('category', '?'),
                 })
 
+    # 4. Local media debates — RSS directos de medios locales por país
+    print('[NewsAgent] === LOCAL MEDIA FEEDS ===')
+    local_result = run_local_media_debates(max_per_country=1)
+    total_created += local_result['debates_created']
+    total_skipped += local_result['debates_skipped']
+    summary.extend(local_result['summary'])
+
     print(f'[NewsAgent] Done — created {total_created} debates, skipped {total_skipped}')
     return {
         'debates_created': total_created,
@@ -1196,6 +1308,79 @@ def run_daily_debates() -> dict:
         'summary': summary,
         'run_at': datetime.utcnow().isoformat(),
     }
+
+
+def run_local_media_debates(max_per_country: int = 1) -> dict:
+    """
+    Fetch RSS feeds from local media per country (La Tercera, Clarín, El Comercio, etc.)
+    and create country-scoped debates. Complements Google News with real local media.
+    """
+    global _created_this_run
+    total_created = 0
+    total_skipped = 0
+    summary = []
+
+    # Build a lookup: country_code → country meta (for _analyze_news_item)
+    country_meta_by_code = {c['code']: c for c in NEWS_COUNTRIES}
+
+    for country_code, feeds in LOCAL_MEDIA_FEEDS.items():
+        country_meta = country_meta_by_code.get(country_code, {
+            'code': country_code, 'lang': 'es', 'name': country_code, 'ceid': '',
+        })
+        created_for_country = 0
+
+        for feed in feeds:
+            if created_for_country >= max_per_country:
+                break
+
+            print(f'[LocalAgent] {country_code} — {feed["name"]}...')
+            items = _fetch_rss_feed(feed['url'], max_items=6)
+            if not items:
+                continue
+
+            for item in items:
+                if created_for_country >= max_per_country:
+                    break
+
+                title_hash = hashlib.sha256(item['title'].encode()).hexdigest()[:16]
+                if title_hash in _created_this_run:
+                    total_skipped += 1
+                    continue
+
+                # Tag the item with the local media name so the AI knows the source
+                enriched_item = {
+                    **item,
+                    'description': f"[Fuente: {feed['name']}]\n{item.get('description', '')}",
+                }
+
+                debate = _analyze_news_item(enriched_item, country_meta, is_global=False)
+                if not debate:
+                    total_skipped += 1
+                    continue
+
+                q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
+                if q_hash in _created_this_run:
+                    total_skipped += 1
+                    continue
+
+                _created_this_run.add(title_hash)
+                _created_this_run.add(q_hash)
+
+                if _create_debate_via_api(debate, country_code):
+                    created_for_country += 1
+                    total_created += 1
+                    summary.append({
+                        'country': country_code,
+                        'source': feed['name'],
+                        'question': debate['question'][:80],
+                        'category': debate.get('category', '?'),
+                    })
+                    break  # one per feed, move to next feed
+
+        print(f'[LocalAgent] {country_code}: created {created_for_country}')
+
+    print(f'[LocalAgent] Done — created {total_created} local debates')
+    return {'debates_created': total_created, 'debates_skipped': total_skipped, 'summary': summary}
 
 
 def _fetch_rss_feed(url: str, max_items: int = 5) -> list:
