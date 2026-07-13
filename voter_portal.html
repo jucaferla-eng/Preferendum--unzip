@@ -542,23 +542,20 @@ async function translateText(text, fromLang, toLang) {
   return null;
 }
 
-async function toggleTranslation(btn, opId, originalText, fromLang, toLang) {
-  if (btn.dataset.translated === '1') {
-    document.getElementById('op-text-' + opId).textContent = originalText;
-    btn.textContent = '🌐 Traducir';
-    btn.dataset.translated = '0';
-    return;
-  }
-  btn.textContent = '…';
-  btn.disabled = true;
-  const translated = await translateText(originalText, fromLang, toLang);
-  btn.disabled = false;
-  if (translated) {
-    document.getElementById('op-text-' + opId).textContent = translated;
-    btn.textContent = '↩ Original';
-    btn.dataset.translated = '1';
-  } else {
-    btn.textContent = '🌐 Traducir';
+async function autoTranslateOpinions(viewLang) {
+  // Find all opinion text elements that need translation and translate them automatically
+  const els = document.querySelectorAll('[data-op-lang]');
+  for (const el of els) {
+    const fromLang = el.dataset.opLang;
+    if (!fromLang || fromLang === viewLang) continue;
+    const original = el.dataset.original;
+    if (!original) continue;
+    const translated = await translateText(original, fromLang, viewLang);
+    if (translated && translated !== original) {
+      el.textContent = translated;
+      const note = el.nextElementSibling;
+      if (note && note.classList.contains('translated-note')) note.style.display = '';
+    }
   }
 }
 
@@ -1301,16 +1298,13 @@ function renderDebate(db, res, items) {
         html += renderAdCard(it.ad);
       } else if (it.type === 'opinion') {
         const op = it.opinion;
-        const opLang   = LANG_BY_COUNTRY[op.country] || 'es';
-        const viewLang = LANG_BY_COUNTRY[userCountry]  || 'es';
-        const needsTranslation = opLang !== viewLang;
-        const translateBtn = needsTranslation
-          ? `<button id="tr-btn-${op.id}" data-translated="0" onclick="toggleTranslation(this,${op.id},${JSON.stringify(op.text)},${JSON.stringify(opLang)},${JSON.stringify(viewLang)})" style="background:none;border:1px solid #d9d4c9;border-radius:20px;padding:2px 10px;font-size:11px;color:#7a7570;cursor:pointer;margin-left:6px;">🌐 Traducir</button>`
-          : '';
+        const opLang  = LANG_BY_COUNTRY[op.country] || 'es';
+        const flag    = op.country ? countryLabel(op.country).split(' ')[0] : '';
         opBuf.push(`<div class="opinion-card">
-          <div class="opinion-text" id="op-text-${op.id}">${esc(op.text)}</div>
+          <div class="opinion-text" data-op-lang="${opLang}" data-original="${esc(op.text)}">${esc(op.text)}</div>
+          <div class="translated-note" style="display:none;font-size:10px;color:#aaa;margin-top:2px;">🌐 Traducido automáticamente</div>
           <div class="opinion-meta">
-            <span>by: ${esc(op.user_name || 'Anónimo')}${op.country ? ` ${countryLabel(op.country).split(' ')[0]}` : ''}${op.knowledge_level ? ` · <span class="opinion-level">${levelLabel[op.knowledge_level] || op.knowledge_level}</span>` : ''}${translateBtn}</span>
+            <span>by: ${esc(op.user_name || 'Anónimo')}${flag ? ` ${flag}` : ''}${op.knowledge_level ? ` · <span class="opinion-level">${levelLabel[op.knowledge_level] || op.knowledge_level}</span>` : ''}</span>
             <span class="opinion-thumbs">👍 👎</span>
           </div>
         </div>`);
@@ -1469,6 +1463,9 @@ function renderDebate(db, res, items) {
     </div>
   `;
   loadComments(debId);
+  // Auto-translate opinions to the viewer's language in the background
+  const viewLang = LANG_BY_COUNTRY[userCountry] || 'es';
+  autoTranslateOpinions(viewLang);
 }
 
 // ── renderVoteSection — renders Q1, Q2 or Q3 depending on branchCurrentQ ──
