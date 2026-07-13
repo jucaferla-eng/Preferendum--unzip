@@ -1923,7 +1923,7 @@ function showError(msg, detail) {
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtDate(s) { try { return new Date(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); } catch{ return s; } }
-function fmtDateTime(s) { try { const d = new Date(s); return d.toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'numeric'}) + ' · ' + d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}); } catch{ return s; } }
+function fmtDateTime(s) { try { const utc = s && !s.endsWith('Z') && !s.includes('+') ? s + 'Z' : s; const d = new Date(utc); return d.toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'numeric'}) + ' · ' + d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}); } catch{ return s; } }
 
 // Init country-dependent fields once DOM is fully ready
 document.addEventListener('DOMContentLoaded', toggleCommuneField);
