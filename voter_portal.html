@@ -531,6 +531,14 @@ const LANG_BY_COUNTRY = {
   GL:'es',
 };
 
+// Detect viewer language from browser (most accurate — reflects actual device language)
+// Falls back to country-based mapping if browser language is not recognized
+const BROWSER_LANG = (navigator.language || navigator.userLanguage || 'es').split('-')[0].toLowerCase();
+const SUPPORTED_LANGS = ['es','en','pt','de','fr','it','ja','ko'];
+function getViewerLang() {
+  return SUPPORTED_LANGS.includes(BROWSER_LANG) ? BROWSER_LANG : (LANG_BY_COUNTRY[userCountry] || 'es');
+}
+
 async function translateText(text, fromLang, toLang) {
   if (!text || fromLang === toLang) return null;
   try {
@@ -1174,7 +1182,7 @@ async function loadDebates() {
     });
     list.innerHTML = items.join('');
     // Auto-translate debate titles in list for non-Spanish users
-    const vl = LANG_BY_COUNTRY[userCountry] || 'es';
+    const vl = getViewerLang();
     if (vl !== 'es') translateDebatePage(vl);
   } catch(e) { list.innerHTML = '<div class="no-debates">Error loading consultations.</div>'; }
 }
@@ -1510,8 +1518,7 @@ function renderDebate(db, res, items) {
     </div>
   `;
   loadComments(debId);
-  const viewLang = LANG_BY_COUNTRY[userCountry] || 'es';
-  // Translate debate title, context, options + opinions automatically
+  const viewLang = getViewerLang();
   translateDebatePage(viewLang);
   autoTranslateOpinions(viewLang);
 }
