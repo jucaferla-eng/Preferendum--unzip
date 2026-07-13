@@ -662,6 +662,34 @@ app.add_middleware(CORSMiddleware,
     allow_origins=['*'], allow_credentials=True,
     allow_methods=['*'], allow_headers=['*'])
 
+# ── AUTO-SCHEDULER: corre el agente de noticias todos los días a las 7am UTC ──
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    import threading
+
+    def _run_daily_debates_job():
+        try:
+            from preferendum_agent import run_daily_debates
+            print('[Scheduler] Iniciando run_daily_debates...')
+            result = run_daily_debates()
+            print(f'[Scheduler] Terminado — creados: {result.get("debates_created", 0)}, saltados: {result.get("debates_skipped", 0)}')
+        except Exception as e:
+            print(f'[Scheduler] Error en run_daily_debates: {e}')
+
+    _scheduler = BackgroundScheduler(timezone='UTC')
+    _scheduler.add_job(
+        _run_daily_debates_job,
+        CronTrigger(hour=7, minute=0),   # 7:00 AM UTC todos los días
+        id='daily_debates',
+        replace_existing=True,
+        misfire_grace_time=3600,         # si el server estaba caído, corre igual dentro de 1h
+    )
+    _scheduler.start()
+    print('[Scheduler] ✅ Scheduler activo — debates diarios a las 7:00 AM UTC')
+except Exception as _sched_err:
+    print(f'[Scheduler] ⚠️ No se pudo iniciar scheduler: {_sched_err}')
+
 SECRET = os.getenv('JWT_SECRET', 'preferendum-jwt-secret-2024')
 security          = HTTPBearer()
 security_optional = HTTPBearer(auto_error=False)  # no lanza error si no hay token
