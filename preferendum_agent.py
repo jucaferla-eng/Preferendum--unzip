@@ -1308,6 +1308,13 @@ def run_daily_debates() -> dict:
     total_skipped += culture_result['debates_skipped']
     summary.extend(culture_result['summary'])
 
+    # 6. Conocimiento general — geografía, ciencias, matemáticas, historia, tecnología, etc.
+    print('[NewsAgent] === CONOCIMIENTO GENERAL ===')
+    general_result = run_general_knowledge_debates(max_debates=5)
+    total_created += general_result['debates_created']
+    total_skipped += general_result['debates_skipped']
+    summary.extend(general_result['summary'])
+
     print(f'[NewsAgent] Done — created {total_created} debates, skipped {total_skipped}')
     return {
         'debates_created': total_created,
@@ -1746,6 +1753,204 @@ def run_culture_debates(max_per_country: int = 2) -> dict:
                 })
 
     print(f'[CultureAgent] Done — created {total_created} culture/everyday debates')
+    return {'debates_created': total_created, 'debates_skipped': total_skipped, 'summary': summary}
+
+
+# ── CONOCIMIENTO GENERAL — temas para debates globales de cualquier área ──────
+GENERAL_KNOWLEDGE_TOPICS = [
+    # Geografía
+    'cuál es el país más grande del mundo por superficie y por población',
+    'cuáles son las 7 maravillas del mundo moderno',
+    'cuál es el océano más profundo y sus misterios inexplorados',
+    'cuáles son las ciudades más pobladas del planeta',
+    'qué continente tiene mayor biodiversidad',
+    'cuáles son las montañas más altas del mundo',
+    'cuál es el río más largo del planeta: Nilo vs Amazonas',
+    'qué países tienen más de 4 zonas horarias',
+
+    # Ciencias naturales
+    'cuál ha sido el descubrimiento científico más importante del siglo XX',
+    'qué planeta del sistema solar tiene más posibilidades de albergar vida',
+    'cuál es la enfermedad más difícil de erradicar en la historia humana',
+    'qué animal es el más inteligente después del ser humano',
+    'cuál es el fenómeno natural más destructivo: terremotos, tsunamis o huracanes',
+    'qué energía renovable tiene más potencial para reemplazar los combustibles fósiles',
+    'cuál es el mayor desafío científico del siglo XXI',
+    'qué es más antiguo: el universo, la Tierra o la vida',
+
+    # Matemáticas y lógica
+    'si pudieras aprender una rama de las matemáticas, ¿cuál elegirías?',
+    'qué aplicación de las matemáticas ha cambiado más al mundo: estadística, criptografía o inteligencia artificial',
+    'cuál es el problema matemático sin resolver más famoso',
+    'qué es más útil en la vida diaria: álgebra, geometría o estadística',
+    'si el universo es infinito, ¿puede tener un centro?',
+
+    # Historia
+    'cuál fue el imperio más influyente de la historia humana',
+    'cuál fue el invento que más cambió la historia: la rueda, la imprenta o internet',
+    'cuál fue el conflicto bélico más devastador de la historia',
+    'qué civilización antigua fue más avanzada para su época',
+    'quién fue el líder histórico que más impactó al mundo',
+    'cuál fue el momento más importante de la historia del siglo XX',
+
+    # Tecnología e IA
+    'cuál es el mayor riesgo de la inteligencia artificial para la humanidad',
+    'en cuántos años la IA superará la inteligencia humana en todas las áreas',
+    'cuál tecnología cambiará más al mundo en los próximos 10 años: IA, robótica o biotecnología',
+    'debería regularse la inteligencia artificial a nivel global',
+    'los robots y la IA generarán más empleo del que eliminarán',
+    'cuál red social ha tenido mayor impacto en la sociedad',
+
+    # Astronomía y espacio
+    'cuándo llegará el ser humano a Marte',
+    'existe vida inteligente en otros planetas',
+    'deberían los humanos colonizar otros planetas antes de solucionar los problemas de la Tierra',
+    'cuál misión espacial ha sido la más importante de la historia',
+    'qué es más asombroso: el espacio exterior o el fondo del océano',
+
+    # Filosofía y ética
+    'es la ética universal posible o cada cultura tiene sus propios valores',
+    'si pudieras vivir para siempre, ¿lo harías?',
+    'el libre albedrío existe o todo está determinado',
+    'qué es más importante: la libertad individual o el bienestar colectivo',
+    'la tecnología hace a los seres humanos más felices o más ansiosos',
+
+    # Naturaleza y medioambiente
+    'cuál es la mayor amenaza para la biodiversidad del planeta',
+    'en cuántos años el cambio climático será irreversible si no actuamos',
+    'qué acción individual tiene mayor impacto positivo en el medioambiente',
+    'deberían los gobiernos prohibir los plásticos de un solo uso globalmente',
+    'la deforestación o la contaminación marina: ¿cuál es más urgente de resolver?',
+
+    # Curiosidades y cultura pop
+    'cuál es el idioma más difícil de aprender en el mundo',
+    'qué libro ha influido más en la humanidad',
+    'cuál deporte es el más completo físicamente',
+    'qué artista o músico ha marcado más a la humanidad',
+    'si pudieras visitar cualquier época histórica, ¿cuál elegirías?',
+    'qué superpoder elegiría la mayoría de las personas si pudiera tener uno',
+]
+
+
+def _generate_general_knowledge_question(topic: str) -> dict | None:
+    """Ask Claude to generate a global opinion debate from a general knowledge topic."""
+    api_key = get_api_key()
+    if not api_key:
+        return None
+
+    prompt = f"""Eres el agente de Preferendum que crea debates de conocimiento general y cultura universal.
+
+Tema: {topic}
+
+Tu misión: crear UNA pregunta de debate interesante y entretenida sobre este tema, pensada para que cualquier persona del mundo pueda opinar. Puede ser de geografía, ciencias, historia, matemáticas, tecnología, filosofía, astronomía o cualquier área del conocimiento.
+
+Un buen debate de conocimiento general en Preferendum:
+✓ Es curiosa, interesante y genera ganas de votar y debatir
+✓ No tiene una sola respuesta "correcta" — invita a opinar o a elegir
+✓ Las opciones reflejan distintas perspectivas o respuestas posibles
+✓ La pregunta empieza con "¿" y es directa (máx 120 caracteres)
+✓ El contexto da datos o reflexiones que enriquecen el tema (2-3 frases)
+✓ Mínimo 3 opciones, máximo 4
+✓ Siempre en español
+
+Ejemplos del tono buscado:
+- "¿Cuál fue el invento que más cambió la historia de la humanidad?"
+- "¿Debería la humanidad colonizar Marte antes de resolver los problemas de la Tierra?"
+- "¿Qué es más asombroso: el espacio exterior o el fondo del océano?"
+- "¿Cuál superpotencia tendrá más influencia global en 2050?"
+
+Responde con este JSON exacto:
+{{
+  "suitable": true,
+  "question": "¿[pregunta clara en español, máx 120 caracteres]?",
+  "context": "[2-3 frases de contexto con datos o reflexiones que enriquecen el debate]",
+  "options": ["Opción A", "Opción B", "Opción C"],
+  "scope": "global",
+  "category": "[una de: science/technology/history/geography/philosophy/environment/astronomy/mathematics/culture/general]"
+}}
+
+Responde ÚNICAMENTE con JSON válido, sin texto adicional."""
+
+    try:
+        resp = _requests.post(
+            'https://api.anthropic.com/v1/messages',
+            headers={
+                'x-api-key':         api_key,
+                'anthropic-version': '2023-06-01',
+                'content-type':      'application/json',
+            },
+            json={
+                'model':      'claude-haiku-4-5-20251001',
+                'max_tokens': 600,
+                'messages':   [{'role': 'user', 'content': prompt}],
+            },
+            timeout=25,
+        )
+        if not resp.ok:
+            return None
+        raw = resp.json().get('content', [{}])[0].get('text', '')
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not m:
+            return None
+        data = json.loads(m.group())
+        if not data.get('suitable') or not data.get('question') or not data.get('options'):
+            return None
+        return data
+    except Exception as e:
+        print(f'[GeneralAgent] Error: {e}')
+        return None
+
+
+def run_general_knowledge_debates(max_debates: int = 5) -> dict:
+    """
+    Generate global debates on general knowledge topics: geography, science,
+    math, history, technology, philosophy, astronomy, etc.
+    These are global scope — anyone in the world can participate.
+    """
+    global _created_this_run
+    import random
+    total_created = 0
+    total_skipped = 0
+    summary = []
+
+    # Pick random topics each run so content is always fresh
+    selected = random.sample(GENERAL_KNOWLEDGE_TOPICS, min(max_debates * 3, len(GENERAL_KNOWLEDGE_TOPICS)))
+    created = 0
+
+    for topic in selected:
+        if created >= max_debates:
+            break
+
+        topic_hash = hashlib.sha256(f'general:{topic}'.encode()).hexdigest()[:16]
+        if topic_hash in _created_this_run:
+            total_skipped += 1
+            continue
+
+        print(f'[GeneralAgent] Topic: "{topic[:60]}..."')
+        debate = _generate_general_knowledge_question(topic)
+        if not debate:
+            total_skipped += 1
+            continue
+
+        q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
+        if q_hash in _created_this_run:
+            total_skipped += 1
+            continue
+
+        _created_this_run.add(topic_hash)
+        _created_this_run.add(q_hash)
+        debate['scope'] = 'global'
+
+        if _create_debate_via_api(debate, 'GL'):
+            created += 1
+            total_created += 1
+            summary.append({
+                'topic': topic[:50],
+                'question': debate['question'][:80],
+                'category': debate.get('category', '?'),
+            })
+
+    print(f'[GeneralAgent] Done — created {total_created} general knowledge debates')
     return {'debates_created': total_created, 'debates_skipped': total_skipped, 'summary': summary}
 
 
