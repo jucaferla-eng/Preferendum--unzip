@@ -517,6 +517,7 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 const API = '';
 let token = localStorage.getItem('pref_voter_token') || '';
 let userCountry = localStorage.getItem('pref_voter_country') || 'CL';
+let userSelfieVerified = localStorage.getItem('pref_selfie_verified') === 'true';
 
 const LANG_BY_COUNTRY = {
   CL:'es', AR:'es', PE:'es', MX:'es', CO:'es', ES:'es', UY:'es',
@@ -775,6 +776,10 @@ async function validateAndShowApp() {
         userCountry = d.country;
         localStorage.setItem('pref_voter_country', userCountry);
       }
+      if (d.selfie_verified !== undefined) {
+        userSelfieVerified = !!d.selfie_verified;
+        localStorage.setItem('pref_selfie_verified', userSelfieVerified ? 'true' : 'false');
+      }
       showApp();
     } else { token=''; localStorage.removeItem('pref_voter_token'); }
   } catch(e) { showApp(); }
@@ -801,9 +806,11 @@ async function doLogin() {
     token = d.token || d.access_token;
     userName = d.user?.name || email.split('@')[0];
     userCountry = d.user?.country || 'CL';
+    userSelfieVerified = !!(d.user?.selfie_verified);
     localStorage.setItem('pref_voter_token', token);
     localStorage.setItem('pref_voter_name', userName);
     localStorage.setItem('pref_voter_country', userCountry);
+    localStorage.setItem('pref_selfie_verified', userSelfieVerified ? 'true' : 'false');
     showApp();
   } catch(e) { document.getElementById('l-err').textContent = 'Connection error'; }
 }
@@ -885,7 +892,7 @@ function toggleCommuneField() {
 
   // National ID label
   const idLabel = document.getElementById('r-id-label');
-  if (idLabel) idLabel.textContent = (ID_LABEL[country] || 'National ID') + ' (opcional)';
+  if (idLabel) idLabel.textContent = (ID_LABEL[country] || 'National ID') + ' *';
 }
 
 async function doRegister() {
@@ -901,8 +908,9 @@ async function doRegister() {
   const country = document.getElementById('r-country').value;
   const commune = document.getElementById('r-commune').value.trim();
 
-  if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'Name, email and password are required'; return; }
-  if (pass.length < 6) { document.getElementById('r-err').textContent = 'Password minimum 6 characters'; return; }
+  if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'Nombre, email y contraseña son obligatorios'; return; }
+  if (pass.length < 6) { document.getElementById('r-err').textContent = 'La contraseña debe tener mínimo 6 caracteres'; return; }
+  if (!rut) { document.getElementById('r-err').textContent = (document.getElementById('r-id-label')?.textContent?.replace(' *','') || 'Documento de identidad') + ' es obligatorio'; return; }
   document.getElementById('r-err').textContent = '';
 
   const btn = document.querySelector('#tab-register .btn');
@@ -1949,6 +1957,49 @@ function branchGoBack() {
   }
 }
 
+async function generateDeviceFingerprint() {
+  const components = [];
+
+  // Canvas fingerprint
+  try {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    ctx.textBaseline = 'top';
+    ctx.font = '14px Arial';
+    ctx.fillStyle = '#f60';
+    ctx.fillRect(0, 0, 80, 30);
+    ctx.fillStyle = '#069';
+    ctx.fillText('Preferendum🗳️', 2, 2);
+    components.push(canvas.toDataURL());
+  } catch(_) {}
+
+  // WebGL renderer
+  try {
+    const gl = document.createElement('canvas').getContext('webgl');
+    if (gl) {
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      if (ext) {
+        components.push(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL));
+        components.push(gl.getParameter(ext.UNMASKED_VENDOR_WEBGL));
+      }
+    }
+  } catch(_) {}
+
+  // Screen + timezone + navigator
+  components.push(screen.width + 'x' + screen.height + 'x' + screen.colorDepth);
+  components.push(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  components.push(navigator.language || '');
+  components.push(navigator.platform || '');
+  components.push(String(navigator.hardwareConcurrency || 0));
+  components.push(navigator.userAgent);
+
+  const raw = components.join('|');
+  const msgBuf = new TextEncoder().encode(raw);
+  const hashBuf = await crypto.subtle.digest('SHA-256', msgBuf);
+  const hashArr = Array.from(new Uint8Array(hashBuf));
+  return hashArr.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 async function castVote() {
   if (selectedOption === null || !currentDebate) return;
 
@@ -1992,11 +2043,24 @@ async function castVote() {
   submitBtn.disabled = true;
   submitBtn.innerHTML = '<span class="spinner"></span> Anchoring to blockchain…';
   if (errEl) errEl.textContent = '';
+  const deviceFp = await generateDeviceFingerprint().catch(() => '');
+
+  // Face verification for users who have completed selfie verification
+  let faceToken = '';
+  if (userSelfieVerified) {
+    faceToken = await requestFaceToken(debateId);
+    if (!faceToken) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = t('submitBtn');
+      return;
+    }
+  }
+
   try {
     const r = await fetch(`${API}/debates/${debateId}/vote`, {
       method: 'POST',
       headers: {'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body: JSON.stringify({ option_index: q1Idx, vote_chain: newPath })
+      body: JSON.stringify({ option_index: q1Idx, vote_chain: newPath, device_fp: deviceFp, face_token: faceToken })
     });
     let d = {};
     try { d = await r.json(); } catch(_) {}
@@ -2170,6 +2234,102 @@ function fmtDateTime(s) { try { const utc = s && !s.endsWith('Z') && !s.includes
 
 // Init country-dependent fields once DOM is fully ready
 document.addEventListener('DOMContentLoaded', toggleCommuneField);
+
+// ── Face Verification Modal ──────────────────────────────────────────────────
+let _faceStream = null;
+let _faceResolve = null;
+
+function _buildFaceModal() {
+  const el = document.createElement('div');
+  el.id = 'face-modal';
+  el.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  el.innerHTML = `
+    <div style="background:#1a1a2e;border-radius:16px;padding:28px 24px;width:340px;max-width:95vw;text-align:center;color:#fff;">
+      <h3 style="margin:0 0 8px;font-size:18px;">Verificación facial</h3>
+      <p style="margin:0 0 16px;font-size:13px;color:#aaa;">Mira directo a la cámara para confirmar tu identidad</p>
+      <video id="face-video" autoplay playsinline muted style="width:100%;border-radius:10px;background:#000;"></video>
+      <canvas id="face-canvas" style="display:none;"></canvas>
+      <p id="face-err" style="color:#ff6b6b;font-size:12px;min-height:18px;margin:8px 0 0;"></p>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button onclick="cancelFaceVerify()" style="flex:1;padding:10px;border-radius:8px;border:1px solid #555;background:transparent;color:#aaa;cursor:pointer;">Cancelar</button>
+        <button id="face-capture-btn" onclick="captureFace()" style="flex:2;padding:10px;border-radius:8px;border:none;background:#4f46e5;color:#fff;font-weight:600;cursor:pointer;">Tomar foto</button>
+      </div>
+    </div>`;
+  el.style.display = 'none';
+  document.body.appendChild(el);
+  return el;
+}
+
+async function requestFaceToken(debateId) {
+  return new Promise(async (resolve) => {
+    _faceResolve = resolve;
+    let modal = document.getElementById('face-modal');
+    if (!modal) modal = _buildFaceModal();
+    modal.style.display = 'flex';
+    document.getElementById('face-err').textContent = '';
+    document.getElementById('face-capture-btn').disabled = false;
+    document.getElementById('face-capture-btn').textContent = 'Tomar foto';
+    try {
+      _faceStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+      document.getElementById('face-video').srcObject = _faceStream;
+    } catch(_) {
+      document.getElementById('face-err').textContent = 'No se pudo acceder a la cámara';
+    }
+    modal._debateId = debateId;
+  });
+}
+
+async function captureFace() {
+  const video = document.getElementById('face-video');
+  const canvas = document.getElementById('face-canvas');
+  const btn = document.getElementById('face-capture-btn');
+  const errEl = document.getElementById('face-err');
+  const modal = document.getElementById('face-modal');
+
+  btn.disabled = true;
+  btn.textContent = 'Verificando…';
+  errEl.textContent = '';
+
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+
+  canvas.toBlob(async (blob) => {
+    try {
+      const fd = new FormData();
+      fd.append('file', blob, 'selfie.jpg');
+      const r = await fetch(`${API}/debates/${modal._debateId}/face-token`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token },
+        body: fd
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        errEl.textContent = d.detail || 'Verificación fallida. Intenta de nuevo.';
+        btn.disabled = false;
+        btn.textContent = 'Tomar foto';
+        return;
+      }
+      _closeFaceModal();
+      _faceResolve(d.token);
+    } catch(_) {
+      errEl.textContent = 'Error de red. Intenta de nuevo.';
+      btn.disabled = false;
+      btn.textContent = 'Tomar foto';
+    }
+  }, 'image/jpeg', 0.85);
+}
+
+function cancelFaceVerify() {
+  _closeFaceModal();
+  if (_faceResolve) _faceResolve(null);
+}
+
+function _closeFaceModal() {
+  const modal = document.getElementById('face-modal');
+  if (modal) modal.style.display = 'none';
+  if (_faceStream) { _faceStream.getTracks().forEach(t => t.stop()); _faceStream = null; }
+}
 </script>
 </body>
 </html>

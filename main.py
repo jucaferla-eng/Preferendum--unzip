@@ -1026,6 +1026,8 @@ class OpinionCreate(BaseModel):
 class CastVoteRequest(BaseModel):
     option_index: int
     vote_chain:   list = []
+    device_fp:    str  = ''
+    face_token:   str  = ''
 
 class VerifyVoteRequest(BaseModel):
     code: str
@@ -1489,6 +1491,17 @@ class VoterRegisterInput(BaseModel):
 @app.post('/voter/register')
 def voter_register(data: VoterRegisterInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
     """Register a voter — sends email OTP for verification."""
+    if not data.national_id or not data.national_id.strip():
+        raise HTTPException(400, 'El documento de identidad (RUT/DNI/CPF) es obligatorio')
+    # Normalize and check national ID not already registered
+    nid_clean = re.sub(r'[\.\-\s]', '', data.national_id.strip().upper())
+    dup_nid = db.query(User).filter(
+        User.national_id.isnot(None),
+        User.national_id != '',
+        User.national_id == data.national_id.strip()
+    ).first()
+    if dup_nid:
+        raise HTTPException(409, 'Este documento de identidad ya está registrado')
     existing = db.query(User).filter(User.email == data.email).first()
     if existing:
         if not bcrypt.checkpw(data.password.encode(), existing.password.encode()):
@@ -1792,6 +1805,7 @@ def me(user: User = Depends(get_current_user)):
         'verify_level': user.verify_level, 'is_verified': user.is_verified,
         'email_verified': user.email_verified,
         'phone_verified': user.phone_verified,
+        'selfie_verified': user.selfie_verified,
     }
 
 # ══════════════════════════════════════════════════════════════
@@ -2924,6 +2938,54 @@ def post_comment(debate_id: int, body: dict, user: User = Depends(get_current_us
     return {'comment': {'id': c.id, 'user_name': c.user_name, 'text': c.text,
                         'created_at': c.created_at.isoformat()}}
 
+@app.post('/debates/{debate_id}/face-token')
+async def get_face_vote_token(
+    debate_id: int,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Verifica la cara del votante y devuelve un token de 5 min para votar."""
+    if not user.selfie_verified:
+        raise HTTPException(400, 'Debes verificar tu identidad con selfie antes de votar')
+
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Consulta no encontrada')
+    if get_debate_status(debate) != 'live':
+        raise HTTPException(400, 'La consulta no está activa')
+
+    contents = await file.read()
+    aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+    ref = db.query(SelfieLog).filter(
+        SelfieLog.user_id == user.id,
+        SelfieLog.verified == True,
+        SelfieLog.face_bytes != None
+    ).order_by(SelfieLog.created_at.desc()).first()
+
+    if aws_key and ref and ref.face_bytes:
+        try:
+            rek = _rekognition_client()
+            resp = rek.compare_faces(
+                SourceImage={'Bytes': base64.b64decode(ref.face_bytes)},
+                TargetImage={'Bytes': contents},
+                SimilarityThreshold=80.0
+            )
+            matches = resp.get('FaceMatches', [])
+            if not matches or matches[0]['Similarity'] / 100.0 < 0.90:
+                raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
+        except ClientError:
+            pass  # AWS falló: dejamos pasar en modo demo
+
+    token = jwt.encode({
+        'sub': user.id,
+        'debate_id': debate_id,
+        'type': 'face_vote',
+        'exp': datetime.utcnow() + timedelta(minutes=5)
+    }, SECRET, algorithm='HS256')
+    return {'token': token}
+
+
 @app.post('/debates/{debate_id}/vote')
 def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_verified_user), db: Session = Depends(get_db)):
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
@@ -2931,6 +2993,19 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         raise HTTPException(404, 'Consultation not found')
     if get_debate_status(debate) != 'live':
         raise HTTPException(400, 'Consultation is not open for voting')
+
+    # Bloqueo 0: verificación facial (solo para usuarios con selfie verificada)
+    if user.selfie_verified:
+        if not data.face_token:
+            raise HTTPException(403, 'Se requiere verificación facial para votar')
+        try:
+            payload = jwt.decode(data.face_token, SECRET, algorithms=['HS256'])
+            if payload.get('type') != 'face_vote' or payload.get('sub') != user.id or payload.get('debate_id') != debate_id:
+                raise HTTPException(403, 'Token de verificación facial inválido')
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(403, 'La verificación facial expiró — por favor tómate una nueva selfie')
+        except Exception:
+            raise HTTPException(403, 'Token de verificación facial inválido')
 
     # Bloqueo 1: misma cuenta
     already = db.query(HasVotedLog).filter(
@@ -2960,15 +3035,26 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         if nid_voted:
             raise HTTPException(409, 'Este documento de identidad ya votó en esta consulta')
 
-    # Bloqueo 4: mismo aparato físico por IMEI
-    imei_log = db.query(IMEILog).filter(IMEILog.user_id == user.id).first()
-    if imei_log:
-        imei_voted = db.query(ImeiVoteLog).filter(
-            ImeiVoteLog.imei_hash == imei_log.imei_hash,
+    # Bloqueo 4: mismo aparato físico por device fingerprint
+    fp_hash = None
+    if data.device_fp:
+        fp_hash = hash_str(data.device_fp, 'pref-fp-')
+        fp_voted = db.query(ImeiVoteLog).filter(
+            ImeiVoteLog.imei_hash == fp_hash,
             ImeiVoteLog.debate_id == debate_id
         ).first()
-        if imei_voted:
+        if fp_voted:
             raise HTTPException(409, 'Este aparato ya fue usado para votar en esta consulta')
+    else:
+        # Fallback: check legacy IMEILog
+        imei_log = db.query(IMEILog).filter(IMEILog.user_id == user.id).first()
+        if imei_log:
+            imei_voted = db.query(ImeiVoteLog).filter(
+                ImeiVoteLog.imei_hash == imei_log.imei_hash,
+                ImeiVoteLog.debate_id == debate_id
+            ).first()
+            if imei_voted:
+                raise HTTPException(409, 'Este aparato ya fue usado para votar en esta consulta')
 
     opts = json.loads(debate.options or '[]')
     if data.option_index < 0 or data.option_index >= len(opts):
@@ -2993,7 +3079,13 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         db.add(SimVoteLog(debate_id=debate_id, phone_hash=phone_hash))
     if user.national_id:
         db.add(NationalIdVoteLog(debate_id=debate_id, national_id_hash=nid_hash))
-    if imei_log:
+    if fp_hash:
+        # Store device fingerprint in IMEILog if not already registered for this user
+        existing_fp = db.query(IMEILog).filter(IMEILog.user_id == user.id).first()
+        if not existing_fp:
+            db.add(IMEILog(user_id=user.id, imei_hash=fp_hash, device_info='browser-fp'))
+        db.add(ImeiVoteLog(debate_id=debate_id, imei_hash=fp_hash))
+    elif imei_log:
         db.add(ImeiVoteLog(debate_id=debate_id, imei_hash=imei_log.imei_hash))
     counts = json.loads(debate.vote_counts or '{}')
     counts[option] = counts.get(option, 0) + 1
