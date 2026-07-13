@@ -560,6 +560,40 @@ async function autoTranslateOpinions(viewLang) {
   }
 }
 
+async function translateDebatePage(viewLang) {
+  if (!viewLang || viewLang === 'es') return;
+
+  // Translate debate title
+  const titleEl = document.querySelector('.detail-title');
+  if (titleEl && titleEl.textContent.trim()) {
+    const t = await translateText(titleEl.textContent.trim(), 'es', viewLang);
+    if (t) titleEl.textContent = t;
+  }
+
+  // Translate context
+  const ctxEl = document.querySelector('.detail-context');
+  if (ctxEl && ctxEl.textContent.trim()) {
+    const t = await translateText(ctxEl.textContent.trim(), 'es', viewLang);
+    if (t) ctxEl.textContent = t;
+  }
+
+  // Translate vote option buttons
+  const optSpans = document.querySelectorAll('.option-btn span');
+  for (const span of optSpans) {
+    if (!span.textContent.trim()) continue;
+    const t = await translateText(span.textContent.trim(), 'es', viewLang);
+    if (t) span.textContent = t;
+  }
+
+  // Translate debate titles in the list view
+  const listTitles = document.querySelectorAll('.debate-card .debate-title');
+  for (const el of listTitles) {
+    if (!el.textContent.trim()) continue;
+    const t = await translateText(el.textContent.trim(), 'es', viewLang);
+    if (t) el.textContent = t;
+  }
+}
+
 const COUNTRY_LABELS = {
   'CL':'🇨🇱 Chile','AR':'🇦🇷 Argentina','PE':'🇵🇪 Perú','MX':'🇲🇽 México',
   'CO':'🇨🇴 Colombia','BR':'🇧🇷 Brasil','US':'🇺🇸 Estados Unidos','ES':'🇪🇸 España',
@@ -1139,6 +1173,9 @@ async function loadDebates() {
       }
     });
     list.innerHTML = items.join('');
+    // Auto-translate debate titles in list for non-Spanish users
+    const vl = LANG_BY_COUNTRY[userCountry] || 'es';
+    if (vl !== 'es') translateDebatePage(vl);
   } catch(e) { list.innerHTML = '<div class="no-debates">Error loading consultations.</div>'; }
 }
 
@@ -1473,8 +1510,9 @@ function renderDebate(db, res, items) {
     </div>
   `;
   loadComments(debId);
-  // Auto-translate opinions to the viewer's language in the background
   const viewLang = LANG_BY_COUNTRY[userCountry] || 'es';
+  // Translate debate title, context, options + opinions automatically
+  translateDebatePage(viewLang);
   autoTranslateOpinions(viewLang);
 }
 
