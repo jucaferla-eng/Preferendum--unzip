@@ -518,6 +518,50 @@ const API = '';
 let token = localStorage.getItem('pref_voter_token') || '';
 let userCountry = localStorage.getItem('pref_voter_country') || 'CL';
 
+const LANG_BY_COUNTRY = {
+  CL:'es', AR:'es', PE:'es', MX:'es', CO:'es', ES:'es', UY:'es',
+  VE:'es', EC:'es', BO:'es', PY:'es',
+  BR:'pt', PT:'pt',
+  US:'en', GB:'en', AU:'en', CA:'en', ZA:'en', NG:'en', IN:'en',
+  DE:'de', AT:'de', CH:'de',
+  FR:'fr', BE:'fr',
+  IT:'it',
+  JP:'ja',
+  KR:'ko',
+  GL:'es',
+};
+
+async function translateText(text, fromLang, toLang) {
+  if (!text || fromLang === toLang) return null;
+  try {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${fromLang}|${toLang}`;
+    const r = await fetch(url);
+    const d = await r.json();
+    if (d.responseStatus === 200) return d.responseData.translatedText;
+  } catch(e) {}
+  return null;
+}
+
+async function toggleTranslation(btn, opId, originalText, fromLang, toLang) {
+  if (btn.dataset.translated === '1') {
+    document.getElementById('op-text-' + opId).textContent = originalText;
+    btn.textContent = '🌐 Traducir';
+    btn.dataset.translated = '0';
+    return;
+  }
+  btn.textContent = '…';
+  btn.disabled = true;
+  const translated = await translateText(originalText, fromLang, toLang);
+  btn.disabled = false;
+  if (translated) {
+    document.getElementById('op-text-' + opId).textContent = translated;
+    btn.textContent = '↩ Original';
+    btn.dataset.translated = '1';
+  } else {
+    btn.textContent = '🌐 Traducir';
+  }
+}
+
 const COUNTRY_LABELS = {
   'CL':'🇨🇱 Chile','AR':'🇦🇷 Argentina','PE':'🇵🇪 Perú','MX':'🇲🇽 México',
   'CO':'🇨🇴 Colombia','BR':'🇧🇷 Brasil','US':'🇺🇸 Estados Unidos','ES':'🇪🇸 España',
@@ -1257,10 +1301,16 @@ function renderDebate(db, res, items) {
         html += renderAdCard(it.ad);
       } else if (it.type === 'opinion') {
         const op = it.opinion;
+        const opLang   = LANG_BY_COUNTRY[op.country] || 'es';
+        const viewLang = LANG_BY_COUNTRY[userCountry]  || 'es';
+        const needsTranslation = opLang !== viewLang;
+        const translateBtn = needsTranslation
+          ? `<button id="tr-btn-${op.id}" data-translated="0" onclick="toggleTranslation(this,${op.id},${JSON.stringify(op.text)},${JSON.stringify(opLang)},${JSON.stringify(viewLang)})" style="background:none;border:1px solid #d9d4c9;border-radius:20px;padding:2px 10px;font-size:11px;color:#7a7570;cursor:pointer;margin-left:6px;">🌐 Traducir</button>`
+          : '';
         opBuf.push(`<div class="opinion-card">
-          <div class="opinion-text">${esc(op.text)}</div>
+          <div class="opinion-text" id="op-text-${op.id}">${esc(op.text)}</div>
           <div class="opinion-meta">
-            <span>by: ${esc(op.user_name || 'Anónimo')}${op.knowledge_level ? ` · <span class="opinion-level">${levelLabel[op.knowledge_level] || op.knowledge_level}</span>` : ''}</span>
+            <span>by: ${esc(op.user_name || 'Anónimo')}${op.country ? ` ${countryLabel(op.country).split(' ')[0]}` : ''}${op.knowledge_level ? ` · <span class="opinion-level">${levelLabel[op.knowledge_level] || op.knowledge_level}</span>` : ''}${translateBtn}</span>
             <span class="opinion-thumbs">👍 👎</span>
           </div>
         </div>`);

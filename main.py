@@ -2857,6 +2857,7 @@ def get_opinions(debate_id: int,
             'knowledge_level': op.knowledge_level,
             'user_name': op.user_name,
             'created_at': op.created_at.isoformat(),
+            'country': op.country or '',
         }})
         # Ad after every 2 opinions starting from the 1st (i=0,2,4,...)
         if i % 2 == 0:
