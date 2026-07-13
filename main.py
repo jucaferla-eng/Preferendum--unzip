@@ -1788,6 +1788,7 @@ def login(data: LoginInput, db: Session = Depends(get_db)):
 def me(user: User = Depends(get_current_user)):
     return {
         'id': user.id, 'name': user.name, 'email': user.email,
+        'country': user.country or 'CL',
         'verify_level': user.verify_level, 'is_verified': user.is_verified,
         'email_verified': user.email_verified,
         'phone_verified': user.phone_verified,

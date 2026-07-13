@@ -584,9 +584,16 @@ if (token) validateAndShowApp();
 async function validateAndShowApp() {
   try {
     const r = await fetch(`${API}/auth/me`, {headers:{'Authorization':'Bearer '+token}});
-    if (r.ok) { const d = await r.json(); userName = d.name || userName; showApp(); }
-    else { token=''; localStorage.removeItem('pref_voter_token'); }
-  } catch(e) { showApp(); } // offline — try anyway
+    if (r.ok) {
+      const d = await r.json();
+      userName = d.name || userName;
+      if (d.country) {
+        userCountry = d.country;
+        localStorage.setItem('pref_voter_country', userCountry);
+      }
+      showApp();
+    } else { token=''; localStorage.removeItem('pref_voter_token'); }
+  } catch(e) { showApp(); }
 }
 
 // ── AUTH ──
