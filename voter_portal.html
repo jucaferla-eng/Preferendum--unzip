@@ -510,7 +510,7 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
       <div class="detail-card" style="margin-top:12px;" id="verify-identity-card">
         <div style="font-size:14px;font-weight:600;color:#060810;margin-bottom:4px;">Verificación de identidad</div>
         <div style="font-size:12px;color:#7a7570;margin-bottom:12px;" id="verify-identity-status">Sube tu cédula y una selfie para habilitar la verificación facial al votar.</div>
-        <button class="btn" onclick="showVerifyScreen()" id="verify-identity-btn" style="width:100%;">Verificar identidad</button>
+        <button class="btn" onclick="openSelfieVerifyModal()" id="verify-identity-btn" style="width:100%;">Verificar identidad →</button>
       </div>
       <div class="section-title" style="margin-top:24px;">Mis votos</div>
       <div id="my-votes-list"><div class="loading"><span class="spinner"></span></div></div>
@@ -2277,6 +2277,92 @@ function fmtDateTime(s) { try { const utc = s && !s.endsWith('Z') && !s.includes
 
 // Init country-dependent fields once DOM is fully ready
 document.addEventListener('DOMContentLoaded', toggleCommuneField);
+
+// ── Profile Selfie Verify Modal ──────────────────────────────────────────────
+let _selfieStream = null;
+
+function _buildSelfieModal() {
+  const el = document.createElement('div');
+  el.id = 'selfie-verify-modal';
+  el.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;';
+  el.innerHTML = `
+    <div style="background:#1a1a2e;border-radius:16px;padding:28px 24px;width:340px;max-width:95vw;text-align:center;color:#fff;">
+      <h3 style="margin:0 0 4px;font-size:18px;">Verificar identidad</h3>
+      <p style="margin:0 0 16px;font-size:12px;color:#aaa;">Mira directo a la cámara y toca el botón</p>
+      <video id="sv-video" autoplay playsinline muted style="width:100%;border-radius:10px;background:#000;"></video>
+      <canvas id="sv-canvas" style="display:none;"></canvas>
+      <p id="sv-err" style="color:#ff6b6b;font-size:12px;min-height:18px;margin:8px 0 0;"></p>
+      <p id="sv-score" style="font-size:14px;font-weight:700;min-height:20px;margin:4px 0 0;"></p>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button onclick="closeSelfieVerifyModal()" style="flex:1;padding:10px;border-radius:8px;border:1px solid #555;background:transparent;color:#aaa;cursor:pointer;">Cerrar</button>
+        <button id="sv-btn" onclick="captureSelfieVerify()" style="flex:2;padding:10px;border-radius:8px;border:none;background:#4f46e5;color:#fff;font-weight:600;cursor:pointer;">📸 Tomar foto</button>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  return el;
+}
+
+async function openSelfieVerifyModal() {
+  let modal = document.getElementById('selfie-verify-modal');
+  if (!modal) modal = _buildSelfieModal();
+  document.getElementById('sv-err').textContent = '';
+  document.getElementById('sv-score').textContent = '';
+  const btn = document.getElementById('sv-btn');
+  btn.disabled = false; btn.textContent = '📸 Tomar foto'; btn.style.background = '#4f46e5';
+  modal.style.display = 'flex';
+  try {
+    _selfieStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+    document.getElementById('sv-video').srcObject = _selfieStream;
+  } catch(_) {
+    document.getElementById('sv-err').textContent = 'No se pudo acceder a la cámara';
+  }
+}
+
+async function captureSelfieVerify() {
+  const video = document.getElementById('sv-video');
+  const canvas = document.getElementById('sv-canvas');
+  const btn = document.getElementById('sv-btn');
+  const errEl = document.getElementById('sv-err');
+  const scoreEl = document.getElementById('sv-score');
+  btn.disabled = true; btn.textContent = 'Verificando…'; errEl.textContent = ''; scoreEl.textContent = '';
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  canvas.toBlob(async (blob) => {
+    try {
+      const fd = new FormData();
+      fd.append('file', blob, 'selfie.jpg');
+      const r = await fetch(`${API}/verify/selfie`, {
+        method: 'POST', headers: {'Authorization': 'Bearer ' + token}, body: fd
+      });
+      const d = await r.json();
+      if (r.ok && d.verified) {
+        userSelfieVerified = true;
+        localStorage.setItem('pref_selfie_verified', 'true');
+        btn.textContent = '✅ Verificado';
+        btn.style.background = '#16a34a';
+        scoreEl.style.color = '#4ade80';
+        scoreEl.textContent = d.match_score ? `Amazon Rekognition: ${d.match_score}% coincidencia` : 'Identidad verificada';
+        // Update profile card
+        const st = document.getElementById('verify-identity-status');
+        if (st) { st.textContent = '✅ Identidad verificada — la cámara se activará al votar.'; st.style.color = '#16a34a'; }
+        setTimeout(() => closeSelfieVerifyModal(), 2500);
+      } else {
+        errEl.textContent = d.detail || `La cara no coincide${d.match_score ? ' (' + d.match_score + '%)' : ''}. Intenta con mejor iluminación.`;
+        btn.disabled = false; btn.textContent = '📸 Intentar de nuevo';
+      }
+    } catch(_) {
+      errEl.textContent = 'Error de red. Intenta de nuevo.';
+      btn.disabled = false; btn.textContent = '📸 Intentar de nuevo';
+    }
+  }, 'image/jpeg', 0.85);
+}
+
+function closeSelfieVerifyModal() {
+  const modal = document.getElementById('selfie-verify-modal');
+  if (modal) modal.style.display = 'none';
+  if (_selfieStream) { _selfieStream.getTracks().forEach(t => t.stop()); _selfieStream = null; }
+}
 
 // ── Face Verification Modal ──────────────────────────────────────────────────
 let _faceStream = null;
