@@ -1301,6 +1301,13 @@ def run_daily_debates() -> dict:
     total_skipped += local_result['debates_skipped']
     summary.extend(local_result['summary'])
 
+    # 5. Cultura y vida cotidiana — Claude genera preguntas sin necesitar noticias
+    print('[NewsAgent] === CULTURA Y VIDA COTIDIANA ===')
+    culture_result = run_culture_debates(max_per_country=2)
+    total_created += culture_result['debates_created']
+    total_skipped += culture_result['debates_skipped']
+    summary.extend(culture_result['summary'])
+
     print(f'[NewsAgent] Done — created {total_created} debates, skipped {total_skipped}')
     return {
         'debates_created': total_created,
@@ -1380,6 +1387,365 @@ def run_local_media_debates(max_per_country: int = 1) -> dict:
         print(f'[LocalAgent] {country_code}: created {created_for_country}')
 
     print(f'[LocalAgent] Done — created {total_created} local debates')
+    return {'debates_created': total_created, 'debates_skipped': total_skipped, 'summary': summary}
+
+
+# ── TEMAS COTIDIANOS Y CULTURALES POR PAÍS ────────────────────────────────────
+# Cada entrada es un "disparador" temático que Claude convierte en pregunta cívica.
+# No requiere noticias — Claude genera la pregunta basándose en contexto cultural real.
+EVERYDAY_TOPICS = {
+    'CL': [
+        'transporte público en Santiago (Metro, Transantiago, micros)',
+        'costo de vida en Chile y el acceso a la vivienda',
+        'calidad del sistema de salud público (FONASA vs ISAPRE)',
+        'educación universitaria y el costo del crédito CAE',
+        'seguridad ciudadana y delincuencia en las ciudades chilenas',
+        'pensiones en Chile y el sistema AFP',
+        'trabajo remoto y la jornada laboral de 40 horas',
+        'turismo interno en Chile: playas, montañas, Patagonia',
+        'gastronomía chilena: empanadas, cazuela, mariscos',
+        'identidad regional: diferencias entre norte, centro y sur de Chile',
+    ],
+    'AR': [
+        'inflación en Argentina y el poder adquisitivo de los argentinos',
+        'transporte público en Buenos Aires (subte, colectivos)',
+        'sistema de salud público y privado en Argentina',
+        'educación pública universitaria gratuita en Argentina',
+        'seguridad en el conurbano bonaerense',
+        'dólar blue y la economía informal en Argentina',
+        'cultura del asado y la gastronomía argentina',
+        'fútbol argentino: clubes, pasiones y rivalidades',
+        'turismo interno: Patagonia, Bariloche, Mendoza, Iguazú',
+        'trabajo y empleo informal en Argentina',
+    ],
+    'PE': [
+        'transporte público en Lima (Metropolitano, combis)',
+        'calidad de la educación pública en Perú',
+        'sistema de salud en Perú: EsSalud y postas médicas',
+        'gastronomía peruana: ceviche, lomo saltado, causa',
+        'turismo en Perú: Machu Picchu, Cusco, Amazonía',
+        'seguridad ciudadana en Lima y otras ciudades peruanas',
+        'acceso al agua potable en zonas rurales del Perú',
+        'informalidad laboral en el Perú',
+        'minería y su impacto en las comunidades peruanas',
+        'identidad cultural: costumbres andinas, amazónicas y costeñas',
+    ],
+    'MX': [
+        'transporte público en Ciudad de México (Metro, Metrobús)',
+        'seguridad y violencia en México: narco y crimen organizado',
+        'sistema de salud en México: IMSS, ISSSTE, INSABI',
+        'gastronomía mexicana: tacos, enchiladas, mole',
+        'turismo en México: playas, pueblos mágicos, pirámides',
+        'educación pública en México y la calidad de las escuelas',
+        'economía informal y los trabajos por cuenta propia en México',
+        'migración mexicana hacia Estados Unidos',
+        'identidad cultural indígena en México',
+        'vivienda y urbanización en las grandes ciudades mexicanas',
+    ],
+    'CO': [
+        'transporte en Bogotá (TransMilenio, ciclovías)',
+        'seguridad y paz en Colombia después del acuerdo de paz',
+        'gastronomía colombiana: bandeja paisa, arepas, sancocho',
+        'turismo en Colombia: Cartagena, Medellín, Coffee Region',
+        'sistema de salud en Colombia (EPS)',
+        'educación pública y cobertura en zonas rurales de Colombia',
+        'cultura cafetera y la industria del café en Colombia',
+        'economía informal y el rebusque en Colombia',
+        'identidad regional: diferencias entre costeños, paisas y rolos',
+        'medioambiente y biodiversidad colombiana',
+    ],
+    'BR': [
+        'transporte público en São Paulo y Río de Janeiro',
+        'desigualdad social en Brasil y las favelas',
+        'sistema de salud público en Brasil (SUS)',
+        'gastronomía brasileña: feijoada, churrasco, açaí',
+        'turismo en Brasil: Amazonía, playas, Carnaval',
+        'educación pública y acceso a universidades en Brasil',
+        'seguridad pública en las grandes ciudades brasileñas',
+        'medioambiente y deforestación del Amazonas',
+        'trabajo informal y economía del gig en Brasil',
+        'identidad cultural: samba, futebol, diversidad regional',
+    ],
+    'US': [
+        'healthcare system and the cost of medical care in the US',
+        'public transportation in major US cities',
+        'housing affordability in US cities',
+        'student loan debt and the cost of college education',
+        'gun control and public safety in the United States',
+        'immigration policy and its impact on American communities',
+        'remote work and the future of work in the US',
+        'food culture: fast food, diversity, farm-to-table movement',
+        'mental health awareness and access to therapy in the US',
+        'environmental policy and climate action in the United States',
+    ],
+    'ES': [
+        'transporte público en España: AVE, cercanías, metro',
+        'acceso a la vivienda en Madrid y Barcelona',
+        'sistema de salud público en España',
+        'gastronomía española: paella, tapas, jamón ibérico',
+        'turismo en España y su impacto en las ciudades',
+        'empleo juvenil y la precariedad laboral en España',
+        'identidad regional: cataluña, euskadi, galicia, andalucía',
+        'educación pública y universitaria en España',
+        'conciliación laboral y familiar en España',
+        'energías renovables y política medioambiental en España',
+    ],
+    'GB': [
+        'NHS (National Health Service) and healthcare waiting times',
+        'housing crisis and rent prices in London and other UK cities',
+        'public transport in the UK: trains, buses, London Underground',
+        'cost of living crisis in the United Kingdom',
+        'education system: state schools vs private schools in the UK',
+        'British food culture: traditional dishes and multicultural food scene',
+        'tourism in the UK: London, Scotland, countryside',
+        'work-life balance and remote working in the UK',
+        'environmental policy and green energy in Britain',
+        'regional identity: England, Scotland, Wales, Northern Ireland',
+    ],
+    'DE': [
+        'transporte público en Alemania (Deutsche Bahn, S-Bahn, U-Bahn)',
+        'sistema de salud en Alemania (Krankenkasse)',
+        'gastronomía alemana: cerveza, salchichas, pan',
+        'vivienda y alquileres en Berlín y Múnich',
+        'energías renovables y la Energiewende alemana',
+        'educación pública y el sistema de formación dual en Alemania',
+        'integración de inmigrantes en la sociedad alemana',
+        'trabajo y la cultura laboral alemana',
+        'turismo en Alemania: castillos, bosques, ciudades históricas',
+        'identidad regional: Baviera, Berlín, Renania',
+    ],
+    'FR': [
+        'transporte público en París (Métro, RER, TGV)',
+        'sistema de salud público en Francia',
+        'gastronomía francesa: baguette, queso, vino, alta cocina',
+        'vivienda y acceso a alquileres en París',
+        'educación pública y las grandes écoles en Francia',
+        'huelgas y protestas en Francia: cultura del movimiento social',
+        'turismo en Francia: París, Provenza, la Costa Azul',
+        'identidad cultural francesa y el laicismo',
+        'trabajo y las 35 horas semanales en Francia',
+        'medioambiente y política climática en Francia',
+    ],
+    'IT': [
+        'transporte público en Roma y Milán',
+        'gastronomía italiana: pizza, pasta, gelato',
+        'turismo en Italia: Roma, Venecia, Florencia, Cinque Terre',
+        'sistema de salud público en Italia (SSN)',
+        'emigración de jóvenes italianos al extranjero',
+        'vivienda en las grandes ciudades italianas',
+        'identidad regional: norte vs sur de Italia',
+        'patrimonio cultural y la conservación del arte italiano',
+        'trabajo informal y la economía italiana',
+        'moda y diseño: la industria italiana de la moda',
+    ],
+    'AU': [
+        'housing affordability crisis in Australian cities',
+        'public transport in Sydney, Melbourne and Brisbane',
+        'healthcare system in Australia (Medicare)',
+        'Australian food culture: barbecue, meat pies, multicultural cuisine',
+        'tourism: Great Barrier Reef, Uluru, coastal cities',
+        'climate change and bushfires in Australia',
+        'education: public vs private schools in Australia',
+        'cost of living in Australian capital cities',
+        'Indigenous Australian culture and reconciliation',
+        'immigration and multiculturalism in Australia',
+    ],
+    'CA': [
+        'housing affordability in Toronto and Vancouver',
+        'public healthcare system in Canada (provincial health care)',
+        'public transport in Canadian cities',
+        'Canadian food culture: poutine, maple syrup, multicultural cuisine',
+        'tourism in Canada: Rockies, Niagara Falls, Quebec City',
+        'bilingualism: French and English in Canada',
+        'immigration and multiculturalism in Canada',
+        'climate and environmental policy in Canada',
+        'Indigenous rights and reconciliation in Canada',
+        'cost of living and inflation in Canada',
+    ],
+}
+# Para países sin lista específica, usar temas genéricos adaptados al contexto local
+EVERYDAY_TOPICS_GENERIC = [
+    'transporte público y movilidad urbana',
+    'acceso a la salud pública',
+    'costo de la educación',
+    'seguridad ciudadana',
+    'acceso a la vivienda',
+    'gastronomía y cultura culinaria local',
+    'turismo interno y lugares emblemáticos',
+    'empleo informal y economía local',
+    'identidad cultural y tradiciones',
+    'medioambiente y recursos naturales',
+]
+
+
+def _generate_culture_question(country: dict, topic: str) -> dict | None:
+    """
+    Ask Claude to generate a civic debate question about an everyday/cultural topic
+    for a specific country — no news article required.
+    """
+    api_key = get_api_key()
+    if not api_key:
+        return None
+
+    prompt = f"""Eres el agente de Preferendum que crea debates cívicos sobre la vida cotidiana y cultura de cada país.
+
+País: {country['name']} ({country['code']})
+Tema: {topic}
+
+Tu misión: crear UNA pregunta de debate cívico sobre este tema cotidiano o cultural, pensada para que los ciudadanos de {country['name']} opinen y compartan su experiencia real.
+
+Un buen debate cotidiano de Preferendum:
+✓ Pregunta algo que afecte la vida diaria de las personas en ese país
+✓ Puede ser sobre cultura, gastronomía, transporte, costumbres, identidad, trabajo, ocio
+✓ Tiene opciones variadas que reflejan posturas reales de la gente
+✓ La pregunta empieza con "¿" y es directa (máx 120 caracteres)
+✓ El contexto explica el tema en 2-3 frases cercanas y concretas
+✓ Mínimo 3 opciones, máximo 4 — que cubran el espectro de opinión
+✓ La pregunta se formula en español, incluso si el país habla otro idioma
+
+Ejemplos del tono buscado:
+- "¿Cuál es el mayor problema del transporte público en Lima?"
+- "¿Debería el asado argentino ser patrimonio cultural nacional?"
+- "¿Qué valoras más de la gastronomía chilena?"
+
+Responde con este JSON exacto:
+{{
+  "suitable": true,
+  "question": "¿[pregunta clara en español, máx 120 caracteres]?",
+  "context": "[2-3 frases de contexto cercano y concreto sobre el tema en ese país]",
+  "options": ["Opción A", "Opción B", "Opción C"],
+  "scope": "country",
+  "category": "[una de: social/culture/transport/health/education/economy/environment/housing/food/tourism/identity/work]"
+}}
+
+Responde ÚNICAMENTE con JSON válido, sin texto adicional."""
+
+    try:
+        resp = _requests.post(
+            'https://api.anthropic.com/v1/messages',
+            headers={
+                'x-api-key':         api_key,
+                'anthropic-version': '2023-06-01',
+                'content-type':      'application/json',
+            },
+            json={
+                'model':      'claude-haiku-4-5-20251001',
+                'max_tokens': 600,
+                'messages':   [{'role': 'user', 'content': prompt}],
+            },
+            timeout=25,
+        )
+        if not resp.ok:
+            return None
+        raw = resp.json().get('content', [{}])[0].get('text', '')
+        raw = raw.strip()
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not m:
+            return None
+        data = json.loads(m.group())
+        if not data.get('suitable'):
+            return None
+        if not data.get('question') or not data.get('options'):
+            return None
+        return data
+    except Exception as e:
+        print(f'[CultureAgent] Error generating question: {e}')
+        return None
+
+
+def run_culture_debates(max_per_country: int = 2) -> dict:
+    """
+    Generate civic debates about everyday life, culture and local identity for each country.
+    Uses Claude directly — no news feed needed.
+    """
+    global _created_this_run
+    import random
+    total_created = 0
+    total_skipped = 0
+    summary = []
+
+    country_meta_by_code = {c['code']: c for c in NEWS_COUNTRIES}
+
+    for country_code, topics in EVERYDAY_TOPICS.items():
+        country_meta = country_meta_by_code.get(country_code, {
+            'code': country_code, 'lang': 'es', 'name': country_code, 'ceid': '',
+        })
+
+        # Pick random topics so each run produces different questions
+        selected = random.sample(topics, min(max_per_country * 2, len(topics)))
+        created_for_country = 0
+
+        for topic in selected:
+            if created_for_country >= max_per_country:
+                break
+
+            topic_hash = hashlib.sha256(f'{country_code}:{topic}'.encode()).hexdigest()[:16]
+            if topic_hash in _created_this_run:
+                total_skipped += 1
+                continue
+
+            print(f'[CultureAgent] {country_code} — "{topic[:50]}..."')
+            debate = _generate_culture_question(country_meta, topic)
+            if not debate:
+                total_skipped += 1
+                continue
+
+            q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
+            if q_hash in _created_this_run:
+                total_skipped += 1
+                continue
+
+            _created_this_run.add(topic_hash)
+            _created_this_run.add(q_hash)
+
+            if _create_debate_via_api(debate, country_code):
+                created_for_country += 1
+                total_created += 1
+                summary.append({
+                    'country': country_code,
+                    'topic': topic[:50],
+                    'question': debate['question'][:80],
+                    'category': debate.get('category', '?'),
+                })
+
+        # For countries without specific topics, use generic ones
+        if country_code not in EVERYDAY_TOPICS and created_for_country < max_per_country:
+            for topic in random.sample(EVERYDAY_TOPICS_GENERIC, min(2, len(EVERYDAY_TOPICS_GENERIC))):
+                if created_for_country >= max_per_country:
+                    break
+                debate = _generate_culture_question(country_meta, topic)
+                if debate and _create_debate_via_api(debate, country_code):
+                    created_for_country += 1
+                    total_created += 1
+
+        print(f'[CultureAgent] {country_code}: created {created_for_country}')
+
+    # Also run generic topics for countries in NEWS_COUNTRIES without specific topics
+    for country in NEWS_COUNTRIES:
+        if country['code'] in EVERYDAY_TOPICS:
+            continue
+        topics = random.sample(EVERYDAY_TOPICS_GENERIC, min(max_per_country, len(EVERYDAY_TOPICS_GENERIC)))
+        created_for_country = 0
+        for topic in topics:
+            if created_for_country >= max_per_country:
+                break
+            debate = _generate_culture_question(country, topic)
+            if not debate:
+                continue
+            q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
+            if q_hash in _created_this_run:
+                continue
+            _created_this_run.add(q_hash)
+            if _create_debate_via_api(debate, country['code']):
+                created_for_country += 1
+                total_created += 1
+                summary.append({
+                    'country': country['code'],
+                    'topic': topic[:50],
+                    'question': debate['question'][:80],
+                })
+
+    print(f'[CultureAgent] Done — created {total_created} culture/everyday debates')
     return {'debates_created': total_created, 'debates_skipped': total_skipped, 'summary': summary}
 
 
