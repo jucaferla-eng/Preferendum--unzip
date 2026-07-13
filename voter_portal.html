@@ -507,6 +507,11 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         <div style="font-size:13px;color:#7a7570;margin-bottom:16px;" id="profile-email"></div>
         <button class="btn" style="background:#ede9e0;color:#060810;border:1px solid #e8e4dc;" onclick="doLogout()">Cerrar sesión</button>
       </div>
+      <div class="detail-card" style="margin-top:12px;" id="verify-identity-card">
+        <div style="font-size:14px;font-weight:600;color:#060810;margin-bottom:4px;">Verificación de identidad</div>
+        <div style="font-size:12px;color:#7a7570;margin-bottom:12px;" id="verify-identity-status">Sube tu cédula y una selfie para habilitar la verificación facial al votar.</div>
+        <button class="btn" onclick="showVerifyScreen()" id="verify-identity-btn" style="width:100%;">Verificar identidad</button>
+      </div>
       <div class="section-title" style="margin-top:24px;">Mis votos</div>
       <div id="my-votes-list"><div class="loading"><span class="spinner"></span></div></div>
     </div>
@@ -1200,6 +1205,24 @@ function navTo(tab) {
     document.getElementById('profile-email').textContent = localStorage.getItem('pref_voter_email') || '';
     setActiveTab('tab-profile');
     loadMyVotes();
+    // Update verification card status
+    const verifyStatus = document.getElementById('verify-identity-status');
+    const verifyBtn = document.getElementById('verify-identity-btn');
+    if (userSelfieVerified) {
+      verifyStatus.textContent = '✅ Identidad verificada — la cámara se activará automáticamente al votar.';
+      verifyStatus.style.color = '#16a34a';
+      verifyBtn.textContent = 'Actualizar verificación';
+      verifyBtn.style.background = '#ede9e0';
+      verifyBtn.style.color = '#060810';
+      verifyBtn.style.border = '1px solid #e8e4dc';
+    } else {
+      verifyStatus.textContent = 'Sube tu cédula y una selfie para habilitar la verificación facial al votar.';
+      verifyStatus.style.color = '#7a7570';
+      verifyBtn.textContent = 'Verificar identidad →';
+      verifyBtn.style.background = '';
+      verifyBtn.style.color = '';
+      verifyBtn.style.border = '';
+    }
   }
 }
 
