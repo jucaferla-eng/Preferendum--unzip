@@ -2371,8 +2371,12 @@ def list_debates(
 ):
     q = db.query(Debate)
     if country and country != 'ALL':
-        # 'GLOBAL' and 'GL' are both used for worldwide debates — show them to everyone
-        q = q.filter(Debate.scope_country.in_([country, 'ALL', 'GLOBAL', 'GL']))
+        # Also show debates with no country set (legacy debates) and global ones to everyone
+        q = q.filter(
+            Debate.scope_country.in_([country, 'ALL', 'GLOBAL', 'GL']) |
+            (Debate.scope_country == None) |
+            (Debate.scope_country == '')
+        )
     debates = q.order_by(Debate.created_at.desc()).limit(limit).all()
     safe = []
     for d in debates:
