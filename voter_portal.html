@@ -531,6 +531,115 @@ const LANG_BY_COUNTRY = {
   GL:'es',
 };
 
+// ── UI STRING TRANSLATIONS ────────────────────────────────────────────────────
+const UI_STRINGS = {
+  es: {
+    phase1: '01 · Tu Perspectiva', phase2: '02 · Debate', phase3: '03 · Tu Voto',
+    shareTitle: 'Comparte tu perspectiva',
+    shareSub: 'Lee el debate primero, luego expresa tu postura. Otros la leerán antes de votar.',
+    levelFamiliar: 'Conozco el tema', levelGood: 'Estoy bien informado/a', levelExpert: 'Soy experto/a en el área',
+    opPlaceholder: 'Escribe tu opinión aquí (mínimo 20 caracteres)…',
+    submitBtn: 'Publicar mi perspectiva →',
+    lockTitle: 'Debes debatir antes de votar',
+    lockSub: 'Comparte tu perspectiva primero. Solo así podrás emitir tu voto.',
+    lockBtn: '↑ Ir a Tu Perspectiva',
+    commentPlaceholder: 'Deja tu opinión sobre esta consulta…',
+    results: 'Resultados', backBtn: '← Todas las consultas',
+  },
+  en: {
+    phase1: '01 · Your Perspective', phase2: '02 · Debate', phase3: '03 · Your Vote',
+    shareTitle: 'Share your perspective',
+    shareSub: 'Read the debate first, then express your view. Others will read it before voting.',
+    levelFamiliar: 'I know the topic', levelGood: 'I am well informed', levelExpert: 'I am an expert in this area',
+    opPlaceholder: 'Write your opinion here (minimum 20 characters)…',
+    submitBtn: 'Publish my perspective →',
+    lockTitle: 'You must debate before voting',
+    lockSub: 'Share your perspective first. Only then can you cast your vote.',
+    lockBtn: '↑ Go to Your Perspective',
+    commentPlaceholder: 'Leave your opinion on this consultation…',
+    results: 'Results', backBtn: '← All consultations',
+  },
+  pt: {
+    phase1: '01 · Sua Perspectiva', phase2: '02 · Debate', phase3: '03 · Seu Voto',
+    shareTitle: 'Compartilhe sua perspectiva',
+    shareSub: 'Leia o debate primeiro, depois expresse sua posição. Outros lerão antes de votar.',
+    levelFamiliar: 'Conheço o tema', levelGood: 'Estou bem informado/a', levelExpert: 'Sou especialista na área',
+    opPlaceholder: 'Escreva sua opinião aqui (mínimo 20 caracteres)…',
+    submitBtn: 'Publicar minha perspectiva →',
+    lockTitle: 'Você deve debater antes de votar',
+    lockSub: 'Compartilhe sua perspectiva primeiro. Só assim poderá votar.',
+    lockBtn: '↑ Ir para Sua Perspectiva',
+    commentPlaceholder: 'Deixe sua opinião sobre esta consulta…',
+    results: 'Resultados', backBtn: '← Todas as consultas',
+  },
+  de: {
+    phase1: '01 · Deine Perspektive', phase2: '02 · Debatte', phase3: '03 · Deine Stimme',
+    shareTitle: 'Teile deine Perspektive',
+    shareSub: 'Lies zuerst die Debatte, dann äußere deine Meinung. Andere lesen sie vor der Abstimmung.',
+    levelFamiliar: 'Ich kenne das Thema', levelGood: 'Ich bin gut informiert', levelExpert: 'Ich bin Experte auf diesem Gebiet',
+    opPlaceholder: 'Schreibe hier deine Meinung (mindestens 20 Zeichen)…',
+    submitBtn: 'Meine Perspektive veröffentlichen →',
+    lockTitle: 'Du musst erst debattieren, bevor du abstimmst',
+    lockSub: 'Teile zuerst deine Perspektive. Nur dann kannst du abstimmen.',
+    lockBtn: '↑ Zur Perspektive gehen',
+    commentPlaceholder: 'Hinterlasse deine Meinung zu dieser Konsultation…',
+    results: 'Ergebnisse', backBtn: '← Alle Konsultationen',
+  },
+  fr: {
+    phase1: '01 · Votre Perspective', phase2: '02 · Débat', phase3: '03 · Votre Vote',
+    shareTitle: 'Partagez votre perspective',
+    shareSub: 'Lisez le débat en premier, puis exprimez votre point de vue. Les autres le liront avant de voter.',
+    levelFamiliar: 'Je connais le sujet', levelGood: 'Je suis bien informé/e', levelExpert: 'Je suis expert/e dans ce domaine',
+    opPlaceholder: 'Écrivez votre opinion ici (minimum 20 caractères)…',
+    submitBtn: 'Publier ma perspective →',
+    lockTitle: 'Vous devez débattre avant de voter',
+    lockSub: 'Partagez d\'abord votre perspective. Seulement alors vous pourrez voter.',
+    lockBtn: '↑ Aller à votre perspective',
+    commentPlaceholder: 'Laissez votre avis sur cette consultation…',
+    results: 'Résultats', backBtn: '← Toutes les consultations',
+  },
+  it: {
+    phase1: '01 · La Tua Prospettiva', phase2: '02 · Dibattito', phase3: '03 · Il Tuo Voto',
+    shareTitle: 'Condividi la tua prospettiva',
+    shareSub: 'Leggi prima il dibattito, poi esprimi la tua posizione. Gli altri la leggeranno prima di votare.',
+    levelFamiliar: 'Conosco l\'argomento', levelGood: 'Sono ben informato/a', levelExpert: 'Sono esperto/a in questo campo',
+    opPlaceholder: 'Scrivi qui la tua opinione (minimo 20 caratteri)…',
+    submitBtn: 'Pubblica la mia prospettiva →',
+    lockTitle: 'Devi dibattere prima di votare',
+    lockSub: 'Condividi prima la tua prospettiva. Solo così potrai votare.',
+    lockBtn: '↑ Vai alla tua prospettiva',
+    commentPlaceholder: 'Lascia la tua opinione su questa consultazione…',
+    results: 'Risultati', backBtn: '← Tutte le consultazioni',
+  },
+  ja: {
+    phase1: '01 · あなたの視点', phase2: '02 · ディベート', phase3: '03 · あなたの投票',
+    shareTitle: '視点を共有する',
+    shareSub: 'まずディベートを読み、それからあなたの立場を表明してください。他の人が投票前に読みます。',
+    levelFamiliar: 'このトピックを知っています', levelGood: 'よく情報を得ています', levelExpert: 'この分野の専門家です',
+    opPlaceholder: 'ここに意見を書いてください（最低20文字）…',
+    submitBtn: '視点を公開する →',
+    lockTitle: '投票前にディベートが必要です',
+    lockSub: 'まず視点を共有してください。そうすることで投票できます。',
+    lockBtn: '↑ 視点へ移動',
+    commentPlaceholder: 'この相談についての意見を残してください…',
+    results: '結果', backBtn: '← すべての相談',
+  },
+  ko: {
+    phase1: '01 · 당신의 관점', phase2: '02 · 토론', phase3: '03 · 당신의 투표',
+    shareTitle: '관점을 공유하세요',
+    shareSub: '먼저 토론을 읽은 후 입장을 표명하세요. 다른 사람들이 투표 전에 읽을 것입니다.',
+    levelFamiliar: '주제를 알고 있습니다', levelGood: '잘 알고 있습니다', levelExpert: '이 분야의 전문가입니다',
+    opPlaceholder: '여기에 의견을 쓰세요 (최소 20자)…',
+    submitBtn: '내 관점 게시 →',
+    lockTitle: '투표 전에 토론해야 합니다',
+    lockSub: '먼저 관점을 공유하세요. 그래야만 투표할 수 있습니다.',
+    lockBtn: '↑ 관점으로 이동',
+    commentPlaceholder: '이 상담에 대한 의견을 남겨주세요…',
+    results: '결과', backBtn: '← 모든 상담',
+  },
+};
+function t(key) { return (UI_STRINGS[getViewerLang()] || UI_STRINGS.es)[key] || UI_STRINGS.es[key] || key; }
+
 // Detect viewer language from browser (most accurate — reflects actual device language)
 // Falls back to country-based mapping if browser language is not recognized
 const BROWSER_LANG = (navigator.language || navigator.userLanguage || 'es').split('-')[0].toLowerCase();
@@ -1423,29 +1532,29 @@ function renderDebate(db, res, items) {
     <div id="comment-section">
       <div class="phase-divider">
         <div class="phase-divider-line"></div>
-        <div class="phase-label">01 · Tu Perspectiva</div>
+        <div class="phase-label">${t('phase1')}</div>
         <div class="phase-divider-line"></div>
       </div>
       <div class="detail-card" id="opinion-form-card">
-        <div style="font-family:'Playfair Display',serif;font-size:15px;font-weight:700;margin-bottom:6px;color:#060810;">Comparte tu perspectiva</div>
-        <div style="font-size:12px;color:#7a7570;margin-bottom:12px;">Lee el debate primero, luego expresa tu postura. Otros la leerán antes de votar.</div>
+        <div style="font-family:'Playfair Display',serif;font-size:15px;font-weight:700;margin-bottom:6px;color:#060810;">${t('shareTitle')}</div>
+        <div style="font-size:12px;color:#7a7570;margin-bottom:12px;">${t('shareSub')}</div>
         <select id="opinion-level" style="width:100%;background:#ede9e0;border:1px solid #e8e4dc;border-radius:8px;padding:10px 12px;color:#060810;font-size:14px;outline:none;margin-bottom:10px;font-family:'Manrope',sans-serif;">
-          <option value="familiar">Conozco el tema</option>
-          <option value="good">Estoy bien informado/a</option>
-          <option value="expert">Soy experto/a en el área</option>
+          <option value="familiar">${t('levelFamiliar')}</option>
+          <option value="good">${t('levelGood')}</option>
+          <option value="expert">${t('levelExpert')}</option>
         </select>
-        <textarea id="opinion-text" placeholder="Escribe tu opinión aquí (mínimo 20 caracteres)…"
+        <textarea id="opinion-text" placeholder="${t('opPlaceholder')}"
           style="width:100%;background:#ede9e0;border:1px solid #e8e4dc;border-radius:8px;
                  padding:12px;color:#060810;font-size:14px;font-family:'Manrope',sans-serif;
                  min-height:90px;resize:vertical;outline:none;margin-bottom:10px;box-sizing:border-box;"></textarea>
-        <button class="btn" onclick="submitOpinion(${debId})">Publicar mi perspectiva →</button>
+        <button class="btn" onclick="submitOpinion(${debId})">${t('submitBtn')}</button>
         <div id="opinion-submit-status" style="font-size:13px;margin-top:8px;min-height:18px;"></div>
       </div>
     </div>
 
     <div class="phase-divider">
       <div class="phase-divider-line"></div>
-      <div class="phase-label">02 · Debate</div>
+      <div class="phase-label">${t('phase2')}</div>
       <div class="phase-divider-line"></div>
     </div>
     <div id="debate-section">${feedHtml}</div>
@@ -1454,15 +1563,15 @@ function renderDebate(db, res, items) {
     <div id="vote-section">
       <div class="phase-divider">
         <div class="phase-divider-line"></div>
-        <div class="phase-label">03 · Tu Voto</div>
+        <div class="phase-label">${t('phase3')}</div>
         <div class="phase-divider-line"></div>
       </div>
       <div id="vote-lock" style="${canVote ? 'display:none;' : ''}background:#fff;border:1px solid #e8e4dc;border-radius:14px;padding:28px 16px;text-align:center;margin-bottom:12px;">
         <div style="font-size:30px;margin-bottom:10px;">🔒</div>
-        <div style="font-family:'Playfair Display',serif;font-size:16px;font-weight:700;color:#060810;margin-bottom:8px;">Debes debatir antes de votar</div>
-        <div style="font-size:13px;color:#7a7570;line-height:1.5;margin-bottom:16px;">Sube al punto <strong>01 · Tu Perspectiva</strong> y comparte tu opinión primero. Solo así podrás emitir tu voto.</div>
+        <div style="font-family:'Playfair Display',serif;font-size:16px;font-weight:700;color:#060810;margin-bottom:8px;">${t('lockTitle')}</div>
+        <div style="font-size:13px;color:#7a7570;line-height:1.5;margin-bottom:16px;">${t('lockSub')}</div>
         <button class="btn" onclick="document.getElementById('opinion-form-card').scrollIntoView({behavior:'smooth'})">
-          ↑ Ir a Tu Perspectiva
+          ${t('lockBtn')}
         </button>
       </div>
       <div id="vote-options" style="${canVote ? '' : 'display:none;'}">
@@ -1504,7 +1613,7 @@ function renderDebate(db, res, items) {
       <div style="color:#7a7570;font-size:13px;text-align:center;padding:12px;">Cargando comentarios…</div>
     </div>
     <div class="detail-card" style="padding:14px;">
-      <textarea id="comment-input-${debId}" placeholder="Deja tu opinión sobre esta consulta (solo para quienes votaron)…"
+      <textarea id="comment-input-${debId}" placeholder="${t('commentPlaceholder')}"
         style="width:100%;min-height:80px;border:1.5px solid #e8e4dc;border-radius:10px;padding:10px;font-size:14px;font-family:'Manrope',sans-serif;resize:vertical;box-sizing:border-box;color:#060810;background:#ede9e0;"></textarea>
       <button onclick="submitComment(${debId})"
         style="margin-top:10px;width:100%;padding:12px;background:#1a3a8f;border:none;border-radius:10px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:'Manrope',sans-serif;">
@@ -1514,7 +1623,7 @@ function renderDebate(db, res, items) {
     </div>
 
     <div style="margin-top:16px;">
-      <button class="btn" onclick="showDebatesList()" style="background:#ede9e0;color:#060810;border:1px solid #e8e4dc;">← Todas las consultas</button>
+      <button class="btn" onclick="showDebatesList()" style="background:#ede9e0;color:#060810;border:1px solid #e8e4dc;">${t('backBtn')}</button>
     </div>
   `;
   loadComments(debId);
@@ -1966,7 +2075,7 @@ async function showVoteSuccess(data, optIdx) {
     </div>
 
     <div style="margin-top:16px;display:flex;flex-direction:column;gap:10px;">
-      <button class="btn" onclick="showDebatesList()" style="background:#ede9e0;color:#060810;border:1px solid #e8e4dc;">← Todas las consultas</button>
+      <button class="btn" onclick="showDebatesList()" style="background:#ede9e0;color:#060810;border:1px solid #e8e4dc;">${t('backBtn')}</button>
     </div>
   `;
   loadComments(debId);
