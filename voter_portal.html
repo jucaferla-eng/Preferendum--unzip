@@ -946,17 +946,37 @@ async function doRegister() {
   }
 }
 
-function showVerifyScreen() {
+async function showVerifyScreen() {
+  document.getElementById('main-app').style.display = 'none';
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('verify-screen').classList.add('visible');
-  // Reset to step 1
-  ['verify-step-1','verify-step-2','verify-step-3','verify-step-4','verify-step-5'].forEach((id,i) => {
-    document.getElementById(id).style.display = i === 0 ? '' : 'none';
-  });
-  ['vdot-1','vdot-2','vdot-3','vdot-4'].forEach((id,i) => {
-    document.getElementById(id).className = 'verify-step-dot' + (i === 0 ? ' active' : '');
-  });
   document.getElementById('verify-skip-btn').style.display = '';
+
+  // If user is already logged in, fetch their status and jump to right step
+  let startStep = 1;
+  if (token) {
+    try {
+      const r = await fetch(`${API}/auth/me`, {headers:{'Authorization':'Bearer '+token}});
+      if (r.ok) {
+        const d = await r.json();
+        if (d.selfie_verified) {
+          startStep = 4; // Let them re-do selfie to update
+        } else if (d.email_verified && d.phone_verified) {
+          startStep = 3;
+        } else if (d.email_verified) {
+          startStep = 2;
+        }
+      }
+    } catch(_) {}
+  }
+
+  ['verify-step-1','verify-step-2','verify-step-3','verify-step-4','verify-step-5'].forEach((id, i) => {
+    document.getElementById(id).style.display = (i + 1 === startStep) ? '' : 'none';
+  });
+  ['vdot-1','vdot-2','vdot-3','vdot-4'].forEach((id, i) => {
+    const step = i + 1;
+    document.getElementById(id).className = 'verify-step-dot' + (step < startStep ? ' done' : step === startStep ? ' active' : '');
+  });
 }
 
 function _advanceVerifyStep(fromStep, toStep) {
