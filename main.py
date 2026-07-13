@@ -5682,6 +5682,19 @@ def agent_daily_debates_sync(secret: str):
     from preferendum_agent import run_daily_debates
     return run_daily_debates()
 
+@app.post('/admin/agent/culture-debates')
+def agent_culture_debates(secret: str, bg: BackgroundTasks):
+    """Trigger culture/everyday + general knowledge debate generation."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    def _run():
+        from preferendum_agent import run_culture_debates, run_general_knowledge_debates
+        r1 = run_culture_debates(max_per_country=2)
+        r2 = run_general_knowledge_debates(max_debates=5)
+        print(f'[CultureAgent] culture={r1["debates_created"]} general={r2["debates_created"]}')
+    bg.add_task(_run)
+    return {'ok': True, 'message': 'Culture + general knowledge agent started in background'}
+
 @app.post('/admin/agent/regional-debates')
 def agent_regional_debates(secret: str, bg: BackgroundTasks):
     """Trigger the regional/sector news agent for Chile (health, transport, agro, pymes, education)."""
