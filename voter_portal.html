@@ -354,9 +354,10 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         </select>
       </div>
       <div class="field" id="commune-field">
-        <label id="commune-label">Commune / City</label>
-        <input type="text" id="r-commune" placeholder="e.g. Santiago" list="communes-list" autocomplete="off"/>
-        <datalist id="communes-list"></datalist>
+        <label id="commune-label">Comuna / Ciudad</label>
+        <select id="r-commune">
+          <option value="">— selecciona —</option>
+        </select>
       </div>
       <button class="btn" onclick="doRegister()">Create Account →</button>
       <p class="auth-err" id="r-err"></p>
@@ -537,7 +538,6 @@ let branchCurrentQ = null; // null = Q1, else {title, options, branches}
 
 // ── INIT ──
 if (token) validateAndShowApp();
-toggleCommuneField(); // populate cities datalist for default country (CL)
 
 // ── INIT ──
 async function validateAndShowApp() {
@@ -629,19 +629,21 @@ const CITIES_BY_COUNTRY = {
 };
 
 function toggleCommuneField() {
-  const country = document.getElementById('r-country').value;
+  const countryEl = document.getElementById('r-country');
+  if (!countryEl) return;
+  const country = countryEl.value;
 
-  // Cities / communes
+  // Cities / communes — populate <select>
   const cities = CITIES_BY_COUNTRY[country] || [];
-  const dl = document.getElementById('communes-list');
-  const input = document.getElementById('r-commune');
+  const sel = document.getElementById('r-commune');
   const label = document.getElementById('commune-label');
-  dl.innerHTML = cities.map(c => `<option value="${c}"/>`).join('');
-  input.value = '';
-  input.placeholder = cities.length ? `e.g. ${cities[0]}` : 'Tu ciudad';
-  label.textContent = country === 'CL' ? 'Comuna' : 'Ciudad';
+  if (sel) {
+    sel.innerHTML = '<option value="">— selecciona —</option>' +
+      cities.map(c => `<option value="${c}">${c}</option>`).join('');
+  }
+  if (label) label.textContent = country === 'CL' ? 'Comuna' : 'Ciudad';
 
-  // Phone prefix
+  // Phone prefix badge
   const prefix = PHONE_PREFIX[country] || '+';
   const phonePh = PHONE_PLACEHOLDER[country] || '';
   const prefixEl = document.getElementById('r-phone-prefix');
@@ -651,7 +653,7 @@ function toggleCommuneField() {
 
   // National ID label
   const idLabel = document.getElementById('r-id-label');
-  if (idLabel) idLabel.textContent = ID_LABEL[country] || 'National ID';
+  if (idLabel) idLabel.textContent = (ID_LABEL[country] || 'National ID') + ' (opcional)';
 }
 
 async function doRegister() {
@@ -1922,6 +1924,9 @@ function showError(msg, detail) {
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtDate(s) { try { return new Date(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); } catch{ return s; } }
 function fmtDateTime(s) { try { const d = new Date(s); return d.toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'numeric'}) + ' · ' + d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}); } catch{ return s; } }
+
+// Init country-dependent fields once DOM is fully ready
+document.addEventListener('DOMContentLoaded', toggleCommuneField);
 </script>
 </body>
 </html>
