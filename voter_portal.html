@@ -994,9 +994,10 @@ async function loadDebates() {
           </div>
           <div class="debate-title">${esc(db.title)}</div>
           <div class="debate-meta">
-            <span class="debate-votes">⬡ ${db.total_votes || 0} votes</span>
+            <span class="debate-votes">⬡ ${db.total_votes || 0} votos</span>
             <span>${db.scope_country || 'Global'}</span>
-            ${db.closes_at ? `<span>Closes ${fmtDate(db.closes_at)}</span>` : ''}
+            ${db.created_at ? `<span>🕐 ${fmtDateTime(db.created_at)}</span>` : ''}
+            ${db.closes_at ? `<span>Cierra ${fmtDate(db.closes_at)}</span>` : ''}
           </div>
         </div>`);
       if (featuredAds.length && (i + 1) % AD_EVERY === 0) {
@@ -1216,6 +1217,7 @@ function renderDebate(db, res, items) {
       <div class="debate-meta">
         <span class="debate-votes">⬡ ${total} votos</span>
         <span>${db.scope_country || 'Global'}</span>
+        ${db.created_at ? `<span>🕐 ${fmtDateTime(db.created_at)}</span>` : ''}
         ${db.closes_at ? `<span>Cierra ${fmtDate(db.closes_at)}</span>` : ''}
       </div>
     </div>
@@ -1837,6 +1839,7 @@ function showError(msg, detail) {
 
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtDate(s) { try { return new Date(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); } catch{ return s; } }
+function fmtDateTime(s) { try { const d = new Date(s); return d.toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'numeric'}) + ' · ' + d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}); } catch{ return s; } }
 </script>
 </body>
 </html>
