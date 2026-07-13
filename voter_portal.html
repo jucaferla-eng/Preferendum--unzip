@@ -349,25 +349,9 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         </select>
       </div>
       <div class="field" id="commune-field">
-        <label>Commune / City</label>
-        <input type="text" id="r-commune" placeholder="e.g. Las Condes" list="communes-list" autocomplete="off"/>
-        <datalist id="communes-list">
-          <option value="Vitacura"/><option value="Las Condes"/><option value="Lo Barnechea"/>
-          <option value="Providencia"/><option value="La Reina"/><option value="Ñuñoa"/>
-          <option value="Peñalolén"/><option value="Macul"/><option value="San Miguel"/>
-          <option value="La Florida"/><option value="Santiago"/><option value="Independencia"/>
-          <option value="Recoleta"/><option value="Quinta Normal"/><option value="Renca"/>
-          <option value="Lo Espejo"/><option value="El Bosque"/><option value="San Ramón"/>
-          <option value="La Pintana"/><option value="Pudahuel"/><option value="Cerro Navia"/>
-          <option value="Lo Prado"/><option value="Cerrillos"/><option value="Estación Central"/>
-          <option value="Maipú"/><option value="Quilicura"/><option value="Huechuraba"/>
-          <option value="Conchalí"/><option value="Valparaíso"/><option value="Viña del Mar"/>
-          <option value="Concón"/><option value="Quilpué"/><option value="Concepción"/>
-          <option value="Talcahuano"/><option value="San Pedro de la Paz"/>
-          <option value="Antofagasta"/><option value="La Serena"/><option value="Coquimbo"/>
-          <option value="Rancagua"/><option value="Temuco"/><option value="Puerto Montt"/>
-          <option value="Iquique"/><option value="Arica"/><option value="Punta Arenas"/>
-        </datalist>
+        <label id="commune-label">Commune / City</label>
+        <input type="text" id="r-commune" placeholder="e.g. Santiago" list="communes-list" autocomplete="off"/>
+        <datalist id="communes-list"></datalist>
       </div>
       <button class="btn" onclick="doRegister()">Create Account →</button>
       <p class="auth-err" id="r-err"></p>
@@ -548,6 +532,7 @@ let branchCurrentQ = null; // null = Q1, else {title, options, branches}
 
 // ── INIT ──
 if (token) validateAndShowApp();
+toggleCommuneField(); // populate cities datalist for default country (CL)
 
 // ── INIT ──
 async function validateAndShowApp() {
@@ -586,9 +571,42 @@ async function doLogin() {
   } catch(e) { document.getElementById('l-err').textContent = 'Connection error'; }
 }
 
+const CITIES_BY_COUNTRY = {
+  CL: ['Santiago','Vitacura','Las Condes','Lo Barnechea','Providencia','La Reina','Ñuñoa','Peñalolén','Macul','San Miguel','La Florida','Independencia','Recoleta','Quinta Normal','Renca','Lo Espejo','El Bosque','San Ramón','La Pintana','Pudahuel','Cerro Navia','Lo Prado','Cerrillos','Estación Central','Maipú','Quilicura','Huechuraba','Conchalí','Valparaíso','Viña del Mar','Concón','Quilpué','Concepción','Talcahuano','San Pedro de la Paz','Antofagasta','La Serena','Coquimbo','Rancagua','Temuco','Puerto Montt','Iquique','Arica','Punta Arenas'],
+  AR: ['Buenos Aires','Córdoba','Rosario','Mendoza','Tucumán','La Plata','Mar del Plata','Salta','Santa Fe','San Juan','Resistencia','Neuquén','Santiago del Estero','Corrientes','Posadas','San Luis','Paraná','Formosa','Río Cuarto','Comodoro Rivadavia','Bahía Blanca','Quilmes','Lanús','Lomas de Zamora','General San Martín'],
+  PE: ['Lima','Arequipa','Trujillo','Chiclayo','Piura','Iquitos','Cusco','Chimbote','Huancayo','Tacna','Juliaca','Ica','Ayacucho','Pucallpa','Cajamarca','Huánuco','Moquegua','Puno','Tumbes','Sullana'],
+  MX: ['Ciudad de México','Guadalajara','Monterrey','Puebla','Tijuana','León','Ciudad Juárez','Zapopan','Mérida','San Luis Potosí','Mexicali','Aguascalientes','Culiacán','Hermosillo','Chihuahua','Querétaro','Morelia','Cancún','Saltillo','Torreón','Toluca','Veracruz','Acapulco','Oaxaca','Tijuana'],
+  CO: ['Bogotá','Medellín','Cali','Barranquilla','Cartagena','Bucaramanga','Cúcuta','Pereira','Ibagué','Santa Marta','Manizales','Pasto','Montería','Villavicencio','Armenia','Sincelejo','Valledupar','Neiva','Soledad','Bello'],
+  BR: ['São Paulo','Rio de Janeiro','Brasília','Salvador','Fortaleza','Belo Horizonte','Manaus','Curitiba','Recife','Goiânia','Porto Alegre','Belém','Guarulhos','Campinas','São Luís','Maceió','Natal','Teresina','Campo Grande','João Pessoa','Osasco','Ribeirão Preto','Sorocaba','Uberlândia','Contagem'],
+  US: ['New York','Los Angeles','Chicago','Houston','Phoenix','Philadelphia','San Antonio','San Diego','Dallas','Jacksonville','Austin','Fort Worth','Columbus','Charlotte','Indianapolis','San Francisco','Seattle','Denver','Washington DC','Nashville','Oklahoma City','El Paso','Las Vegas','Boston','Miami'],
+  ES: ['Madrid','Barcelona','Valencia','Sevilla','Zaragoza','Málaga','Murcia','Palma','Las Palmas','Bilbao','Alicante','Córdoba','Valladolid','Vigo','Gijón','Granada','Vitoria','La Coruña','Santa Cruz de Tenerife','Pamplona'],
+  GB: ['London','Birmingham','Manchester','Glasgow','Leeds','Liverpool','Newcastle','Sheffield','Bristol','Edinburgh','Cardiff','Belfast','Leicester','Coventry','Bradford','Nottingham','Southampton','Portsmouth','Oxford','Cambridge'],
+  DE: ['Berlín','Múnich','Hamburgo','Colonia','Frankfurt','Stuttgart','Düsseldorf','Leipzig','Dortmund','Essen','Bremen','Hanóver','Dresde','Núremberg','Duisburgo','Bochum','Wuppertal','Bielefeld','Bonn','Karlsruhe'],
+  FR: ['París','Marsella','Lyon','Toulouse','Niza','Nantes','Strasbourg','Montpellier','Bordeaux','Lille','Rennes','Reims','Saint-Étienne','Toulon','Le Havre','Grenoble','Dijon','Angers','Nîmes','Villeurbanne'],
+  IT: ['Roma','Milán','Nápoles','Turín','Palermo','Génova','Bolonia','Florencia','Bari','Catania','Venecia','Verona','Mesina','Padua','Trieste','Taranto','Brescia','Reggio Calabria','Módena','Prato'],
+  AU: ['Sídney','Melbourne','Brisbane','Perth','Adelaida','Gold Coast','Newcastle','Canberra','Wollongong','Sunshine Coast','Hobart','Geelong','Townsville','Cairns','Darwin'],
+  CA: ['Toronto','Montreal','Vancouver','Calgary','Edmonton','Ottawa','Winnipeg','Quebec','Hamilton','Kitchener','London','Victoria','Halifax','Saskatoon','Regina'],
+  IN: ['Bombay','Delhi','Bangalore','Hyderabad','Chennai','Kolkata','Ahmedabad','Pune','Surat','Jaipur','Lucknow','Kanpur','Nagpur','Indore','Thane','Bhopal','Visakhapatnam','Pimpri','Patna','Vadodara'],
+  ZA: ['Johannesburgo','Ciudad del Cabo','Durban','Pretoria','Port Elizabeth','Bloemfontein','Nelspruit','Kimberley','Polokwane','East London'],
+  VE: ['Caracas','Maracaibo','Valencia','Barquisimeto','Maracay','Ciudad Guayana','Barcelona','Maturín','San Cristóbal','Cumaná'],
+  UY: ['Montevideo','Salto','Paysandú','Las Piedras','Rivera','Maldonado','Tacuarembó','Melo','Mercedes','Artigas'],
+  EC: ['Guayaquil','Quito','Cuenca','Santo Domingo','Ambato','Machala','Portoviejo','Manta','Durán','Loja'],
+  BO: ['Santa Cruz','La Paz','Cochabamba','Sucre','Oruro','Potosí','Tarija','Trinidad','Cobija','Riberalta'],
+  PY: ['Asunción','San Lorenzo','Luque','Fernando de la Mora','Lambaré','Capiatá','Limpio','Ñemby','Encarnación','Ciudad del Este'],
+  NG: ['Lagos','Kano','Ibadan','Abuja','Port Harcourt','Benin City','Maiduguri','Zaria','Aba','Jos'],
+  OTHER: [],
+};
+
 function toggleCommuneField() {
   const country = document.getElementById('r-country').value;
-  document.getElementById('commune-field').style.display = country === 'CL' ? '' : '';
+  const cities = CITIES_BY_COUNTRY[country] || [];
+  const dl = document.getElementById('communes-list');
+  const input = document.getElementById('r-commune');
+  const label = document.getElementById('commune-label');
+  dl.innerHTML = cities.map(c => `<option value="${c}"/>`).join('');
+  input.value = '';
+  input.placeholder = cities.length ? `e.g. ${cities[0]}` : 'Tu ciudad';
+  label.textContent = country === 'CL' ? 'Comuna' : 'Ciudad';
 }
 
 async function doRegister() {
