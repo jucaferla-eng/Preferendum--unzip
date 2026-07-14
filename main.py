@@ -758,6 +758,19 @@ def update_verify_level(user, db):
 def hash_str(s, prefix=''):
     return hashlib.sha256(f'{prefix}{s}'.encode()).hexdigest()
 
+def check_and_register_device(device_fp: str, user_id: int, db: Session):
+    """Verifica que el dispositivo no esté registrado a otra cuenta. Si no está, lo registra."""
+    if not device_fp:
+        return  # sin fingerprint, no hacemos nada
+    fp_hash = hash_str(device_fp, 'pref-fp-')
+    existing = db.query(IMEILog).filter(IMEILog.imei_hash == fp_hash).first()
+    if existing:
+        if existing.user_id != user_id:
+            raise HTTPException(409, 'Este dispositivo ya está registrado con otra cuenta. Solo se permite una cuenta por dispositivo.')
+    else:
+        db.add(IMEILog(user_id=user_id, imei_hash=fp_hash, device_info='browser-fp-login'))
+        db.commit()
+
 def generate_verify_code():
     chars = string.ascii_uppercase + string.digits
     parts = [''.join(random.choices(chars, k=4)) for _ in range(3)]
@@ -976,8 +989,9 @@ class RegisterInput(BaseModel):
     national_id: str = ''
 
 class LoginInput(BaseModel):
-    email:    str
-    password: str
+    email:     str
+    password:  str
+    device_fp: str = ''
 
 class OTPInput(BaseModel):
     code:    str
@@ -1486,6 +1500,7 @@ class VoterRegisterInput(BaseModel):
     gender:      str = ''
     dob:         str = ''   # YYYY-MM-DD
     commune:     str = ''   # comuna declarada
+    device_fp:   str = ''
 
 
 @app.post('/voter/register')
@@ -1530,6 +1545,7 @@ def voter_register(data: VoterRegisterInput, bg: BackgroundTasks, db: Session = 
     db.refresh(user)
     _assign_user_tier(user, db)
     code = gen_otp()
+    check_and_register_device(data.device_fp, user.id, db)
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
                    expires_at=datetime.utcnow() + timedelta(minutes=15)))
     db.commit()
@@ -1784,6 +1800,7 @@ def login(data: LoginInput, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
         raise HTTPException(401, 'Invalid credentials')
+    check_and_register_device(data.device_fp, user.id, db)
     return {
         'token': make_token(user.id, user.role),
         'user': {

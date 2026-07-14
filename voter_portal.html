@@ -803,9 +803,10 @@ async function doLogin() {
   const pass  = document.getElementById('l-pass').value;
   if (!email || !pass) return;
   document.getElementById('l-err').textContent = '';
+  const deviceFpLogin = await generateDeviceFingerprint().catch(() => '');
   try {
     const r = await fetch(`${API}/auth/login`, {method:'POST',headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({email, password: pass})});
+      body: JSON.stringify({email, password: pass, device_fp: deviceFpLogin})});
     const d = await r.json();
     if (!r.ok) { document.getElementById('l-err').textContent = d.detail || 'Login failed'; return; }
     token = d.token || d.access_token;
@@ -921,11 +922,12 @@ async function doRegister() {
   const btn = document.querySelector('#tab-register .btn');
   btn.disabled = true; btn.textContent = 'Creating account…';
 
+  const deviceFpReg = await generateDeviceFingerprint().catch(() => '');
   try {
     const r = await fetch(`${API}/voter/register`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({name, email, password: pass, country,
-        phone, national_id: rut, dob, gender, commune})
+        phone, national_id: rut, dob, gender, commune, device_fp: deviceFpReg})
     });
     const d = await r.json();
     btn.disabled = false; btn.textContent = 'Create Account →';
