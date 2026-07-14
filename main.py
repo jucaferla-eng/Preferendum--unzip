@@ -1389,13 +1389,48 @@ def dev_otp(phone: str, db: Session = Depends(get_db)):
             return {'error': 'user not found', 'phone': phone}
         otp = db.query(OTPCode).filter(
             OTPCode.user_id == user.id,
-            OTPCode.used == False
+            OTPCode.used == False,
+            OTPCode.expires_at > datetime.utcnow()
         ).order_by(OTPCode.id.desc()).first()
         if not otp:
-            return {'error': 'no active OTP found', 'user_id': user.id}
+            return {'error': 'no active OTP found — generate one via /admin/force-otp/' + phone, 'user_id': user.id}
         return {'phone': phone, 'code': otp.code, 'expires_at': str(otp.expires_at)}
     except Exception as e:
         return {'error': str(e)}
+
+@app.post('/admin/force-otp/{phone}')
+def force_otp(phone: str, db: Session = Depends(get_db)):
+    """Admin: generate fresh OTP for phone without sending SMS (for testing)."""
+    try:
+        from urllib.parse import unquote
+        phone = unquote(phone)
+        user = db.query(User).filter(User.phone == phone).first()
+        if not user:
+            return {'error': 'user not found', 'phone': phone}
+        code = gen_otp()
+        db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='sms',
+                       expires_at=datetime.utcnow() + timedelta(minutes=10)))
+        db.commit()
+        return {'phone': phone, 'code': code, 'message': 'OTP created (no SMS sent)', 'user_id': user.id}
+    except Exception as e:
+        return {'error': str(e)}
+
+@app.get('/admin/vote-code')
+def admin_vote_code(email: str, debate_id: int, db: Session = Depends(get_db)):
+    """Admin: get verify_code for a user+debate combo (testing only)."""
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        return {'error': 'user not found'}
+    log = db.query(HasVotedLog).filter(HasVotedLog.user_id == user.id, HasVotedLog.debate_id == debate_id).first()
+    if not log:
+        return {'error': 'no vote found for this user+debate', 'user_id': user.id}
+    vote = db.query(DebateVote).filter(DebateVote.verify_code == log.verify_code).first()
+    return {
+        'email': email,
+        'debate_id': debate_id,
+        'verify_code': log.verify_code,
+        'option_voted': vote.option_text if vote else '—',
+    }
 
 @app.get('/admin/check-stripe')
 def check_stripe():
