@@ -2349,71 +2349,32 @@ document.addEventListener('DOMContentLoaded', toggleCommuneField);
 
 // ── Expired Debate View ──────────────────────────────────────────────────────
 function renderExpiredDebate(db, res, items, content) {
-  const opts   = db.options || [];
-  const resultsList = (res.debate || res).results || [];
-  const counts = {};
-  resultsList.forEach(r => { counts[r.option] = r.count || 0; });
-  const total  = (res.debate || res).total_votes || db.total_votes || 0;
-  const COLORS = ['#8ba7d4','#1a2f5e','#c07848','#b498c8','#5cbfbc','#7a9e96','#cc8878','#3d7a70'];
-  const debId  = db.id;
-
-  // Winner
-  let winnerIdx = 0;
-  if (total > 0 && opts.length > 0) {
-    opts.forEach((opt, i) => { if ((counts[opt]||0) > (counts[opts[winnerIdx]]||0)) winnerIdx = i; });
-  }
-  const winnerOpt = opts[winnerIdx] || '';
-  const winnerPct = total > 0 ? Math.round((counts[winnerOpt]||0) / total * 100) : 0;
-
-  // Opinions
-  const opinionsHtml = (() => {
-    if (!items || !items.length) return '<div style="color:#7a7570;font-size:13px;text-align:center;padding:16px;">Sin perspectivas registradas.</div>';
-    return items.filter(it => it.type === 'opinion').map(op => `
-      <div style="background:#fff;border:1px solid #e8e4dc;border-radius:12px;padding:14px;margin-bottom:10px;">
-        <div style="font-size:12px;color:#7a7570;margin-bottom:6px;">${esc(op.user_name || 'Ciudadano')} · ${esc(op.country || '')}</div>
-        <div style="font-size:14px;color:#060810;">${esc(op.text)}</div>
-      </div>`).join('');
-  })();
-
+  const debId = db.id;
   content.innerHTML = `
     <div style="padding:0 0 80px;">
-      <div class="detail-title" style="font-size:18px;font-weight:700;color:#060810;margin-bottom:4px;">${esc(db.title)}</div>
-      <div style="font-size:12px;color:#7a7570;margin-bottom:20px;">Consulta cerrada · ${total} votos</div>
+      <div style="font-size:18px;font-weight:700;color:#060810;margin-bottom:6px;">${esc(db.title)}</div>
+      <div style="font-size:12px;color:#7a7570;margin-bottom:28px;">Consulta cerrada</div>
 
-      <!-- Resultados -->
-      <div style="font-size:11px;font-weight:700;color:#7a7570;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">Resultado final</div>
-      <div style="background:#f5f3ee;border-radius:12px;padding:16px;margin-bottom:20px;">
-        <div style="font-size:13px;color:#7a7570;margin-bottom:4px;">La comunidad decidió</div>
-        <div style="font-size:20px;font-weight:800;color:#060810;margin-bottom:8px;">${esc(winnerOpt)}</div>
-        <div style="font-size:13px;color:#7a7570;">${winnerPct}% · ${total} votos verificados</div>
-        <div style="margin-top:14px;">${renderDonut(opts, counts, total, COLORS)}</div>
-      </div>
-
-      <!-- Perspectivas -->
-      <div style="font-size:11px;font-weight:700;color:#7a7570;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">Perspectivas de la comunidad</div>
-      ${opinionsHtml}
-
-      <!-- Verificar voto -->
-      <div style="font-size:11px;font-weight:700;color:#7a7570;text-transform:uppercase;letter-spacing:.08em;margin:20px 0 10px;">Verificar mi voto</div>
-      <div style="background:#fff;border:1px solid #e8e4dc;border-radius:12px;padding:16px;">
-        <div style="font-size:13px;color:#7a7570;margin-bottom:12px;">Ingresa tu código de verificación para confirmar cómo fue contabilizado tu voto.</div>
-        <input type="text" id="verify-code-input" placeholder="Ej: AB3X9K2M" maxlength="20"
-          style="width:100%;padding:12px;border-radius:10px;border:1.5px solid #d4cfc5;background:#f5f3ee;font-family:'DM Mono',monospace;font-size:15px;letter-spacing:3px;text-transform:uppercase;outline:none;box-sizing:border-box;margin-bottom:10px;"/>
+      <div style="font-size:11px;font-weight:700;color:#7a7570;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">Verificar mi voto</div>
+      <div style="background:#fff;border:1px solid #e8e4dc;border-radius:14px;padding:18px;">
+        <div style="font-size:13px;color:#7a7570;margin-bottom:14px;">Ingresa el código que recibiste al votar.</div>
+        <input type="text" id="verify-code-input" placeholder="Tu código de verificación" maxlength="20"
+          style="width:100%;padding:13px;border-radius:10px;border:1.5px solid #d4cfc5;background:#f5f3ee;font-family:'DM Mono',monospace;font-size:15px;letter-spacing:3px;text-transform:uppercase;outline:none;box-sizing:border-box;margin-bottom:10px;"/>
         <button onclick="verifyVoteCode(${debId})"
           style="width:100%;padding:13px;background:#060810;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">
-          Verificar voto →
+          Verificar →
         </button>
-        <div id="verify-code-result" style="margin-top:12px;"></div>
+        <div id="verify-code-result" style="margin-top:14px;"></div>
       </div>
     </div>`;
 }
 
 // ── Vote Code Verification ───────────────────────────────────────────────────
 async function verifyVoteCode(debateId) {
-  const input = document.getElementById('verify-code-input');
+  const input  = document.getElementById('verify-code-input');
   const result = document.getElementById('verify-code-result');
-  const code = (input?.value || '').trim().toUpperCase();
-  if (!code) { result.innerHTML = '<div style="color:#f87171;font-size:13px;">Ingresa tu código de verificación.</div>'; return; }
+  const code   = (input?.value || '').trim().toUpperCase();
+  if (!code) { result.innerHTML = '<div style="color:#f87171;font-size:13px;">Ingresa tu código.</div>'; return; }
   result.innerHTML = '<div style="color:#7a7570;font-size:13px;">Verificando…</div>';
   try {
     const r = await fetch(`${API}/debates/${debateId}/verify`, {
@@ -2422,19 +2383,71 @@ async function verifyVoteCode(debateId) {
       body: JSON.stringify({code})
     });
     const d = await r.json();
-    if (r.ok && d.found) {
-      result.innerHTML = `
-        <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;padding:16px;">
-          <div style="font-size:16px;font-weight:700;color:#16a34a;margin-bottom:8px;">✅ Voto verificado</div>
-          <div style="font-size:13px;color:#374151;margin-bottom:4px;">Tu voto fue: <strong>${esc(d.your_vote)}</strong></div>
-          <div style="font-size:12px;color:#7a7570;margin-bottom:4px;">Consulta: ${esc(d.debate_title)}</div>
-          ${d.blockchain_tx ? `<div style="font-size:11px;color:#7a7570;margin-top:8px;font-family:'DM Mono',monospace;word-break:break-all;">TX: ${esc(d.blockchain_tx)}</div>` : ''}
-        </div>`;
-    } else {
+    if (!r.ok || !d.found) {
       result.innerHTML = '<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:12px;padding:16px;color:#dc2626;font-size:13px;">❌ Código no encontrado. Verifica que lo hayas ingresado correctamente.</div>';
+      return;
     }
+    if (d.already_verified) {
+      result.innerHTML = `<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;padding:16px;">
+        <div style="font-size:15px;font-weight:700;color:#16a34a;margin-bottom:6px;">✅ Este voto ya fue verificado</div>
+        <div style="font-size:13px;color:#374151;">Tu voto fue contabilizado como: <strong>${esc(d.your_vote)}</strong></div>
+      </div>`;
+      return;
+    }
+    // Mostrar resultado con botones de confirmar/disputar
+    result.innerHTML = `
+      <div style="background:#f5f3ee;border-radius:14px;padding:18px;margin-top:4px;">
+        <div style="font-size:13px;color:#7a7570;margin-bottom:4px;">Tu voto fue contabilizado como:</div>
+        <div style="font-size:22px;font-weight:800;color:#060810;margin-bottom:4px;">"${esc(d.your_vote)}"</div>
+        <div style="font-size:12px;color:#7a7570;margin-bottom:20px;">Consulta: ${esc(d.debate_title)}</div>
+        <div style="font-size:13px;font-weight:600;color:#060810;margin-bottom:12px;">¿Tu voto está bien contabilizado?</div>
+        <div style="display:flex;gap:10px;">
+          <button onclick="confirmVote(${debateId},'${code}',true)"
+            style="flex:1;padding:13px;background:#16a34a;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">
+            ✅ Sí, está correcto
+          </button>
+          <button onclick="showDisputeForm(${debateId},'${code}')"
+            style="flex:1;padding:13px;background:#fff;color:#dc2626;border:1.5px solid #dc2626;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">
+            ❌ No, está mal
+          </button>
+        </div>
+        <div id="dispute-form" style="display:none;margin-top:14px;">
+          <textarea id="dispute-reason" placeholder="Explica por qué crees que tu voto está mal contabilizado..." rows="3"
+            style="width:100%;padding:12px;border-radius:10px;border:1.5px solid #fca5a5;background:#fff;font-size:13px;outline:none;box-sizing:border-box;resize:none;"></textarea>
+          <button onclick="confirmVote(${debateId},'${code}',false)"
+            style="width:100%;margin-top:8px;padding:12px;background:#dc2626;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">
+            Reportar error →
+          </button>
+        </div>
+        <div id="vote-confirm-result" style="margin-top:12px;"></div>
+      </div>`;
   } catch(_) {
     result.innerHTML = '<div style="color:#f87171;font-size:13px;">Error de conexión. Intenta de nuevo.</div>';
+  }
+}
+
+function showDisputeForm(debateId, code) {
+  document.getElementById('dispute-form').style.display = 'block';
+}
+
+async function confirmVote(debateId, code, confirmed) {
+  const reason = document.getElementById('dispute-reason')?.value || '';
+  const resultEl = document.getElementById('vote-confirm-result');
+  resultEl.innerHTML = '<div style="color:#7a7570;font-size:13px;">Guardando…</div>';
+  try {
+    const fd = new FormData();
+    fd.append('code', code);
+    fd.append('confirmed', confirmed);
+    fd.append('dispute_reason', reason);
+    const r = await fetch(`${API}/debates/${debateId}/verify/confirm`, {method:'POST', body: fd});
+    const d = await r.json();
+    if (r.ok && d.recorded) {
+      resultEl.innerHTML = confirmed
+        ? `<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:14px;color:#16a34a;font-size:13px;font-weight:600;">✅ Gracias por verificar tu voto. Queda registrado como correcto.</div>`
+        : `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:14px;color:#dc2626;font-size:13px;font-weight:600;">⚠️ Disputa registrada. Nuestro equipo la revisará.</div>`;
+    }
+  } catch(_) {
+    resultEl.innerHTML = '<div style="color:#f87171;font-size:13px;">Error. Intenta de nuevo.</div>';
   }
 }
 
