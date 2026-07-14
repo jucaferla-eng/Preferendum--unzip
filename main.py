@@ -1001,6 +1001,13 @@ class LoginInput(BaseModel):
     password:  str
     device_fp: str = ''
 
+class CompleteLoginInput(BaseModel):
+    pre_auth_token: str
+    email_code:     str = ''
+    sms_code:       str = ''
+    face_token:     str = ''
+    device_fp:      str = ''
+
 class OTPInput(BaseModel):
     code:    str
     channel: str = 'email'
@@ -1839,11 +1846,189 @@ def register(data: RegisterInput, bg: BackgroundTasks, db: Session = Depends(get
     }
 
 @app.post('/auth/login')
-def login(data: LoginInput, db: Session = Depends(get_db)):
+def login(data: LoginInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == data.email).first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
         raise HTTPException(401, 'Invalid credentials')
     check_and_register_device(data.device_fp, user.id, db)
+
+    needs_2fa = user.email_verified or user.phone_verified or user.selfie_verified
+    if not needs_2fa:
+        return {
+            'token': make_token(user.id, user.role),
+            'user': {
+                'id': user.id, 'name': user.name, 'email': user.email,
+                'country': user.country or 'CL',
+                'verify_level': user.verify_level, 'is_verified': user.is_verified,
+                'email_verified': user.email_verified,
+                'phone_verified': user.phone_verified,
+                'id_verified': user.id_verified,
+                'selfie_verified': user.selfie_verified,
+            }
+        }
+
+    # Invalidar OTPs previos y generar nuevos
+    db.query(OTPCode).filter(OTPCode.user_id == user.id, OTPCode.used == False).update({'used': True})
+    db.commit()
+
+    if user.email_verified:
+        email_code = gen_otp()
+        db.add(OTPCode(user_id=user.id, email=user.email, code=email_code, channel='email',
+                       expires_at=datetime.utcnow() + timedelta(minutes=10)))
+        bg.add_task(send_email_otp, user.email, email_code, user.name)
+
+    if user.phone_verified and user.phone:
+        sms_code = gen_otp()
+        db.add(OTPCode(user_id=user.id, email=user.email, code=sms_code, channel='sms',
+                       expires_at=datetime.utcnow() + timedelta(minutes=10)))
+        bg.add_task(send_sms_otp, user.phone, sms_code)
+
+    db.commit()
+
+    pre_auth = jwt.encode({
+        'sub': user.id, 'type': 'pre_auth',
+        'exp': datetime.utcnow() + timedelta(minutes=10)
+    }, SECRET, algorithm='HS256')
+
+    return {
+        'pending_2fa': True,
+        'pre_auth_token': pre_auth,
+        'requires': {
+            'email': bool(user.email_verified),
+            'sms':   bool(user.phone_verified and user.phone),
+            'face':  bool(user.selfie_verified),
+        },
+        'email_hint': user.email[:3] + '***' + user.email[user.email.find('@'):] if user.email else '',
+        'phone_hint': ('***' + user.phone[-4:]) if user.phone else '',
+    }
+
+@app.post('/auth/login/face-token')
+async def login_face_token(
+    file: UploadFile = File(...),
+    pre_auth_token: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """Valida la cara durante el 2FA de login y devuelve un token de cara."""
+    try:
+        payload = jwt.decode(pre_auth_token, SECRET, algorithms=['HS256'])
+        if payload.get('type') != 'pre_auth':
+            raise HTTPException(403, 'Token inválido')
+        user_id = payload['sub']
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(403, 'Sesión expirada — vuelve a iniciar sesión')
+    except Exception:
+        raise HTTPException(403, 'Token inválido')
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.selfie_verified:
+        raise HTTPException(400, 'Sin selfie de referencia')
+
+    contents = await file.read()
+    ref = db.query(SelfieLog).filter(
+        SelfieLog.user_id == user_id, SelfieLog.verified == True, SelfieLog.face_bytes != None
+    ).order_by(SelfieLog.created_at.desc()).first()
+
+    rekognition_score = None
+    rekognition_mode = 'no_aws'
+
+    aws_key = os.getenv('AWS_ACCESS_KEY_ID')
+    if aws_key and ref and ref.face_bytes:
+        try:
+            rek = _rekognition_client()
+            resp = rek.compare_faces(
+                SourceImage={'Bytes': base64.b64decode(ref.face_bytes)},
+                TargetImage={'Bytes': contents},
+                SimilarityThreshold=80.0
+            )
+            matches = resp.get('FaceMatches', [])
+            if matches:
+                rekognition_score = round(matches[0]['Similarity'], 2)
+                rekognition_mode = 'verified'
+                if rekognition_score / 100.0 < 0.90:
+                    raise HTTPException(400, f'Similitud insuficiente ({rekognition_score}%). Intenta con mejor iluminación.')
+            else:
+                rekognition_mode = 'no_match'
+                raise HTTPException(400, 'Tu cara no coincide con la registrada.')
+        except HTTPException:
+            raise
+        except Exception as e:
+            rekognition_mode = f'aws_error: {e}'
+    else:
+        rekognition_mode = 'no_credentials' if not aws_key else 'no_reference'
+
+    face_token = jwt.encode({
+        'sub': user_id, 'type': 'face_login',
+        'exp': datetime.utcnow() + timedelta(minutes=5)
+    }, SECRET, algorithm='HS256')
+
+    return {
+        'face_token': face_token,
+        'rekognition_score': rekognition_score,
+        'rekognition_mode': rekognition_mode,
+        'message': f'✅ {rekognition_score}% coincidencia' if rekognition_score else '✅ Verificado (modo demo)'
+    }
+
+@app.post('/auth/complete-login')
+def complete_login(data: CompleteLoginInput, db: Session = Depends(get_db)):
+    """Paso 2 del login: valida OTPs + face token y devuelve el JWT completo."""
+    try:
+        payload = jwt.decode(data.pre_auth_token, SECRET, algorithms=['HS256'])
+        if payload.get('type') != 'pre_auth':
+            raise HTTPException(403, 'Token inválido')
+        user_id = payload['sub']
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(403, 'Sesión expirada — vuelve a iniciar sesión')
+    except Exception:
+        raise HTTPException(403, 'Token inválido')
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, 'Usuario no encontrado')
+
+    # Validar código de email
+    if user.email_verified:
+        if not data.email_code:
+            raise HTTPException(400, 'Se requiere el código de email')
+        otp_email = db.query(OTPCode).filter(
+            OTPCode.user_id == user.id, OTPCode.channel == 'email',
+            OTPCode.code == data.email_code.strip(), OTPCode.used == False,
+            OTPCode.expires_at > datetime.utcnow()
+        ).first()
+        if not otp_email:
+            raise HTTPException(400, 'Código de email incorrecto o expirado')
+        otp_email.used = True
+
+    # Validar código de SMS
+    if user.phone_verified and user.phone:
+        if not data.sms_code:
+            raise HTTPException(400, 'Se requiere el código de SMS')
+        otp_sms = db.query(OTPCode).filter(
+            OTPCode.user_id == user.id, OTPCode.channel == 'sms',
+            OTPCode.code == data.sms_code.strip(), OTPCode.used == False,
+            OTPCode.expires_at > datetime.utcnow()
+        ).first()
+        if not otp_sms:
+            raise HTTPException(400, 'Código de SMS incorrecto o expirado')
+        otp_sms.used = True
+
+    # Validar face token
+    if user.selfie_verified:
+        if not data.face_token:
+            raise HTTPException(400, 'Se requiere verificación facial')
+        try:
+            fp = jwt.decode(data.face_token, SECRET, algorithms=['HS256'])
+            if fp.get('type') != 'face_login' or fp.get('sub') != user.id:
+                raise HTTPException(403, 'Token facial inválido')
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(403, 'La verificación facial expiró — vuelve a tomarte la selfie')
+        except Exception:
+            raise HTTPException(403, 'Token facial inválido')
+
+    db.commit()
+
+    if data.device_fp:
+        check_and_register_device(data.device_fp, user.id, db)
+
     return {
         'token': make_token(user.id, user.role),
         'user': {

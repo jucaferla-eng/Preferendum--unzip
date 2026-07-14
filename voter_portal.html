@@ -229,6 +229,13 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 </head>
 <body>
 
+<!-- 2FA LOGIN MODAL -->
+<div id="twofa-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9000;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#fff;border-radius:20px;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <div id="twofa-modal-body"></div>
+  </div>
+</div>
+
 <!-- WELCOME MODAL -->
 <div id="welcome-modal">
   <div class="welcome-sheet">
@@ -827,16 +834,153 @@ async function doLogin() {
       body: JSON.stringify({email, password: pass, device_fp: deviceFpLogin})});
     const d = await r.json();
     if (!r.ok) { document.getElementById('l-err').textContent = d.detail || 'Login failed'; return; }
-    token = d.token || d.access_token;
-    userName = d.user?.name || email.split('@')[0];
-    userCountry = d.user?.country || 'CL';
-    userSelfieVerified = !!(d.user?.selfie_verified);
-    localStorage.setItem('pref_voter_token', token);
-    localStorage.setItem('pref_voter_name', userName);
-    localStorage.setItem('pref_voter_country', userCountry);
-    localStorage.setItem('pref_selfie_verified', userSelfieVerified ? 'true' : 'false');
-    showApp();
-  } catch(e) { document.getElementById('l-err').textContent = 'Connection error'; }
+
+    if (d.pending_2fa) {
+      show2FAModal(d, deviceFpLogin);
+      return;
+    }
+
+    finishLogin(d);
+  } catch(e) { document.getElementById('l-err').textContent = 'Error de conexión'; }
+}
+
+function finishLogin(d) {
+  token = d.token || d.access_token;
+  userName = d.user?.name || '';
+  userCountry = d.user?.country || 'CL';
+  userSelfieVerified = !!(d.user?.selfie_verified);
+  localStorage.setItem('pref_voter_token', token);
+  localStorage.setItem('pref_voter_name', userName);
+  localStorage.setItem('pref_voter_country', userCountry);
+  localStorage.setItem('pref_selfie_verified', userSelfieVerified ? 'true' : 'false');
+  showApp();
+}
+
+let _2faData = {};
+let _loginFaceToken = '';
+
+function show2FAModal(d, deviceFp) {
+  _2faData = {preAuthToken: d.pre_auth_token, requires: d.requires, deviceFp};
+  _loginFaceToken = '';
+
+  const req = d.requires || {};
+  const emailHint = d.email_hint || '';
+  const phoneHint = d.phone_hint || '';
+
+  const emailBlock = req.email ? `
+    <div style="margin-bottom:16px;">
+      <div style="font-size:13px;color:#7a7570;margin-bottom:6px;">📧 Código enviado a <strong>${emailHint}</strong></div>
+      <input id="twofa-email-code" type="text" maxlength="6" placeholder="Código de email"
+        style="width:100%;padding:13px;border-radius:10px;border:1.5px solid #e5e7eb;font-size:16px;letter-spacing:4px;text-align:center;outline:none;box-sizing:border-box;">
+    </div>` : '';
+
+  const smsBlock = req.sms ? `
+    <div style="margin-bottom:16px;">
+      <div style="font-size:13px;color:#7a7570;margin-bottom:6px;">📱 Código enviado a <strong>${phoneHint}</strong></div>
+      <input id="twofa-sms-code" type="text" maxlength="6" placeholder="Código de SMS"
+        style="width:100%;padding:13px;border-radius:10px;border:1.5px solid #e5e7eb;font-size:16px;letter-spacing:4px;text-align:center;outline:none;box-sizing:border-box;">
+    </div>` : '';
+
+  const faceBlock = req.face ? `
+    <div style="margin-bottom:16px;">
+      <div style="font-size:13px;color:#7a7570;margin-bottom:8px;">🤳 Verificación facial</div>
+      <button onclick="captureLoginFace()" id="face-login-btn"
+        style="width:100%;padding:13px;background:#f5f3ee;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;color:#060810;">
+        Tomar selfie →
+      </button>
+      <div id="face-login-result" style="margin-top:6px;font-size:12px;color:#7a7570;"></div>
+    </div>` : '';
+
+  document.getElementById('twofa-modal-body').innerHTML = `
+    <div style="padding:24px;">
+      <div style="font-size:18px;font-weight:800;color:#060810;margin-bottom:6px;">Verificación de seguridad</div>
+      <div style="font-size:13px;color:#7a7570;margin-bottom:20px;">Para proteger tu cuenta, confirma tu identidad con los siguientes pasos.</div>
+      ${emailBlock}
+      ${smsBlock}
+      ${faceBlock}
+      <div id="twofa-err" style="color:#dc2626;font-size:13px;margin-bottom:10px;"></div>
+      <button onclick="completeTwoFactor()"
+        style="width:100%;padding:14px;background:#060810;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">
+        Confirmar e ingresar →
+      </button>
+    </div>`;
+
+  document.getElementById('twofa-modal').style.display = 'flex';
+}
+
+async function captureLoginFace() {
+  const btn = document.getElementById('face-login-btn');
+  const resultEl = document.getElementById('face-login-result');
+  btn.textContent = 'Abriendo cámara…';
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'user'}});
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <video id="login-face-video" autoplay playsinline style="width:280px;height:280px;border-radius:50%;object-fit:cover;border:3px solid #fff;"></video>
+      <button id="login-snap-btn" style="margin-top:20px;padding:14px 32px;background:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">📸 Tomar foto</button>
+      <button onclick="this.closest('div').remove()" style="margin-top:10px;padding:10px 24px;background:transparent;border:1.5px solid #fff;color:#fff;border-radius:10px;font-size:13px;cursor:pointer;">Cancelar</button>`;
+    document.body.appendChild(modal);
+    document.getElementById('login-face-video').srcObject = stream;
+
+    document.getElementById('login-snap-btn').onclick = async () => {
+      const video = document.getElementById('login-face-video');
+      const canvas = document.createElement('canvas');
+      canvas.width = 320; canvas.height = 320;
+      canvas.getContext('2d').drawImage(video, 0, 0, 320, 320);
+      stream.getTracks().forEach(t => t.stop());
+      modal.remove();
+
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.85));
+      const fd = new FormData();
+      fd.append('file', blob, 'face.jpg');
+      fd.append('pre_auth_token', _2faData.preAuthToken);
+
+      btn.textContent = 'Verificando…';
+      try {
+        const r = await fetch(`${API}/auth/login/face-token`, {method: 'POST', body: fd});
+        const data = await r.json();
+        if (!r.ok) { resultEl.innerHTML = `<span style="color:#dc2626;">❌ ${data.detail}</span>`; btn.textContent = 'Reintentar selfie'; return; }
+        _loginFaceToken = data.face_token;
+        resultEl.innerHTML = `<span style="color:#16a34a;">✅ ${data.message}</span>`;
+        btn.textContent = '✅ Cara verificada';
+        btn.style.background = '#f0fdf4';
+        btn.style.borderColor = '#86efac';
+      } catch(_) { resultEl.innerHTML = '<span style="color:#dc2626;">Error de conexión</span>'; btn.textContent = 'Reintentar selfie'; }
+    };
+  } catch(_) { btn.textContent = 'No se pudo acceder a la cámara'; }
+}
+
+async function completeTwoFactor() {
+  const req = _2faData.requires || {};
+  const emailCode = req.email ? (document.getElementById('twofa-email-code')?.value.trim() || '') : '';
+  const smsCode   = req.sms   ? (document.getElementById('twofa-sms-code')?.value.trim() || '') : '';
+  const errEl = document.getElementById('twofa-err');
+  errEl.textContent = '';
+
+  if (req.email && !emailCode) { errEl.textContent = 'Ingresa el código de email'; return; }
+  if (req.sms   && !smsCode)   { errEl.textContent = 'Ingresa el código de SMS'; return; }
+  if (req.face  && !_loginFaceToken) { errEl.textContent = 'Debes verificar tu cara primero'; return; }
+
+  try {
+    const fp = await generateDeviceFingerprint().catch(() => '');
+    const r = await fetch(`${API}/auth/complete-login`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        pre_auth_token: _2faData.preAuthToken,
+        email_code: emailCode,
+        sms_code: smsCode,
+        face_token: _loginFaceToken,
+        device_fp: fp
+      })
+    });
+    const d = await r.json();
+    if (!r.ok) { errEl.textContent = d.detail || 'Error de verificación'; return; }
+    document.getElementById('twofa-modal').style.display = 'none';
+    finishLogin(d);
+  } catch(_) { errEl.textContent = 'Error de conexión'; }
 }
 
 const PHONE_PREFIX = {
