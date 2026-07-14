@@ -2388,9 +2388,22 @@ async function verifyVoteCode(debateId) {
       return;
     }
     if (d.already_verified) {
+      const score = d.legitimacy_score ?? null;
+      const scoreHtml = score !== null ? `
+        <div style="margin-top:14px;background:#fff;border-radius:10px;padding:14px;border:1.5px solid #e5e7eb;">
+          <div style="font-size:12px;color:#7a7570;margin-bottom:6px;">Índice de legitimidad de esta consulta</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="flex:1;background:#e5e7eb;border-radius:99px;height:10px;overflow:hidden;">
+              <div style="width:${score}%;background:${score>=80?'#16a34a':score>=50?'#f59e0b':'#dc2626'};height:100%;border-radius:99px;"></div>
+            </div>
+            <div style="font-size:18px;font-weight:800;color:${score>=80?'#16a34a':score>=50?'#f59e0b':'#dc2626'};">${score}%</div>
+          </div>
+          <div style="font-size:11px;color:#7a7570;margin-top:5px;">${d.verifications_ok || 0} de ${d.verifications_total || 0} votantes confirmaron que su voto está bien contabilizado</div>
+        </div>` : '';
       result.innerHTML = `<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;padding:16px;">
         <div style="font-size:15px;font-weight:700;color:#16a34a;margin-bottom:6px;">✅ Este voto ya fue verificado</div>
-        <div style="font-size:13px;color:#374151;">Tu voto fue contabilizado como: <strong>${esc(d.your_vote)}</strong></div>
+        <div style="font-size:13px;color:#374151;margin-bottom:4px;">Tu voto fue contabilizado como: <strong>${esc(d.your_vote)}</strong></div>
+        ${scoreHtml}
       </div>`;
       return;
     }

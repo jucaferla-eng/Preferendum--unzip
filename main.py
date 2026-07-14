@@ -3217,6 +3217,9 @@ def verify_vote(debate_id: int, data: VerifyVoteRequest, db: Session = Depends(g
         'blockchain_tx': vote.blockchain_tx,
         'recorded_at': vote.created_at.isoformat(),
         'already_verified': vote.verified is not None,
+        'legitimacy_score': debate.legitimacy_score if debate else 0,
+        'verifications_ok': debate.verifications_ok if debate else 0,
+        'verifications_total': debate.verifications_total if debate else 0,
     }
 
 @app.post('/debates/{debate_id}/verify/confirm')
