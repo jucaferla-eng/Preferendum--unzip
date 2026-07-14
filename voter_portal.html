@@ -2442,9 +2442,21 @@ async function confirmVote(debateId, code, confirmed) {
     const r = await fetch(`${API}/debates/${debateId}/verify/confirm`, {method:'POST', body: fd});
     const d = await r.json();
     if (r.ok && d.recorded) {
+      const score = d.legitimacy_score ?? null;
+      const scoreHtml = score !== null ? `
+        <div style="margin-top:14px;background:#fff;border-radius:10px;padding:14px;border:1.5px solid #e5e7eb;">
+          <div style="font-size:12px;color:#7a7570;margin-bottom:6px;">Índice de legitimidad de esta consulta</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div style="flex:1;background:#e5e7eb;border-radius:99px;height:10px;overflow:hidden;">
+              <div style="width:${score}%;background:${score>=80?'#16a34a':score>=50?'#f59e0b':'#dc2626'};height:100%;border-radius:99px;transition:width 0.6s;"></div>
+            </div>
+            <div style="font-size:18px;font-weight:800;color:${score>=80?'#16a34a':score>=50?'#f59e0b':'#dc2626'};">${score}%</div>
+          </div>
+          <div style="font-size:11px;color:#7a7570;margin-top:5px;">de los votantes confirmaron que su voto está bien contabilizado</div>
+        </div>` : '';
       resultEl.innerHTML = confirmed
-        ? `<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:14px;color:#16a34a;font-size:13px;font-weight:600;">✅ Gracias por verificar tu voto. Queda registrado como correcto.</div>`
-        : `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:14px;color:#dc2626;font-size:13px;font-weight:600;">⚠️ Disputa registrada. Nuestro equipo la revisará.</div>`;
+        ? `<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:14px;color:#16a34a;font-size:13px;font-weight:600;">✅ Gracias por verificar tu voto. Queda registrado como correcto.${scoreHtml}</div>`
+        : `<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:10px;padding:14px;color:#dc2626;font-size:13px;font-weight:600;">⚠️ Disputa registrada. Nuestro equipo la revisará.${scoreHtml}</div>`;
     }
   } catch(_) {
     resultEl.innerHTML = '<div style="color:#f87171;font-size:13px;">Error. Intenta de nuevo.</div>';
