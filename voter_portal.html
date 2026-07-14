@@ -2305,6 +2305,12 @@ function _buildSelfieModal() {
 }
 
 async function openSelfieVerifyModal() {
+  // Si no está verificado aún → necesita subir cédula primero → flujo completo
+  if (!userSelfieVerified) {
+    showVerifyScreen();
+    return;
+  }
+  // Ya verificado → cámara directo para re-confirmar cara
   let modal = document.getElementById('selfie-verify-modal');
   if (!modal) modal = _buildSelfieModal();
   document.getElementById('sv-err').textContent = '';
@@ -2334,18 +2340,21 @@ async function captureSelfieVerify() {
     try {
       const fd = new FormData();
       fd.append('file', blob, 'selfie.jpg');
-      const r = await fetch(`${API}/verify/selfie`, {
+      // Si ya está verificado: usa /verify/face (compara contra selfie guardada en registro)
+      // Si no: usa /verify/selfie (compara contra cédula subida)
+      const endpoint = userSelfieVerified ? `${API}/verify/face` : `${API}/verify/selfie`;
+      const r = await fetch(endpoint, {
         method: 'POST', headers: {'Authorization': 'Bearer ' + token}, body: fd
       });
       const d = await r.json();
-      if (r.ok && d.verified) {
+      const verified = r.ok && (d.verified !== false);
+      if (verified) {
         userSelfieVerified = true;
         localStorage.setItem('pref_selfie_verified', 'true');
         btn.textContent = '✅ Verificado';
         btn.style.background = '#16a34a';
         scoreEl.style.color = '#4ade80';
         scoreEl.textContent = d.match_score ? `Amazon Rekognition: ${d.match_score}% coincidencia` : 'Identidad verificada';
-        // Update profile card
         const st = document.getElementById('verify-identity-status');
         if (st) { st.textContent = '✅ Identidad verificada — la cámara se activará al votar.'; st.style.color = '#16a34a'; }
         setTimeout(() => closeSelfieVerifyModal(), 2500);
