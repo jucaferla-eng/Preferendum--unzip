@@ -2407,15 +2407,22 @@ def list_debates(
     country: str = Query('CL'),
     commune: str = Query(None),
     limit:   int = Query(50),
+    status:  str = Query('live'),   # 'live' | 'expired'
     db: Session = Depends(get_db)
 ):
+    now = datetime.utcnow()
     q = db.query(Debate)
     if country and country != 'ALL':
-        # Also show debates with no country set (legacy debates) and global ones to everyone
         q = q.filter(
             Debate.scope_country.in_([country, 'ALL', 'GLOBAL', 'GL']) |
             (Debate.scope_country == None) |
             (Debate.scope_country == '')
+        )
+    if status == 'expired':
+        q = q.filter(Debate.closes_at != None, Debate.closes_at < now)
+    else:
+        q = q.filter(
+            (Debate.closes_at == None) | (Debate.closes_at >= now)
         )
     debates = q.order_by(Debate.created_at.desc()).limit(limit).all()
     safe = []

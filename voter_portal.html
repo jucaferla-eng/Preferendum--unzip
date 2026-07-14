@@ -448,6 +448,24 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
   </div>
 </div>
 
+<!-- HOME SELECTION -->
+<div id="home-selection" style="display:none;position:fixed;inset:0;background:#f5f3ee;z-index:500;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;">
+  <div style="font-size:28px;font-weight:800;color:#060810;margin-bottom:8px;text-align:center;">Preferendum</div>
+  <div style="font-size:14px;color:#7a7570;margin-bottom:48px;text-align:center;">¿Qué quieres ver?</div>
+  <div style="display:flex;flex-direction:column;gap:16px;width:100%;max-width:320px;">
+    <button onclick="goToVigentes()" style="padding:22px;border-radius:16px;border:none;background:#060810;color:#fff;font-size:16px;font-weight:700;cursor:pointer;text-align:left;">
+      <div style="font-size:28px;margin-bottom:8px;">🗳️</div>
+      <div>Consultas vigentes</div>
+      <div style="font-size:12px;font-weight:400;color:#aaa;margin-top:4px;">Participa y vota en consultas activas</div>
+    </button>
+    <button onclick="goToExpiradas()" style="padding:22px;border-radius:16px;border:2px solid #060810;background:#fff;color:#060810;font-size:16px;font-weight:700;cursor:pointer;text-align:left;">
+      <div style="font-size:28px;margin-bottom:8px;">🔍</div>
+      <div>Consultas expiradas</div>
+      <div style="font-size:12px;font-weight:400;color:#7a7570;margin-top:4px;">Verifica cómo fue contado tu voto</div>
+    </button>
+  </div>
+</div>
+
 <!-- MAIN APP -->
 <div id="main-app">
   <div class="topbar">
@@ -1151,14 +1169,35 @@ function showApp() {
   const vs = document.getElementById('verify-screen');
   vs.classList.remove('visible');
   vs.style.display = 'none';
+  document.getElementById('main-app').style.display = 'none';
+  // Deep-link: ?debate=ID abre directamente sin pantalla de selección
+  const urlDebateId = new URLSearchParams(location.search).get('debate');
+  if (urlDebateId) {
+    _launchMainApp();
+    setTimeout(() => openDebate(parseInt(urlDebateId)), 600);
+    return;
+  }
+  if (!localStorage.getItem('pref_seen_welcome')) showWelcomeModal();
+  // Mostrar pantalla de selección
+  const hs = document.getElementById('home-selection');
+  hs.style.display = 'flex';
+}
+
+function _launchMainApp() {
+  document.getElementById('home-selection').style.display = 'none';
   document.getElementById('main-app').style.display = 'flex';
   document.getElementById('main-app').classList.add('visible');
   document.getElementById('user-name-display').textContent = userName;
-  loadDebates();
-  if (!localStorage.getItem('pref_seen_welcome')) showWelcomeModal();
-  // Deep-link: ?debate=ID opens that consultation directly
-  const urlDebateId = new URLSearchParams(location.search).get('debate');
-  if (urlDebateId) setTimeout(() => openDebate(parseInt(urlDebateId)), 600);
+}
+
+function goToVigentes() {
+  _launchMainApp();
+  loadDebates('live');
+}
+
+function goToExpiradas() {
+  _launchMainApp();
+  loadDebates('expired');
 }
 
 function showWelcomeModal() {
@@ -1332,13 +1371,18 @@ function showDebatesList() {
 }
 
 // ── DEBATES ──
-async function loadDebates() {
+let _currentDebateStatus = 'live';
+async function loadDebates(status = 'live') {
+  _currentDebateStatus = status;
   const list = document.getElementById('debates-list');
+  // Update section title
+  const secTitle = document.querySelector('.section-title');
+  if (secTitle) secTitle.textContent = status === 'expired' ? 'Consultas expiradas' : 'Consultas';
   list.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   try {
     const [dr, ar] = await Promise.all([
-      fetch(`${API}/debates?limit=20&country=${encodeURIComponent(userCountry)}`),
-      fetch(`${API}/ads/featured`).catch(() => null),
+      fetch(`${API}/debates?limit=50&country=${encodeURIComponent(userCountry)}&status=${status}`),
+      status === 'live' ? fetch(`${API}/ads/featured`).catch(() => null) : Promise.resolve(null),
     ]);
     const debates = (await dr.json()).debates || [];
     const featuredAds = ar && ar.ok ? (await ar.json()).ads || [] : [];
@@ -1688,6 +1732,23 @@ function renderDebate(db, res, items) {
       </div>` : ''}
       <div class="detail-card">${renderDonut(opts, counts, total, COLORS)}</div>
     </div>
+
+    ${!isLive ? `
+    <div class="phase-divider" style="margin-top:24px;">
+      <div class="phase-divider-line"></div>
+      <div class="phase-label">🔍 Verificar mi voto</div>
+      <div class="phase-divider-line"></div>
+    </div>
+    <div class="detail-card" style="margin-top:12px;">
+      <div style="font-size:13px;color:#7a7570;margin-bottom:12px;">Ingresa tu código de verificación para confirmar cómo fue contabilizado tu voto.</div>
+      <input type="text" id="verify-code-input" placeholder="Ej: AB3X9K2M" maxlength="20"
+        style="width:100%;padding:12px;border-radius:10px;border:1.5px solid #d4cfc5;background:#f5f3ee;font-family:'DM Mono',monospace;font-size:15px;letter-spacing:3px;text-transform:uppercase;outline:none;box-sizing:border-box;margin-bottom:10px;"/>
+      <button onclick="verifyVoteCode(${debId})"
+        style="width:100%;padding:13px;background:#060810;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">
+        Verificar voto →
+      </button>
+      <div id="verify-code-result" style="margin-top:12px;"></div>
+    </div>` : ''}
 
     <div class="phase-divider" style="margin-top:24px;">
       <div class="phase-divider-line"></div>
@@ -2279,6 +2340,36 @@ function fmtDateTime(s) { try { const utc = s && !s.endsWith('Z') && !s.includes
 
 // Init country-dependent fields once DOM is fully ready
 document.addEventListener('DOMContentLoaded', toggleCommuneField);
+
+// ── Vote Code Verification ───────────────────────────────────────────────────
+async function verifyVoteCode(debateId) {
+  const input = document.getElementById('verify-code-input');
+  const result = document.getElementById('verify-code-result');
+  const code = (input?.value || '').trim().toUpperCase();
+  if (!code) { result.innerHTML = '<div style="color:#f87171;font-size:13px;">Ingresa tu código de verificación.</div>'; return; }
+  result.innerHTML = '<div style="color:#7a7570;font-size:13px;">Verificando…</div>';
+  try {
+    const r = await fetch(`${API}/debates/${debateId}/verify`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({code})
+    });
+    const d = await r.json();
+    if (r.ok && d.found) {
+      result.innerHTML = `
+        <div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;padding:16px;">
+          <div style="font-size:16px;font-weight:700;color:#16a34a;margin-bottom:8px;">✅ Voto verificado</div>
+          <div style="font-size:13px;color:#374151;margin-bottom:4px;">Tu voto fue: <strong>${esc(d.your_vote)}</strong></div>
+          <div style="font-size:12px;color:#7a7570;margin-bottom:4px;">Consulta: ${esc(d.debate_title)}</div>
+          ${d.blockchain_tx ? `<div style="font-size:11px;color:#7a7570;margin-top:8px;font-family:'DM Mono',monospace;word-break:break-all;">TX: ${esc(d.blockchain_tx)}</div>` : ''}
+        </div>`;
+    } else {
+      result.innerHTML = '<div style="background:#fef2f2;border:1.5px solid #fca5a5;border-radius:12px;padding:16px;color:#dc2626;font-size:13px;">❌ Código no encontrado. Verifica que lo hayas ingresado correctamente.</div>';
+    }
+  } catch(_) {
+    result.innerHTML = '<div style="color:#f87171;font-size:13px;">Error de conexión. Intenta de nuevo.</div>';
+  }
+}
 
 // ── Profile Selfie Verify Modal ──────────────────────────────────────────────
 let _selfieStream = null;
