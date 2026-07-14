@@ -759,15 +759,23 @@ def hash_str(s, prefix=''):
     return hashlib.sha256(f'{prefix}{s}'.encode()).hexdigest()
 
 def check_and_register_device(device_fp: str, user_id: int, db: Session):
-    """Verifica que el dispositivo no esté registrado a otra cuenta. Si no está, lo registra."""
+    """Verifica que el dispositivo no esté registrado a otra cuenta.
+    Usa fingerprint + RUT como identidad compuesta para evitar falsos positivos por colisión."""
     if not device_fp:
-        return  # sin fingerprint, no hacemos nada
+        return
     fp_hash = hash_str(device_fp, 'pref-fp-')
     existing = db.query(IMEILog).filter(IMEILog.imei_hash == fp_hash).first()
-    if existing:
-        if existing.user_id != user_id:
-            raise HTTPException(409, 'Este dispositivo ya está registrado con otra cuenta. Solo se permite una cuenta por dispositivo.')
-    else:
+    if existing and existing.user_id != user_id:
+        # Mismo fingerprint, distinta cuenta — verificar si es colisión legítima o fraude
+        current_user  = db.query(User).filter(User.id == user_id).first()
+        existing_user = db.query(User).filter(User.id == existing.user_id).first()
+        if (current_user and existing_user
+                and current_user.national_id and existing_user.national_id):
+            def _nid(u): return re.sub(r'[\.\-\s]', '', u.national_id.strip().upper())
+            if _nid(current_user) == _nid(existing_user):
+                return  # mismo RUT = misma persona en otro navegador, permitir
+        raise HTTPException(409, 'Este dispositivo ya está registrado con otra cuenta. Solo se permite una cuenta por dispositivo.')
+    if not existing:
         db.add(IMEILog(user_id=user_id, imei_hash=fp_hash, device_info='browser-fp-login'))
         db.commit()
 
