@@ -313,6 +313,15 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
   </div>
 </div>
 
+<!-- RESULTS MODAL -->
+<div id="results-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9000;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#1a1f2e;border-radius:20px;width:100%;max-width:420px;max-height:90vh;overflow-y:auto;padding:24px;position:relative;">
+    <button onclick="document.getElementById('results-modal').style.display='none'"
+      style="position:absolute;top:16px;right:16px;background:transparent;border:none;color:#fff;font-size:20px;cursor:pointer;">✕</button>
+    <div id="results-modal-body"></div>
+  </div>
+</div>
+
 <script>
 const API = 'https://preferendum-unzip.onrender.com';
 let token = localStorage.getItem('pref_org_token') || '';
@@ -749,7 +758,7 @@ async function loadDebates() {
     list.innerHTML = debates.map(db => {
       const isLive = db.status === 'live';
       const opts = db.options || [];
-      return `<div class="debate-card">
+      return `<div class="debate-card" onclick="showResults(${db.id})" style="cursor:pointer;transition:transform 0.15s,box-shadow 0.15s;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(0,0,0,0.3)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
         <span class="badge ${isLive?'badge-live':'badge-closed'}">${isLive?'● Live':'Closed'}</span>
         <div class="debate-title" style="margin-top:8px;">${db.title}</div>
         ${db.context ? `<div style="font-size:13px;color:var(--muted);margin-top:4px;">${db.context}</div>` : ''}
@@ -759,10 +768,75 @@ async function loadDebates() {
           <span>${db.scope_country||'Global'}</span>
           ${db.closes_at ? `<span>Closes ${db.closes_at.split('T')[0]}</span>` : ''}
         </div>
+        <div style="font-size:12px;color:#6366f1;margin-top:8px;font-weight:600;">Ver resultados →</div>
       </div>`;
     }).join('');
   } catch(e) {
     list.innerHTML = '<div style="color:#f87171;font-size:14px;">Error loading consultations.</div>';
+  }
+}
+
+async function showResults(debateId) {
+  const modal = document.getElementById('results-modal');
+  const body  = document.getElementById('results-modal-body');
+  modal.style.display = 'flex';
+  body.innerHTML = '<div style="color:#a0a8c0;text-align:center;padding:40px;">Cargando resultados…</div>';
+
+  try {
+    const r = await fetch(`${API}/debates/${debateId}/results`, {headers:{'Authorization':'Bearer '+token}});
+    const d = await r.json();
+
+    const results = d.results || [];
+    const total   = d.total_votes || 0;
+    const title   = d.title || '';
+    const isLive  = d.status === 'live';
+
+    // Ordenar por votos desc para encontrar ganador
+    const sorted = [...results].sort((a,b) => b.count - a.count);
+    const winner = sorted[0];
+
+    const COLORS = ['#6366f1','#22d3ee','#f59e0b','#10b981','#f43f5e','#a78bfa','#34d399','#fb923c'];
+
+    const bars = results.map((res, i) => {
+      const pct    = total > 0 ? Math.round((res.count / total) * 100) : 0;
+      const isWin  = winner && res.option === winner.option && total > 0;
+      const color  = COLORS[i % COLORS.length];
+      return `
+        <div style="margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+            <div style="font-size:13px;color:${isWin?'#fff':'#a0a8c0'};font-weight:${isWin?'700':'400'};display:flex;align-items:center;gap:6px;">
+              ${isWin && total > 0 ? '🏆 ' : ''}<span>${res.option}</span>
+            </div>
+            <div style="font-size:15px;font-weight:800;color:${color};">${pct}%</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.08);border-radius:99px;height:12px;overflow:hidden;">
+            <div style="width:${pct}%;background:${color};height:100%;border-radius:99px;transition:width 0.6s;"></div>
+          </div>
+          <div style="font-size:11px;color:#6b7280;margin-top:3px;">${res.count} voto${res.count!==1?'s':''}</div>
+        </div>`;
+    }).join('');
+
+    const legitimacy = d.legitimacy_score != null ? `
+      <div style="background:rgba(255,255,255,0.05);border-radius:12px;padding:14px;margin-top:16px;">
+        <div style="font-size:12px;color:#a0a8c0;margin-bottom:6px;">Índice de legitimidad</div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;background:rgba(255,255,255,0.1);border-radius:99px;height:8px;overflow:hidden;">
+            <div style="width:${d.legitimacy_score}%;background:${d.legitimacy_score>=80?'#10b981':d.legitimacy_score>=50?'#f59e0b':'#f43f5e'};height:100%;border-radius:99px;"></div>
+          </div>
+          <div style="font-size:16px;font-weight:800;color:#fff;">${d.legitimacy_score}%</div>
+        </div>
+        <div style="font-size:11px;color:#6b7280;margin-top:4px;">${d.verifications_ok||0} de ${d.verifications_total||0} votantes verificaron su voto</div>
+      </div>` : '';
+
+    body.innerHTML = `
+      <div style="font-size:11px;color:#6366f1;font-weight:600;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">${isLive ? '● En vivo' : 'Cerrada'}</div>
+      <div style="font-size:18px;font-weight:800;color:#fff;margin-bottom:4px;line-height:1.3;">${title}</div>
+      <div style="font-size:13px;color:#6b7280;margin-bottom:20px;">Total: <strong style="color:#fff;">${total}</strong> voto${total!==1?'s':''}</div>
+      ${total === 0 ? '<div style="color:#a0a8c0;text-align:center;padding:20px;">Aún no hay votos registrados.</div>' : bars}
+      ${legitimacy}`;
+
+  } catch(e) {
+    body.innerHTML = '<div style="color:#f87171;text-align:center;padding:40px;">Error cargando resultados.</div>';
   }
 }
 </script>
