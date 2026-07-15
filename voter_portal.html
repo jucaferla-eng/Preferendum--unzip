@@ -2181,8 +2181,8 @@ async function shareResult(debId) {
 
 async function shareMyVote(option, title, debId) {
   const instName = currentDebate?.inst_name || 'Preferendum';
-  const fallback = `Participé en la consulta de ${instName} en Preferendum.\nMi elección: "${option}"\n¿Y tú?`;
-  _shareWithPoster(title, option, instName, debId, fallback);
+  const fallback = `Participé en la consulta de ${instName} en Preferendum.\n¿Y tú qué prefieres?\n${location.origin}/voter?debate=${debId}`;
+  _shareWithPoster(title, '', instName, debId, fallback);
 }
 
 async function _doShare(title, text, url) {
