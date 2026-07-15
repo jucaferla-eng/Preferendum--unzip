@@ -2158,25 +2158,17 @@ async function shareResult(debId) {
   const db = currentDebate;
   if (!db) return;
   const opts = db.options || [];
-  let winnerText = opts[0] || '', winnerPct = 0, total = 0;
-  try {
-    const r = await fetch(`${API}/debates/${debId}/results`, {headers: token ? {'Authorization':'Bearer '+token} : {}});
-    if (r.ok) {
-      const res = await r.json();
-      const rl = (res.debate || res).results || [];
-      const cts = {};
-      rl.forEach(row => { cts[row.option] = row.count || 0; });
-      total = (res.debate || res).total_votes || 0;
-      if (total > 0) {
-        winnerText = opts.reduce((best, opt) => (cts[opt]||0) > (cts[best]||0) ? opt : best, opts[0]);
-        winnerPct  = Math.round((cts[winnerText]||0) / total * 100);
-      }
-    }
-  } catch(_) {}
+  const results = db.results || [];
+  const total = db.total_votes || 0;
+  let winnerText = opts[0] || '', winnerPct = 0;
+  if (total > 0 && results.length) {
+    const winner = results.reduce((best, r) => r.count > best.count ? r : best, results[0]);
+    winnerText = winner.option;
+    winnerPct  = Math.round(winner.count / total * 100);
+  }
   const instName = db.inst_name || 'Preferendum';
-  const subtitle = `"${winnerText}" ganó — ${winnerPct}%`;
-  const fallback = `La consulta de ${instName} en Preferendum ya tiene resultado:\n"${winnerText}" ganó con ${winnerPct}% de los votos.\n¿Y tú qué prefieres?`;
-  _shareWithPoster(db.title, subtitle, instName, debId, fallback);
+  const fallback = `La consulta de ${instName} en Preferendum ya tiene resultado:\n"${winnerText}" ganó con ${winnerPct}% de los votos.\n¿Y tú qué prefieres?\n${location.origin}/voter?debate=${debId}`;
+  _shareWithPoster(db.title, '', instName, debId, fallback);
 }
 
 async function shareMyVote(option, title, debId) {
