@@ -1877,11 +1877,14 @@ def login(data: LoginInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
                        expires_at=datetime.utcnow() + timedelta(minutes=10)))
         bg.add_task(send_email_otp, user.email, email_code, user.name)
 
-    if user.phone_verified and user.phone:
+    twilio_active = bool(os.getenv('TWILIO_ACCOUNT_SID') and os.getenv('TWILIO_AUTH_TOKEN'))
+    sms_required = False
+    if user.phone_verified and user.phone and twilio_active:
         sms_code = gen_otp()
         db.add(OTPCode(user_id=user.id, email=user.email, code=sms_code, channel='sms',
                        expires_at=datetime.utcnow() + timedelta(minutes=10)))
         bg.add_task(send_sms_otp, user.phone, sms_code)
+        sms_required = True
 
     db.commit()
 
@@ -1895,7 +1898,7 @@ def login(data: LoginInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
         'pre_auth_token': pre_auth,
         'requires': {
             'email': bool(user.email_verified),
-            'sms':   bool(user.phone_verified and user.phone),
+            'sms':   sms_required,
             'face':  bool(user.selfie_verified),
         },
         'email_hint': user.email[:3] + '***' + user.email[user.email.find('@'):] if user.email else '',
@@ -1998,8 +2001,9 @@ def complete_login(data: CompleteLoginInput, db: Session = Depends(get_db)):
             raise HTTPException(400, 'Código de email incorrecto o expirado')
         otp_email.used = True
 
-    # Validar código de SMS
-    if user.phone_verified and user.phone:
+    # Validar código de SMS solo si Twilio está activo
+    twilio_active = bool(os.getenv('TWILIO_ACCOUNT_SID') and os.getenv('TWILIO_AUTH_TOKEN'))
+    if user.phone_verified and user.phone and twilio_active:
         if not data.sms_code:
             raise HTTPException(400, 'Se requiere el código de SMS')
         otp_sms = db.query(OTPCode).filter(
