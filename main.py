@@ -1935,30 +1935,32 @@ async def login_face_token(
     rekognition_mode = 'no_aws'
 
     aws_key = os.getenv('AWS_ACCESS_KEY_ID')
-    if aws_key and ref and ref.face_bytes:
-        try:
-            rek = _rekognition_client()
-            resp = rek.compare_faces(
-                SourceImage={'Bytes': base64.b64decode(ref.face_bytes)},
-                TargetImage={'Bytes': contents},
-                SimilarityThreshold=80.0
-            )
-            matches = resp.get('FaceMatches', [])
-            if matches:
-                rekognition_score = round(matches[0]['Similarity'], 2)
-                rekognition_mode = 'verified'
-                if rekognition_score / 100.0 < 0.90:
-                    raise HTTPException(400, f'Similitud insuficiente ({rekognition_score}%). Intenta con mejor iluminación.')
-            else:
-                rekognition_mode = 'no_match'
-                raise HTTPException(400, 'Tu cara no coincide con la registrada.')
-        except HTTPException:
-            raise
-        except Exception as e:
-            rekognition_mode = f'aws_error: {e}'
-    else:
-        rekognition_mode = 'no_credentials' if not aws_key else 'no_reference'
+    if not aws_key:
+        raise HTTPException(503, 'Verificación facial no disponible en este momento.')
+    if not ref or not ref.face_bytes:
+        raise HTTPException(400, 'No tienes selfie de referencia registrada.')
+    try:
+        rek = _rekognition_client()
+        resp = rek.compare_faces(
+            SourceImage={'Bytes': base64.b64decode(ref.face_bytes)},
+            TargetImage={'Bytes': contents},
+            SimilarityThreshold=80.0
+        )
+        matches = resp.get('FaceMatches', [])
+        if matches:
+            rekognition_score = round(matches[0]['Similarity'], 2)
+            rekognition_mode = 'verified'
+            if rekognition_score / 100.0 < 0.90:
+                raise HTTPException(400, f'Tu cara no coincide ({rekognition_score}% similitud). Intenta con mejor iluminación.')
+        else:
+            rekognition_mode = 'no_match'
+            raise HTTPException(400, 'Tu cara no coincide con la registrada.')
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, 'Error en el servicio de verificación facial. Intenta de nuevo.')
 
+    # Solo llega aquí si rekognition_mode == 'verified'
     face_token = jwt.encode({
         'sub': user_id, 'type': 'face_login',
         'exp': datetime.utcnow() + timedelta(minutes=5)
@@ -3223,9 +3225,9 @@ async def get_face_vote_token(
     rekognition_mode = 'no_aws'
 
     if not aws_key:
-        rekognition_mode = 'no_credentials'
+        raise HTTPException(503, 'Verificación facial no disponible en este momento. Contacta al soporte.')
     elif not ref or not ref.face_bytes:
-        rekognition_mode = 'no_reference_selfie'
+        raise HTTPException(400, 'No tienes selfie de referencia registrada. Completa la verificación de identidad primero.')
     else:
         try:
             rek = _rekognition_client()
@@ -3239,15 +3241,16 @@ async def get_face_vote_token(
                 rekognition_score = round(matches[0]['Similarity'], 2)
                 rekognition_mode = 'verified'
                 if rekognition_score / 100.0 < 0.90:
-                    raise HTTPException(400, f'Similitud insuficiente ({rekognition_score}%). Intenta con mejor iluminación.')
+                    raise HTTPException(400, f'Tu cara no coincide con la registrada ({rekognition_score}% similitud). Intenta con mejor iluminación.')
             else:
                 rekognition_mode = 'no_match'
                 raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
         except HTTPException:
             raise
         except ClientError as e:
-            rekognition_mode = f'aws_error: {e.response["Error"]["Code"]}'
+            raise HTTPException(503, f'Error en el servicio de verificación facial. Intenta de nuevo.')
 
+    # Solo llega aquí si rekognition_mode == 'verified'
     token = jwt.encode({
         'sub': user.id,
         'debate_id': debate_id,
