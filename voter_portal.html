@@ -2117,10 +2117,12 @@ async function _generatePoster(title, subtitle, instName) {
   ctx.strokeStyle = botLine; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(0, H - botH); ctx.lineTo(W, H - botH); ctx.stroke();
 
-  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 40px Arial';
-  ctx.fillText('preferendum.com', PAD, H - botH + 66);
   ctx.fillStyle = '#94a3b8'; ctx.font = '28px Arial';
-  ctx.fillText('¿Tú qué prefieres? · Vota y verifica en blockchain', PAD, H - botH + 116);
+  ctx.fillText('preferendum.com', PAD, H - botH + 44);
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 52px Georgia, serif';
+  ctx.fillText('¿Tú qué prefieres?', PAD, H - botH + 106);
+  ctx.fillStyle = '#60a5fa'; ctx.font = '30px Arial';
+  ctx.fillText('Vota y verifica en blockchain', PAD, H - botH + 148);
 
   return canvas;
 }
