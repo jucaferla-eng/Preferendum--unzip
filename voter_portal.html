@@ -913,6 +913,27 @@ async function captureLoginFace() {
   const resultEl = document.getElementById('face-login-result');
   btn.textContent = 'Abriendo cámara…';
 
+  // Detectar in-app browser (WhatsApp, Instagram, Gmail, etc.)
+  const ua = navigator.userAgent || '';
+  const isInApp = /FBAN|FBAV|Instagram|Line|Twitter|GSA|MicroMessenger|Snapchat/.test(ua)
+    || (!!window.webkit && !navigator.mediaDevices);
+  const cameraAvailable = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+
+  if (isInApp || !cameraAvailable) {
+    const currentUrl = window.location.href;
+    btn.textContent = 'Tomar selfie →';
+    resultEl.innerHTML = `
+      <div style="background:#fef9ec;border:1.5px solid #fbbf24;border-radius:10px;padding:12px;margin-top:6px;">
+        <div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:6px;">⚠️ Cámara no disponible en esta app</div>
+        <div style="font-size:12px;color:#78350f;margin-bottom:10px;">Abre este enlace directamente en <strong>Safari</strong> o <strong>Chrome</strong> para usar la cámara.</div>
+        <button onclick="window.open('${currentUrl}','_blank')"
+          style="width:100%;padding:10px;background:#f59e0b;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;">
+          Abrir en navegador →
+        </button>
+      </div>`;
+    return;
+  }
+
   try {
     const stream = await navigator.mediaDevices.getUserMedia({video: {facingMode: 'user'}});
     const modal = document.createElement('div');
@@ -2658,11 +2679,15 @@ async function openSelfieVerifyModal() {
   const btn = document.getElementById('sv-btn');
   btn.disabled = false; btn.textContent = '📸 Tomar foto'; btn.style.background = '#4f46e5';
   modal.style.display = 'flex';
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+    document.getElementById('sv-err').innerHTML = '⚠️ Cámara no disponible. Abre Preferendum en <strong>Safari</strong> o <strong>Chrome</strong> directamente (no desde otra app).';
+    return;
+  }
   try {
     _selfieStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
     document.getElementById('sv-video').srcObject = _selfieStream;
   } catch(_) {
-    document.getElementById('sv-err').textContent = 'No se pudo acceder a la cámara';
+    document.getElementById('sv-err').innerHTML = '⚠️ Cámara bloqueada. Abre Preferendum en <strong>Safari</strong> o <strong>Chrome</strong> y permite el acceso a la cámara.';
   }
 }
 
@@ -2749,11 +2774,15 @@ async function requestFaceToken(debateId) {
     document.getElementById('face-err').textContent = '';
     document.getElementById('face-capture-btn').disabled = false;
     document.getElementById('face-capture-btn').textContent = 'Tomar foto';
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+      document.getElementById('face-err').innerHTML = '⚠️ Cámara no disponible. Abre Preferendum en <strong>Safari</strong> o <strong>Chrome</strong> directamente.';
+      return;
+    }
     try {
       _faceStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
       document.getElementById('face-video').srcObject = _faceStream;
     } catch(_) {
-      document.getElementById('face-err').textContent = 'No se pudo acceder a la cámara';
+      document.getElementById('face-err').innerHTML = '⚠️ Cámara bloqueada. Abre Preferendum en <strong>Safari</strong> o <strong>Chrome</strong> y permite el acceso a la cámara.';
     }
     modal._debateId = debateId;
   });
