@@ -2074,15 +2074,6 @@ async function _generatePoster(title, subtitle, instName) {
   ctx.fillStyle = '#93c5fd'; ctx.font = '48px Arial';
   y = _wrapTextCapped(ctx, `"${title}"`, PAD, y, INNER, 62, 3); y += 40;
 
-  // Choice
-  if (subtitle) {
-    ctx.fillStyle = '#334155'; ctx.fillRect(PAD - 24, y - 40, INNER + 48, 180);
-    ctx.fillStyle = '#94a3b8'; ctx.font = '38px Arial';
-    ctx.fillText('Mi preferencia:', PAD, y); y += 64;
-    ctx.fillStyle = '#10b981'; ctx.font = 'bold 68px Arial';
-    y = _wrapTextCapped(ctx, subtitle, PAD, y, INNER, 80, 2); y += 16;
-  }
-
   // Bottom bar
   const botH = 160;
   ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, H - botH, W, botH);
