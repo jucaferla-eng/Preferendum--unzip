@@ -2038,49 +2038,89 @@ async function _generatePoster(title, subtitle, instName) {
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  // Background gradient
+  // Rich dark background
   const bg = ctx.createLinearGradient(0, 0, W, H);
-  bg.addColorStop(0, '#07090f'); bg.addColorStop(1, '#0d1f3c');
+  bg.addColorStop(0, '#050810'); bg.addColorStop(0.5, '#0a1428'); bg.addColorStop(1, '#060d1e');
   ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
 
-  // Top accent bar
-  ctx.fillStyle = '#2d6eff'; ctx.fillRect(0, 0, W, 12);
+  // Subtle radial glow top-center
+  const glow = ctx.createRadialGradient(W/2, 0, 0, W/2, 0, 700);
+  glow.addColorStop(0, 'rgba(45,110,255,0.18)'); glow.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
 
-  let y = 120;
+  // Top gradient bar
+  const bar = ctx.createLinearGradient(0, 0, W, 0);
+  bar.addColorStop(0, '#6b21ff'); bar.addColorStop(0.5, '#2d6eff'); bar.addColorStop(1, '#00c8ff');
+  ctx.fillStyle = bar; ctx.fillRect(0, 0, W, 10);
 
-  // Wordmark
-  ctx.fillStyle = '#2d6eff'; ctx.font = 'bold 72px Arial';
-  ctx.fillText('PREFERENDUM', PAD, y); y += 56;
-  ctx.fillStyle = '#475569'; ctx.font = '34px Arial';
-  ctx.fillText('Plataforma de consultas verificadas', PAD, y); y += 56;
+  let y = 110;
 
-  // Divider
-  ctx.strokeStyle = '#1e3a8a'; ctx.lineWidth = 2;
+  // ── HEADER: icon circle + wordmark ──
+  const ICON_R = 56;
+  const iconX = PAD + ICON_R, iconY = y + ICON_R;
+
+  // Draw P icon circle (simplified logo)
+  const ring = ctx.createLinearGradient(iconX - ICON_R, iconY - ICON_R, iconX + ICON_R, iconY + ICON_R);
+  ring.addColorStop(0, '#7c3aff'); ring.addColorStop(0.5, '#2d6eff'); ring.addColorStop(1, '#00c8ff');
+
+  // Outer ring
+  ctx.beginPath(); ctx.arc(iconX, iconY, ICON_R, 0, Math.PI * 2);
+  ctx.strokeStyle = ring; ctx.lineWidth = 10; ctx.stroke();
+
+  // P letter
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 72px Georgia, serif';
+  ctx.textAlign = 'center'; ctx.fillText('P', iconX, iconY + 24); ctx.textAlign = 'left';
+
+  // Wordmark next to icon
+  const wordX = PAD + ICON_R * 2 + 24;
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 64px Georgia, serif';
+  ctx.fillText('Preferendum', wordX, iconY + 4);
+  ctx.fillStyle = '#60a5fa'; ctx.font = '28px Arial';
+  ctx.fillText('Plataforma de consultas verificadas', wordX, iconY + 38);
+
+  y = iconY + ICON_R + 50;
+
+  // Divider line with gradient
+  const divGrad = ctx.createLinearGradient(PAD, 0, W - PAD, 0);
+  divGrad.addColorStop(0, 'rgba(45,110,255,0.6)'); divGrad.addColorStop(1, 'rgba(0,200,255,0.2)');
+  ctx.strokeStyle = divGrad; ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(W - PAD, y); ctx.stroke(); y += 60;
 
   // "Participé en la consulta de"
-  ctx.fillStyle = '#64748b'; ctx.font = '42px Arial';
-  ctx.fillText('Participé en la consulta de', PAD, y); y += 80;
+  ctx.fillStyle = '#94a3b8'; ctx.font = '40px Arial';
+  ctx.fillText('Participé en la consulta de', PAD, y); y += 76;
 
-  // Institution name — max 2 lines
-  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 82px Arial';
-  y = _wrapTextCapped(ctx, instName || 'Preferendum', PAD, y, INNER, 96, 2); y += 24;
+  // Institution name — max 2 lines, white bold
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 78px Georgia, serif';
+  y = _wrapTextCapped(ctx, instName || 'Preferendum', PAD, y, INNER, 92, 2); y += 30;
 
-  // Divider
-  ctx.strokeStyle = '#1e3a8a'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(W - PAD, y); ctx.stroke(); y += 50;
+  // Card background for title
+  ctx.fillStyle = 'rgba(45,110,255,0.08)';
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(PAD - 20, y - 20, INNER + 40, 260, 16) : ctx.rect(PAD - 20, y - 20, INNER + 40, 260);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(45,110,255,0.25)'; ctx.lineWidth = 1;
+  ctx.stroke();
 
-  // Consultation title — max 3 lines
-  ctx.fillStyle = '#93c5fd'; ctx.font = '48px Arial';
-  y = _wrapTextCapped(ctx, `"${title}"`, PAD, y, INNER, 62, 3); y += 40;
+  y += 20;
+  // Consultation title — max 3 lines, light blue
+  ctx.fillStyle = '#e2e8f0'; ctx.font = '46px Arial';
+  y = _wrapTextCapped(ctx, `"${title}"`, PAD + 10, y, INNER - 20, 60, 3); y += 30;
 
   // Bottom bar
-  const botH = 160;
-  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, H - botH, W, botH);
-  ctx.fillStyle = '#2d6eff'; ctx.font = 'bold 38px Arial';
-  ctx.fillText('preferendum.com', PAD, H - botH + 58);
-  ctx.fillStyle = '#475569'; ctx.font = '30px Arial';
-  ctx.fillText('Voto verificado · ¿Tú qué prefieres?', PAD, H - botH + 108);
+  const botH = 170;
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, H - botH, W, botH);
+
+  // Bottom gradient line
+  const botLine = ctx.createLinearGradient(0, 0, W, 0);
+  botLine.addColorStop(0, '#7c3aff'); botLine.addColorStop(0.5, '#2d6eff'); botLine.addColorStop(1, '#00c8ff');
+  ctx.strokeStyle = botLine; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(0, H - botH); ctx.lineTo(W, H - botH); ctx.stroke();
+
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 40px Arial';
+  ctx.fillText('preferendum.com', PAD, H - botH + 66);
+  ctx.fillStyle = '#94a3b8'; ctx.font = '28px Arial';
+  ctx.fillText('¿Tú qué prefieres? · Vota y verifica en blockchain', PAD, H - botH + 116);
 
   return canvas;
 }
