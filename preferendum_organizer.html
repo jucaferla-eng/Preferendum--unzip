@@ -164,21 +164,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
       </div>
       <div class="alert" id="create-alert"></div>
 
-      <!-- Ciudadano vs Empresa -->
-      <div class="field">
-        <label>¿Quién convoca esta consulta?</label>
-        <div style="display:flex;gap:12px;margin-top:6px;">
-          <button type="button" id="btn-ciudadano" onclick="setCreatorType('citizen')"
-            style="flex:1;padding:14px;border-radius:12px;border:2px solid #2d6eff;background:#eff6ff;color:#1d4ed8;font-size:14px;font-weight:700;cursor:pointer;">
-            👤 Ciudadano
-          </button>
-          <button type="button" id="btn-empresa" onclick="setCreatorType('organization')"
-            style="flex:1;padding:14px;border-radius:12px;border:2px solid #e2e8f0;background:#f8fafc;color:#64748b;font-size:14px;font-weight:700;cursor:pointer;">
-            🏢 Empresa / Institución
-          </button>
-        </div>
-        <input type="hidden" id="c-creator-type" value="citizen"/>
-      </div>
+      <input type="hidden" id="c-creator-type" value="citizen"/>
 
       <div class="field" id="field-inst-name" style="display:none;">
         <label>Nombre de empresa o institución</label>
