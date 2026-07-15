@@ -4,6 +4,7 @@
     "slug": "preferendum",
     "version": "6.0.36",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
       "backgroundColor": "#0a0d14",
