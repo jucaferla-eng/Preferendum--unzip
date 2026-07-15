@@ -2014,70 +2014,82 @@ function selectOption(idx) {
 }
 
 // ── SHARE POSTER — canvas image for social sharing ──
-function _wrapText(ctx, text, x, y, maxW, lineH) {
+function _wrapTextCapped(ctx, text, x, y, maxW, lineH, maxLines) {
   const words = String(text).split(' ');
-  let line = '';
+  let line = '', lines = [], i = 0;
   for (const w of words) {
     const test = line ? line + ' ' + w : w;
     if (ctx.measureText(test).width > maxW && line) {
-      ctx.fillText(line, x, y);
-      line = w; y += lineH;
+      lines.push(line); line = w;
     } else { line = test; }
   }
-  if (line) { ctx.fillText(line, x, y); y += lineH; }
+  if (line) lines.push(line);
+  if (maxLines && lines.length > maxLines) {
+    lines = lines.slice(0, maxLines);
+    lines[maxLines - 1] = lines[maxLines - 1].replace(/\s?\S+$/, '…');
+  }
+  for (const l of lines) { ctx.fillText(l, x, y); y += lineH; }
   return y;
 }
 
 async function _generatePoster(title, subtitle, instName) {
-  const W = 1080, H = 1350;
+  const W = 1080, H = 1350, PAD = 80, INNER = W - PAD * 2;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  // Background
+  // Background gradient
   const bg = ctx.createLinearGradient(0, 0, W, H);
-  bg.addColorStop(0, '#0a1628'); bg.addColorStop(1, '#1a2f5e');
+  bg.addColorStop(0, '#07090f'); bg.addColorStop(1, '#0d1f3c');
   ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
 
   // Top accent bar
-  ctx.fillStyle = '#2d6eff'; ctx.fillRect(0, 0, W, 16);
+  ctx.fillStyle = '#2d6eff'; ctx.fillRect(0, 0, W, 12);
 
-  // Preferendum wordmark
-  ctx.fillStyle = '#2d6eff';
-  ctx.font = 'bold 80px Arial'; ctx.fillText('PREFERENDUM', 80, 160);
-  ctx.fillStyle = '#64748b';
-  ctx.font = '38px Arial'; ctx.fillText('Digital Verified Decision Making', 80, 220);
+  let y = 120;
+
+  // Wordmark
+  ctx.fillStyle = '#2d6eff'; ctx.font = 'bold 72px Arial';
+  ctx.fillText('PREFERENDUM', PAD, y); y += 56;
+  ctx.fillStyle = '#475569'; ctx.font = '34px Arial';
+  ctx.fillText('Plataforma de consultas verificadas', PAD, y); y += 56;
 
   // Divider
   ctx.strokeStyle = '#1e3a8a'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(80, 260); ctx.lineTo(W - 80, 260); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(W - PAD, y); ctx.stroke(); y += 60;
 
   // "Participé en la consulta de"
-  ctx.fillStyle = '#94a3b8'; ctx.font = '48px Arial';
-  ctx.fillText('Participé en la consulta de', 80, 370);
+  ctx.fillStyle = '#64748b'; ctx.font = '42px Arial';
+  ctx.fillText('Participé en la consulta de', PAD, y); y += 80;
 
-  // Institution / convener name
-  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 96px Arial';
-  _wrapText(ctx, instName || 'Preferendum', 80, 490, W - 160, 110);
+  // Institution name — max 2 lines
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 82px Arial';
+  y = _wrapTextCapped(ctx, instName || 'Preferendum', PAD, y, INNER, 96, 2); y += 24;
 
-  // Consultation title
-  ctx.fillStyle = '#93c5fd'; ctx.font = '52px Arial';
-  _wrapText(ctx, `"${title}"`, 80, 730, W - 160, 64);
+  // Divider
+  ctx.strokeStyle = '#1e3a8a'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(W - PAD, y); ctx.stroke(); y += 50;
 
-  // Choice label + value
+  // Consultation title — max 3 lines
+  ctx.fillStyle = '#93c5fd'; ctx.font = '48px Arial';
+  y = _wrapTextCapped(ctx, `"${title}"`, PAD, y, INNER, 62, 3); y += 40;
+
+  // Choice
   if (subtitle) {
-    ctx.fillStyle = '#64748b'; ctx.font = '44px Arial';
-    ctx.fillText('Mi elección:', 80, 980);
-    ctx.fillStyle = '#10b981'; ctx.font = 'bold 78px Arial';
-    _wrapText(ctx, subtitle, 80, 1080, W - 160, 90);
+    ctx.fillStyle = '#334155'; ctx.fillRect(PAD - 24, y - 40, INNER + 48, 180);
+    ctx.fillStyle = '#94a3b8'; ctx.font = '38px Arial';
+    ctx.fillText('Mi preferencia:', PAD, y); y += 64;
+    ctx.fillStyle = '#10b981'; ctx.font = 'bold 68px Arial';
+    y = _wrapTextCapped(ctx, subtitle, PAD, y, INNER, 80, 2); y += 16;
   }
 
   // Bottom bar
-  ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(0, H - 190, W, 190);
-  ctx.fillStyle = '#2d6eff'; ctx.font = 'bold 44px Arial';
-  ctx.fillText('preferendum-unzip.onrender.com', 80, H - 100);
-  ctx.fillStyle = '#64748b'; ctx.font = '34px Arial';
-  ctx.fillText('Voto verificado en blockchain · Participa ya', 80, H - 46);
+  const botH = 160;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(0, H - botH, W, botH);
+  ctx.fillStyle = '#2d6eff'; ctx.font = 'bold 38px Arial';
+  ctx.fillText('preferendum.com', PAD, H - botH + 58);
+  ctx.fillStyle = '#475569'; ctx.font = '30px Arial';
+  ctx.fillText('Voto verificado · ¿Tú qué prefieres?', PAD, H - botH + 108);
 
   return canvas;
 }
@@ -2172,7 +2184,7 @@ async function shareResult(debId) {
   } catch(_) {}
   const instName = db.inst_name || 'Preferendum';
   const subtitle = `"${winnerText}" ganó — ${winnerPct}%`;
-  const fallback = `La consulta de ${instName} en Preferendum ya tiene resultado:\n"${winnerText}" ganó con ${winnerPct}% de los votos.\n¿Y tú qué opinas?`;
+  const fallback = `La consulta de ${instName} en Preferendum ya tiene resultado:\n"${winnerText}" ganó con ${winnerPct}% de los votos.\n¿Y tú qué prefieres?`;
   _shareWithPoster(db.title, subtitle, instName, debId, fallback);
 }
 
