@@ -22,7 +22,11 @@
     },
     "android": {
       "package": "com.caip.preferendum",
-      "versionCode": 2
+      "versionCode": 12,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "extra": {
       "eas": {
