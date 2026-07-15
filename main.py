@@ -4123,6 +4123,53 @@ def organizer_login_v2(data: LoginInput, db: Session = Depends(get_db)):
     }
 
 
+class EmpresaVerifyInput(BaseModel):
+    full_name:    str
+    rut:          str
+    phone:        str = ''
+    company_name: str
+    boss_email:   str
+    document_url: str = ''
+    consent:      bool = False
+
+@app.post('/organizer/empresa-verify')
+def organizer_empresa_verify(
+    data: EmpresaVerifyInput,
+    bg:   BackgroundTasks,
+    user: User = Depends(get_current_user),
+    db:   Session = Depends(get_db),
+):
+    if not data.consent:
+        raise HTTPException(400, 'Debes aceptar los términos y condiciones')
+    if not data.boss_email or '@' not in data.boss_email:
+        raise HTTPException(400, 'Correo del jefe inválido')
+
+    token = hashlib.sha256(
+        f'{user.id}-{data.boss_email}-{datetime.utcnow()}'.encode()
+    ).hexdigest()[:32]
+
+    db.add(AuthorizationRequest(
+        employee_user_id = user.id,
+        employee_name    = data.full_name,
+        employee_email   = user.email,
+        supervisor_email = data.boss_email,
+        token            = token,
+    ))
+    db.commit()
+
+    bg.add_task(
+        _send_supervisor_authorization_email,
+        supervisor_email = data.boss_email,
+        employee_name    = data.full_name,
+        employee_email   = user.email,
+        company          = data.company_name,
+        cargo            = f'RUT {data.rut}',
+        token            = token,
+        role             = 'organizer',
+    )
+    return {'ok': True, 'message': 'Solicitud enviada al jefe'}
+
+
 @app.post('/organizer/upload-cargo-doc')
 async def upload_cargo_doc(
     file: UploadFile = File(...),

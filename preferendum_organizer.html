@@ -151,9 +151,17 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
     </div>
   </div>
   <div class="content">
+    <!-- NUEVA CONSULTA CTA -->
+    <div id="nueva-consulta-cta" style="margin-bottom:24px;">
+      <button class="btn" onclick="openTypeSelect()" style="width:100%;font-size:16px;padding:18px;border-radius:14px;letter-spacing:.02em;">+ Nueva Consulta</button>
+    </div>
+
     <!-- CREATE NEW -->
-    <div class="new-debate-form" id="create-form">
-      <div class="form-title">+ New Consultation</div>
+    <div class="new-debate-form" id="create-form" style="display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div class="form-title" style="margin-bottom:0;">+ New Consultation</div>
+        <button onclick="cancelCreate()" style="background:none;border:none;color:#6b7280;font-size:13px;cursor:pointer;padding:4px 8px;">✕ Cancelar</button>
+      </div>
       <div class="alert" id="create-alert"></div>
 
       <!-- Ciudadano vs Empresa -->
@@ -310,6 +318,44 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
     <div class="section-title">My Consultations</div>
     <div class="section-sub">Consultations you have created</div>
     <div id="debates-list"><div style="color:var(--muted);font-size:14px;">Loading…</div></div>
+  </div>
+</div>
+
+<!-- TYPE SELECT MODAL -->
+<div id="type-select-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9000;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#111827;border:1px solid rgba(255,255,255,0.1);border-radius:24px;width:100%;max-width:420px;padding:32px 24px;">
+    <div style="font-family:'Playfair Display',serif;font-size:22px;font-weight:700;color:#fff;text-align:center;margin-bottom:6px;">Nueva Consulta</div>
+    <div style="font-size:14px;color:#a0a8c0;text-align:center;margin-bottom:28px;">¿Quién realiza esta consulta?</div>
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <button onclick="chooseCiudadano()" style="width:100%;padding:22px 20px;border-radius:16px;border:2px solid rgba(99,102,241,0.4);background:rgba(99,102,241,0.08);cursor:pointer;text-align:left;font-family:'Inter',sans-serif;" onmouseover="this.style.borderColor='#6366f1';this.style.background='rgba(99,102,241,0.18)'" onmouseout="this.style.borderColor='rgba(99,102,241,0.4)';this.style.background='rgba(99,102,241,0.08)'">
+        <div style="font-size:30px;margin-bottom:6px;">👤</div>
+        <div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:3px;">Ciudadano</div>
+        <div style="font-size:13px;color:#a0a8c0;">Persona natural — acceso inmediato</div>
+      </button>
+      <button onclick="chooseEmpresa()" style="width:100%;padding:22px 20px;border-radius:16px;border:2px solid rgba(16,185,129,0.4);background:rgba(16,185,129,0.08);cursor:pointer;text-align:left;font-family:'Inter',sans-serif;" onmouseover="this.style.borderColor='#10b981';this.style.background='rgba(16,185,129,0.18)'" onmouseout="this.style.borderColor='rgba(16,185,129,0.4)';this.style.background='rgba(16,185,129,0.08)'">
+        <div style="font-size:30px;margin-bottom:6px;">🏢</div>
+        <div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:3px;">Empresa / Institución</div>
+        <div style="font-size:13px;color:#a0a8c0;">Requiere verificación de representante</div>
+      </button>
+    </div>
+    <button onclick="document.getElementById('type-select-modal').style.display='none'" style="width:100%;margin-top:16px;padding:10px;background:none;border:none;color:#6b7280;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif;">Cancelar</button>
+  </div>
+</div>
+
+<!-- EMPRESA VERIFICATION MODAL -->
+<div id="empresa-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9001;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;">
+  <div style="background:#111827;border:1px solid rgba(255,255,255,0.1);border-radius:24px;width:100%;max-width:460px;margin:auto;padding:28px 24px;margin-top:16px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+      <button id="empresa-back-btn" onclick="backToTypeSelect()" style="background:none;border:none;color:#a0a8c0;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif;padding:4px 0;">← Volver</button>
+      <div id="empresa-step-indicator" style="font-size:12px;color:#6b7280;font-weight:600;letter-spacing:.05em;">PASO 1 DE 3</div>
+    </div>
+    <!-- Step progress bar -->
+    <div style="display:flex;gap:6px;margin-bottom:24px;">
+      <div id="step-bar-1" style="flex:1;height:4px;border-radius:2px;background:#6366f1;"></div>
+      <div id="step-bar-2" style="flex:1;height:4px;border-radius:2px;background:rgba(255,255,255,0.1);"></div>
+      <div id="step-bar-3" style="flex:1;height:4px;border-radius:2px;background:rgba(255,255,255,0.1);"></div>
+    </div>
+    <div id="empresa-step-body"></div>
   </div>
 </div>
 
@@ -776,6 +822,211 @@ async function loadDebates() {
   }
 }
 
+// ── TIPO DE CONSULTA / VERIFICACIÓN EMPRESA ─────────────────
+function openTypeSelect() {
+  document.getElementById('type-select-modal').style.display = 'flex';
+}
+
+function chooseCiudadano() {
+  document.getElementById('type-select-modal').style.display = 'none';
+  document.getElementById('nueva-consulta-cta').style.display = 'none';
+  document.getElementById('create-form').style.display = 'block';
+  setCreatorType('citizen');
+  document.getElementById('create-form').scrollIntoView({behavior:'smooth'});
+}
+
+function chooseEmpresa() {
+  document.getElementById('type-select-modal').style.display = 'none';
+  _empresaData = { consent:false, docUrl:'', nombre:'', rut:'', telefono:'', empresa:'', bossEmail:'' };
+  showEmpresaStep(1);
+  document.getElementById('empresa-modal').style.display = 'flex';
+}
+
+function backToTypeSelect() {
+  document.getElementById('empresa-modal').style.display = 'none';
+  document.getElementById('type-select-modal').style.display = 'flex';
+}
+
+function cancelCreate() {
+  document.getElementById('create-form').style.display = 'none';
+  document.getElementById('nueva-consulta-cta').style.display = 'block';
+}
+
+let _empresaData = { consent:false, docUrl:'', nombre:'', rut:'', telefono:'', empresa:'', bossEmail:'' };
+
+function _updateStepBars(step) {
+  [1,2,3].forEach(n => {
+    document.getElementById(`step-bar-${n}`).style.background = n <= step ? '#6366f1' : 'rgba(255,255,255,0.1)';
+  });
+  if (step <= 3) document.getElementById('empresa-step-indicator').textContent = `PASO ${step} DE 3`;
+}
+
+function showEmpresaStep(step) {
+  _updateStepBars(step);
+  const body = document.getElementById('empresa-step-body');
+
+  if (step === 1) {
+    document.getElementById('empresa-back-btn').onclick = backToTypeSelect;
+    body.innerHTML = `
+      <div style="font-size:20px;font-weight:800;color:#fff;margin-bottom:6px;">Términos y Condiciones</div>
+      <div style="font-size:13px;color:#a0a8c0;margin-bottom:16px;">Para crear consultas en representación de una empresa debes aceptar nuestros términos de uso.</div>
+      <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:16px;max-height:200px;overflow-y:auto;font-size:12px;color:#a0a8c0;line-height:1.8;margin-bottom:20px;">
+        <strong style="color:#fff;display:block;margin-bottom:8px;">Términos de Uso — Consultas Empresariales en Preferendum</strong>
+        1. La empresa declara actuar de buena fe y con datos verídicos.<br/>
+        2. El representante que crea la consulta debe tener autorización expresa de su organización.<br/>
+        3. Preferendum no se hace responsable del contenido de las consultas creadas por empresas.<br/>
+        4. El uso indebido de la plataforma puede resultar en la suspensión de la cuenta y sanciones legales.<br/>
+        5. Los datos de la empresa serán tratados con confidencialidad conforme a la ley aplicable.<br/>
+        6. El jefe o representante legal debe autorizar el uso de la plataforma mediante el correo de verificación enviado por Preferendum.
+      </div>
+      <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;margin-bottom:24px;padding:14px;background:rgba(99,102,241,0.08);border-radius:12px;border:1px solid rgba(99,102,241,0.2);">
+        <input type="checkbox" id="consent-check" style="width:20px;height:20px;margin-top:1px;accent-color:#6366f1;flex-shrink:0;" ${_empresaData.consent?'checked':''}/>
+        <span style="font-size:13px;color:#e2e8f0;line-height:1.5;">He leído y acepto los términos y condiciones para el uso empresarial de Preferendum.</span>
+      </label>
+      <button onclick="empresaNext(1)" style="width:100%;padding:15px;background:#6366f1;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;">Continuar →</button>`;
+
+  } else if (step === 2) {
+    document.getElementById('empresa-back-btn').onclick = () => showEmpresaStep(1);
+    const inp = (id, placeholder, val, type='text') =>
+      `<input type="${type}" id="${id}" placeholder="${placeholder}" value="${val}" style="width:100%;background:#1a2332;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:12px 14px;color:#fff;font-size:14px;outline:none;font-family:'Inter',sans-serif;margin-top:6px;"/>`;
+    body.innerHTML = `
+      <div style="font-size:20px;font-weight:800;color:#fff;margin-bottom:6px;">Tus datos</div>
+      <div style="font-size:13px;color:#a0a8c0;margin-bottom:18px;">Ingresa tus datos y sube un documento que acredite tu relación con la empresa (contrato de trabajo, carta del empleador, etc.).</div>
+      <div class="field"><label>Nombre completo</label>${inp('emp-nombre','Tu nombre completo',_empresaData.nombre)}</div>
+      <div class="field"><label>RUT</label>${inp('emp-rut','12.345.678-9',_empresaData.rut)}</div>
+      <div class="field"><label>Teléfono</label>${inp('emp-tel','+56 9 1234 5678',_empresaData.telefono,'tel')}</div>
+      <div class="field"><label>Empresa donde trabajas</label>${inp('emp-empresa','Nombre de la empresa',_empresaData.empresa)}</div>
+      <div class="field">
+        <label>Documento acreditador</label>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:14px;background:#1a2332;border:1.5px dashed rgba(255,255,255,0.2);border-radius:10px;font-size:13px;color:#a0a8c0;margin-top:6px;">
+          <span id="doc-icon" style="font-size:20px;">${_empresaData.docUrl?'✅':'📎'}</span>
+          <span id="doc-label">${_empresaData.docUrl?'✓ Documento subido':'Subir documento (PDF, JPG, PNG)'}</span>
+          <input type="file" id="emp-doc-file" accept=".pdf,.jpg,.jpeg,.png" style="display:none;" onchange="uploadEmpresaDoc(this)"/>
+        </label>
+      </div>
+      <div id="emp-err2" style="color:#f87171;font-size:13px;margin-bottom:8px;display:none;"></div>
+      <button onclick="empresaNext(2)" style="width:100%;padding:15px;background:#6366f1;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;margin-top:4px;">Continuar →</button>`;
+
+  } else if (step === 3) {
+    document.getElementById('empresa-back-btn').onclick = () => showEmpresaStep(2);
+    body.innerHTML = `
+      <div style="font-size:20px;font-weight:800;color:#fff;margin-bottom:6px;">Autorización del Jefe</div>
+      <div style="font-size:13px;color:#a0a8c0;margin-bottom:18px;">Se enviará un correo a tu jefe o representante para que autorice tu uso en representación de la empresa.</div>
+      <div class="field">
+        <label>Correo del jefe o representante</label>
+        <input type="email" id="emp-boss-email" placeholder="jefe@empresa.com" value="${_empresaData.bossEmail}" style="width:100%;background:#1a2332;border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:12px 14px;color:#fff;font-size:14px;outline:none;font-family:'Inter',sans-serif;margin-top:6px;"/>
+      </div>
+      <div style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.2);border-radius:12px;padding:14px;margin-bottom:20px;">
+        <div style="font-size:12px;color:#a0a8c0;line-height:1.8;">
+          📧 <strong style="color:#e2e8f0;">Tu jefe recibirá un correo con:</strong><br/>
+          &nbsp;&nbsp;• Los términos y condiciones de Preferendum<br/>
+          &nbsp;&nbsp;• Tu nombre y la empresa que representas<br/>
+          &nbsp;&nbsp;• Un enlace para autorizar o rechazar tu solicitud
+        </div>
+      </div>
+      <div id="emp-err3" style="color:#f87171;font-size:13px;margin-bottom:8px;display:none;"></div>
+      <button id="btn-enviar-solicitud" onclick="submitEmpresaVerify()" style="width:100%;padding:15px;background:#10b981;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;">Enviar solicitud ✓</button>`;
+  }
+}
+
+function empresaNext(fromStep) {
+  if (fromStep === 1) {
+    if (!document.getElementById('consent-check').checked) {
+      alert('Debes aceptar los términos y condiciones para continuar.');
+      return;
+    }
+    _empresaData.consent = true;
+    showEmpresaStep(2);
+  } else if (fromStep === 2) {
+    _empresaData.nombre   = document.getElementById('emp-nombre').value.trim();
+    _empresaData.rut      = document.getElementById('emp-rut').value.trim();
+    _empresaData.telefono = document.getElementById('emp-tel').value.trim();
+    _empresaData.empresa  = document.getElementById('emp-empresa').value.trim();
+    const err = document.getElementById('emp-err2');
+    if (!_empresaData.nombre || !_empresaData.rut || !_empresaData.empresa) {
+      err.textContent = 'Nombre, RUT y empresa son obligatorios.';
+      err.style.display = 'block';
+      return;
+    }
+    err.style.display = 'none';
+    showEmpresaStep(3);
+  }
+}
+
+async function uploadEmpresaDoc(fileInput) {
+  const file = fileInput.files[0];
+  if (!file) return;
+  document.getElementById('doc-label').textContent = 'Subiendo…';
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch(`${API}/upload/image`, {method:'POST', headers:{'Authorization':'Bearer '+token}, body:fd});
+    const d = await r.json();
+    if (d.url) {
+      _empresaData.docUrl = d.url;
+      document.getElementById('doc-label').textContent = '✓ Documento subido';
+      document.getElementById('doc-icon').textContent = '✅';
+    } else {
+      document.getElementById('doc-label').textContent = '❌ Error al subir';
+    }
+  } catch(e) {
+    document.getElementById('doc-label').textContent = '❌ Error de conexión';
+  }
+}
+
+async function submitEmpresaVerify() {
+  _empresaData.bossEmail = document.getElementById('emp-boss-email').value.trim();
+  const err = document.getElementById('emp-err3');
+  if (!_empresaData.bossEmail || !_empresaData.bossEmail.includes('@')) {
+    err.textContent = 'Ingresa un correo de jefe válido.';
+    err.style.display = 'block';
+    return;
+  }
+  err.style.display = 'none';
+  const btn = document.getElementById('btn-enviar-solicitud');
+  btn.disabled = true;
+  btn.textContent = 'Enviando…';
+
+  try {
+    await fetch(`${API}/organizer/empresa-verify`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({
+        full_name:    _empresaData.nombre,
+        rut:          _empresaData.rut,
+        phone:        _empresaData.telefono,
+        company_name: _empresaData.empresa,
+        boss_email:   _empresaData.bossEmail,
+        document_url: _empresaData.docUrl,
+        consent:      _empresaData.consent
+      })
+    });
+  } catch(e) { /* non-blocking */ }
+
+  _updateStepBars(3);
+  document.getElementById('empresa-step-indicator').textContent = '✓ COMPLETADO';
+  document.getElementById('empresa-back-btn').style.display = 'none';
+  document.getElementById('empresa-step-body').innerHTML = `
+    <div style="text-align:center;padding:20px 0;">
+      <div style="font-size:52px;margin-bottom:16px;">✅</div>
+      <div style="font-size:21px;font-weight:800;color:#fff;margin-bottom:8px;">Solicitud enviada</div>
+      <div style="font-size:14px;color:#a0a8c0;margin-bottom:28px;line-height:1.6;">
+        Tu jefe recibirá un correo en breve para autorizar tu cuenta.<br/>Mientras tanto, puedes comenzar a crear tu consulta.
+      </div>
+      <button onclick="continueAsEmpresa()" style="width:100%;padding:15px;background:#10b981;color:#fff;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;">Crear consulta →</button>
+    </div>`;
+}
+
+function continueAsEmpresa() {
+  document.getElementById('empresa-modal').style.display = 'none';
+  document.getElementById('nueva-consulta-cta').style.display = 'none';
+  document.getElementById('create-form').style.display = 'block';
+  setCreatorType('organization');
+  if (_empresaData.empresa) document.getElementById('c-inst-name').value = _empresaData.empresa;
+  document.getElementById('create-form').scrollIntoView({behavior:'smooth'});
+}
+
+// ── RESULTS ──────────────────────────────────────────────────
 async function showResults(debateId) {
   const modal = document.getElementById('results-modal');
   const body  = document.getElementById('results-modal-body');
