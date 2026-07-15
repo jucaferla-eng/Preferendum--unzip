@@ -50,6 +50,8 @@ export default function App() {
         domStorageEnabled={true}
         allowsInlineMediaPlayback={true}
         mediaPlaybackRequiresUserAction={false}
+        mediaCapturePermissionGrantType="grant"
+        allowsProtectedMedia={true}
         onShouldStartLoadWithRequest={(req) => {
           // External links (ads, blockchain explorer, etc.) open in Safari
           if (!req.url.includes(APP_ORIGIN)) {
@@ -58,6 +60,7 @@ export default function App() {
           }
           return true;
         }}
+        onPermissionRequest={(e) => e.nativeEvent.request.grant(e.nativeEvent.request.resources)}
         onLoadEnd={() => { setReady(true); setError(false); }}
         onError={() => setError(true)}
         onHttpError={(e) => {

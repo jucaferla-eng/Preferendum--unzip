@@ -46,6 +46,10 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Preferendum necesita acceso a la cámara para verificar tu identidad con selfie.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Preferendum necesita el micrófono para la verificación de video.</string>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
 	<key>RCTNewArchEnabled</key>
