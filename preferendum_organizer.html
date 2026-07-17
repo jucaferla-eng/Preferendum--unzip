@@ -235,14 +235,15 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
       <!-- TARGETING VECTOR -->
       <div class="targeting-block">
         <div class="targeting-header">Segmentación de audiencia</div>
-        <div class="targeting-sub">Define quién participa y cómo se asigna la publicidad</div>
+        <div class="targeting-sub">Define quién participa en esta consulta</div>
         <div class="field">
           <label>Tipo de institución</label>
           <div class="chip-row">
-            <div class="chip selected" data-value="gov"   onclick="selectChip('c-inst-type',this)">🏛 Gobierno</div>
-            <div class="chip"          data-value="priv"  onclick="selectChip('c-inst-type',this)">🏢 Empresa</div>
-            <div class="chip"          data-value="union" onclick="selectChip('c-inst-type',this)">⚙️ Sindicato</div>
-            <div class="chip"          data-value="ngo"   onclick="selectChip('c-inst-type',this)">🌿 ONG</div>
+            <div class="chip selected" data-value="gov"      onclick="selectChip('c-inst-type',this)">🏛 Gobierno</div>
+            <div class="chip"          data-value="priv"     onclick="selectChip('c-inst-type',this)">🏢 Empresa</div>
+            <div class="chip"          data-value="union"    onclick="selectChip('c-inst-type',this)">⚙️ Sindicato</div>
+            <div class="chip"          data-value="ngo"      onclick="selectChip('c-inst-type',this)">🌿 ONG</div>
+            <div class="chip"          data-value="consumer" onclick="selectChip('c-inst-type',this)">🛍️ Consumidores y clientes</div>
           </div>
           <input type="hidden" id="c-inst-type" value="gov"/>
         </div>
