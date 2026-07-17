@@ -792,8 +792,30 @@ let currentDebate = null;
 let branchPath = [];       // [{level, option_index, option_text, question}]
 let branchCurrentQ = null; // null = Q1, else {title, options, branches}
 
+async function _showDebateBannerOnAuth() {
+  const debateId = new URLSearchParams(location.search).get('debate');
+  if (!debateId) return;
+  try {
+    const r = await fetch(`${API}/debates/${debateId}`);
+    if (!r.ok) return;
+    const d = await r.json();
+    const banner = document.createElement('div');
+    banner.style.cssText = 'background:linear-gradient(135deg,#6b21ff22,#2d6eff22);border:1px solid #2d6eff44;border-radius:14px;padding:14px 16px;margin-bottom:16px;text-align:center;';
+    const img = (d.option_images || [])[0] || '';
+    banner.innerHTML = `
+      ${img ? `<img src="${img}" style="width:54px;height:54px;object-fit:cover;border-radius:10px;margin-bottom:8px;" alt=""/>` : ''}
+      <div style="font-size:11px;font-weight:700;color:#2d6eff;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">${esc(d.inst_name || 'Preferendum')}</div>
+      <div style="font-size:14px;font-weight:700;color:#060810;line-height:1.4;margin-bottom:4px;">${esc(d.title)}</div>
+      <div style="font-size:12px;color:#7a7570;">Crea tu cuenta gratuita para participar →</div>`;
+    const card = document.querySelector('.auth-card');
+    if (card) card.insertBefore(banner, card.firstChild);
+    switchTab('register');
+  } catch(_) {}
+}
+
 // ── INIT ──
 if (token) validateAndShowApp();
+else _showDebateBannerOnAuth();
 
 // ── INIT ──
 async function validateAndShowApp() {
@@ -2042,7 +2064,7 @@ function _wrapTextCapped(ctx, text, x, y, maxW, lineH, maxLines) {
   return y;
 }
 
-async function _generatePoster(title, subtitle, instName) {
+async function _generatePoster(title, subtitle, instName, results, total) {
   const W = 1080, H = 1350, PAD = 80, INNER = W - PAD * 2;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
@@ -2117,6 +2139,55 @@ async function _generatePoster(title, subtitle, instName) {
   ctx.fillStyle = '#e2e8f0'; ctx.font = '46px Arial';
   y = _wrapTextCapped(ctx, `"${title}"`, PAD + 10, y, INNER - 20, 60, 3); y += 30;
 
+  // ── MINI DONUT (resultados en tiempo real) ──
+  if (results && results.length && total > 0) {
+    const DCOLS = ['#2d6eff','#10b981','#f59e0b','#f43f5e','#8b5cf6','#06b6d4'];
+    const DR = 115, DW = 42;
+    const cx = W / 2;
+    const cy = y + 44 + DR;
+
+    // Background ring
+    ctx.beginPath(); ctx.arc(cx, cy, DR, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)'; ctx.lineWidth = DW; ctx.lineCap = 'butt'; ctx.stroke();
+
+    // Segments
+    let ang = -Math.PI / 2;
+    const GAP = 0.03;
+    results.forEach((r, i) => {
+      const sweep = (r.count / total) * (2 * Math.PI - GAP * results.length);
+      if (sweep <= 0) return;
+      ctx.beginPath(); ctx.arc(cx, cy, DR, ang, ang + sweep);
+      ctx.strokeStyle = DCOLS[i % DCOLS.length]; ctx.lineWidth = DW; ctx.lineCap = 'butt'; ctx.stroke();
+      ang += sweep + GAP;
+    });
+
+    // Center label
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 54px Arial';
+    ctx.textAlign = 'center'; ctx.fillText(String(total), cx, cy + 16);
+    ctx.fillStyle = '#94a3b8'; ctx.font = '26px Arial';
+    ctx.fillText('votos', cx, cy + 52);
+    ctx.textAlign = 'left';
+
+    y = cy + DR + 36;
+
+    // Legend: top 3 options sorted by votes
+    const legItems = [...results].sort((a, b) => b.count - a.count).slice(0, 3);
+    const legW = INNER / legItems.length;
+    legItems.forEach((r, i) => {
+      const origIdx = results.findIndex(x => x.option === r.option);
+      const lx = PAD + i * legW;
+      const pct = Math.round(r.count / total * 100);
+      ctx.fillStyle = DCOLS[origIdx % DCOLS.length];
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(lx, y, 22, 22, 4) : ctx.rect(lx, y, 22, 22); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.font = 'bold 28px Arial';
+      ctx.fillText(`${pct}%`, lx + 30, y + 20);
+      ctx.fillStyle = '#94a3b8'; ctx.font = '22px Arial';
+      const name = (r.option || '').replace(/[Zz]apatilla\s*/i, '').slice(0, 10);
+      ctx.fillText(name, lx + 30, y + 46);
+    });
+    y += 72;
+  }
+
   // Bottom bar
   const botH = 170;
   ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, H - botH, W, botH);
@@ -2137,10 +2208,10 @@ async function _generatePoster(title, subtitle, instName) {
   return canvas;
 }
 
-async function _shareWithPoster(title, subtitle, instName, debId, fallbackText) {
+async function _shareWithPoster(title, subtitle, instName, debId, fallbackText, results, total) {
   const shareUrl = `${location.origin}/voter?debate=${debId}`;
   try {
-    const canvas = await _generatePoster(title, subtitle, instName);
+    const canvas = await _generatePoster(title, subtitle, instName, results || [], total || 0);
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
     const file = new File([blob], 'preferendum.png', { type: 'image/png' });
     if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -2220,13 +2291,15 @@ async function shareResult(debId) {
   }
   const instName = db.inst_name || 'Preferendum';
   const fallback = `La consulta de ${instName} en Preferendum ya tiene resultado:\n"${winnerText}" ganó con ${winnerPct}% de los votos.\n¿Y tú qué prefieres?\n${location.origin}/voter?debate=${debId}`;
-  _shareWithPoster(db.title, '', instName, debId, fallback);
+  _shareWithPoster(db.title, '', instName, debId, fallback, results, total);
 }
 
 async function shareMyVote(option, title, debId) {
   const instName = currentDebate?.inst_name || 'Preferendum';
+  const results = currentDebate?.results || [];
+  const total = currentDebate?.total_votes || 0;
   const fallback = `Participé en la consulta de ${instName} en Preferendum.\n¿Y tú qué prefieres?\n${location.origin}/voter?debate=${debId}`;
-  _shareWithPoster(title, '', instName, debId, fallback);
+  _shareWithPoster(title, '', instName, debId, fallback, results, total);
 }
 
 async function _doShare(title, text, url) {
@@ -2369,9 +2442,9 @@ async function castVote() {
   if (errEl) errEl.textContent = '';
   const deviceFp = await generateDeviceFingerprint().catch(() => '');
 
-  // Face verification for users who have completed selfie verification
+  // Face verification required for ALL voters before casting
   let faceToken = '';
-  if (userSelfieVerified) {
+  {
     faceToken = await requestFaceToken(debateId);
     if (!faceToken) {
       submitBtn.disabled = false;
