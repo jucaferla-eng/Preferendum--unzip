@@ -1355,6 +1355,16 @@ function _launchMainApp() {
   document.getElementById('user-name-display').textContent = userName;
 }
 
+function showAuthScreen() {
+  document.getElementById('main-app').style.display = 'none';
+  const vs = document.getElementById('verify-screen');
+  vs.classList.remove('visible');
+  vs.style.display = 'none';
+  document.getElementById('home-selection').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'flex';
+  switchTab('register');
+}
+
 function goToVigentes() {
   _launchMainApp();
   loadDebates('live');
@@ -2495,6 +2505,11 @@ async function submitOpinion(debateId) {
   const text  = document.getElementById('opinion-text').value.trim();
   const level = document.getElementById('opinion-level').value;
   const status = document.getElementById('opinion-submit-status');
+  if (!token) {
+    status.style.color = '#f87171';
+    status.innerHTML = 'Necesitas una cuenta para participar. <a href="#" onclick="showAuthScreen();return false;" style="color:#1a3a8f;font-weight:700;text-decoration:underline;">Regístrate gratis →</a>';
+    return;
+  }
   if (text.length < 20) {
     status.style.color = '#f87171';
     status.textContent = 'Escribe al menos 20 caracteres.';
@@ -2525,7 +2540,14 @@ async function submitOpinion(debateId) {
     } else {
       btn.disabled = false; btn.textContent = 'Publicar mi perspectiva →';
       status.style.color = '#f87171';
-      status.textContent = d.detail || 'Error al publicar. Intenta de nuevo.';
+      const msg = d.detail || 'Error al publicar. Intenta de nuevo.';
+      if (r.status === 401 || r.status === 403 || !token) {
+        status.innerHTML = 'Debes tener una cuenta para comentar. <a href="#" onclick="showAuthScreen();return false;" style="color:#1a3a8f;font-weight:700;text-decoration:underline;">Regístrate o inicia sesión →</a>';
+      } else if (typeof msg === 'string' && (msg.toLowerCase().includes('verif') || msg.toLowerCase().includes('email'))) {
+        status.innerHTML = msg + ' <a href="#" onclick="showVerifyScreen();return false;" style="color:#1a3a8f;font-weight:700;text-decoration:underline;">Verificar ahora →</a>';
+      } else {
+        status.textContent = msg;
+      }
     }
   } catch(e) {
     btn.disabled = false; btn.textContent = 'Publicar mi perspectiva →';
