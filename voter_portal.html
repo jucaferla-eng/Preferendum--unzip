@@ -2476,23 +2476,30 @@ async function castVote() {
     let d = {};
     try { d = await r.json(); } catch(_) {}
     if (!r.ok) {
-      const msg = d.detail || 'Vote failed — please try again';
+      // 409 "Ya votaste" means the vote actually went through (retry after a server glitch)
+      if (r.status === 409 && (d.detail || '').includes('Ya votaste')) {
+        branchPath = []; branchCurrentQ = null;
+        showVoteSuccess({ option: (currentDebate?.options || [])[q1Idx] || '' }, q1Idx);
+        return;
+      }
+      const msg = d.detail
+        || (r.status >= 500 ? 'Error temporal del servidor — espera unos segundos e intenta de nuevo' : `Error ${r.status} — intenta de nuevo`);
       showError(msg, `HTTP ${r.status}`);
       const errEl2 = document.getElementById('vote-err');
       if (errEl2) errEl2.textContent = msg;
       const btn2 = document.getElementById('vote-submit-btn');
-      if (btn2) { btn2.disabled = false; btn2.textContent = 'Try again'; }
+      if (btn2) { btn2.disabled = false; btn2.textContent = 'Reintentar'; }
       return;
     }
     branchPath = []; branchCurrentQ = null;
     showVoteSuccess(d, q1Idx);
   } catch(e) {
-    const msg = e.message || 'Connection error — check your internet';
-    showError('Connection error', msg);
+    const msg = e.message || 'Error de conexión — revisa tu internet';
+    showError('Error de conexión', msg);
     const errEl2 = document.getElementById('vote-err');
-    if (errEl2) errEl2.textContent = 'Connection error — check your internet';
+    if (errEl2) errEl2.textContent = 'Error de conexión — revisa tu internet';
     const btn2 = document.getElementById('vote-submit-btn');
-    if (btn2) { btn2.disabled = false; btn2.textContent = 'Retry'; }
+    if (btn2) { btn2.disabled = false; btn2.textContent = 'Reintentar'; }
   }
 }
 
