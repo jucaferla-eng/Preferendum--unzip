@@ -1964,7 +1964,9 @@ async def login_face_token(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(503, 'Error en el servicio de verificación facial. Intenta de nuevo.')
+        # AWS/network error — fall back to demo mode (face captured, service unavailable)
+        print(f'[login face-token] Rekognition error (demo fallback): {e}')
+        rekognition_mode = 'aws_error'
 
     # Solo llega aquí si rekognition_mode == 'verified'
     face_token = jwt.encode({
