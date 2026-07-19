@@ -5819,7 +5819,10 @@ def admin_search_users(q: str, secret: str, db: Session = Depends(get_db)):
     users = db.query(User).filter(
         (User.email.ilike(f'%{q}%')) | (User.name.ilike(f'%{q}%'))
     ).order_by(User.id.desc()).limit(20).all()
-    return {'users': [{'id': u.id, 'email': u.email, 'name': u.name, 'role': u.role, 'created_at': str(u.created_at)} for u in users]}
+    return {'users': [{'id': u.id, 'email': u.email, 'name': u.name, 'role': u.role,
+                        'email_verified': u.email_verified, 'phone_verified': u.phone_verified,
+                        'selfie_verified': u.selfie_verified, 'verify_level': u.verify_level,
+                        'created_at': str(u.created_at)} for u in users]}
 
 @app.post('/admin/users/reset-password')
 def admin_reset_password(user_id: int, new_password: str, secret: str, db: Session = Depends(get_db)):
@@ -5845,7 +5848,8 @@ def admin_reset_selfie(user_id: int, secret: str, db: Session = Depends(get_db))
     return {'ok': True, 'email': user.email, 'message': 'Selfie borrada — el usuario puede registrar su cara de nuevo'}
 
 @app.post('/admin/users/fix')
-def admin_fix_user(user_id: int, secret: str, email: str = '', name: str = '', role: str = '', db: Session = Depends(get_db)):
+def admin_fix_user(user_id: int, secret: str, email: str = '', name: str = '', role: str = '',
+                   email_verified: str = '', selfie_verified: str = '', db: Session = Depends(get_db)):
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
     user = db.query(User).filter(User.id == user_id).first()
@@ -5854,8 +5858,21 @@ def admin_fix_user(user_id: int, secret: str, email: str = '', name: str = '', r
     if email: user.email = email
     if name:  user.name  = name
     if role:  user.role  = role
+    if email_verified in ('true', '1'):
+        user.email_verified = True
+        update_verify_level(user, db)
+    elif email_verified in ('false', '0'):
+        user.email_verified = False
+        update_verify_level(user, db)
+    if selfie_verified in ('true', '1'):
+        user.selfie_verified = True
+        update_verify_level(user, db)
+    elif selfie_verified in ('false', '0'):
+        user.selfie_verified = False
+        update_verify_level(user, db)
     db.commit()
-    return {'ok': True, 'id': user.id, 'email': user.email, 'name': user.name, 'role': user.role}
+    return {'ok': True, 'id': user.id, 'email': user.email, 'name': user.name, 'role': user.role,
+            'email_verified': user.email_verified, 'selfie_verified': user.selfie_verified, 'verify_level': user.verify_level}
 
 @app.post('/admin/payments/manual-credit')
 def payments_admin_manual(
