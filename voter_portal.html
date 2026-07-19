@@ -2704,6 +2704,14 @@ function fmtDateTime(s) { try { const utc = s && !s.endsWith('Z') && !s.includes
 // Init country-dependent fields once DOM is fully ready
 document.addEventListener('DOMContentLoaded', toggleCommuneField);
 
+// On every page show (including bfcache restores), reset 2FA modal so user never gets stuck
+window.addEventListener('pageshow', () => {
+  const m = document.getElementById('twofa-modal');
+  if (m) m.style.display = 'none';
+  _2faData = {};
+  _loginFaceToken = '';
+});
+
 // ── Expired Debate View ──────────────────────────────────────────────────────
 function renderExpiredDebate(db, res, items, content) {
   const debId = db.id;
