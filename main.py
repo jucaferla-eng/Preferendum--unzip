@@ -3369,15 +3369,24 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
     debate.total_votes = (debate.total_votes or 0) + 1
     # Assign unique reward code from pool if available
     reward_code = None
-    unclaimed = db.query(DebateRewardCode).filter(
-        DebateRewardCode.debate_id == debate_id,
-        DebateRewardCode.claimed == False
-    ).with_for_update(skip_locked=True).first()
-    if unclaimed:
-        unclaimed.claimed = True
-        unclaimed.claimed_at = datetime.utcnow()
-        reward_code = unclaimed.code
-    db.commit()
+    try:
+        unclaimed = db.query(DebateRewardCode).filter(
+            DebateRewardCode.debate_id == debate_id,
+            DebateRewardCode.claimed == False
+        ).with_for_update(skip_locked=True).first()
+        if unclaimed:
+            unclaimed.claimed = True
+            unclaimed.claimed_at = datetime.utcnow()
+            reward_code = unclaimed.code
+    except Exception as e:
+        print(f'[cast_vote] reward_code query error (non-fatal): {e}')
+    try:
+        db.commit()
+    except Exception as e:
+        import traceback
+        print(f'[cast_vote] DB commit error for user={user.id} debate={debate_id}: {traceback.format_exc()}')
+        db.rollback()
+        raise HTTPException(500, f'Error al registrar el voto: {type(e).__name__}')
     return {
         'success': True,
         'verify_code': verify_code,
