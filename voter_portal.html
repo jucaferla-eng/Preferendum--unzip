@@ -1156,7 +1156,9 @@ async function doRegister() {
 async function showVerifyScreen() {
   document.getElementById('main-app').style.display = 'none';
   document.getElementById('auth-screen').style.display = 'none';
-  document.getElementById('verify-screen').classList.add('visible');
+  const vs = document.getElementById('verify-screen');
+  vs.style.display = 'flex';   // override any inline display:none
+  vs.classList.add('visible');
   document.getElementById('verify-skip-btn').style.display = '';
 
   // If user is already logged in, fetch their status and jump to right step
@@ -2442,9 +2444,9 @@ async function castVote() {
   if (errEl) errEl.textContent = '';
   const deviceFp = await generateDeviceFingerprint().catch(() => '');
 
-  // Face verification required for ALL voters before casting
+  // Face verification for users who have completed selfie verification
   let faceToken = '';
-  {
+  if (userSelfieVerified) {
     faceToken = await requestFaceToken(debateId);
     if (!faceToken) {
       submitBtn.disabled = false;
