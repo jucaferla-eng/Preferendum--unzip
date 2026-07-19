@@ -5874,6 +5874,45 @@ def admin_fix_user(user_id: int, secret: str, email: str = '', name: str = '', r
     return {'ok': True, 'id': user.id, 'email': user.email, 'name': user.name, 'role': user.role,
             'email_verified': user.email_verified, 'selfie_verified': user.selfie_verified, 'verify_level': user.verify_level}
 
+@app.get('/admin/debug-vote')
+def admin_debug_vote(user_id: int, debate_id: int, secret: str, db: Session = Depends(get_db)):
+    """Dry-run: check if user can vote in debate without committing anything."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return {'error': f'User {user_id} not found'}
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        return {'error': f'Debate {debate_id} not found'}
+    checks = {
+        'email_verified': user.email_verified,
+        'selfie_verified': user.selfie_verified,
+        'debate_status': get_debate_status(debate),
+        'debate_is_live': get_debate_status(debate) == 'live',
+    }
+    already = db.query(HasVotedLog).filter(HasVotedLog.user_id == user_id, HasVotedLog.debate_id == debate_id).first()
+    checks['already_voted'] = bool(already)
+    if user.phone:
+        ph = hash_str(user.phone.replace(' ', '').replace('-', ''), 'pref-sim-')
+        checks['sim_blocked'] = bool(db.query(SimVoteLog).filter(SimVoteLog.phone_hash == ph, SimVoteLog.debate_id == debate_id).first())
+    if user.national_id:
+        nh = hash_str(user.national_id.replace('.', '').replace('-', '').upper(), 'pref-nid-')
+        checks['rut_blocked'] = bool(db.query(NationalIdVoteLog).filter(NationalIdVoteLog.national_id_hash == nh, NationalIdVoteLog.debate_id == debate_id).first())
+    imei_log = db.query(IMEILog).filter(IMEILog.user_id == user_id).first()
+    if imei_log:
+        checks['device_blocked'] = bool(db.query(ImeiVoteLog).filter(ImeiVoteLog.imei_hash == imei_log.imei_hash, ImeiVoteLog.debate_id == debate_id).first())
+        checks['device_hash'] = imei_log.imei_hash[:16] + '...'
+    checks['can_vote'] = (
+        user.email_verified and
+        get_debate_status(debate) == 'live' and
+        not already and
+        not checks.get('sim_blocked') and
+        not checks.get('rut_blocked') and
+        not checks.get('device_blocked')
+    )
+    return {'user': {'id': user.id, 'email': user.email, 'name': user.name}, 'checks': checks}
+
 @app.post('/admin/payments/manual-credit')
 def payments_admin_manual(
     user_id:     int,
