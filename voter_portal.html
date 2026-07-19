@@ -817,6 +817,9 @@ async function _showDebateBannerOnAuth() {
 if (token) validateAndShowApp();
 else _showDebateBannerOnAuth();
 
+// Ping DB every 3 min to prevent Render PostgreSQL from sleeping
+setInterval(() => fetch(`${API}/health`).catch(()=>{}), 180000);
+
 // ── INIT ──
 async function validateAndShowApp() {
   try {
@@ -2471,23 +2474,35 @@ async function castVote() {
     }
   }
 
-  try {
-    const r = await fetch(`${API}/debates/${debateId}/vote`, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body: JSON.stringify({ option_index: q1Idx, vote_chain: newPath, device_fp: deviceFp, face_token: faceToken })
-    });
+  const voteBody = JSON.stringify({ option_index: q1Idx, vote_chain: newPath, device_fp: deviceFp, face_token: faceToken });
+  const voteHeaders = {'Content-Type':'application/json','Authorization':'Bearer '+token};
+
+  async function _doVote() {
+    const r = await fetch(`${API}/debates/${debateId}/vote`, { method: 'POST', headers: voteHeaders, body: voteBody });
     let d = {};
     try { d = await r.json(); } catch(_) {}
+    return { r, d };
+  }
+
+  try {
+    let { r, d } = await _doVote();
+
+    // 5xx: server/DB cold-start — wait 4s and retry once automatically
+    if (!r.ok && r.status >= 500) {
+      const errEl2 = document.getElementById('vote-err');
+      if (errEl2) errEl2.textContent = 'Conectando con el servidor…';
+      await new Promise(res => setTimeout(res, 4000));
+      ({ r, d } = await _doVote());
+    }
+
     if (!r.ok) {
-      // 409 "Ya votaste" means the vote actually went through (retry after a server glitch)
+      // 409 "Ya votaste" means the vote went through before the glitch
       if (r.status === 409 && (d.detail || '').includes('Ya votaste')) {
         branchPath = []; branchCurrentQ = null;
         showVoteSuccess({ option: (currentDebate?.options || [])[q1Idx] || '' }, q1Idx);
         return;
       }
-      const msg = d.detail
-        || (r.status >= 500 ? 'Error temporal del servidor — espera unos segundos e intenta de nuevo' : `Error ${r.status} — intenta de nuevo`);
+      const msg = d.detail || `Error ${r.status} — intenta de nuevo`;
       showError(msg, `HTTP ${r.status}`);
       const errEl2 = document.getElementById('vote-err');
       if (errEl2) errEl2.textContent = msg;
