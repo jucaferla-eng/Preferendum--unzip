@@ -1930,9 +1930,14 @@ function renderDebate(db, res, items) {
             <div class="winner-pct-label">%</div>
           </div>
           <div class="winner-votes-label">${total} ${t('verifiedVotes')} · ${countryLabel(db.scope_country)}</div>
-          <button class="share-result-btn" onclick="shareResult(${debId})">
-            <span style="font-size:18px;">↑</span> ${t('shareResult')}
-          </button>
+          <div style="display:flex;gap:10px;margin-top:4px;">
+            <button class="share-btn share-btn-wa" style="flex:1;padding:12px;" onclick="shareViaWhatsApp('${esc(db.title)}','${esc(db.inst_name||'')}',${debId})">
+              <span style="font-size:17px;">💬</span> WhatsApp
+            </button>
+            <button class="share-result-btn" style="flex:1;margin-top:0;" onclick="shareResult(${debId})">
+              <span style="font-size:17px;">↑</span> ${t('shareResult')}
+            </button>
+          </div>
         </div>
       </div>` : ''}
       <div class="detail-card">${renderDonut(opts, counts, total, COLORS)}</div>
@@ -2296,6 +2301,13 @@ async function shareResult(debId) {
   _shareWithPoster(db.title, '', instName, debId, fallback, results, total);
 }
 
+function shareViaWhatsApp(title, instName, debId) {
+  const url = `${location.origin}/voter?debate=${debId}`;
+  const inst = instName || 'Preferendum';
+  const text = `Participé en la consulta de *${inst}* en Preferendum:\n"${title}"\n\n¿Tú qué prefieres? Vota aquí (verificado en blockchain):\n${url}`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+}
+
 async function shareMyVote(option, title, debId) {
   const instName = currentDebate?.inst_name || 'Preferendum';
   const results = currentDebate?.results || [];
@@ -2532,10 +2544,16 @@ async function showVoteSuccess(data, optIdx) {
       <div class="vcode-box">${esc(vcode)}</div>
       <div class="vcode-label">Guarda este código — te permitirá verificar cómo fue contabilizado tu voto cuando termine el período de votación</div>
       ${data.blockchain_tx ? `<a class="verify-link" href="https://polygonscan.com/tx/${data.blockchain_tx}" target="_blank" rel="noopener">Ver en Polygon blockchain ↗</a>` : ''}
-      <button onclick="shareMyVote('${esc(option)}','${esc(currentDebate?.title||'')}',${debId})"
-        style="margin-top:14px;width:100%;padding:13px;background:linear-gradient(135deg,#2563eb,#4f46e5);border:none;border-radius:12px;color:#fff;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-family:'Inter',sans-serif;">
-        <span style="font-size:17px;">↑</span> Compartir mi decisión
-      </button>
+      <div style="display:flex;gap:10px;margin-top:14px;">
+        <button onclick="shareViaWhatsApp('${esc(currentDebate?.title||'')}','${esc(currentDebate?.inst_name||'')}',${debId})"
+          class="share-btn share-btn-wa" style="flex:1;padding:13px;">
+          <span style="font-size:18px;">💬</span> WhatsApp
+        </button>
+        <button onclick="shareMyVote('${esc(option)}','${esc(currentDebate?.title||'')}',${debId})"
+          class="share-btn" style="flex:1;padding:13px;background:linear-gradient(135deg,#2563eb,#4f46e5);color:#fff;">
+          <span style="font-size:17px;">↑</span> Otras redes
+        </button>
+      </div>
     </div>
     ${postAdHtml}
 
