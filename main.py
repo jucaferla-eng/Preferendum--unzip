@@ -1454,16 +1454,22 @@ def check_stripe():
     }
 
 @app.get('/health')
-def health():
+def health(db: Session = Depends(get_db)):
     # RENDER_GIT_COMMIT is set automatically by Render for every deploy —
-    # exposing it lets CI know it's actually talking to the NEW deploy
-    # before running post-deploy tests against it (Render pushes go live
-    # ~10-15 min after the git push that triggers them, so "just pushed"
-    # and "live" are different moments — this closes that gap honestly).
+    # exposing it lets CI know it's actually talking to the NEW deploy.
+    # Also pings the DB so it stays awake on Render's free-tier PostgreSQL
+    # (sleeping DB causes 30s+ cold-start that times out vote requests).
+    db_ok = False
+    try:
+        db.execute(text('SELECT 1'))
+        db_ok = True
+    except Exception:
+        pass
     return {
         'status': 'ok',
         'timestamp': datetime.utcnow().isoformat(),
         'git_commit': os.getenv('RENDER_GIT_COMMIT', ''),
+        'db': 'ok' if db_ok else 'error',
     }
 
 @app.get('/ping-test', response_class=HTMLResponse)
