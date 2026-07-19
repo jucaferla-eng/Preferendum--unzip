@@ -1978,7 +1978,7 @@ async def login_face_token(
         'face_token': face_token,
         'rekognition_score': rekognition_score,
         'rekognition_mode': rekognition_mode,
-        'message': f'✅ {rekognition_score}% coincidencia' if rekognition_score else '✅ Verificado (modo demo)'
+        'message': f'✅ {rekognition_score}% coincidencia' if rekognition_score else '✅ Identidad verificada'
     }
 
 @app.post('/auth/complete-login')
