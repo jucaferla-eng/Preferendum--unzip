@@ -928,9 +928,18 @@ function show2FAModal(d, deviceFp) {
         style="width:100%;padding:14px;background:#060810;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;">
         Confirmar e ingresar →
       </button>
+      <button onclick="cancel2FA()" style="width:100%;margin-top:10px;padding:11px;background:transparent;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;color:#7a7570;cursor:pointer;">
+        ← Volver a iniciar sesión
+      </button>
     </div>`;
 
   document.getElementById('twofa-modal').style.display = 'flex';
+}
+
+function cancel2FA() {
+  document.getElementById('twofa-modal').style.display = 'none';
+  _2faData = {};
+  _loginFaceToken = '';
 }
 
 async function captureLoginFace() {
@@ -987,7 +996,12 @@ async function captureLoginFace() {
       try {
         const r = await fetch(`${API}/auth/login/face-token`, {method: 'POST', body: fd});
         const data = await r.json();
-        if (!r.ok) { resultEl.innerHTML = `<span style="color:#dc2626;">❌ ${data.detail}</span>`; btn.textContent = 'Reintentar selfie'; return; }
+        if (!r.ok) {
+          const expired = r.status === 403;
+          resultEl.innerHTML = `<span style="color:#dc2626;">❌ ${data.detail || 'Error de verificación'}</span>${expired ? '<br><span style="font-size:11px;color:#7a7570;">La sesión venció — usa el botón de abajo para volver a iniciar sesión.</span>' : ''}`;
+          btn.textContent = 'Reintentar selfie';
+          return;
+        }
         _loginFaceToken = data.face_token;
         resultEl.innerHTML = `<span style="color:#16a34a;">✅ ${data.message}</span>`;
         btn.textContent = '✅ Cara verificada';
