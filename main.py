@@ -6092,9 +6092,9 @@ def admin_fix_inst_name(secret: str, old_name: str, new_name: str, db: Session =
         raise HTTPException(403, 'Forbidden')
     from sqlalchemy import text as _text
     r1 = db.execute(_text('UPDATE debates SET inst_name = :new WHERE inst_name = :old'), {'new': new_name, 'old': old_name})
-    r2 = db.execute(_text('UPDATE ad_campaigns SET brand = :new WHERE brand = :old'), {'new': new_name, 'old': old_name})
+    r2 = db.execute(_text('UPDATE debate_ads SET brand = :new WHERE brand = :old'), {'new': new_name, 'old': old_name})
     db.commit()
-    return {'ok': True, 'debates_updated': r1.rowcount, 'campaigns_updated': r2.rowcount}
+    return {'ok': True, 'debates_updated': r1.rowcount, 'ads_updated': r2.rowcount}
 
 @app.post('/admin/cleanup-orphan-imei')
 def admin_cleanup_orphan_imei(secret: str, db: Session = Depends(get_db)):
