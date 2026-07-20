@@ -1642,6 +1642,8 @@ async function loadDebates(status = 'live') {
             <span>${countryLabel(db.scope_country)}</span>
             ${db.created_at ? `<span>🕐 ${fmtDateTime(db.created_at)}</span>` : ''}
             ${db.closes_at ? `<span>Cierra ${fmtDate(db.closes_at)}</span>` : ''}
+            ${(db.target_age_min > 13 || db.target_age_max < 99) ? `<span>👤 ${db.target_age_min||13}–${db.target_age_max||99} años</span>` : ''}
+            ${db.target_gender && db.target_gender !== 'all' ? `<span>${db.target_gender === 'F' ? '♀ Mujeres' : '♂ Hombres'}</span>` : ''}
           </div>
         </div>`);
       if (featuredAds.length && (i + 1) % AD_EVERY === 0) {
