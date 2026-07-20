@@ -308,56 +308,56 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
   <div class="logo-sub">Digital Verified Decision Making</div>
   <div class="auth-card">
     <div class="auth-tabs">
-      <div class="auth-tab active" id="tab-login-btn" onclick="switchTab('login')">Sign In</div>
-      <div class="auth-tab" id="tab-reg-btn" onclick="switchTab('register')">Register</div>
+      <div class="auth-tab active" id="tab-login-btn" onclick="switchTab('login')">Ingresar</div>
+      <div class="auth-tab" id="tab-reg-btn" onclick="switchTab('register')">Registrarse</div>
     </div>
     <!-- LOGIN -->
     <div id="tab-login">
-      <div class="field"><label>Email</label><input type="email" id="l-email" placeholder="your@email.com" autocomplete="email"/></div>
-      <div class="field"><label>Password</label><input type="password" id="l-pass" placeholder="••••••••" autocomplete="current-password"/></div>
-      <button class="btn" onclick="doLogin()">Sign In</button>
+      <div class="field"><label>Email</label><input type="email" id="l-email" placeholder="tu@email.com" autocomplete="email"/></div>
+      <div class="field"><label>Contraseña</label><input type="password" id="l-pass" placeholder="••••••••" autocomplete="current-password"/></div>
+      <button class="btn" onclick="doLogin()">Ingresar</button>
       <p class="auth-err" id="l-err"></p>
     </div>
     <!-- REGISTER -->
     <div id="tab-register" style="display:none;">
-      <div class="field"><label>Full Name</label><input type="text" id="r-name" placeholder="Your full name" autocomplete="name"/></div>
+      <div class="field"><label>Nombre completo</label><input type="text" id="r-name" placeholder="Tu nombre completo" autocomplete="name"/></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div class="field"><label>Email</label><input type="email" id="r-email" placeholder="your@email.com" autocomplete="email"/></div>
-        <div class="field"><label>Password</label><input type="password" id="r-pass" placeholder="Min 6 chars" autocomplete="new-password"/></div>
+        <div class="field"><label>Email</label><input type="email" id="r-email" placeholder="tu@email.com" autocomplete="email"/></div>
+        <div class="field"><label>Contraseña</label><input type="password" id="r-pass" placeholder="Mín. 6 caracteres" autocomplete="new-password"/></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div class="field"><label>Phone</label>
+        <div class="field"><label>Teléfono</label>
           <div style="display:flex;gap:6px;">
             <span id="r-phone-prefix" style="display:flex;align-items:center;background:#ede9e0;border:1.5px solid #d9d4c9;border-radius:10px;padding:0 10px;font-size:14px;font-weight:600;color:#3a3530;white-space:nowrap;min-width:54px;justify-content:center;">+56</span>
             <input type="tel" id="r-phone" placeholder="9 1234 5678" autocomplete="tel" style="flex:1;"/>
           </div>
         </div>
-        <div class="field"><label id="r-id-label">RUT / National ID</label><input type="text" id="r-rut" placeholder="12.345.678-9"/></div>
+        <div class="field"><label id="r-id-label">RUT / Documento</label><input type="text" id="r-rut" placeholder="12.345.678-9"/></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div class="field"><label>Date of Birth</label><input type="date" id="r-dob"/></div>
-        <div class="field"><label>Gender</label>
+        <div class="field"><label>Fecha de nacimiento</label><input type="date" id="r-dob"/></div>
+        <div class="field"><label>Género</label>
           <select id="r-gender">
-            <option value="">— select —</option>
-            <option value="M">Male</option>
-            <option value="F">Female</option>
-            <option value="NB">Non-binary</option>
-            <option value="NA">Prefer not to say</option>
+            <option value="">— selecciona —</option>
+            <option value="M">Masculino</option>
+            <option value="F">Femenino</option>
+            <option value="NB">No binario</option>
+            <option value="NA">Prefiero no decir</option>
           </select>
         </div>
       </div>
-      <div class="field"><label>Country</label>
+      <div class="field"><label>País</label>
         <select id="r-country" onchange="toggleCommuneField()">
           <option value="CL">Chile</option>
           <option value="AR">Argentina</option>
-          <option value="PE">Peru</option>
-          <option value="MX">Mexico</option>
+          <option value="PE">Perú</option>
+          <option value="MX">México</option>
           <option value="CO">Colombia</option>
-          <option value="BR">Brazil</option>
-          <option value="US">United States</option>
-          <option value="ES">Spain</option>
-          <option value="GB">United Kingdom</option>
-          <option value="OTHER">Other</option>
+          <option value="BR">Brasil</option>
+          <option value="US">Estados Unidos</option>
+          <option value="ES">España</option>
+          <option value="GB">Reino Unido</option>
+          <option value="OTHER">Otro</option>
         </select>
       </div>
       <div class="field" id="commune-field">
@@ -366,7 +366,7 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
           <option value="">— selecciona —</option>
         </select>
       </div>
-      <button class="btn" onclick="doRegister()">Create Account →</button>
+      <button class="btn" onclick="doRegister()">Crear cuenta →</button>
       <p class="auth-err" id="r-err"></p>
     </div>
   </div>
@@ -375,7 +375,7 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 <!-- IDENTITY VERIFICATION WIZARD -->
 <div id="verify-screen">
   <div class="logo">prefer<span>endum</span></div>
-  <div class="logo-sub" style="margin-bottom:24px;">Identity Verification</div>
+  <div class="logo-sub" style="margin-bottom:24px;">Verificación de Identidad</div>
   <div class="verify-card">
     <div class="verify-progress">
       <div class="verify-step-dot active" id="vdot-1"></div>
@@ -386,7 +386,7 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 
     <!-- Step 1: Email OTP -->
     <div id="verify-step-1">
-      <div class="verify-step-num">Step 1 of 4</div>
+      <div class="verify-step-num">Paso 1 de 4</div>
       <div class="verify-step-title">📧 Revisa tu correo</div>
       <div class="verify-step-sub" id="email-otp-sub">Te enviamos un código de 6 números a tu email. Escribe ese código aquí abajo (no tu correo, sino el código numérico).</div>
       <input type="text" id="email-otp-input" maxlength="6" inputmode="numeric" pattern="[0-9]*"
@@ -394,20 +394,20 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         style="width:100%;text-align:center;letter-spacing:8px;font-size:22px;font-weight:700;
                background:var(--bg3);border:2px solid var(--border);border-radius:10px;
                padding:14px;color:var(--text);outline:none;margin-bottom:12px;"/>
-      <button class="btn" onclick="confirmEmailOTP()">Verify Email →</button>
+      <button class="btn" onclick="confirmEmailOTP()">Verificar email →</button>
       <div class="verify-status" id="email-otp-status"></div>
       <div style="text-align:center;margin-top:12px;">
-        <button class="verify-skip" onclick="resendEmailOTP()" style="color:var(--blue);text-decoration:none;">Resend code</button>
+        <button class="verify-skip" onclick="resendEmailOTP()" style="color:var(--blue);text-decoration:none;">Reenviar código</button>
       </div>
     </div>
 
     <!-- Step 2: Phone OTP -->
     <div id="verify-step-2" style="display:none;">
-      <div class="verify-step-num">Step 2 of 4</div>
-      <div class="verify-step-title">📱 Verify your phone</div>
-      <div class="verify-step-sub" id="phone-otp-sub">We will send an SMS to your phone number.</div>
+      <div class="verify-step-num">Paso 2 de 4</div>
+      <div class="verify-step-title">📱 Verifica tu teléfono</div>
+      <div class="verify-step-sub" id="phone-otp-sub">Te enviaremos un SMS con un código de verificación.</div>
       <div id="phone-send-section">
-        <button class="btn" onclick="sendPhoneOTP()">Send SMS code →</button>
+        <button class="btn" onclick="sendPhoneOTP()">Enviar código SMS →</button>
       </div>
       <div id="phone-confirm-section" style="display:none;">
         <input type="text" id="phone-otp-input" maxlength="6" inputmode="numeric" pattern="[0-9]*"
@@ -415,18 +415,18 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
           style="width:100%;text-align:center;letter-spacing:8px;font-size:22px;font-weight:700;
                  background:var(--bg3);border:2px solid var(--border);border-radius:10px;
                  padding:14px;color:var(--text);outline:none;margin-bottom:12px;"/>
-        <button class="btn" onclick="confirmPhoneOTP()">Verify Phone →</button>
+        <button class="btn" onclick="confirmPhoneOTP()">Verificar teléfono →</button>
       </div>
       <div class="verify-status" id="phone-otp-status"></div>
     </div>
 
     <!-- Step 3: ID Document -->
     <div id="verify-step-3" style="display:none;">
-      <div class="verify-step-num">Step 3 of 4</div>
-      <div class="verify-step-title">📄 Upload your ID</div>
-      <div class="verify-step-sub">Take a clear photo of your national ID card or passport — the side that shows your photo.</div>
+      <div class="verify-step-num">Paso 3 de 4</div>
+      <div class="verify-step-title">📄 Foto de tu cédula</div>
+      <div class="verify-step-sub">Toma una foto clara de tu cédula de identidad o pasaporte — el lado que muestra tu foto.</div>
       <label class="upload-btn" for="doc-file-input">
-        📷 Open Camera / Choose Photo
+        📷 Abrir cámara / Elegir foto
         <input type="file" id="doc-file-input" accept="image/jpeg,image/png,image/webp" capture="environment" style="display:none" onchange="handleDocUpload(this)"/>
       </label>
       <div class="verify-status" id="doc-status"></div>
@@ -434,11 +434,11 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 
     <!-- Step 4: Selfie -->
     <div id="verify-step-4" style="display:none;">
-      <div class="verify-step-num">Step 4 of 4</div>
-      <div class="verify-step-title">🤳 Take a selfie</div>
-      <div class="verify-step-sub">Hold your ID card under your chin so both your face and the document are visible in the same photo.</div>
+      <div class="verify-step-num">Paso 4 de 4</div>
+      <div class="verify-step-title">🤳 Tómate una selfie</div>
+      <div class="verify-step-sub">Sostén tu cédula bajo tu mentón para que tu cara y el documento aparezcan en la misma foto.</div>
       <label class="upload-btn" for="selfie-file-input">
-        📸 Take Selfie
+        📸 Tomar selfie
         <input type="file" id="selfie-file-input" accept="image/jpeg,image/png,image/webp" capture="user" style="display:none" onchange="handleSelfieUpload(this)"/>
       </label>
       <div class="verify-status" id="selfie-status"></div>
@@ -451,7 +451,8 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
       <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">Tu cuenta está asegurada con verificación biométrica.</div>
     </div>
 
-    <button class="verify-skip" id="verify-skip-btn" onclick="showApp()">Saltar verificación por ahora →</button>
+    <!-- verify-skip-btn oculto para usuarios públicos; solo activar en desarrollo -->
+    <button class="verify-skip" id="verify-skip-btn" onclick="showApp()" style="display:none;">Saltar verificación por ahora →</button>
   </div>
 </div>
 
