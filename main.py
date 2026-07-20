@@ -6060,11 +6060,16 @@ def admin_purge_user(user_id: int, secret: str, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(404, 'User not found')
     email = user.email
-    db.query(SelfieLog).filter(SelfieLog.user_id == user_id).delete()
-    db.query(DocumentLog).filter(DocumentLog.user_id == user_id).delete()
-    db.query(HasVotedLog).filter(HasVotedLog.user_id == user_id).delete()
-    db.query(IMEILog).filter(IMEILog.user_id == user_id).delete()
-    db.delete(user)
+    kw = dict(synchronize_session=False)
+    db.query(SelfieLog).filter(SelfieLog.user_id == user_id).delete(**kw)
+    db.query(DocumentLog).filter(DocumentLog.user_id == user_id).delete(**kw)
+    db.query(HasVotedLog).filter(HasVotedLog.user_id == user_id).delete(**kw)
+    db.query(IMEILog).filter(IMEILog.user_id == user_id).delete(**kw)
+    db.query(SIMLog).filter(SIMLog.user_id == user_id).delete(**kw)
+    db.query(GeoLog).filter(GeoLog.user_id == user_id).delete(**kw)
+    db.query(AdImpressionLog).filter(AdImpressionLog.user_id == user_id).delete(**kw)
+    db.expunge(user)
+    db.execute(__import__('sqlalchemy').text('DELETE FROM users WHERE id = :uid'), {'uid': user_id})
     db.commit()
     return {'ok': True, 'deleted': email}
 
