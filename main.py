@@ -6076,6 +6076,9 @@ def admin_purge_user(user_id: int, secret: str, db: Session = Depends(get_db)):
             except Exception:
                 db.rollback()
         db.execute(_text('DELETE FROM users WHERE id = :uid'), {'uid': user_id})
+        # also clean orphaned device/sim records from any previously deleted accounts
+        db.execute(_text('DELETE FROM imei_logs WHERE user_id NOT IN (SELECT id FROM users)'))
+        db.execute(_text('DELETE FROM sim_logs WHERE user_id NOT IN (SELECT id FROM users)'))
         db.commit()
         return {'ok': True, 'deleted': email}
     except Exception as e:
