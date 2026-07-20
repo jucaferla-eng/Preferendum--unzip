@@ -3927,14 +3927,37 @@ def organizer_debate_results(debate_id: int, user: User = Depends(get_current_us
 COST_PER_VIEW = 20  # CLP por impresión
 
 # ── SECTOR PÚBLICO — PRICING ──────────────────────────────────
-# Costo por contacto (USD por usuario registrado).
-# Fórmula: costo_campaña = N_usuarios × PUBLIC_SECTOR_CPM_USD
+# Costo por contacto (USD por usuario registrado verificado por identidad).
+# Premium ~5x sobre CPM de Meta Ads para usuarios no verificados,
+# justificado por verificación de identidad (comparable a email marketing B2B).
+# Fórmula: costo_campaña = Σ( N_usuarios_por_país × CPM_país )
 # Actualizable sin redeploy vía POST /admin/set-public-sector-cpm
-PUBLIC_SECTOR_CPM_USD: float = float(os.getenv('PUBLIC_SECTOR_CPM_USD', '0.10'))
-_public_sector_cpm_override: float | None = None  # set by admin endpoint
 
-def get_public_sector_cpm() -> float:
-    return _public_sector_cpm_override if _public_sector_cpm_override is not None else PUBLIC_SECTOR_CPM_USD
+PUBLIC_SECTOR_CPM_BY_COUNTRY: dict[str, float] = {
+    'US': 0.10,   # EE.UU.     — Meta $0.020 × 5x premium verificado
+    'GB': 0.06,   # Reino Unido
+    'DE': 0.06,   # Alemania
+    'FR': 0.06,   # Francia
+    'ES': 0.04,   # España
+    'MX': 0.02,   # México
+    'BR': 0.013,  # Brasil
+    'CL': 0.012,  # Chile
+    'CO': 0.010,  # Colombia
+    'AR': 0.009,  # Argentina
+    'PE': 0.008,  # Perú
+    'EC': 0.008,  # Ecuador
+    'UY': 0.008,  # Uruguay
+}
+PUBLIC_SECTOR_CPM_DEFAULT: float = float(os.getenv('PUBLIC_SECTOR_CPM_DEFAULT', '0.008'))  # resto del mundo
+
+# Override global (aplica a todos los países) — set by admin endpoint
+_public_sector_global_override: float | None = None
+
+def get_cpm_for_country(country_code: str) -> float:
+    if _public_sector_global_override is not None:
+        return _public_sector_global_override
+    code = (country_code or '').upper().strip()
+    return PUBLIC_SECTOR_CPM_BY_COUNTRY.get(code, PUBLIC_SECTOR_CPM_DEFAULT)
 
 @app.post('/advertiser/campaigns')
 def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
@@ -6100,34 +6123,48 @@ def admin_purge_user(user_id: int, secret: str, db: Session = Depends(get_db)):
 
 @app.get('/public-sector/pricing')
 def public_sector_pricing(db: Session = Depends(get_db)):
-    """Calcula el costo de campaña para el sector público.
-    Fórmula: costo_USD = N_usuarios_registrados × CPM_constante.
+    """Calcula el costo de campaña para el sector público por país.
+    Fórmula: costo_USD = Σ( N_usuarios_por_país × CPM_país )
+    CPM premium ~5x sobre Meta Ads — usuarios verificados por identidad.
     """
     from sqlalchemy import text as _text
-    cpm = get_public_sector_cpm()
-    user_count = db.execute(_text('SELECT COUNT(*) FROM users')).scalar() or 0
-    campaign_cost_usd = round(user_count * cpm, 2)
-    messages_included = user_count  # un mensaje de utilidad pública por usuario registrado
+    rows = db.execute(_text(
+        "SELECT UPPER(COALESCE(country,'OTHER')) AS c, COUNT(*) AS n FROM users GROUP BY c"
+    )).fetchall()
+
+    breakdown = []
+    total_users = 0
+    total_cost = 0.0
+    for row in rows:
+        code = row[0] or 'OTHER'
+        n = row[1]
+        cpm = get_cpm_for_country(code)
+        cost = n * cpm
+        total_users += n
+        total_cost += cost
+        breakdown.append({'country': code, 'users': n, 'cpm_usd': cpm, 'subtotal_usd': round(cost, 2)})
+
+    breakdown.sort(key=lambda x: x['subtotal_usd'], reverse=True)
     return {
-        'user_count': user_count,
-        'cpm_usd': cpm,
-        'campaign_cost_usd': campaign_cost_usd,
-        'messages_included': messages_included,
-        'note': 'El costo se actualiza automáticamente con cada nuevo usuario registrado en Preferendum.'
+        'user_count': total_users,
+        'campaign_cost_usd': round(total_cost, 2),
+        'messages_included': total_users,
+        'breakdown_by_country': breakdown,
+        'note': 'Tarifa premium verificado por identidad (~5x CPM de Meta Ads). Se actualiza con cada nuevo usuario.'
     }
 
 @app.post('/admin/set-public-sector-cpm')
 def admin_set_public_sector_cpm(secret: str, cpm_usd: float, db: Session = Depends(get_db)):
-    """Actualiza el costo por contacto del sector público sin redeploy."""
+    """Aplica un override global de CPM (todos los países) sin redeploy."""
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
-    global _public_sector_cpm_override
-    _public_sector_cpm_override = cpm_usd
+    global _public_sector_global_override
+    _public_sector_global_override = cpm_usd
     from sqlalchemy import text as _text
     user_count = db.execute(_text('SELECT COUNT(*) FROM users')).scalar() or 0
     return {
         'ok': True,
-        'new_cpm_usd': cpm_usd,
+        'global_cpm_override_usd': cpm_usd,
         'user_count': user_count,
         'campaign_cost_usd': round(user_count * cpm_usd, 2)
     }

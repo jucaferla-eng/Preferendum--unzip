@@ -1400,25 +1400,39 @@ async function loadPublicPricing() {
   try {
     const r = await fetch(`${API}/public-sector/pricing`);
     const d = await r.json();
-    const cost = d.campaign_cost_usd.toLocaleString('en-US', {style:'currency', currency:'USD'});
-    const users = d.user_count.toLocaleString();
-    const cpm = d.cpm_usd.toLocaleString('en-US', {style:'currency', currency:'USD', minimumFractionDigits:2});
+    const usd = v => v.toLocaleString('en-US', {style:'currency', currency:'USD', minimumFractionDigits:2});
+    const num = v => v.toLocaleString();
+    const flagMap = {US:'🇺🇸',GB:'🇬🇧',DE:'🇩🇪',FR:'🇫🇷',ES:'🇪🇸',MX:'🇲🇽',BR:'🇧🇷',
+                     CL:'🇨🇱',CO:'🇨🇴',AR:'🇦🇷',PE:'🇵🇪',EC:'🇪🇨',UY:'🇺🇾'};
+    const rows = (d.breakdown_by_country || [])
+      .filter(b => b.users > 0)
+      .map(b => `<tr>
+        <td style="padding:7px 10px;color:var(--paper);">${flagMap[b.country]||'🌍'} ${b.country}</td>
+        <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;">${num(b.users)}</td>
+        <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:#a0a8c0;">${usd(b.cpm_usd)}</td>
+        <td style="padding:7px 10px;text-align:right;font-family:'DM Mono',monospace;color:#fbbf24;">${usd(b.subtotal_usd)}</td>
+      </tr>`).join('');
     body.innerHTML = `
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;text-align:center;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;text-align:center;margin-bottom:18px;">
         <div>
           <div style="font-family:'DM Mono',monospace;font-size:10px;color:#fbbf24;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Usuarios verificados</div>
-          <div style="font-size:26px;font-weight:700;color:var(--paper);">${users}</div>
+          <div style="font-size:28px;font-weight:700;color:var(--paper);">${num(d.user_count)}</div>
         </div>
         <div>
-          <div style="font-family:'DM Mono',monospace;font-size:10px;color:#fbbf24;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Costo por contacto</div>
-          <div style="font-size:26px;font-weight:700;color:var(--paper);">${cpm}</div>
-        </div>
-        <div>
-          <div style="font-family:'DM Mono',monospace;font-size:10px;color:#fbbf24;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Costo campaña</div>
-          <div style="font-size:26px;font-weight:700;color:#fbbf24;">${cost}</div>
+          <div style="font-family:'DM Mono',monospace;font-size:10px;color:#fbbf24;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Costo total campaña</div>
+          <div style="font-size:28px;font-weight:700;color:#fbbf24;">${usd(d.campaign_cost_usd)}</div>
         </div>
       </div>
-      <div style="margin-top:14px;font-size:12px;color:var(--muted);">Incluye <strong style="color:var(--paper);">${users} mensajes de utilidad pública</strong> — uno por usuario registrado.</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead><tr style="border-bottom:1px solid rgba(255,255,255,0.08);">
+          <th style="padding:6px 10px;text-align:left;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;">País</th>
+          <th style="padding:6px 10px;text-align:right;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;">Usuarios</th>
+          <th style="padding:6px 10px;text-align:right;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;">CPM</th>
+          <th style="padding:6px 10px;text-align:right;font-family:'DM Mono',monospace;font-size:10px;color:var(--muted);text-transform:uppercase;">Subtotal</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div style="margin-top:12px;font-size:11px;color:var(--muted);">Incluye <strong style="color:var(--paper);">${num(d.user_count)} mensajes de utilidad pública</strong>. Tarifa premium verificado por identidad (~5× CPM de Meta Ads).</div>
     `;
   } catch(e) {
     body.innerHTML = '<span style="color:#f87171;">Error al cargar tarifa. Intenta de nuevo.</span>';
