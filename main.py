@@ -2442,6 +2442,17 @@ async def verify_document(
             serial_matches = _re.findall(r'\b[A-Z]?\d{9}\b', all_text)
             if serial_matches:
                 doc_serial_found = serial_matches[0]
+
+            # Validar nombre: al menos un apellido del documento debe aparecer en el nombre registrado
+            if user.name:
+                registered_tokens = set(_re.sub(r'[^A-Z ]', '', user.name.upper()).split())
+                doc_tokens = set(all_text.split())
+                # Ignorar palabras cortas (artículos, preposiciones)
+                meaningful = {t for t in doc_tokens if len(t) >= 4}
+                name_match = bool(registered_tokens & meaningful)
+                if not name_match and rut_matches:
+                    # El RUT está en el documento pero ningún token del nombre coincide → posible fraude
+                    print(f'[verify/document] ALERTA nombre no coincide: user={user.name!r} doc_tokens={list(meaningful)[:10]}')
         except Exception as e:
             print(f'[verify/document] detect_text error (non-fatal): {e}')
 
@@ -2466,6 +2477,7 @@ async def verify_document(
         'verify_level': user.verify_level,
         'doc_rut_match': doc_rut_match,
         'doc_serial_found': bool(doc_serial_found),
+        'doc_name_match': name_match if 'name_match' in dir() else None,
     }
 
 @app.post('/verify/selfie')
