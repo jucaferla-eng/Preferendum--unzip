@@ -1647,7 +1647,7 @@ async function loadDebates(status = 'live') {
     // Auto-translate debate titles in list for non-Spanish users
     const vl = getViewerLang();
     if (vl !== 'es') translateDebatePage(vl);
-  } catch(e) { list.innerHTML = '<div class="no-debates">Error loading consultations.</div>'; }
+  } catch(e) { list.innerHTML = `<div class="no-debates">Error lista: ${e.message || e}</div>`; }
 }
 
 async function openDebate(id) {
@@ -1673,7 +1673,7 @@ async function openDebate(id) {
     const opinions_data = ar.ok ? await ar.json() : {};
     currentDebate = db;
     renderDebate(db, res, opinions_data.items || []);
-  } catch(e) { content.innerHTML = '<div class="no-debates">Error loading consultation.</div>'; }
+  } catch(e) { content.innerHTML = `<div class="no-debates">Error: ${e.message || e}</div>`; }
 }
 
 function renderAdCard(ad) {
