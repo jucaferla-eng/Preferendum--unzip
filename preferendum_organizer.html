@@ -159,15 +159,21 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
     <!-- CREATE NEW -->
     <div class="new-debate-form" id="create-form" style="display:none;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-        <div class="form-title" style="margin-bottom:0;">+ New Consultation</div>
+        <div class="form-title" id="create-form-title" style="margin-bottom:0;">+ New Consultation</div>
         <button onclick="cancelCreate()" style="background:none;border:none;color:#6b7280;font-size:13px;cursor:pointer;padding:4px 8px;">✕ Cancelar</button>
       </div>
       <div class="alert" id="create-alert"></div>
 
+      <!-- Sector Público banner — visible only in public mode -->
+      <div id="public-sector-banner" style="display:none;background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);border-radius:12px;padding:12px 16px;margin-bottom:16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#fbbf24;margin-bottom:4px;">🏛 Consulta Ciudadana · Sector Público</div>
+        <div style="font-size:12px;color:#d4a814;line-height:1.5;">Esta consulta aparecerá como: <strong style="color:#fef3c7;">Facilitada por [institución] · Preferendum</strong></div>
+      </div>
+
       <input type="hidden" id="c-creator-type" value="citizen"/>
 
       <div class="field" id="field-inst-name" style="display:none;">
-        <label>Nombre de empresa o institución</label>
+        <label id="label-inst-name">Nombre de empresa o institución</label>
         <input type="text" id="c-inst-name" placeholder="Ej: Volkswagen Chile, Nike, Municipalidad de Santiago…"/>
       </div>
 
@@ -187,7 +193,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
       </div>
 
       <div class="field">
-        <label>Imagen de portada (logo o banner de la marca)</label>
+        <label id="label-cover-img">Imagen de portada (logo o banner de la marca)</label>
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
           <label style="cursor:pointer;padding:10px 18px;background:#f1f5f9;border:1.5px dashed #cbd5e1;border-radius:10px;font-size:13px;font-weight:600;color:#475569;">
             📷 Subir imagen
@@ -321,8 +327,13 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
       </button>
       <button onclick="chooseEmpresa()" style="width:100%;padding:22px 20px;border-radius:16px;border:2px solid rgba(16,185,129,0.4);background:rgba(16,185,129,0.08);cursor:pointer;text-align:left;font-family:'Inter',sans-serif;" onmouseover="this.style.borderColor='#10b981';this.style.background='rgba(16,185,129,0.18)'" onmouseout="this.style.borderColor='rgba(16,185,129,0.4)';this.style.background='rgba(16,185,129,0.08)'">
         <div style="font-size:30px;margin-bottom:6px;">🏢</div>
-        <div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:3px;">Empresa / Institución</div>
+        <div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:3px;">Empresa / Institución privada</div>
         <div style="font-size:13px;color:#a0a8c0;">Requiere verificación de representante</div>
+      </button>
+      <button onclick="choosePublico()" style="width:100%;padding:22px 20px;border-radius:16px;border:2px solid rgba(251,191,36,0.4);background:rgba(251,191,36,0.06);cursor:pointer;text-align:left;font-family:'Inter',sans-serif;" onmouseover="this.style.borderColor='#fbbf24';this.style.background='rgba(251,191,36,0.14)'" onmouseout="this.style.borderColor='rgba(251,191,36,0.4)';this.style.background='rgba(251,191,36,0.06)'">
+        <div style="font-size:30px;margin-bottom:6px;">🏛</div>
+        <div style="font-size:17px;font-weight:700;color:#fff;margin-bottom:3px;">Sector Público</div>
+        <div style="font-size:13px;color:#a0a8c0;">Municipio, gobierno, ONG — consulta ciudadana</div>
       </button>
     </div>
     <button onclick="document.getElementById('type-select-modal').style.display='none'" style="width:100%;margin-top:16px;padding:10px;background:none;border:none;color:#6b7280;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif;">Cancelar</button>
@@ -824,9 +835,46 @@ function chooseCiudadano() {
 
 function chooseEmpresa() {
   document.getElementById('type-select-modal').style.display = 'none';
+  setPublicSectorMode(false);
   _empresaData = { consent:false, docUrl:'', nombre:'', rut:'', telefono:'', empresa:'', bossEmail:'' };
   showEmpresaStep(1);
   document.getElementById('empresa-modal').style.display = 'flex';
+}
+
+function choosePublico() {
+  document.getElementById('type-select-modal').style.display = 'none';
+  document.getElementById('nueva-consulta-cta').style.display = 'none';
+  document.getElementById('create-form').style.display = 'block';
+  document.getElementById('c-creator-type').value = 'public';
+  document.getElementById('c-is-anonymous').value = 'false';
+  setPublicSectorMode(true);
+  document.getElementById('create-form').scrollIntoView({behavior:'smooth'});
+}
+
+function setPublicSectorMode(enabled) {
+  const banner  = document.getElementById('public-sector-banner');
+  const title   = document.getElementById('create-form-title');
+  const lblInst = document.getElementById('label-inst-name');
+  const instInput = document.getElementById('c-inst-name');
+  const lblCover  = document.getElementById('label-cover-img');
+  const fieldInst = document.getElementById('field-inst-name');
+  const fieldAnon = document.getElementById('field-anonymous');
+
+  if (enabled) {
+    banner.style.display = 'block';
+    title.textContent = '🏛 Nueva Consulta Ciudadana';
+    lblInst.textContent = 'Institución convocante';
+    instInput.placeholder = 'Ej: Municipalidad de Santiago, Ministerio de Salud, ONU…';
+    lblCover.textContent = 'Logo o imagen institucional';
+    fieldInst.style.display = '';
+    fieldAnon.style.display = 'none';
+  } else {
+    banner.style.display = 'none';
+    title.textContent = '+ New Consultation';
+    lblInst.textContent = 'Nombre de empresa o institución';
+    instInput.placeholder = 'Ej: Volkswagen Chile, Nike, Municipalidad de Santiago…';
+    lblCover.textContent = 'Imagen de portada (logo o banner de la marca)';
+  }
 }
 
 function backToTypeSelect() {
@@ -837,6 +885,7 @@ function backToTypeSelect() {
 function cancelCreate() {
   document.getElementById('create-form').style.display = 'none';
   document.getElementById('nueva-consulta-cta').style.display = 'block';
+  setPublicSectorMode(false);
 }
 
 let _empresaData = { consent:false, docUrl:'', nombre:'', rut:'', telefono:'', empresa:'', bossEmail:'' };
