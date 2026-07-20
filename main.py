@@ -6056,20 +6056,30 @@ def admin_reset_selfie(user_id: int, secret: str, db: Session = Depends(get_db))
 def admin_purge_user(user_id: int, secret: str, db: Session = Depends(get_db)):
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
+    from sqlalchemy import text as _text
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, 'User not found')
     email = user.email
-    kw = dict(synchronize_session=False)
-    db.query(SelfieLog).filter(SelfieLog.user_id == user_id).delete(**kw)
-    db.query(DocumentLog).filter(DocumentLog.user_id == user_id).delete(**kw)
-    db.query(HasVotedLog).filter(HasVotedLog.user_id == user_id).delete(**kw)
-    db.query(IMEILog).filter(IMEILog.user_id == user_id).delete(**kw)
-    db.query(SIMLog).filter(SIMLog.user_id == user_id).delete(**kw)
-    db.query(GeoLog).filter(GeoLog.user_id == user_id).delete(**kw)
-    db.delete(user)
-    db.commit()
-    return {'ok': True, 'deleted': email}
+    try:
+        tables = [
+            'otp_codes', 'selfie_logs', 'document_logs', 'imei_logs',
+            'sim_logs', 'geo_logs', 'vote_identity_locks', 'opinions',
+            'debate_has_voted', 'post_vote_comments',
+            'organizer_profiles', 'marketer_profiles',
+            'authorization_requests', 'marketer_authorization_requests',
+        ]
+        for tbl in tables:
+            try:
+                db.execute(_text(f'DELETE FROM {tbl} WHERE user_id = :uid'), {'uid': user_id})
+            except Exception:
+                db.rollback()
+        db.execute(_text('DELETE FROM users WHERE id = :uid'), {'uid': user_id})
+        db.commit()
+        return {'ok': True, 'deleted': email}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(500, str(e))
 
 @app.delete('/admin/users/{user_id}')
 def admin_delete_user(user_id: int, secret: str, db: Session = Depends(get_db)):
