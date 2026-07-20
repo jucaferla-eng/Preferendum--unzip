@@ -1599,12 +1599,12 @@ async function loadDebates(status = 'live') {
   const secTitle = document.querySelector('.section-title');
   if (secTitle) secTitle.textContent = status === 'expired' ? 'Consultas expiradas' : 'Consultas';
   list.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
+  const debatesUrl = token
+    ? `${API}/debates/for-me?limit=50&status=${status}`
+    : `${API}/debates?limit=50&country=${encodeURIComponent(userCountry)}&status=${status}`;
+  const debatesHeaders = token ? {'Authorization': 'Bearer ' + token} : {};
   try {
     // Si hay sesión activa, usar el endpoint autenticado que filtra por perfil del usuario
-    const debatesUrl = token
-      ? `${API}/debates/for-me?limit=50&status=${status}`
-      : `${API}/debates?limit=50&country=${encodeURIComponent(userCountry)}&status=${status}`;
-    const debatesHeaders = token ? {'Authorization': 'Bearer ' + token} : {};
     const [dr, ar] = await Promise.all([
       fetch(debatesUrl, {headers: debatesHeaders}),
       status === 'live' ? fetch(`${API}/ads/featured`).catch(() => null) : Promise.resolve(null),
@@ -1647,7 +1647,7 @@ async function loadDebates(status = 'live') {
     // Auto-translate debate titles in list for non-Spanish users
     const vl = getViewerLang();
     if (vl !== 'es') translateDebatePage(vl);
-  } catch(e) { list.innerHTML = `<div class="no-debates">Error lista: ${e.message || e}</div>`; }
+  } catch(e) { list.innerHTML = `<div class="no-debates">Error lista: ${e.name}: ${e.message}<br>URL: ${debatesUrl||'?'}<br>Token: ${token ? token.slice(0,20)+'...' : 'none'}</div>`; }
 }
 
 async function openDebate(id) {
