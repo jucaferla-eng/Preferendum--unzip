@@ -98,6 +98,7 @@ class User(Base):
     gender          = Column(String, default='F')
     dob             = Column(String, default='')
     national_id     = Column(String, default='')
+    doc_serial      = Column(String, default='')   # número de serie del documento físico (9 dígitos)
     phone           = Column(String, default='')
     role            = Column(String, default='voter')
     email_verified  = Column(Boolean, default=False)
@@ -276,6 +277,15 @@ class ImeiVoteLog(Base):
     id          = Column(Integer, primary_key=True)
     debate_id   = Column(Integer, index=True, nullable=False)
     imei_hash   = Column(String, index=True, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+class DocSerialVoteLog(Base):
+    """Número de serie del documento físico — solo puede votar una vez por debate.
+    Bloquea aunque renueven el chip, creen cuenta nueva o cambien de RUT."""
+    __tablename__ = 'doc_serial_vote_log'
+    id          = Column(Integer, primary_key=True)
+    debate_id   = Column(Integer, index=True, nullable=False)
+    serial_hash = Column(String, index=True, nullable=False)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
 class DebateAd(Base):
@@ -2407,6 +2417,38 @@ async def verify_document(
     else:
         face_detected = True  # sin credenciales: modo demo
 
+    # Extraer texto del documento: RUT y número de serie (9 dígitos)
+    doc_rut_match = False
+    doc_serial_found = None
+    if aws_key and face_detected:
+        try:
+            rek = _rekognition_client()
+            text_resp = rek.detect_text(Image={'Bytes': contents})
+            detected_lines = [t['DetectedText'] for t in text_resp.get('TextDetections', [])
+                              if t['Type'] == 'LINE' and t.get('Confidence', 0) > 60]
+            all_text = ' '.join(detected_lines).upper()
+
+            # Buscar RUT en el texto (formato XX.XXX.XXX-X o XXXXXXXX-X)
+            import re as _re
+            rut_matches = _re.findall(r'\d{1,2}\.?\d{3}\.?\d{3}[-–]\s*[\dkK]', all_text)
+            if rut_matches and user.national_id:
+                # Normalizar: quitar puntos, guiones, espacios
+                def _norm_rut(r): return _re.sub(r'[.\-\s–]', '', r).upper()
+                user_rut_norm = _norm_rut(user.national_id)
+                doc_rut_norm  = _norm_rut(rut_matches[0])
+                doc_rut_match = (user_rut_norm == doc_rut_norm)
+
+            # Buscar número de serie: secuencia de exactamente 9 dígitos (puede tener letra al inicio)
+            serial_matches = _re.findall(r'\b[A-Z]?\d{9}\b', all_text)
+            if serial_matches:
+                doc_serial_found = serial_matches[0]
+        except Exception as e:
+            print(f'[verify/document] detect_text error (non-fatal): {e}')
+
+    # Guardar número de serie si lo encontramos
+    if doc_serial_found:
+        user.doc_serial = doc_serial_found
+
     doc_log = DocumentLog(
         user_id=user.id,
         doc_hash=hashlib.sha256(contents).hexdigest(),
@@ -2419,7 +2461,12 @@ async def verify_document(
         user.id_verified = True
         update_verify_level(user, db)
     db.commit()
-    return {'verified': face_detected, 'verify_level': user.verify_level}
+    return {
+        'verified': face_detected,
+        'verify_level': user.verify_level,
+        'doc_rut_match': doc_rut_match,
+        'doc_serial_found': bool(doc_serial_found),
+    }
 
 @app.post('/verify/selfie')
 async def verify_selfie(
@@ -3439,6 +3486,17 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
             if imei_voted:
                 raise HTTPException(409, 'Este aparato ya fue usado para votar en esta consulta')
 
+    # Bloqueo 5: mismo número de serie del documento físico
+    serial_hash = None
+    if user.doc_serial:
+        serial_hash = hash_str(user.doc_serial.strip().upper(), 'pref-serial-')
+        serial_voted = db.query(DocSerialVoteLog).filter(
+            DocSerialVoteLog.serial_hash == serial_hash,
+            DocSerialVoteLog.debate_id == debate_id
+        ).first()
+        if serial_voted:
+            raise HTTPException(409, 'Este documento de identidad ya fue usado para votar en esta consulta')
+
     opts = json.loads(debate.options or '[]')
     if data.option_index < 0 or data.option_index >= len(opts):
         raise HTTPException(400, 'Invalid option')
@@ -3470,6 +3528,8 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
         db.add(ImeiVoteLog(debate_id=debate_id, imei_hash=fp_hash))
     elif imei_log:
         db.add(ImeiVoteLog(debate_id=debate_id, imei_hash=imei_log.imei_hash))
+    if serial_hash:
+        db.add(DocSerialVoteLog(debate_id=debate_id, serial_hash=serial_hash))
     counts = json.loads(debate.vote_counts or '{}')
     counts[option] = counts.get(option, 0) + 1
     debate.vote_counts = json.dumps(counts)
