@@ -1042,7 +1042,7 @@ class DebateCreate(BaseModel):
     target_se_tiers:     str = 'A,B,C,D'
     category:            str = 'general'
     closes_at:           str
-    verify_days:         int = 14
+    verify_days:         int = 1
     follow_up_questions: str = ''
     reward:              str = ''
     option_images:       List[str] = []
@@ -1133,7 +1133,7 @@ def seed_demo_data():
                 scope='country',
                 scope_country='CL',
                 closes_at=now + timedelta(days=7),
-                verify_closes_at=now + timedelta(days=21),
+                verify_closes_at=now + timedelta(days=8),
                 total_votes=24812,
                 vote_counts=json.dumps({'Reducir 40%': 11166, 'Reducir 20%': 6204, 'Mantener actual': 4962, 'Aumentar segun metricas': 2480}),
             ),
@@ -1148,7 +1148,7 @@ def seed_demo_data():
                 scope_country='CL',
                 scope_commune='Las Condes',
                 closes_at=now + timedelta(days=14),
-                verify_closes_at=now + timedelta(days=28),
+                verify_closes_at=now + timedelta(days=15),
                 total_votes=8934,
                 vote_counts=json.dumps({'Infraestructura vial': 2859, 'Salud publica': 2323, 'Educacion': 2055, 'Areas verdes': 1697}),
             ),
@@ -1164,7 +1164,7 @@ def seed_demo_data():
                 target_age_min=16,
                 target_age_max=35,
                 closes_at=now + timedelta(days=5),
-                verify_closes_at=now + timedelta(days=19),
+                verify_closes_at=now + timedelta(days=6),
                 total_votes=4182,
                 vote_counts=json.dumps({'Air Max Pulse': 1631, 'Air Force 1': 1129, 'React Infinity': 920, 'Pegasus Trail': 502}),
             ),
@@ -5274,7 +5274,7 @@ def admin_patch_debate(debate_id: int, secret: str, target_age_min: int = None, 
             debate.verify_closes_at = now
         elif status == 'live':
             debate.closes_at = now + timedelta(days=30)
-            debate.verify_closes_at = debate.closes_at + timedelta(days=7)
+            debate.verify_closes_at = debate.closes_at + timedelta(days=1)
     db.commit()
     db.refresh(debate)
     return {'ok': True, 'debate': format_debate(debate)}
