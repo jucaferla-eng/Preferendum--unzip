@@ -198,6 +198,7 @@ class Debate(Base):
     status           = Column(String, default='live')
     opens_at         = Column(DateTime, default=datetime.utcnow)
     closes_at        = Column(DateTime)
+    verify_opens_at  = Column(DateTime)
     verify_closes_at = Column(DateTime)
     total_votes      = Column(Integer, default=0)
     vote_counts      = Column(Text, default='{}')
@@ -801,6 +802,9 @@ def get_debate_status(debate):
     now = datetime.utcnow()
     if not debate.closes_at or now <= debate.closes_at:
         return 'live'
+    verify_opens = debate.verify_opens_at or (debate.closes_at + timedelta(days=1))
+    if now < verify_opens:
+        return 'closed'      # cerrada, aún no abre verificación (primeras 24h)
     if debate.verify_closes_at and now <= debate.verify_closes_at:
         return 'verifying'
     return 'verified'
@@ -836,6 +840,7 @@ def format_debate(debate, has_voted=False):
         'total_votes': total,
         'opens_at': debate.opens_at.isoformat() if debate.opens_at else None,
         'closes_at': debate.closes_at.isoformat() if debate.closes_at else None,
+        'verify_opens_at': debate.verify_opens_at.isoformat() if debate.verify_opens_at else None,
         'verify_closes_at': debate.verify_closes_at.isoformat() if debate.verify_closes_at else None,
         'legitimacy_score': debate.legitimacy_score,
         'verifications_ok': debate.verifications_ok,
@@ -1042,7 +1047,7 @@ class DebateCreate(BaseModel):
     target_se_tiers:     str = 'A,B,C,D'
     category:            str = 'general'
     closes_at:           str
-    verify_days:         int = 1
+    verify_days:         int = 15
     follow_up_questions: str = ''
     reward:              str = ''
     option_images:       List[str] = []
@@ -2732,6 +2737,7 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
     if len(data.options) < 2:
         raise HTTPException(400, 'At least 2 options required')
     closes = datetime.fromisoformat(data.closes_at)
+    verify_opens = closes + timedelta(days=1)
     verify_closes = closes + timedelta(days=data.verify_days)
     debate = Debate(
         title=data.title, context=data.context,
@@ -2743,7 +2749,7 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
         category=getattr(data, 'category', 'general') or 'general',
-        closes_at=closes, verify_closes_at=verify_closes,
+        closes_at=closes, verify_opens_at=verify_opens, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
         reward=data.reward or '',
@@ -3660,6 +3666,7 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
     if len(data.options) < 2:
         raise HTTPException(400, 'At least 2 options required')
     closes = datetime.fromisoformat(data.closes_at)
+    verify_opens = closes + timedelta(days=1)
     verify_closes = closes + timedelta(days=data.verify_days)
     debate = Debate(
         title=data.title, context=data.context,
@@ -3672,7 +3679,7 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
         category=getattr(data, 'category', 'general') or 'general',
-        closes_at=closes, verify_closes_at=verify_closes,
+        closes_at=closes, verify_opens_at=verify_opens, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
         reward=data.reward or '',
@@ -4324,6 +4331,7 @@ def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_c
         raise HTTPException(400, f'Consulta rechazada: {moderation["reason"]}')
 
     closes        = datetime.fromisoformat(data.closes_at)
+    verify_opens  = closes + timedelta(days=1)
     verify_closes = closes + timedelta(days=data.verify_days)
 
     # Consultas en revisión quedan como 'draft' hasta aprobación manual
@@ -4340,7 +4348,7 @@ def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_c
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
         category=getattr(data, 'category', 'general') or 'general',
-        closes_at=closes, verify_closes_at=verify_closes,
+        closes_at=closes, verify_opens_at=verify_opens, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
         follow_up_questions=data.follow_up_questions or '',
         reward=data.reward or '',
