@@ -585,13 +585,22 @@ def _migrate():
                 pass
         # users — se_tier e income_index para matching de ads
         existing_user_cols = {c['name'] for c in inspector.get_columns('users')} if inspector.has_table('users') else set()
-        for col, defn in [('se_tier', "TEXT DEFAULT ''"), ('income_index', 'FLOAT DEFAULT 0.0')]:
+        for col, defn in [('se_tier', "TEXT DEFAULT ''"), ('income_index', 'FLOAT DEFAULT 0.0'),
+                          ('doc_serial', "TEXT DEFAULT ''")]:
             if col not in existing_user_cols:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
                     conn.commit()
                 except Exception:
                     pass
+        # debates — verify_opens_at
+        existing_debate_cols2 = {c['name'] for c in inspector.get_columns('debates')} if inspector.has_table('debates') else set()
+        if 'verify_opens_at' not in existing_debate_cols2:
+            try:
+                conn.execute(text("ALTER TABLE debates ADD COLUMN verify_opens_at TIMESTAMP"))
+                conn.commit()
+            except Exception:
+                pass
         # ad_campaigns — nuevas columnas de targeting por ingreso
         existing_ad_cols = {c['name'] for c in inspector.get_columns('ad_campaigns')} if inspector.has_table('ad_campaigns') else set()
         for col, defn in [
