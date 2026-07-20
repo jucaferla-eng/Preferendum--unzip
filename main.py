@@ -6085,6 +6085,16 @@ def admin_purge_user(user_id: int, secret: str, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(500, str(e))
 
+@app.post('/admin/fix-inst-name')
+def admin_fix_inst_name(secret: str, old_name: str, new_name: str, db: Session = Depends(get_db)):
+    """Renombra inst_name en todos los debates que tengan old_name."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from sqlalchemy import text as _text
+    r = db.execute(_text('UPDATE debates SET inst_name = :new WHERE inst_name = :old'), {'new': new_name, 'old': old_name})
+    db.commit()
+    return {'ok': True, 'updated': r.rowcount}
+
 @app.post('/admin/cleanup-orphan-imei')
 def admin_cleanup_orphan_imei(secret: str, db: Session = Depends(get_db)):
     """Borra registros de imei_logs y sim_logs huérfanos (user_id que ya no existe en users)."""
