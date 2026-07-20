@@ -2686,6 +2686,72 @@ def get_feed(
         'section_title': 'Consultations available to vote',
     }
 
+@app.get('/debates/for-me')
+def debates_for_me(
+    status: str = Query('live'),
+    limit:  int = Query(50),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Devuelve solo las consultas para las que el usuario califica según su perfil verificado."""
+    from datetime import date as _date
+    now = datetime.utcnow()
+
+    # Calcular edad del usuario
+    user_age = None
+    if user.dob:
+        try:
+            dob = _date.fromisoformat(user.dob)
+            today = _date.today()
+            user_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        except Exception:
+            pass
+
+    user_country = (user.country or 'CL').upper()
+    user_commune = (user.commune or '').strip().lower()
+    user_gender  = user.gender or ''
+
+    q = db.query(Debate).filter(Debate.status == 'live')
+    if status == 'expired':
+        q = db.query(Debate).filter(Debate.status != 'draft', Debate.closes_at != None, Debate.closes_at < now)
+    else:
+        q = q.filter((Debate.closes_at == None) | (Debate.closes_at >= now))
+
+    all_debates = q.order_by(Debate.created_at.desc()).limit(200).all()
+
+    eligible = []
+    for d in all_debates:
+        # Filtro por alcance geográfico
+        scope = (d.scope or 'global').lower()
+        if scope == 'commune':
+            if not user_commune or user_commune != (d.scope_commune or '').strip().lower():
+                continue
+        elif scope == 'country':
+            sc = (d.scope_country or '').upper()
+            if sc and sc not in ('', 'ALL', 'GLOBAL', 'GL') and sc != user_country:
+                continue
+
+        # Filtro por género
+        tg = (d.target_gender or 'all').lower()
+        if tg != 'all' and user_gender and user_gender != tg:
+            continue
+
+        # Filtro por edad
+        if user_age is not None:
+            if d.target_age_min and user_age < d.target_age_min:
+                continue
+            if d.target_age_max and user_age > d.target_age_max:
+                continue
+
+        try:
+            eligible.append(format_debate(d))
+        except Exception:
+            pass
+        if len(eligible) >= limit:
+            break
+
+    return {'debates': eligible}
+
 @app.get('/ads/featured')
 def get_featured_ads(db: Session = Depends(get_db)):
     """Returns up to 2 active ad campaigns to display in the debates list."""

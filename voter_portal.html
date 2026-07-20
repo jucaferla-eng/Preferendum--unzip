@@ -1597,8 +1597,13 @@ async function loadDebates(status = 'live') {
   if (secTitle) secTitle.textContent = status === 'expired' ? 'Consultas expiradas' : 'Consultas';
   list.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
   try {
+    // Si hay sesión activa, usar el endpoint autenticado que filtra por perfil del usuario
+    const debatesUrl = token
+      ? `${API}/debates/for-me?limit=50&status=${status}`
+      : `${API}/debates?limit=50&country=${encodeURIComponent(userCountry)}&status=${status}`;
+    const debatesHeaders = token ? {'Authorization': 'Bearer ' + token} : {};
     const [dr, ar] = await Promise.all([
-      fetch(`${API}/debates?limit=50&country=${encodeURIComponent(userCountry)}&status=${status}`),
+      fetch(debatesUrl, {headers: debatesHeaders}),
       status === 'live' ? fetch(`${API}/ads/featured`).catch(() => null) : Promise.resolve(null),
     ]);
     const debates = (await dr.json()).debates || [];
