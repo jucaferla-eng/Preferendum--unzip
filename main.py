@@ -6067,9 +6067,7 @@ def admin_purge_user(user_id: int, secret: str, db: Session = Depends(get_db)):
     db.query(IMEILog).filter(IMEILog.user_id == user_id).delete(**kw)
     db.query(SIMLog).filter(SIMLog.user_id == user_id).delete(**kw)
     db.query(GeoLog).filter(GeoLog.user_id == user_id).delete(**kw)
-    db.query(AdImpressionLog).filter(AdImpressionLog.user_id == user_id).delete(**kw)
-    db.expunge(user)
-    db.execute(__import__('sqlalchemy').text('DELETE FROM users WHERE id = :uid'), {'uid': user_id})
+    db.delete(user)
     db.commit()
     return {'ok': True, 'deleted': email}
 
