@@ -266,6 +266,9 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
         <div class="sidebar-item" id="nav-deployment" style="display:none;">
           <span class="sidebar-icon">◎</span> Deployment
         </div>
+        <div class="sidebar-item" onclick="showPanel('public-sector');loadPublicPricing()" id="nav-public-sector">
+          <span class="sidebar-icon">🏛</span> Sector Público
+        </div>
       </div>
 
       <!-- CONTENT -->
@@ -632,6 +635,45 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
         </div>
 
         <!-- BLOCKCHAIN PANEL -->
+        <!-- ── SECTOR PÚBLICO PANEL ── -->
+        <div class="panel" id="panel-public-sector">
+          <p class="section-tag">Sector Público</p>
+          <h2 class="section-title">Consulta Ciudadana</h2>
+
+          <!-- Pricing card — populated by loadPublicPricing() -->
+          <div class="card" style="margin-bottom:20px;border:1px solid rgba(251,191,36,0.3);background:rgba(251,191,36,0.04);">
+            <div style="font-family:'DM Mono',monospace;font-size:11px;color:#fbbf24;letter-spacing:.1em;text-transform:uppercase;margin-bottom:14px;">Tarifa vigente · calculada en tiempo real</div>
+            <div id="pub-pricing-body" style="text-align:center;padding:20px 0;color:var(--muted);font-size:13px;">Cargando…</div>
+          </div>
+
+          <!-- Options -->
+          <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:24px;">
+
+            <div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.25);border-radius:12px;padding:16px 18px;">
+              <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:5px;">Opción A — Mensajes de utilidad pública</div>
+              <div style="font-size:13px;color:var(--muted);line-height:1.6;">Tu institución ocupa los espacios con mensajes propios: vacunación, subsidios, alertas, servicios. <strong style="color:var(--paper);">Tu organización paga la tarifa de audiencia.</strong></div>
+            </div>
+
+            <div style="background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.25);border-radius:12px;padding:16px 18px;">
+              <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:5px;">Opción B — Conversation Sponsors</div>
+              <div style="font-size:13px;color:var(--muted);line-height:1.6;">Marcas privadas patrocinan tu consulta. Aparecen como <em style="color:var(--paper);">"Facilitada por [Marca]"</em>. El ingreso de los sponsors cubre el costo. <strong style="color:var(--paper);">Sin costo directo para la institución.</strong></div>
+            </div>
+
+            <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25);border-radius:12px;padding:16px 18px;">
+              <div style="font-size:13px;font-weight:700;color:#6ee7b7;margin-bottom:5px;">Opción C — Pago directo</div>
+              <div style="font-size:13px;color:var(--muted);line-height:1.6;">Consulta completamente limpia. Sin mensajes ni sponsors. <strong style="color:var(--paper);">Tu institución paga el equivalente a la tarifa de audiencia.</strong></div>
+            </div>
+
+          </div>
+
+          <div style="background:var(--ink2);border-radius:10px;padding:14px 16px;font-size:12px;color:var(--muted);line-height:1.7;">
+            💡 <strong style="color:var(--paper);">¿Cómo se calcula el costo?</strong><br/>
+            Costo = N° usuarios registrados en Preferendum × tarifa por contacto.<br/>
+            A mayor audiencia, mayor alcance — y mayor costo. La tarifa es constante; el valor sube con el crecimiento de la plataforma.<br/><br/>
+            Para contratar, contacta al equipo Preferendum: <strong style="color:var(--gold2);">jucaferla@preferendum.com</strong>
+          </div>
+        </div>
+
         <div class="panel" id="panel-blockchain">
           <p class="section-tag">Transparency</p>
           <h2 class="section-title">Blockchain Verification</h2>
@@ -1350,6 +1392,37 @@ function showPanel(name) {
   if (name === 'overview')     { loadOverview(); refreshBalance(); }
   if (name === 'credits')      { loadPackages(); }
   if (name === 'new-campaign') initBrandSafetyChips();
+}
+
+async function loadPublicPricing() {
+  const body = document.getElementById('pub-pricing-body');
+  if (!body) return;
+  try {
+    const r = await fetch(`${API}/public-sector/pricing`);
+    const d = await r.json();
+    const cost = d.campaign_cost_usd.toLocaleString('en-US', {style:'currency', currency:'USD'});
+    const users = d.user_count.toLocaleString();
+    const cpm = d.cpm_usd.toLocaleString('en-US', {style:'currency', currency:'USD', minimumFractionDigits:2});
+    body.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;text-align:center;">
+        <div>
+          <div style="font-family:'DM Mono',monospace;font-size:10px;color:#fbbf24;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Usuarios verificados</div>
+          <div style="font-size:26px;font-weight:700;color:var(--paper);">${users}</div>
+        </div>
+        <div>
+          <div style="font-family:'DM Mono',monospace;font-size:10px;color:#fbbf24;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Costo por contacto</div>
+          <div style="font-size:26px;font-weight:700;color:var(--paper);">${cpm}</div>
+        </div>
+        <div>
+          <div style="font-family:'DM Mono',monospace;font-size:10px;color:#fbbf24;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Costo campaña</div>
+          <div style="font-size:26px;font-weight:700;color:#fbbf24;">${cost}</div>
+        </div>
+      </div>
+      <div style="margin-top:14px;font-size:12px;color:var(--muted);">Incluye <strong style="color:var(--paper);">${users} mensajes de utilidad pública</strong> — uno por usuario registrado.</div>
+    `;
+  } catch(e) {
+    body.innerHTML = '<span style="color:#f87171;">Error al cargar tarifa. Intenta de nuevo.</span>';
+  }
 }
 
 // ── HELPERS ───────────────────────────────────────────────────

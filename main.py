@@ -3926,6 +3926,16 @@ def organizer_debate_results(debate_id: int, user: User = Depends(get_current_us
 
 COST_PER_VIEW = 20  # CLP por impresión
 
+# ── SECTOR PÚBLICO — PRICING ──────────────────────────────────
+# Costo por contacto (USD por usuario registrado).
+# Fórmula: costo_campaña = N_usuarios × PUBLIC_SECTOR_CPM_USD
+# Actualizable sin redeploy vía POST /admin/set-public-sector-cpm
+PUBLIC_SECTOR_CPM_USD: float = float(os.getenv('PUBLIC_SECTOR_CPM_USD', '0.10'))
+_public_sector_cpm_override: float | None = None  # set by admin endpoint
+
+def get_public_sector_cpm() -> float:
+    return _public_sector_cpm_override if _public_sector_cpm_override is not None else PUBLIC_SECTOR_CPM_USD
+
 @app.post('/advertiser/campaigns')
 def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
     campaign = AdCampaign(
@@ -6087,6 +6097,40 @@ def admin_purge_user(user_id: int, secret: str, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(500, str(e))
+
+@app.get('/public-sector/pricing')
+def public_sector_pricing(db: Session = Depends(get_db)):
+    """Calcula el costo de campaña para el sector público.
+    Fórmula: costo_USD = N_usuarios_registrados × CPM_constante.
+    """
+    from sqlalchemy import text as _text
+    cpm = get_public_sector_cpm()
+    user_count = db.execute(_text('SELECT COUNT(*) FROM users')).scalar() or 0
+    campaign_cost_usd = round(user_count * cpm, 2)
+    messages_included = user_count  # un mensaje de utilidad pública por usuario registrado
+    return {
+        'user_count': user_count,
+        'cpm_usd': cpm,
+        'campaign_cost_usd': campaign_cost_usd,
+        'messages_included': messages_included,
+        'note': 'El costo se actualiza automáticamente con cada nuevo usuario registrado en Preferendum.'
+    }
+
+@app.post('/admin/set-public-sector-cpm')
+def admin_set_public_sector_cpm(secret: str, cpm_usd: float, db: Session = Depends(get_db)):
+    """Actualiza el costo por contacto del sector público sin redeploy."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    global _public_sector_cpm_override
+    _public_sector_cpm_override = cpm_usd
+    from sqlalchemy import text as _text
+    user_count = db.execute(_text('SELECT COUNT(*) FROM users')).scalar() or 0
+    return {
+        'ok': True,
+        'new_cpm_usd': cpm_usd,
+        'user_count': user_count,
+        'campaign_cost_usd': round(user_count * cpm_usd, 2)
+    }
 
 @app.post('/admin/fix-inst-name')
 def admin_fix_inst_name(secret: str, old_name: str, new_name: str, db: Session = Depends(get_db)):
