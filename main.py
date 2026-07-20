@@ -1251,8 +1251,10 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
   background:radial-gradient(ellipse 70% 50% at 50% 40%,rgba(37,99,235,0.12) 0%,transparent 65%);}
 .brand{font-family:'Playfair Display',serif;font-size:clamp(18px,4.5vw,26px);
   font-weight:700;color:#c8d8f0;letter-spacing:0.3em;
-  text-transform:uppercase;margin-bottom:48px;}
+  text-transform:uppercase;margin-bottom:10px;}
 .brand span{color:#4d8aff;}
+.brand-sub{font-size:clamp(11px,1.8vw,14px);color:rgba(240,244,255,0.50);
+  letter-spacing:0.18em;text-transform:uppercase;margin-bottom:42px;font-weight:400;}
 .headline{font-family:'Playfair Display',serif;font-size:clamp(36px,8vw,96px);
   font-weight:900;color:#F0F4FF;line-height:1.02;letter-spacing:-2px;
   margin-bottom:28px;max-width:820px;}
@@ -1308,6 +1310,7 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
 <!-- PAGE 1: CONCEPT -->
 <div id="page1">
   <div class="brand">prefer<span>endum</span></div>
+  <div class="brand-sub">The Global Preference Network</div>
   <h1 class="headline">
     Anyone.<br/>
     Anywhere.<br/>
@@ -1315,12 +1318,12 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
   </h1>
   <p class="nuance">
     <strong>Global decisions. Define your path.</strong><br/>
-    When everyone expresses their preference, the nuance appears.
+    When every preference is expressed, collective intelligence emerges.
   </p>
   <button class="enter-btn" onclick="showPage2()">
     Enter →
   </button>
-  <div class="tagline">Freedom to choose goes global</div>
+  <div class="tagline">Freedom to choose. Together.</div>
 </div>
 
 <!-- PAGE 2: ROLE SELECTION -->
