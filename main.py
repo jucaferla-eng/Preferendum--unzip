@@ -2443,16 +2443,22 @@ async def verify_document(
             if serial_matches:
                 doc_serial_found = serial_matches[0]
 
-            # Validar nombre: al menos un apellido del documento debe aparecer en el nombre registrado
+            # Validar nombre: al menos 2 palabras del nombre registrado deben aparecer en el documento
             if user.name:
-                registered_tokens = set(_re.sub(r'[^A-Z ]', '', user.name.upper()).split())
-                doc_tokens = set(all_text.split())
-                # Ignorar palabras cortas (artículos, preposiciones)
-                meaningful = {t for t in doc_tokens if len(t) >= 4}
-                name_match = bool(registered_tokens & meaningful)
+                import unicodedata as _ud
+                def _norm_name(s):
+                    # Quitar tildes y caracteres especiales, dejar solo A-Z y espacios
+                    nfkd = _ud.normalize('NFKD', s.upper())
+                    ascii_str = ''.join(c for c in nfkd if not _ud.combining(c))
+                    return _re.sub(r'[^A-Z ]', ' ', ascii_str)
+
+                registered_tokens = {t for t in _norm_name(user.name).split() if len(t) >= 4}
+                doc_tokens        = {t for t in _norm_name(all_text).split() if len(t) >= 4}
+                common = registered_tokens & doc_tokens
+                # Exigir al menos 2 palabras coincidentes (apellidos o nombres)
+                name_match = len(common) >= 2
                 if not name_match and rut_matches:
-                    # El RUT está en el documento pero ningún token del nombre coincide → posible fraude
-                    print(f'[verify/document] ALERTA nombre no coincide: user={user.name!r} doc_tokens={list(meaningful)[:10]}')
+                    print(f'[verify/document] ALERTA nombre no coincide: user={user.name!r} coincidencias={common} doc_tokens={list(doc_tokens)[:15]}')
         except Exception as e:
             print(f'[verify/document] detect_text error (non-fatal): {e}')
 
