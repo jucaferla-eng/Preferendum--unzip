@@ -321,7 +321,7 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
     <!-- REGISTER -->
     <div id="tab-register" style="display:none;">
       <div class="field">
-        <label>Nombre completo <span style="font-size:11px;color:#7a7570;font-weight:400;">— escríbelo igual que en tu cédula o ID</span></label>
+        <label>Nombre y apellidos <span style="font-size:11px;color:#7a7570;font-weight:400;">— exactamente como aparecen en tu cédula o ID</span></label>
         <input type="text" id="r-name" placeholder="Ej: Juan Carlos Fernández Lazo" autocomplete="name"/>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
@@ -1321,11 +1321,17 @@ async function handleDocUpload(input) {
     const d = await r.json();
     if (r.ok && d.verified) {
       status.className = 'verify-status ok';
-      status.textContent = '✓ Document accepted';
+      let msg = '✓ Documento aceptado';
+      if (d.extracted_name || d.extracted_rut) {
+        msg += ' — Datos leídos del carnet:';
+        if (d.extracted_name) msg += ` <strong>${d.extracted_name}</strong>`;
+        if (d.extracted_rut)  msg += ` · ${d.extracted_rut}`;
+      }
+      status.innerHTML = msg;
       _advanceVerifyStep(3, 4);
     } else {
       status.className = 'verify-status err';
-      status.textContent = d.detail || '✗ No face detected. Use a clearer photo.';
+      status.textContent = d.detail || '✗ No detectamos cara. Usa una foto más clara.';
     }
   } catch(e) {
     status.className = 'verify-status err';

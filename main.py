@@ -2478,6 +2478,22 @@ async def verify_document(
     if doc_serial_found:
         user.doc_serial = doc_serial_found
 
+    # Extraer nombre legible del documento para devolver al frontend
+    extracted_name = None
+    extracted_rut  = None
+    if 'detected_lines' in dir() or 'all_text' in locals():
+        try:
+            # Nombre: líneas que parecen apellidos/nombres (solo letras y espacios, mín 3 palabras)
+            name_candidates = [l for l in detected_lines
+                               if _re.match(r'^[A-ZÁÉÍÓÚÜÑ ]{6,}$', l.strip().upper())
+                               and len(l.strip().split()) >= 2]
+            if name_candidates:
+                extracted_name = name_candidates[0].strip().title()
+            if rut_matches:
+                extracted_rut = rut_matches[0].strip()
+        except Exception:
+            pass
+
     doc_log = DocumentLog(
         user_id=user.id,
         doc_hash=hashlib.sha256(contents).hexdigest(),
@@ -2495,7 +2511,9 @@ async def verify_document(
         'verify_level': user.verify_level,
         'doc_rut_match': doc_rut_match,
         'doc_serial_found': bool(doc_serial_found),
-        'doc_name_match': name_match if 'name_match' in dir() else None,
+        'doc_name_match': name_match if 'name_match' in locals() else None,
+        'extracted_name': extracted_name,
+        'extracted_rut':  extracted_rut,
     }
 
 @app.post('/verify/selfie')
