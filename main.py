@@ -6082,6 +6082,17 @@ def admin_purge_user(user_id: int, secret: str, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(500, str(e))
 
+@app.post('/admin/cleanup-orphan-imei')
+def admin_cleanup_orphan_imei(secret: str, db: Session = Depends(get_db)):
+    """Borra registros de imei_logs y sim_logs huérfanos (user_id que ya no existe en users)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from sqlalchemy import text as _text
+    r1 = db.execute(_text('DELETE FROM imei_logs WHERE user_id NOT IN (SELECT id FROM users)'))
+    r2 = db.execute(_text('DELETE FROM sim_logs WHERE user_id NOT IN (SELECT id FROM users)'))
+    db.commit()
+    return {'ok': True, 'imei_deleted': r1.rowcount, 'sim_deleted': r2.rowcount}
+
 @app.delete('/admin/users/{user_id}')
 def admin_delete_user(user_id: int, secret: str, db: Session = Depends(get_db)):
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
