@@ -341,6 +341,44 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 </div>
 
 <!-- EMPRESA VERIFICATION MODAL -->
+<!-- SECTOR PÚBLICO — CONDITIONS MODAL -->
+<div id="publico-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9001;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;">
+  <div style="background:#111827;border:1px solid rgba(251,191,36,0.2);border-radius:24px;width:100%;max-width:460px;margin:auto;padding:28px 24px;margin-top:16px;margin-bottom:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;">
+      <button onclick="backToTypeSelect();document.getElementById('publico-modal').style.display='none';" style="background:none;border:none;color:#a0a8c0;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif;padding:4px 0;">← Volver</button>
+      <div style="font-size:11px;color:#fbbf24;font-weight:700;letter-spacing:.08em;">🏛 SECTOR PÚBLICO</div>
+    </div>
+
+    <div style="font-family:'Playfair Display',serif;font-size:22px;font-weight:700;color:#fff;margin-bottom:6px;">Condiciones de uso</div>
+    <div style="font-size:13px;color:#a0a8c0;margin-bottom:24px;line-height:1.6;">Las consultas ciudadanas en Preferendum tienen un costo basado en la audiencia activa de la plataforma al momento de publicar. <strong style="color:#e2e8f0;">No existe acceso gratuito.</strong></div>
+
+    <!-- Option A -->
+    <div style="background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.25);border-radius:14px;padding:16px 18px;margin-bottom:12px;">
+      <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:6px;">Opción A — Mensajes de utilidad pública</div>
+      <div style="font-size:13px;color:#d1d5db;line-height:1.6;">Tu institución ocupa los espacios con mensajes propios: dónde vacunarse, cómo postular al subsidio habitacional, fechas de pago, alertas. <strong style="color:#fff;">Tu organización paga la tarifa de audiencia.</strong></div>
+    </div>
+
+    <!-- Option B -->
+    <div style="background:rgba(99,102,241,0.06);border:1px solid rgba(99,102,241,0.25);border-radius:14px;padding:16px 18px;margin-bottom:12px;">
+      <div style="font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:6px;">Opción B — Conversation Sponsors</div>
+      <div style="font-size:13px;color:#d1d5db;line-height:1.6;">Marcas privadas patrocinan tu consulta como Conversation Sponsors. Aparecen como <em style="color:#e2e8f0;">"Facilitada por [Marca]"</em> — no publicidad. El ingreso generado por los sponsors cubre el costo de la plataforma. <strong style="color:#fff;">Sin costo directo para la institución.</strong></div>
+    </div>
+
+    <!-- Option C -->
+    <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25);border-radius:14px;padding:16px 18px;margin-bottom:24px;">
+      <div style="font-size:13px;font-weight:700;color:#6ee7b7;margin-bottom:6px;">Opción C — Pago directo</div>
+      <div style="font-size:13px;color:#d1d5db;line-height:1.6;">Sin mensajes propios ni sponsors. La consulta aparece completamente limpia. <strong style="color:#fff;">Tu institución paga a Preferendum el equivalente al ingreso de audiencia.</strong></div>
+    </div>
+
+    <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:12px 14px;margin-bottom:24px;">
+      <div style="font-size:11px;color:#9ca3af;line-height:1.6;">💡 <strong style="color:#e2e8f0;">Tarifa de audiencia:</strong> el costo se calcula en función de los usuarios verificados activos en Preferendum al momento de publicar tu consulta. A mayor audiencia, mayor alcance — y mayor costo. El equipo de Preferendum te entregará una cotización antes de publicar.</div>
+    </div>
+
+    <button onclick="confirmPublico()" style="width:100%;padding:16px;background:#fbbf24;color:#1a1200;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;letter-spacing:.01em;">Entendido, crear consulta ciudadana →</button>
+    <button onclick="backToTypeSelect();document.getElementById('publico-modal').style.display='none';" style="width:100%;margin-top:10px;padding:10px;background:none;border:none;color:#6b7280;font-size:13px;cursor:pointer;font-family:'Inter',sans-serif;">Cancelar</button>
+  </div>
+</div>
+
 <div id="empresa-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9001;align-items:flex-start;justify-content:center;padding:20px;overflow-y:auto;">
   <div style="background:#111827;border:1px solid rgba(255,255,255,0.1);border-radius:24px;width:100%;max-width:460px;margin:auto;padding:28px 24px;margin-top:16px;margin-bottom:16px;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
@@ -843,6 +881,11 @@ function chooseEmpresa() {
 
 function choosePublico() {
   document.getElementById('type-select-modal').style.display = 'none';
+  document.getElementById('publico-modal').style.display = 'flex';
+}
+
+function confirmPublico() {
+  document.getElementById('publico-modal').style.display = 'none';
   document.getElementById('nueva-consulta-cta').style.display = 'none';
   document.getElementById('create-form').style.display = 'block';
   document.getElementById('c-creator-type').value = 'public';
