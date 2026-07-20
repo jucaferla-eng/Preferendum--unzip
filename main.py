@@ -2791,7 +2791,7 @@ def debates_for_me(
     else:
         q = q.filter((Debate.closes_at == None) | (Debate.closes_at >= now))
 
-    all_debates = q.order_by(Debate.created_at.desc()).limit(200).all()
+    all_debates = q.order_by(Debate.created_at.desc()).limit(500).all()
 
     eligible = []
     for d in all_debates:
