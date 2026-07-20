@@ -778,6 +778,52 @@ def update_verify_level(user, db):
 def hash_str(s, prefix=''):
     return hashlib.sha256(f'{prefix}{s}'.encode()).hexdigest()
 
+def compute_device_composite(imei_raw: str, sim_raw: str, lat: float = None, lon: float = None) -> dict:
+    """Fórmula de identidad compuesta ponderada.
+    composite = SHA256( IMEI×3 | SIM×2 | coords×1 )
+    Nunca se comparte el valor raw — solo el composite y los hashes individuales.
+    Cumple con las políticas de Apple/Google: no se expone el IMEI directamente.
+
+    Si el composite difiere entre dos registros, se contrasta señal por señal:
+    1° IMEI → 2° SIM/chip → 3° Ubicación
+    Esto permite detectar: mismo teléfono + nuevo SIM, o mismo SIM en otro aparato.
+    """
+    imei_clean = re.sub(r'\D', '', imei_raw or '')
+    sim_clean  = re.sub(r'\D', '', sim_raw  or '')
+    lat_r = round(float(lat or 0), 3)   # precisión ~111m
+    lon_r = round(float(lon or 0), 3)
+
+    # Pesos: IMEI más único que SIM, SIM más estable que ubicación
+    weighted = (imei_clean * 3) + '|' + (sim_clean * 2) + '|' + f'{lat_r},{lon_r}'
+    composite = hashlib.sha256(weighted.encode()).hexdigest()
+
+    return {
+        'composite':  composite,
+        'imei_hash':  hashlib.sha256(imei_clean.encode()).hexdigest() if imei_clean else None,
+        'sim_hash':   hashlib.sha256(sim_clean.encode()).hexdigest()  if sim_clean  else None,
+        'location':   f'{lat_r},{lon_r}',
+    }
+
+def compare_device_signals(new: dict, stored: dict) -> dict:
+    """Contraste señal por señal cuando el composite no coincide.
+    Orden: IMEI → SIM → ubicación.
+    Retorna el nivel de coincidencia para decidir si bloquear o alertar.
+    """
+    imei_match = bool(new.get('imei_hash') and new['imei_hash'] == stored.get('imei_hash'))
+    sim_match  = bool(new.get('sim_hash')  and new['sim_hash']  == stored.get('sim_hash'))
+    loc_match  = new.get('location') == stored.get('location')
+
+    if new['composite'] == stored.get('composite'):
+        return {'same': True,  'level': 'full',     'detail': 'IMEI+SIM+ubicación coinciden'}
+    elif imei_match and sim_match:
+        return {'same': True,  'level': 'imei+sim',  'detail': 'Mismo aparato y chip, ubicación distinta (viajó)'}
+    elif imei_match:
+        return {'same': True,  'level': 'imei_only', 'detail': 'Mismo aparato, SIM distinta — posible cambio de chip'}
+    elif sim_match:
+        return {'same': False, 'level': 'sim_only',  'detail': 'Mismo chip en otro aparato — alerta fraude'}
+    else:
+        return {'same': False, 'level': 'none',      'detail': 'Dispositivo distinto'}
+
 def check_and_register_device(device_fp: str, user_id: int, db: Session):
     """Verifica que el dispositivo no esté registrado a otra cuenta.
     Usa fingerprint + RUT como identidad compuesta para evitar falsos positivos por colisión."""
