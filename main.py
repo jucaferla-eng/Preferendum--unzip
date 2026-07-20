@@ -3284,6 +3284,33 @@ def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_ve
     if get_debate_status(debate) != 'live':
         raise HTTPException(400, 'Consultation is not open for voting')
 
+    # Elegibilidad: el votante debe cumplir las condiciones del consultante
+    if debate.scope == 'commune' and debate.scope_commune:
+        if (user.commune or '').strip().lower() != debate.scope_commune.strip().lower():
+            raise HTTPException(403, f'Esta consulta es solo para residentes de {debate.scope_commune}')
+    elif debate.scope == 'country' and debate.scope_country and debate.scope_country != 'GL':
+        if (user.country or '').upper() != debate.scope_country.upper():
+            raise HTTPException(403, f'Esta consulta es solo para residentes de {debate.scope_country}')
+
+    if debate.target_gender and debate.target_gender != 'all':
+        if (user.gender or '') != debate.target_gender:
+            raise HTTPException(403, 'Esta consulta está dirigida a un género específico')
+
+    if user.dob:
+        try:
+            from datetime import date
+            dob = date.fromisoformat(user.dob)
+            today = date.today()
+            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            if debate.target_age_min and age < debate.target_age_min:
+                raise HTTPException(403, f'Esta consulta es para mayores de {debate.target_age_min} años')
+            if debate.target_age_max and age > debate.target_age_max:
+                raise HTTPException(403, f'Esta consulta es para menores de {debate.target_age_max} años')
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # si dob tiene formato inválido, no bloqueamos
+
     # Bloqueo 0: verificación facial (solo para usuarios con selfie verificada)
     if user.selfie_verified:
         if not data.face_token:
