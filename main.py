@@ -2782,7 +2782,7 @@ def debates_for_me(
             pass
 
     user_country = (user.country or 'CL').upper()
-    user_commune = (user.commune or '').strip().lower()
+    user_commune = (user.county or '').strip().lower()
     user_gender  = user.gender or ''
 
     q = db.query(Debate).filter(Debate.status == 'live')
