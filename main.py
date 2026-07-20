@@ -6043,6 +6043,22 @@ def admin_reset_selfie(user_id: int, secret: str, db: Session = Depends(get_db))
     db.commit()
     return {'ok': True, 'email': user.email, 'message': 'Selfie borrada — el usuario puede registrar su cara de nuevo'}
 
+@app.delete('/admin/users/{user_id}')
+def admin_delete_user(user_id: int, secret: str, db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, 'User not found')
+    email = user.email
+    db.query(SelfieLog).filter(SelfieLog.user_id == user_id).delete()
+    db.query(DocumentLog).filter(DocumentLog.user_id == user_id).delete()
+    db.query(HasVotedLog).filter(HasVotedLog.user_id == user_id).delete()
+    db.query(IMEILog).filter(IMEILog.user_id == user_id).delete()
+    db.delete(user)
+    db.commit()
+    return {'ok': True, 'deleted': email}
+
 @app.post('/admin/users/fix')
 def admin_fix_user(user_id: int, secret: str, email: str = '', name: str = '', role: str = '',
                    email_verified: str = '', selfie_verified: str = '', db: Session = Depends(get_db)):
