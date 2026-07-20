@@ -6068,6 +6068,7 @@ def admin_purge_user(user_id: int, secret: str, db: Session = Depends(get_db)):
             'debate_has_voted', 'post_vote_comments',
             'organizer_profiles', 'marketer_profiles',
             'authorization_requests', 'marketer_authorization_requests',
+            'credit_accounts',
         ]
         for tbl in tables:
             try:
