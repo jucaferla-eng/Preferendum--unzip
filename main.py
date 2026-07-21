@@ -3213,6 +3213,13 @@ def _match_campaigns(user, debate, db) -> list:
             if c_tgt and c_tgt not in ('ALL', 'GLOBAL', '') and c_tgt not in debate_countries:
                 continue
 
+        # ── SE TIER FILTER — usuario debe pertenecer al tier objetivo ──
+        # Si el usuario tiene se_tier asignado y la campaña restringe tiers,
+        # sólo mostrar si el tier del usuario está en target_se_tiers.
+        if user and getattr(user, 'se_tier', ''):
+            if not _tier_matches(user.se_tier, c.target_se_tiers or 'A,B,C,D'):
+                continue
+
         valid_orm.append(c)
 
     if not valid_orm:
@@ -3353,9 +3360,13 @@ def get_opinions(debate_id: int,
         (AdCampaign.end_date == None) | (AdCampaign.end_date > now_ts),
     ).order_by(AdCampaign.created_at.desc()).limit(10).all()
     matched_ids = {c.get('id') for c in matched}
+    user_se = (getattr(user, 'se_tier', '') or '') if user else ''
     prepend = []
     for rc in recent:
         if rc.id not in matched_ids:
+            # Respetar tier del usuario: si tiene tier asignado, solo campañas compatibles
+            if user_se and not _tier_matches(user_se, rc.target_se_tiers or 'A,B,C,D'):
+                continue
             prepend.append({
                 'id': rc.id, 'advertiser_name': rc.advertiser_name or '',
                 'ad_copy': rc.ad_copy or '', 'title': rc.title or '',
@@ -7541,7 +7552,7 @@ def sable_demo(db: Session = Depends(get_db)):
     commune_rows = ''.join(f'''<tr>
       <td><strong>{c["nombre"]}</strong></td>
       <td style="color:rgba(240,244,255,0.5);font-size:12px;">{REGION_NAMES.get(c["region"], c["region"])}</td>
-      <td style="color:#7dd3fc">{c["m2_promedio"]} m²</td>
+      <td style="color:#7dd3fc">{c["uf_m2"]} UF/m²</td>
       <td><span class="tier tier-{c["se_tier"]}">{c["se_tier"]}</span></td>
       <td style="color:#34d399">${c["cpm_usd"]}</td>
       <td style="color:rgba(240,244,255,0.55)">{c["votantes_est"]:,}</td>

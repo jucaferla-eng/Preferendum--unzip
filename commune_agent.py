@@ -3,13 +3,20 @@ commune_agent.py
 ================
 PREFERENDUM — Agente de Optimización de Comunas
 
-Este agente:
-1. Recopila datos de comunas chilenas (m² promedio de vivienda)
-2. Calcula el CPM por comuna según proxy de ingreso
-3. Genera la tabla de allocation para el motor de ads
-4. Se puede ejecutar periódicamente para mantener datos actualizados
+Proxy de ingreso: precio de ARRIENDO por m² en UF (no tamaño del depto)
+Fuente: Portal Inmobiliario, Yapo, TocToc — datos 2025
+Referencia: Vitacura = 0.40 UF/m² = índice 100
+Todas las demás comunas son relativas a Vitacura.
 
-Fuente de datos: INE Chile, SII, datos municipales públicos
+Tiers SE:
+  A  ≥ 80  — Alto ingreso         (Vitacura, Las Condes, Lo Barnechea, Providencia)
+  B  55-79 — Medio-alto           (Ñuñoa, La Florida, Viña del Mar, Antofagasta)
+  C  35-54 — Medio                (Maipú, Quilicura, Valparaíso, Concepción)
+  D  < 35  — Popular              (La Pintana, Cerro Navia, El Bosque, San Ramón)
+
+Actualización: anual (scheduler 2 enero). Los precios de arriendo son estables
+salvo boom inmobiliario — en ese caso usar endpoint /admin/agent/update-rental-prices.
+
 En memoria del Socio Fundador José Ignacio Fernández (1989–2024)
 """
 
@@ -18,284 +25,222 @@ import math
 from datetime import datetime
 
 # ══════════════════════════════════════════════════════════════
-# DATOS BASE — Comunas Chile con m² promedio de vivienda
-# Fuente: INE Censo 2017 + estimaciones SII 2023
+# REFERENCIA: Vitacura = 0.40 UF/m² = índice 100
+# Índice = (uf_m2 / 0.40) * 100
+# ══════════════════════════════════════════════════════════════
+REFERENCIA_UF_M2   = 0.40   # Vitacura 2025
+REFERENCIA_COMMUNE = 'Vitacura'
+
+# ══════════════════════════════════════════════════════════════
+# DATOS BASE — precio arriendo UF/m² por comuna
+# Fuente: Portal Inmobiliario / Yapo / TocToc 2025
+# Formato: (nombre, región, uf_por_m2, población_estimada)
 # ══════════════════════════════════════════════════════════════
 
 COMUNAS_DATA = [
-    # (nombre, región, m2_promedio, población_estimada)
-    # Región Metropolitana — Alto ingreso
-    ("Vitacura",           "RM", 142, 92000),
-    ("Las Condes",         "RM", 128, 310000),
-    ("Lo Barnechea",       "RM", 118, 105000),
-    ("Providencia",        "RM", 112, 150000),
-    ("La Reina",           "RM", 108, 98000),
-    ("Ñuñoa",              "RM", 92,  225000),
-    ("Peñalolén",          "RM", 88,  240000),
-    ("Macul",              "RM", 82,  130000),
-    ("San Miguel",         "RM", 80,  110000),
-    ("La Florida",         "RM", 76,  380000),
-    # Región Metropolitana — Medio
-    ("Santiago",           "RM", 68,  520000),
-    ("Independencia",      "RM", 65,  105000),
-    ("Recoleta",           "RM", 62,  175000),
-    ("Quinta Normal",      "RM", 60,  115000),
-    ("Renca",              "RM", 58,  155000),
-    ("Lo Espejo",          "RM", 54,  115000),
-    ("El Bosque",          "RM", 52,  185000),
-    ("San Ramón",          "RM", 50,  100000),
-    ("La Pintana",         "RM", 48,  225000),
-    ("Pudahuel",           "RM", 56,  245000),
-    ("Cerro Navia",        "RM", 46,  145000),
-    ("Lo Prado",           "RM", 52,  110000),
-    ("Cerrillos",          "RM", 60,  90000),
-    ("Estación Central",   "RM", 58,  145000),
-    ("Maipú",              "RM", 72,  620000),
-    ("Quilicura",          "RM", 70,  235000),
-    ("Huechuraba",         "RM", 74,  98000),
-    ("Conchalí",           "RM", 58,  140000),
-    # Otras regiones — ciudades principales
-    ("Valparaíso",         "V",  62,  310000),
-    ("Viña del Mar",       "V",  78,  390000),
-    ("Concón",             "V",  92,  52000),
-    ("Quilpué",            "V",  68,  235000),
-    ("Concepción",         "VIII", 70, 245000),
-    ("Talcahuano",         "VIII", 64, 175000),
-    ("San Pedro de la Paz","VIII", 76, 135000),
-    ("Antofagasta",        "II",  72,  420000),
-    ("La Serena",          "IV",  74,  250000),
-    ("Coquimbo",           "IV",  62,  245000),
-    ("Rancagua",           "VI",  66,  245000),
-    ("Temuco",             "IX",  68,  360000),
-    ("Puerto Montt",       "X",   64,  275000),
-    ("Iquique",            "I",   70,  245000),
-    ("Arica",              "XV",  60,  245000),
-    ("Punta Arenas",       "XII", 68,  145000),
+    # ── Región Metropolitana — Tier A (índice ≥ 80) ──────────
+    ("Vitacura",         "RM", 0.40, 92000),    # índice 100 — referencia
+    ("Las Condes",       "RM", 0.39, 310000),   # índice  97
+    ("Lo Barnechea",     "RM", 0.38, 105000),   # índice  95 — La Dehesa, San Carlos
+    ("Providencia",      "RM", 0.38, 150000),   # índice  95
+    ("La Reina",         "RM", 0.32, 98000),    # índice  80
+
+    # ── Región Metropolitana — Tier B (índice 55–79) ─────────
+    ("Ñuñoa",            "RM", 0.28, 225000),   # índice  70
+    ("Peñalolén",        "RM", 0.24, 240000),   # índice  60
+    ("Macul",            "RM", 0.23, 130000),   # índice  57
+    ("San Miguel",       "RM", 0.23, 110000),   # índice  57
+    ("Huechuraba",       "RM", 0.21, 98000),    # índice  52 — mixto, baja a C
+    ("Santiago",         "RM", 0.24, 520000),   # índice  60 — nuevo stock céntrico
+    ("La Florida",       "RM", 0.22, 380000),   # índice  55
+
+    # ── Región Metropolitana — Tier C (índice 35–54) ─────────
+    ("Maipú",            "RM", 0.21, 620000),   # índice  52
+    ("Quilicura",        "RM", 0.19, 235000),   # índice  47
+    ("Estación Central", "RM", 0.19, 145000),   # índice  47
+    ("Independencia",    "RM", 0.22, 105000),   # índice  55
+    ("Recoleta",         "RM", 0.20, 175000),   # índice  50
+    ("Cerrillos",        "RM", 0.17, 90000),    # índice  42
+    ("Conchalí",         "RM", 0.17, 140000),   # índice  42
+    ("Quinta Normal",    "RM", 0.18, 115000),   # índice  45
+    ("Lo Prado",         "RM", 0.14, 110000),   # índice  35
+    ("Pudahuel",         "RM", 0.16, 245000),   # índice  40
+    ("Renca",            "RM", 0.15, 155000),   # índice  37
+
+    # ── Región Metropolitana — Tier D (índice < 35) ──────────
+    ("Lo Espejo",        "RM", 0.13, 115000),   # índice  32
+    ("El Bosque",        "RM", 0.12, 185000),   # índice  30
+    ("San Ramón",        "RM", 0.11, 100000),   # índice  27
+    ("La Pintana",       "RM", 0.10, 225000),   # índice  25
+    ("Cerro Navia",      "RM", 0.12, 145000),   # índice  30
+
+    # ── Valparaíso ───────────────────────────────────────────
+    ("Concón",           "V",  0.26, 52000),    # índice  65 — B
+    ("Viña del Mar",     "V",  0.23, 390000),   # índice  57 — B
+    ("Valparaíso",       "V",  0.18, 310000),   # índice  45 — C
+    ("Quilpué",          "V",  0.17, 235000),   # índice  42 — C
+
+    # ── Biobío ───────────────────────────────────────────────
+    ("San Pedro de la Paz","VIII", 0.21, 135000), # índice 52 — C
+    ("Concepción",       "VIII", 0.19, 245000),  # índice  47 — C
+    ("Talcahuano",       "VIII", 0.16, 175000),  # índice  40 — C
+
+    # ── Otras regiones ───────────────────────────────────────
+    ("Antofagasta",      "II",  0.23, 420000),  # índice  57 — B (minería)
+    ("Iquique",          "I",   0.20, 245000),  # índice  50 — C
+    ("La Serena",        "IV",  0.20, 250000),  # índice  50 — C
+    ("Coquimbo",         "IV",  0.17, 245000),  # índice  42 — C
+    ("Rancagua",         "VI",  0.17, 245000),  # índice  42 — C
+    ("Temuco",           "IX",  0.18, 360000),  # índice  45 — C
+    ("Puerto Montt",     "X",   0.17, 275000),  # índice  42 — C
+    ("Arica",            "XV",  0.16, 245000),  # índice  40 — C
+    ("Punta Arenas",     "XII", 0.17, 145000),  # índice  42 — C
 ]
 
+
 # ══════════════════════════════════════════════════════════════
-# MODELO DE PRICING — CPM según m² promedio
-# Calibrado con benchmark Facebook/Meta ARPU Q4 2024
+# ÍNDICE Y TIER
 # ══════════════════════════════════════════════════════════════
 
-def calculate_cpm(m2_promedio: float) -> float:
-    """
-    Calcula el CPM (USD) según m² promedio de vivienda.
-    
-    Lógica:
-    - >120 m²  = SE A = CPM $12-15 (comparable a US tier 2)
-    - 80-120   = SE B = CPM $7-11  (comparable a BR premium)
-    - 55-80    = SE C = CPM $4-6   (comparable a MX estándar)
-    - <55      = SE D = CPM $2-3   (comparable a mercado masivo)
-    
-    Fórmula: CPM = base_cpm * (m2 / 80) ^ 0.7
-    """
-    BASE_CPM = 8.0
-    normalized = (m2_promedio / 80.0) ** 0.7
-    cpm = BASE_CPM * normalized
-    return round(max(2.0, min(16.0, cpm)), 2)
+def uf_to_index(uf_m2: float) -> float:
+    """Convierte precio UF/m² a índice relativo (Vitacura = 100)."""
+    return round((uf_m2 / REFERENCIA_UF_M2) * 100, 1)
 
-
-def get_se_tier(m2: float) -> str:
-    if m2 >= 120: return "A"
-    if m2 >= 80:  return "B"
-    if m2 >= 55:  return "C"
+def get_se_tier(income_index: float) -> str:
+    if income_index >= 80: return "A"
+    if income_index >= 55: return "B"
+    if income_index >= 35: return "C"
     return "D"
 
-
 def get_se_description(tier: str) -> str:
-    descriptions = {
+    return {
         "A": "Alto — Profesionales y ejecutivos",
         "B": "Medio-alto — Clase media profesional",
         "C": "Medio — Trabajadores calificados",
         "D": "Popular — Trabajadores y estudiantes",
-    }
-    return descriptions.get(tier, "")
+    }.get(tier, "")
 
 
 # ══════════════════════════════════════════════════════════════
-# MOTOR DE ALLOCATION
+# CPM — escala con el índice de ingreso
+# Benchmark: Meta/Google ARPU Q4 2024 por país/región
+# CPM = CPM_base × (índice / 100) ^ 0.65
+# ══════════════════════════════════════════════════════════════
+CPM_BASE_CL = 8.0   # USD — CPM base para Chile (equivalente a BR premium)
+
+def calculate_cpm(income_index: float) -> float:
+    cpm = CPM_BASE_CL * (income_index / 100.0) ** 0.65
+    return round(max(2.0, min(16.0, cpm)), 2)
+
+
+# ══════════════════════════════════════════════════════════════
+# TABLA COMPLETA
 # ══════════════════════════════════════════════════════════════
 
 def calculate_commune_table() -> list:
-    """
-    Genera la tabla completa de comunas con CPM y métricas.
-    """
     communes = []
-    for nombre, region, m2, poblacion in COMUNAS_DATA:
-        cpm = calculate_cpm(m2)
-        tier = get_se_tier(m2)
-        # Estimación de votantes activos (penetración smartphone ~75%)
-        votantes_est = int(poblacion * 0.75 * 0.35)  # 35% usa app
+    for nombre, region, uf_m2, poblacion in COMUNAS_DATA:
+        index = uf_to_index(uf_m2)
+        tier  = get_se_tier(index)
+        cpm   = calculate_cpm(index)
+        votantes_est = int(poblacion * 0.75 * 0.35)
         communes.append({
-            "nombre":          nombre,
-            "region":          region,
-            "m2_promedio":     m2,
-            "se_tier":         tier,
-            "se_descripcion":  get_se_description(tier),
-            "cpm_usd":         cpm,
-            "poblacion":       poblacion,
-            "votantes_est":    votantes_est,
-            "costo_1000_imp":  cpm,
+            "nombre":         nombre,
+            "region":         region,
+            "uf_m2":          uf_m2,          # precio arriendo UF/m²
+            "income_index":   index,           # índice relativo (Vitacura=100)
+            "se_tier":        tier,
+            "se_descripcion": get_se_description(tier),
+            "cpm_usd":        cpm,
+            "poblacion":      poblacion,
+            "votantes_est":   votantes_est,
+            "m2_promedio":    index,           # alias para compatibilidad con código existente
         })
-    # Sort by CPM descending
-    communes.sort(key=lambda x: x["cpm_usd"], reverse=True)
+    communes.sort(key=lambda x: x["income_index"], reverse=True)
     return communes
 
 
+# ══════════════════════════════════════════════════════════════
+# ALLOCATION DE PRESUPUESTO
+# ══════════════════════════════════════════════════════════════
+
 def allocate_budget(
     budget_usd: float,
-    target_se: list = None,       # e.g. ["A", "B"] for premium
-    target_region: str = None,    # e.g. "RM"
+    target_se: list = None,
+    target_region: str = None,
     max_communes: int = None,
 ) -> dict:
-    """
-    Distribuye el presupuesto del marketer entre comunas.
-    
-    Args:
-        budget_usd:     Total en USD
-        target_se:      Lista de tiers SE a incluir (None = todos)
-        target_region:  Filtrar por región (None = Chile completo)
-        max_communes:   Máximo de comunas (None = sin límite)
-    
-    Returns:
-        Dict con allocation optimizada
-    """
     communes = calculate_commune_table()
-    
-    # Filtrar
     if target_se:
         communes = [c for c in communes if c["se_tier"] in target_se]
     if target_region:
         communes = [c for c in communes if c["region"] == target_region]
     if max_communes:
         communes = communes[:max_communes]
-    
     if not communes:
         return {"error": "No communes match the criteria"}
-    
-    # Calcular peso por votantes disponibles y CPM
-    # Más presupuesto a comunas con más votantes y mayor CPM
+
     total_weight = sum(c["votantes_est"] for c in communes)
-    
     allocation = []
     total_votantes = 0
     total_impressions = 0
-    
+
     for c in communes:
-        weight = c["votantes_est"] / total_weight
+        weight         = c["votantes_est"] / total_weight
         budget_commune = budget_usd * weight
-        impressions = int((budget_commune / c["cpm_usd"]) * 1000)
-        votantes_alcanzados = min(impressions, c["votantes_est"])
-        
+        impressions    = int((budget_commune / c["cpm_usd"]) * 1000)
+        votantes_alc   = min(impressions, c["votantes_est"])
         allocation.append({
             "comuna":              c["nombre"],
             "region":              c["region"],
             "se_tier":             c["se_tier"],
-            "m2_promedio":         c["m2_promedio"],
+            "uf_m2":               c["uf_m2"],
+            "income_index":        c["income_index"],
             "cpm_usd":             c["cpm_usd"],
             "presupuesto_usd":     round(budget_commune, 2),
             "presupuesto_pct":     round(weight * 100, 1),
             "impresiones_est":     impressions,
-            "votantes_alcanzados": votantes_alcanzados,
+            "votantes_alcanzados": votantes_alc,
         })
-        
-        total_votantes    += votantes_alcanzados
+        total_votantes    += votantes_alc
         total_impressions += impressions
-    
-    costo_por_votante = round(budget_usd / total_votantes, 4) if total_votantes > 0 else 0
-    
+
     return {
         "budget_total_usd":      budget_usd,
         "total_communes":        len(allocation),
         "total_votantes_est":    total_votantes,
         "total_impresiones_est": total_impressions,
-        "costo_por_votante_usd": costo_por_votante,
-        "cpm_promedio":          round(budget_usd / (total_impressions / 1000), 2) if total_impressions > 0 else 0,
+        "costo_por_votante_usd": round(budget_usd / total_votantes, 4) if total_votantes else 0,
+        "cpm_promedio":          round(budget_usd / (total_impressions / 1000), 2) if total_impressions else 0,
         "allocation":            allocation,
+        "referencia":            f"{REFERENCIA_COMMUNE} = {REFERENCIA_UF_M2} UF/m² = índice 100",
         "generated_at":          datetime.utcnow().isoformat(),
     }
 
 
 # ══════════════════════════════════════════════════════════════
-# FASTAPI ROUTES — agregar a main.py
-# ══════════════════════════════════════════════════════════════
-
-ADS_ROUTES_CODE = '''
-# ── AD OPTIMIZATION ROUTES ────────────────────────────────────
-
-from commune_agent import calculate_commune_table, allocate_budget
-
-class CampaignRequest(BaseModel):
-    budget_usd:     float
-    target_se:      list = None
-    target_region:  str  = None
-    debate_id:      int  = None
-
-@app.get("/ads/communes")
-def get_communes():
-    """Get all communes with CPM pricing."""
-    return {"communes": calculate_commune_table()}
-
-@app.post("/ads/allocate")
-def allocate_campaign(data: CampaignRequest):
-    """
-    Optimize budget allocation across communes.
-    Called when marketer creates a campaign.
-    """
-    result = allocate_budget(
-        budget_usd=data.budget_usd,
-        target_se=data.target_se,
-        target_region=data.target_region,
-    )
-    return result
-
-@app.get("/ads/communes/rm")
-def get_rm_communes():
-    """Get Santiago Metro communes only."""
-    all_c = calculate_commune_table()
-    rm = [c for c in all_c if c["region"] == "RM"]
-    return {"communes": rm, "region": "Región Metropolitana"}
-'''
-
-# ══════════════════════════════════════════════════════════════
-# DEMO — run directly to see the output
+# DEMO
 # ══════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("PREFERENDUM — Agente de Optimización de Comunas")
-    print("=" * 60)
-    
-    # 1. Show commune table (top 10)
-    print("\n📍 TOP 10 COMUNAS POR CPM:\n")
+    print("=" * 65)
+    print("PREFERENDUM — Clasificación de Comunas por Precio Arriendo m²")
+    print(f"Referencia: {REFERENCIA_COMMUNE} = {REFERENCIA_UF_M2} UF/m² = índice 100")
+    print("=" * 65)
+
     communes = calculate_commune_table()
-    print(f"{'Comuna':<20} {'SE':<4} {'m²':<6} {'CPM':<8} {'Votantes'}")
+    print(f"\n{'Comuna':<22} {'SE':<4} {'UF/m²':<7} {'Índice':<8} {'CPM USD'}")
     print("-" * 55)
-    for c in communes[:10]:
-        print(f"{c['nombre']:<20} {c['se_tier']:<4} {c['m2_promedio']:<6} ${c['cpm_usd']:<7} {c['votantes_est']:,}")
-    
-    # 2. Simulate Nike campaign $10,000
-    print("\n\n💰 SIMULACIÓN: Nike Chile — $10,000 USD\n")
-    result = allocate_budget(
-        budget_usd=10000,
-        target_se=["A", "B"],
-        target_region="RM"
-    )
-    print(f"  Total comunas:      {result['total_communes']}")
+    for c in communes:
+        print(f"{c['nombre']:<22} {c['se_tier']:<4} {c['uf_m2']:<7.2f} {c['income_index']:<8.1f} ${c['cpm_usd']}")
+
+    print("\n\n💰 SIMULACIÓN: Porsche Chile — $10,000 USD (solo tier A)\n")
+    result = allocate_budget(budget_usd=10000, target_se=["A"])
+    print(f"  Comunas tier A:     {result['total_communes']}")
     print(f"  Votantes estimados: {result['total_votantes_est']:,}")
-    print(f"  Impresiones est.:   {result['total_impresiones_est']:,}")
-    print(f"  Costo/votante:      ${result['costo_por_votante_usd']}")
     print(f"  CPM promedio:       ${result['cpm_promedio']}")
     print(f"\n  ALLOCATION:\n")
-    
-    for a in result["allocation"][:8]:
-        print(f"  {a['comuna']:<20} SE{a['se_tier']} ${a['presupuesto_usd']:>8,.0f} ({a['presupuesto_pct']}%) → {a['votantes_alcanzados']:,} votantes")
-    
-    # 3. Save to JSON
-    all_communes = calculate_commune_table()
-    with open("communes_cpm_table.json", "w", encoding="utf-8") as f:
-        json.dump(all_communes, f, ensure_ascii=False, indent=2)
-    print(f"\n✅ Tabla guardada en communes_cpm_table.json ({len(all_communes)} comunas)")
-    print("\nEn memoria del Socio Fundador José Ignacio Fernández (1989–2024)")
+    for a in result["allocation"]:
+        print(f"  {a['comuna']:<22} índice {a['income_index']:<6} ${a['presupuesto_usd']:>7,.0f} → {a['votantes_alcanzados']:,} personas")
 
+    print("\nEn memoria del Socio Fundador José Ignacio Fernández (1989–2024)")

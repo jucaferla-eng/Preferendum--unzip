@@ -20,17 +20,19 @@ PORTALS     = []   # external scrapers — filled when APIFY_TOKEN is set
 
 
 def get_fallback_table():
-    """Return commune table in the format expected by main.py."""
+    """Return commune table in the format expected by main.py.
+    income_index: Vitacura = 100 (basado en precio arriendo UF/m²)
+    """
     communes = calculate_commune_table()
     result = []
     for c in communes:
         result.append({
             'country':      'CL',
             'commune':      c['nombre'],
-            'income_index': round(c['m2_promedio'] / 10.0, 2),
+            'income_index': c['income_index'],   # Vitacura=100, relativo a UF/m²
             'cpm_usd':      c['cpm_usd'],
             'se_tier':      c['se_tier'],
-            'm2_avg':       c['m2_promedio'],
+            'price_m2_avg': 0,  # 0 = excluye de _recalculate_global_index (índice ya viene correcto)
             'population':   c['poblacion'],
             'updated_at':   None,
         })
@@ -38,8 +40,7 @@ def get_fallback_table():
 
 
 def calculate_cpm_from_index(income_index: float) -> float:
-    m2 = income_index * 10.0
-    return calculate_cpm(m2)
+    return calculate_cpm(income_index)
 
 
 def run_apify_scraper(portal, country='CL'):
