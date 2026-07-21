@@ -7310,6 +7310,22 @@ def admin_debug_user(secret: str, email: str, db: Session = Depends(get_db)):
         } if commune_row else None,
     }
 
+@app.get('/admin/tier-summary')
+def admin_tier_summary(secret: str, db: Session = Depends(get_db)):
+    """Distribución de se_tier entre todos los usuarios."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from collections import Counter
+    users = db.query(User).all()
+    dist = Counter(u.se_tier or 'sin_tier' for u in users)
+    total = len(users)
+    return {
+        'total_usuarios': total,
+        'distribucion': dict(sorted(dist.items())),
+        'con_tier': total - dist.get('sin_tier', 0),
+        'sin_tier': dist.get('sin_tier', 0),
+    }
+
 @app.post('/admin/fix-user-tier')
 def admin_fix_user_tier(secret: str, email: str, db: Session = Depends(get_db)):
     """Fuerza recalculo de se_tier para un usuario específico."""
