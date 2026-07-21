@@ -93,8 +93,9 @@ class User(Base):
     password        = Column(String)
     country         = Column(String, default='CL')
     county          = Column(String, default='')   # comuna declarada — nunca dirección exacta
-    se_tier         = Column(String, default='')   # AAA/AAB/ABB/BBB/BBC/BCC — asignado por CommuneMarketData
+    se_tier         = Column(String, default='')   # A/B/C/D — combinación de comuna + profesión
     income_index    = Column(Float, default=0.0)   # índice de ingreso de su comuna
+    profession      = Column(String, default='')   # profesión declarada al registrarse
     gender          = Column(String, default='F')
     dob             = Column(String, default='')
     national_id     = Column(String, default='')
@@ -586,7 +587,7 @@ def _migrate():
         # users — se_tier e income_index para matching de ads
         existing_user_cols = {c['name'] for c in inspector.get_columns('users')} if inspector.has_table('users') else set()
         for col, defn in [('se_tier', "TEXT DEFAULT ''"), ('income_index', 'FLOAT DEFAULT 0.0'),
-                          ('doc_serial', "TEXT DEFAULT ''")]:
+                          ('doc_serial', "TEXT DEFAULT ''"), ('profession', "TEXT DEFAULT ''")]:
             if col not in existing_user_cols:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
@@ -697,16 +698,48 @@ try:
         except Exception as e:
             print(f'[Scheduler] Error en run_daily_debates: {e}')
 
+    def _run_se_lifestyle_job():
+        try:
+            from se_lifestyle_agent import run_se_lifestyle_debates
+            print('[Scheduler] Iniciando SE Lifestyle Agent...')
+            result = run_se_lifestyle_debates(max_per_tier=2)
+            print(f'[Scheduler] SE Lifestyle — creados: {result.get("debates_created", 0)}, saltados: {result.get("debates_skipped", 0)}')
+        except Exception as e:
+            print(f'[Scheduler] Error en SE Lifestyle Agent: {e}')
+
+    def _run_annual_rental_prices_job():
+        try:
+            from market_data_agent import run_full_agent
+            print('[Scheduler] Iniciando actualización anual de precios arriendo por m²...')
+            result = run_full_agent()
+            print(f'[Scheduler] Precios actualizados — comunas: {result.get("total_communes", 0)}, fuente: {result.get("source", "?")}')
+        except Exception as e:
+            print(f'[Scheduler] Error en rental prices update: {e}')
+
     _scheduler = BackgroundScheduler(timezone='UTC')
     _scheduler.add_job(
         _run_daily_debates_job,
-        CronTrigger(hour=7, minute=0),   # 7:00 AM UTC todos los días
+        CronTrigger(hour=7, minute=0),          # 7:00 AM UTC todos los días
         id='daily_debates',
         replace_existing=True,
-        misfire_grace_time=3600,         # si el server estaba caído, corre igual dentro de 1h
+        misfire_grace_time=3600,
+    )
+    _scheduler.add_job(
+        _run_annual_rental_prices_job,
+        CronTrigger(month=1, day=2, hour=3, minute=0),  # 2 enero, 3:00 AM UTC — anual
+        id='annual_rental_prices',
+        replace_existing=True,
+        misfire_grace_time=86400,
+    )
+    _scheduler.add_job(
+        _run_se_lifestyle_job,
+        CronTrigger(day_of_week='mon', hour=8, minute=0),  # lunes 8:00 AM UTC — semanal
+        id='se_lifestyle_debates',
+        replace_existing=True,
+        misfire_grace_time=3600,
     )
     _scheduler.start()
-    print('[Scheduler] ✅ Scheduler activo — debates diarios a las 7:00 AM UTC')
+    print('[Scheduler] ✅ Scheduler activo — debates diarios 7:00 AM UTC | lifestyle lunes 8:00 AM | precios 2 enero')
 except Exception as _sched_err:
     print(f'[Scheduler] ⚠️ No se pudo iniciar scheduler: {_sched_err}')
 
@@ -1629,6 +1662,7 @@ class VoterRegisterInput(BaseModel):
     gender:      str = ''
     dob:         str = ''   # YYYY-MM-DD
     commune:     str = ''   # comuna declarada
+    profession:  str = ''   # profesión declarada — complementa el proxy de ingreso por comuna
     device_fp:   str = ''
 
 
@@ -1668,6 +1702,7 @@ def voter_register(data: VoterRegisterInput, bg: BackgroundTasks, db: Session = 
         country=data.country, email_verified=False,
         phone=data.phone, county=data.commune,
         gender=data.gender, dob=data.dob, national_id=data.national_id,
+        profession=data.profession or '',
     )
     db.add(user)
     db.commit()
@@ -2419,23 +2454,51 @@ def _send_supervisor_authorization_email(supervisor_email, employee_name, employ
             print(f'[SupervisorEmail] {e}')
 
 
+# Profesiones que indican ingreso alto (elevan tier a A si la comuna lo permite)
+_PROFESSION_TIER: dict[str, str] = {
+    'medico': 'A', 'dentista': 'A', 'abogado': 'A', 'juez': 'A',
+    'economista': 'A', 'ing_civil': 'A', 'ing_comercial': 'A',
+    'empresario': 'A', 'ejecutivo': 'A', 'financiero': 'A',
+    'farmaceutico': 'B', 'psicologo': 'B', 'contador': 'B',
+    'ing_informatica': 'B', 'arquitecto': 'B', 'ing_otro': 'B',
+    'consultor': 'B', 'marketing': 'B', 'profesor_univ': 'B',
+    'cientifico': 'B', 'periodista': 'C', 'artista': 'C',
+    'ventas': 'C', 'profesor_escuela': 'C', 'tecnico': 'C',
+    'enfermero': 'C', 'comercio': 'C', 'estudiante': 'C',
+    'mecanico': 'D', 'construccion': 'D', 'transporte': 'D',
+    'servicios': 'D', 'hogar': 'D', 'desempleado': 'D',
+}
+
+def _tier_rank(t: str) -> int:
+    return {'A': 4, 'B': 3, 'C': 2, 'D': 1}.get(t, 0)
+
 def _assign_user_tier(user, db):
-    """Asigna se_tier e income_index al usuario según su comuna declarada."""
-    if not user.county:
-        return
-    commune_data = db.query(CommuneMarketData).filter(
-        CommuneMarketData.commune.ilike(user.county.strip()),
-        CommuneMarketData.country == _country_code(user.country)
-    ).first()
-    if not commune_data:
-        # Búsqueda parcial si no hay match exacto
+    """Asigna se_tier e income_index combinando comuna + profesión declarada."""
+    commune_tier = None
+    if user.county:
         commune_data = db.query(CommuneMarketData).filter(
-            CommuneMarketData.commune.ilike(f'%{user.county.strip()}%')
+            CommuneMarketData.commune.ilike(user.county.strip()),
+            CommuneMarketData.country == _country_code(user.country)
         ).first()
-    if commune_data:
-        user.se_tier      = commune_data.se_tier
-        user.income_index = commune_data.income_index
-        db.commit()
+        if not commune_data:
+            commune_data = db.query(CommuneMarketData).filter(
+                CommuneMarketData.commune.ilike(f'%{user.county.strip()}%')
+            ).first()
+        if commune_data:
+            commune_tier      = commune_data.se_tier
+            user.income_index = commune_data.income_index
+
+    profession_tier = _PROFESSION_TIER.get(getattr(user, 'profession', '') or '', None)
+
+    # Tier final: el más alto entre comuna y profesión (un médico en Maipú = tier A)
+    if commune_tier and profession_tier:
+        user.se_tier = commune_tier if _tier_rank(commune_tier) >= _tier_rank(profession_tier) else profession_tier
+    elif commune_tier:
+        user.se_tier = commune_tier
+    elif profession_tier:
+        user.se_tier = profession_tier
+
+    db.commit()
 
 
 def _rekognition_client():
@@ -6594,6 +6657,35 @@ def agent_daily_debates_sync(secret: str):
         raise HTTPException(403, 'Forbidden')
     from preferendum_agent import run_daily_debates
     return run_daily_debates()
+
+@app.post('/admin/agent/se-lifestyle-debates')
+def agent_se_lifestyle(secret: str, bg: BackgroundTasks):
+    """Trigger the SE Lifestyle Agent — generates aspirational debates per income tier (A/B/C/D)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from se_lifestyle_agent import run_se_lifestyle_debates
+    bg.add_task(run_se_lifestyle_debates)
+    return {'ok': True, 'message': 'SE Lifestyle Agent started in background — luxury, premium, mass market debates'}
+
+@app.post('/admin/agent/se-lifestyle-debates/sync')
+def agent_se_lifestyle_sync(secret: str, tier: str = None):
+    """Run SE Lifestyle Agent synchronously. Optional ?tier=A to run only one tier."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from se_lifestyle_agent import run_se_lifestyle_debates, SE_TOPICS
+    if tier:
+        tier = tier.upper()
+        if tier not in SE_TOPICS:
+            raise HTTPException(400, f'Tier must be A, B, C or D')
+        from se_lifestyle_agent import _generate_se_debate, _create_se_debate_via_api, _created_this_run
+        _created_this_run.clear()
+        created = 0
+        for t in SE_TOPICS[tier][:3]:
+            d = _generate_se_debate(t, tier)
+            if d and _create_se_debate_via_api(d, tier):
+                created += 1
+        return {'ok': True, 'tier': tier, 'debates_created': created}
+    return run_se_lifestyle_debates(max_per_tier=3)
 
 @app.post('/admin/agent/culture-debates')
 def agent_culture_debates(secret: str, bg: BackgroundTasks):

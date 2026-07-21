@@ -369,6 +369,65 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
           <option value="">— selecciona —</option>
         </select>
       </div>
+      <div class="field">
+        <label>Profesión / Ocupación <span style="font-size:11px;color:#7a7570;font-weight:400;">— opcional</span></label>
+        <select id="r-profession">
+          <option value="">— selecciona —</option>
+          <optgroup label="Salud">
+            <option value="medico">Médico / Doctor</option>
+            <option value="dentista">Dentista / Odontólogo</option>
+            <option value="enfermero">Enfermero / Kinesiólgo</option>
+            <option value="farmaceutico">Farmacéutico</option>
+            <option value="psicologo">Psicólogo</option>
+          </optgroup>
+          <optgroup label="Derecho y Finanzas">
+            <option value="abogado">Abogado</option>
+            <option value="juez">Juez / Fiscal</option>
+            <option value="economista">Economista</option>
+            <option value="contador">Contador / Auditor</option>
+            <option value="financiero">Analista / Gestor Financiero</option>
+          </optgroup>
+          <optgroup label="Ingeniería y Tecnología">
+            <option value="ing_civil">Ingeniero Civil</option>
+            <option value="ing_comercial">Ingeniero Comercial</option>
+            <option value="ing_informatica">Ingeniero Informático / Desarrollador</option>
+            <option value="arquitecto">Arquitecto</option>
+            <option value="ing_otro">Otro Ingeniero</option>
+          </optgroup>
+          <optgroup label="Empresa y Gestión">
+            <option value="empresario">Empresario / Emprendedor</option>
+            <option value="ejecutivo">Ejecutivo / Gerente</option>
+            <option value="consultor">Consultor</option>
+            <option value="marketing">Marketing / Publicidad</option>
+            <option value="ventas">Ventas / Comercial</option>
+          </optgroup>
+          <optgroup label="Educación y Ciencias">
+            <option value="profesor_univ">Profesor Universitario</option>
+            <option value="profesor_escuela">Profesor / Docente</option>
+            <option value="cientifico">Científico / Investigador</option>
+          </optgroup>
+          <optgroup label="Arte, Medios y Comunicación">
+            <option value="periodista">Periodista / Comunicador</option>
+            <option value="artista">Artista / Diseñador</option>
+            <option value="actor">Actor / Músico</option>
+          </optgroup>
+          <optgroup label="Oficios y Servicios">
+            <option value="tecnico">Técnico Especializado</option>
+            <option value="mecanico">Mecánico / Electricista</option>
+            <option value="construccion">Construcción / Maestro</option>
+            <option value="transporte">Conductor / Transporte</option>
+            <option value="comercio">Comerciante / Emprendedor informal</option>
+            <option value="servicios">Servicios / Atención al cliente</option>
+          </optgroup>
+          <optgroup label="Otros">
+            <option value="estudiante">Estudiante</option>
+            <option value="jubilado">Jubilado / Pensionado</option>
+            <option value="hogar">Labores del hogar</option>
+            <option value="desempleado">En búsqueda de trabajo</option>
+            <option value="otro">Otra profesión</option>
+          </optgroup>
+        </select>
+      </div>
       <button class="btn" onclick="doRegister()">Crear cuenta →</button>
       <p class="auth-err" id="r-err"></p>
     </div>
@@ -1138,7 +1197,8 @@ async function doRegister() {
   const dob     = document.getElementById('r-dob').value;
   const gender  = document.getElementById('r-gender').value;
   const country = document.getElementById('r-country').value;
-  const commune = document.getElementById('r-commune').value.trim();
+  const commune    = document.getElementById('r-commune').value.trim();
+  const profession = document.getElementById('r-profession').value;
 
   if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'Nombre, email y contraseña son obligatorios'; return; }
   if (pass.length < 6) { document.getElementById('r-err').textContent = 'La contraseña debe tener mínimo 6 caracteres'; return; }
@@ -1153,7 +1213,7 @@ async function doRegister() {
     const r = await fetch(`${API}/voter/register`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({name, email, password: pass, country,
-        phone, national_id: rut, dob, gender, commune, device_fp: deviceFpReg})
+        phone, national_id: rut, dob, gender, commune, profession, device_fp: deviceFpReg})
     });
     const d = await r.json();
     btn.disabled = false; btn.textContent = 'Create Account →';
@@ -1637,6 +1697,7 @@ async function loadDebates(status = 'live') {
             }
           </div>
           <div class="debate-title">${esc(db.title)}</div>
+          ${db.reward ? `<div style="margin:8px 0 4px;background:linear-gradient(135deg,rgba(16,185,129,0.10),rgba(26,58,143,0.08));border:1px solid rgba(16,185,129,0.30);border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;color:#059669;display:flex;align-items:center;gap:6px;">🎁 ${esc(db.reward)}</div>` : ''}
           <div class="debate-meta">
             <span class="debate-votes">⬡ ${db.total_votes || 0} votos</span>
             <span>${countryLabel(db.scope_country)}</span>
