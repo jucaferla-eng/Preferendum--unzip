@@ -2394,13 +2394,27 @@ async function shareResult(debId) {
   _shareWithPoster(db.title, '', instName, debId, fallback, results, total);
 }
 
-function shareViaWhatsApp(title, instName, debId) {
+async function shareViaWhatsApp(title, instName, debId) {
   const url = `${location.origin}/voter?debate=${debId}`;
   const inst = instName || 'Preferendum';
   const text = `Participé en la consulta de *${inst}* en Preferendum:\n"${title}"\n\n¿Tú qué prefieres? Vota aquí (verificado en blockchain):\n${url}`;
+  const db = currentDebate;
+  // Intentar compartir con imagen (igual que botón azul)
+  if (db) {
+    try {
+      const results = db.results || [];
+      const total = db.total_votes || 0;
+      const canvas = await _generatePoster(title, '', inst, results, total);
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
+      const file = new File([blob], 'preferendum.png', { type: 'image/png' });
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text, url });
+        return;
+      }
+    } catch(_) {}
+  }
+  // Fallback: WhatsApp link con solo texto
   const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
-  // In WebView (iOS/Android app) window.open() is blocked and returns null;
-  // location.href triggers onShouldStartLoadWithRequest which opens WhatsApp/Safari
   const w = window.open(waUrl, '_blank');
   if (!w) window.location.href = waUrl;
 }
