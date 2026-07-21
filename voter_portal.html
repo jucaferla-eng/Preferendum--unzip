@@ -1163,30 +1163,160 @@ const ID_LABEL = {
   UY:'Cédula', EC:'Cédula', BO:'CI', PY:'CI', OTHER:'National ID',
 };
 
+// Formato: array plana = sin grupos | objeto {grupo:[...]} = con optgroups
 const CITIES_BY_COUNTRY = {
-  CL: ['Santiago','Vitacura','Las Condes','Lo Barnechea','Providencia','La Reina','Ñuñoa','Peñalolén','Macul','San Miguel','La Florida','Independencia','Recoleta','Quinta Normal','Renca','Lo Espejo','El Bosque','San Ramón','La Pintana','Pudahuel','Cerro Navia','Lo Prado','Cerrillos','Estación Central','Maipú','Quilicura','Huechuraba','Conchalí','Valparaíso','Viña del Mar','Concón','Quilpué','Concepción','Talcahuano','San Pedro de la Paz','Antofagasta','La Serena','Coquimbo','Rancagua','Temuco','Puerto Montt','Iquique','Arica','Punta Arenas'],
-  AR: ['Buenos Aires','Córdoba','Rosario','Mendoza','Tucumán','La Plata','Mar del Plata','Salta','Santa Fe','San Juan','Resistencia','Neuquén','Santiago del Estero','Corrientes','Posadas','San Luis','Paraná','Formosa','Río Cuarto','Comodoro Rivadavia','Bahía Blanca','Quilmes','Lanús','Lomas de Zamora','General San Martín'],
-  PE: ['Lima','Arequipa','Trujillo','Chiclayo','Piura','Iquitos','Cusco','Chimbote','Huancayo','Tacna','Juliaca','Ica','Ayacucho','Pucallpa','Cajamarca','Huánuco','Moquegua','Puno','Tumbes','Sullana'],
-  MX: ['Ciudad de México','Guadalajara','Monterrey','Puebla','Tijuana','León','Ciudad Juárez','Zapopan','Mérida','San Luis Potosí','Mexicali','Aguascalientes','Culiacán','Hermosillo','Chihuahua','Querétaro','Morelia','Cancún','Saltillo','Torreón','Toluca','Veracruz','Acapulco','Oaxaca','Tijuana'],
-  CO: ['Bogotá','Medellín','Cali','Barranquilla','Cartagena','Bucaramanga','Cúcuta','Pereira','Ibagué','Santa Marta','Manizales','Pasto','Montería','Villavicencio','Armenia','Sincelejo','Valledupar','Neiva','Soledad','Bello'],
-  BR: ['São Paulo','Rio de Janeiro','Brasília','Salvador','Fortaleza','Belo Horizonte','Manaus','Curitiba','Recife','Goiânia','Porto Alegre','Belém','Guarulhos','Campinas','São Luís','Maceió','Natal','Teresina','Campo Grande','João Pessoa','Osasco','Ribeirão Preto','Sorocaba','Uberlândia','Contagem'],
-  US: ['New York','Los Angeles','Chicago','Houston','Phoenix','Philadelphia','San Antonio','San Diego','Dallas','Jacksonville','Austin','Fort Worth','Columbus','Charlotte','Indianapolis','San Francisco','Seattle','Denver','Washington DC','Nashville','Oklahoma City','El Paso','Las Vegas','Boston','Miami'],
-  ES: ['Madrid','Barcelona','Valencia','Sevilla','Zaragoza','Málaga','Murcia','Palma','Las Palmas','Bilbao','Alicante','Córdoba','Valladolid','Vigo','Gijón','Granada','Vitoria','La Coruña','Santa Cruz de Tenerife','Pamplona'],
-  GB: ['London','Birmingham','Manchester','Glasgow','Leeds','Liverpool','Newcastle','Sheffield','Bristol','Edinburgh','Cardiff','Belfast','Leicester','Coventry','Bradford','Nottingham','Southampton','Portsmouth','Oxford','Cambridge'],
-  DE: ['Berlín','Múnich','Hamburgo','Colonia','Frankfurt','Stuttgart','Düsseldorf','Leipzig','Dortmund','Essen','Bremen','Hanóver','Dresde','Núremberg','Duisburgo','Bochum','Wuppertal','Bielefeld','Bonn','Karlsruhe'],
-  FR: ['París','Marsella','Lyon','Toulouse','Niza','Nantes','Strasbourg','Montpellier','Bordeaux','Lille','Rennes','Reims','Saint-Étienne','Toulon','Le Havre','Grenoble','Dijon','Angers','Nîmes','Villeurbanne'],
-  IT: ['Roma','Milán','Nápoles','Turín','Palermo','Génova','Bolonia','Florencia','Bari','Catania','Venecia','Verona','Mesina','Padua','Trieste','Taranto','Brescia','Reggio Calabria','Módena','Prato'],
-  AU: ['Sídney','Melbourne','Brisbane','Perth','Adelaida','Gold Coast','Newcastle','Canberra','Wollongong','Sunshine Coast','Hobart','Geelong','Townsville','Cairns','Darwin'],
-  CA: ['Toronto','Montreal','Vancouver','Calgary','Edmonton','Ottawa','Winnipeg','Quebec','Hamilton','Kitchener','London','Victoria','Halifax','Saskatoon','Regina'],
-  IN: ['Bombay','Delhi','Bangalore','Hyderabad','Chennai','Kolkata','Ahmedabad','Pune','Surat','Jaipur','Lucknow','Kanpur','Nagpur','Indore','Thane','Bhopal','Visakhapatnam','Pimpri','Patna','Vadodara'],
-  ZA: ['Johannesburgo','Ciudad del Cabo','Durban','Pretoria','Port Elizabeth','Bloemfontein','Nelspruit','Kimberley','Polokwane','East London'],
-  VE: ['Caracas','Maracaibo','Valencia','Barquisimeto','Maracay','Ciudad Guayana','Barcelona','Maturín','San Cristóbal','Cumaná'],
-  UY: ['Montevideo','Salto','Paysandú','Las Piedras','Rivera','Maldonado','Tacuarembó','Melo','Mercedes','Artigas'],
-  EC: ['Guayaquil','Quito','Cuenca','Santo Domingo','Ambato','Machala','Portoviejo','Manta','Durán','Loja'],
-  BO: ['Santa Cruz','La Paz','Cochabamba','Sucre','Oruro','Potosí','Tarija','Trinidad','Cobija','Riberalta'],
-  PY: ['Asunción','San Lorenzo','Luque','Fernando de la Mora','Lambaré','Capiatá','Limpio','Ñemby','Encarnación','Ciudad del Este'],
-  NG: ['Lagos','Kano','Ibadan','Abuja','Port Harcourt','Benin City','Maiduguri','Zaria','Aba','Jos'],
+  CL: {
+    'Región Metropolitana — Tier A':['Vitacura','Las Condes','Lo Barnechea','Providencia','La Reina'],
+    'Región Metropolitana — Tier B':['Ñuñoa','Peñalolén','Santiago','Macul','San Miguel','La Florida','Independencia'],
+    'Región Metropolitana — Tier C':['Huechuraba','Maipú','Recoleta','Quilicura','Estación Central','Quinta Normal','Cerrillos','Conchalí','Lo Prado','Pudahuel','Renca'],
+    'Región Metropolitana — Tier D':['Lo Espejo','El Bosque','San Ramón','La Pintana','Cerro Navia'],
+    'Valparaíso':['Concón','Viña del Mar','Valparaíso','Quilpué'],
+    'Biobío':['San Pedro de la Paz','Concepción','Talcahuano'],
+    'Otras regiones':['Antofagasta','Iquique','La Serena','Coquimbo','Rancagua','Temuco','Puerto Montt','Arica','Punta Arenas'],
+  },
+  US: {
+    'Nueva York Metro':['Manhattan','Brooklyn','Queens','Staten Island','Bronx','Westchester County','Nassau County','Hudson County NJ'],
+    'Los Ángeles Metro':['Los Angeles County','Orange County CA','San Diego County','Ventura County','Riverside County','San Bernardino County'],
+    'SF Bay Area':['San Francisco','Silicon Valley','San Mateo County','Marin County','Alameda County','Contra Costa County','Boulder County'],
+    'Washington DC Metro':['Washington DC','Arlington County','Alexandria VA','Fairfax County','Loudoun County','Montgomery County MD'],
+    'Boston Metro':['Cambridge MA','Brookline MA','Boston','Newton MA','Somerville MA','Norfolk County MA','Middlesex County MA'],
+    'Seattle Metro':['Bellevue WA','Seattle','Kirkland WA','Snohomish County','Tacoma'],
+    'Chicago Metro':['Evanston IL','Chicago','DuPage County','Lake County IL','Will County'],
+    'Miami Metro':['Miami Beach','Palm Beach County','Miami-Dade County','Broward County'],
+    'Dallas Metro':['Collin County','Rockwall County','Dallas County','Denton County','Tarrant County'],
+    'Houston Metro':['Fort Bend County','Galveston County','Harris County','Montgomery County TX'],
+    'Denver Metro':['Douglas County CO','Denver','Jefferson County CO','Arapahoe County','Adams County CO'],
+    'Philadelphia Metro':['Chester County PA','Montgomery County PA','Bucks County PA','Delaware County PA','Philadelphia'],
+    'Atlanta Metro':['Fulton County','Cobb County','Gwinnett County','DeKalb County'],
+    'Nashville':['Williamson County TN','Davidson County'],
+    'Minneapolis':['Hennepin County','Ramsey County'],
+    'Portland Metro':['Washington County OR','Multnomah County','Clackamas County'],
+    'Austin Metro':['Williamson County TX','Travis County'],
+    'Phoenix Metro':['Scottsdale','Maricopa County','Pima County'],
+    'Baltimore Metro':['Howard County MD','Baltimore County','Baltimore City'],
+    'Otras ciudades':['Mecklenburg County','Hamilton County IN','Marion County','Delaware County OH','Franklin County','St Johns County FL','Duval County','Salt Lake County','Honolulu County','Multnomah County OR','Oklahoma County','El Paso County TX','Clark County','Bexar County','Allegheny County','Hamilton County OH','Cuyahoga County','Milwaukee County','Memphis Shelby County'],
+  },
+  GB: {
+    'Inner London':['Kensington & Chelsea','Westminster','City of London','Camden','Islington','Hammersmith & Fulham','Richmond upon Thames','Wandsworth','Hackney','Southwark','Tower Hamlets','Lambeth','Haringey'],
+    'Outer London':['Merton','Kingston upon Thames','Barnet','Waltham Forest','Newham','Redbridge','Brent','Ealing','Hounslow','Lewisham','Greenwich','Bromley','Hillingdon','Enfield','Sutton','Croydon','Havering','Barking & Dagenham'],
+    'Home Counties':['Surrey','Hertfordshire','Essex','Oxford','Cambridge'],
+    'Otras ciudades':['Bristol','Edinburgh','Manchester','Salford','Birmingham','Solihull','Leeds','Sheffield','Liverpool','Newcastle','Glasgow','Cardiff','Belfast','Nottingham','Leicester','Coventry','Southampton','Portsmouth','Bradford'],
+  },
+  ES: {
+    'Madrid — Distritos':['Salamanca Madrid','Chamartín Madrid','Retiro Madrid','Chamberí Madrid','Moncloa-Aravaca Madrid','Hortaleza Madrid','Ciudad Lineal Madrid','Latina Madrid','Carabanchel Madrid','Vallecas Madrid'],
+    'Madrid — Municipios':['Pozuelo de Alarcón','Las Rozas','Majadahonda','Alcobendas','Boadilla del Monte','Móstoles','Leganés','Alcorcón','Getafe','Fuenlabrada'],
+    'Barcelona — Distritos':['Sarrià-Sant Gervasi','Les Corts Barcelona','Eixample Barcelona','Gràcia Barcelona','Pedralbes','Sant Martí Barcelona','Sants-Montjuïc','Horta-Guinardó','Sant Andreu Barcelona','Nou Barris Barcelona','Ciutat Vella Barcelona'],
+    'Barcelona — Municipios':['Sant Cugat del Vallès','Sitges'],
+    'Otras ciudades':['Palma','Málaga','Marbella','Bilbao','Donostia-San Sebastián','Valencia','Sevilla','Alicante','Las Palmas','Vitoria-Gasteiz','Zaragoza','Vigo','Granada','Valladolid','Murcia','Córdoba ES','Pamplona','Santa Cruz de Tenerife'],
+  },
+  DE: {
+    'Múnich':['Schwabing-Freimann','Bogenhausen München','Maxvorstadt München','Altstadt München','Neuhausen München','Schwabing München','Landkreis München'],
+    'Frankfurt':['Frankfurt Westend','Frankfurt Sachsenhausen','Frankfurt','Hochtaunuskreis','Main-Taunus-Kreis'],
+    'Hamburgo':['Hamburg Blankenese','Hamburg Eimsbüttel','Hamburgo','Hamburg Harburg'],
+    'Berlín':['Berlin Mitte','Berlin Prenzlauer Berg','Berlin Charlottenburg','Berlín','Berlin Neukölln','Berlin Marzahn'],
+    'Stuttgart':['Stuttgart','Böblingen'],
+    'Otras ciudades':['Düsseldorf','Colonia','Bonn','Karlsruhe','Núremberg','Hanóver','Bremen','Dortmund','Bochum','Essen','Leipzig','Dresde','Bielefeld','Duisburgo','Wuppertal','Augsburgo','Mannheim','Freiburg','Heidelberg'],
+  },
+  FR: {
+    'París':['París 6°-7° Rive Gauche','París 1°-4° Centre','París 8°-16°-17° Ouest','París 5°-13° Latin','París 9°-10°-11° Nord','París 12°-14°-15° Sud','París 18°-19°-20° Est'],
+    'Île-de-France':['Neuilly-sur-Seine','Boulogne-Billancourt','Levallois-Perret','Saint-Cloud','Versailles','Hauts-de-Seine Nord','Val-de-Marne','Seine-Saint-Denis','Essonne','Seine-et-Marne'],
+    'Otras ciudades':['Niza','Antibes-Juan-les-Pins','Lyon 2°-6°','Lyon','Villeurbanne','Bordeaux','Strasbourg','Nantes','Montpellier','Toulouse','Rennes','Marsella','Grenoble','Lille','Dijon','Angers','Toulon','Reims','Le Havre','Saint-Étienne'],
+  },
+  IT: {
+    'Milán':['Brera-Duomo Milano','Porta Venezia Milano','Navigli Milano','CityLife-Portello','Milán','Monza','Bergamo','Brescia'],
+    'Roma':['Parioli Roma','Prati Roma','Trastevere Roma','Roma','EUR Roma','Ostia'],
+    'Otras ciudades':['Venecia','Florencia','Bolonia','Turín','Génova','Verona','Padua','Módena','Trieste','Nápoles','Palermo','Bari','Catania','Taranto','Reggio Calabria','Mesina'],
+  },
+  AU: {
+    'Sídney':['Woollahra','Mosman','North Sydney','Waverley','Ku-ring-gai','Willoughby','Eastern Suburbs Sydney','Lower North Shore','Inner West Sydney','Sídney','Northern Beaches','Lane Cove','Parramatta','Blacktown','Penrith','Liverpool NSW'],
+    'Melbourne':['Stonnington','Boroondara','Port Phillip','Bayside VIC','Melbourne','Whitehorse','Monash','Greater Dandenong'],
+    'Otras ciudades':['Brisbane','Gold Coast','Sunshine Coast','Canberra','Perth','Adelaida','Hobart','Geelong','Townsville','Cairns','Darwin','Newcastle NSW','Wollongong'],
+  },
+  CA: {
+    'Toronto Metro':['York Region ON','Toronto','Peel Region ON','Halton Region ON','Durham Region ON'],
+    'Vancouver Metro':['West Vancouver','North Vancouver','Vancouver','Burnaby','Richmond BC','Surrey BC','Coquitlam','Langley BC'],
+    'Victoria':['Saanich','Victoria BC'],
+    'Otras ciudades':['Ottawa','Calgary','Côte-des-Neiges','Plateau Mont-Royal','Montreal','Laval','Longueuil','Edmonton','Winnipeg','Quebec City','Hamilton ON','Kitchener-Waterloo','London ON','Halifax','Saskatoon','Regina'],
+  },
+  BR: {
+    'São Paulo':['Jardins-Itaim SP','Vila Olímpia SP','Pinheiros SP','São Paulo','Guarulhos','Osasco','Santo André','São Bernardo do Campo','Campinas','São José dos Campos','Jundiaí','Ribeirão Preto','Sorocaba','Lapa SP'],
+    'Rio de Janeiro':['Leblon-Ipanema RJ','Barra da Tijuca RJ','Flamengo-Botafogo RJ','Rio de Janeiro','Niterói'],
+    'Brasília':['Lago Sul DF','Brasília'],
+    'Otras capitales':['Florianópolis','Belo Horizonte','Porto Alegre','Curitiba','Goiânia','Recife','Fortaleza','Salvador','Manaus','Belém','Natal','João Pessoa','Maceió','Campo Grande','Teresina','São Luís','Uberlândia','Contagem'],
+  },
+  AR: {
+    'Buenos Aires — Barrios':['Palermo Buenos Aires','Recoleta Buenos Aires','San Telmo-Puerto Madero','Belgrano Buenos Aires','Núñez Buenos Aires','Caballito Buenos Aires','Villa Crespo BA','Flores Buenos Aires','Mataderos Buenos Aires','Villa Lugano BA'],
+    'GBA Norte':['San Isidro','Vicente López','Pilar','Tigre','San Fernando BA'],
+    'GBA Oeste / Sur':['Ituzaingó','Morón','Tres de Febrero','General San Martín BA','Lanús','Avellaneda BA','Lomas de Zamora','Quilmes','La Matanza','Almirante Brown','Esteban Echeverría'],
+    'Interior':['Córdoba Capital','Neuquén','Mendoza','Rosario','Mar del Plata','Comodoro Rivadavia','Bahía Blanca','Santa Fe Capital','Salta Capital','La Plata','Corrientes Capital','Posadas','Tucumán','Río Cuarto','San Juan','Resistencia','Formosa Capital'],
+  },
+  MX: {
+    'CDMX — Alcaldías':['Miguel Hidalgo CDMX','Benito Juárez CDMX','Cuauhtémoc CDMX','Álvaro Obregón CDMX','Coyoacán CDMX','Azcapotzalco CDMX','Tlalpan CDMX','Iztacalco CDMX','Gustavo A. Madero CDMX','Iztapalapa CDMX','Xochimilco CDMX'],
+    'Estado de México':['Huixquilucan','Naucalpan','Atizapán de Zaragoza','Tlalnepantla','Ecatepec','Nezahualcóyotl'],
+    'Monterrey Metro':['San Pedro Garza García','Monterrey','Guadalupe NL','San Nicolás NL','Apodaca NL'],
+    'Guadalajara Metro':['Zapopan','Guadalajara','Tlaquepaque'],
+    'Otras ciudades':['Tijuana','Cancún','Querétaro','Mérida','Hermosillo','Chihuahua City','Ciudad Juárez','Morelia','Toluca','Puebla','Aguascalientes','San Luis Potosí','Saltillo','Torreón','Culiacán','Oaxaca','Mexicali','León','Acapulco','Veracruz'],
+  },
+  CO: {
+    'Bogotá — Localidades':['Chapinero Bogotá','Usaquén Bogotá','Teusaquillo Bogotá','Barrios Unidos Bogotá','Suba Bogotá','Kennedy Bogotá','Engativá Bogotá','Fontibón Bogotá','Rafael Uribe Bogotá','Bosa Bogotá','Ciudad Bolívar Bogotá'],
+    'Medellín Metro':['El Poblado Medellín','Laureles-Estadio','Envigado','Sabaneta','Medellín','Bello','Itagüí'],
+    'Otras ciudades':['Cartagena','Santa Marta','Barranquilla','Soledad','Cali','Bucaramanga','Pereira','Manizales','Villavicencio','Ibagué','Armenia','Neiva','Cúcuta','Montería','Pasto'],
+  },
+  PE: {
+    'Lima — Distritos':['Miraflores Lima','San Isidro Lima','Barranco Lima','La Molina Lima','Surco Lima','San Borja Lima','Jesús María Lima','Magdalena Lima','Pueblo Libre Lima','San Miguel Lima','Lince Lima','Breña Lima','Surquillo Lima','Lima Cercado','La Victoria Lima','Los Olivos Lima','Carabayllo Lima','Villa El Salvador Lima','San Juan de Lurigancho','Villa María del Triunfo'],
+    'Otras ciudades':['Cusco','Miraflores Arequipa','Arequipa','Trujillo','Chiclayo','Piura','Ica','Tacna','Iquitos','Huancayo','Cajamarca','Pucallpa','Juliaca','Puno'],
+  },
+  IN: {
+    'Mumbai':['South Mumbai','Bandra-Khar Mumbai','Juhu-Versova Mumbai','Powai Mumbai','Andheri West Mumbai','Andheri East Mumbai','Thane','Navi Mumbai','Panvel','Mira-Bhayander'],
+    'Delhi NCR':['Lutyens Delhi','South Delhi','Gurugram','Noida','Dwarka Delhi','Faridabad','Ghaziabad'],
+    'Bangalore':['Koramangala Bangalore','Indiranagar Bangalore','Whitefield Bangalore','Bangalore','Électronique City'],
+    'Hyderabad':['Banjara Hills Hyd','Gachibowli Hyd','Hyderabad','Secunderabad'],
+    'Chennai':['Anna Nagar Chennai','Adyar Chennai','Chennai'],
+    'Otras ciudades':['Kolkata','Pune Koregaon Park','Pune','Surat','Ahmedabad','Jaipur','Lucknow','Kochi','Bhopal','Nagpur','Kanpur'],
+  },
+  ZA: {
+    'Ciudad del Cabo':['Atlantic Seaboard CPT','City Bowl Cape Town','Southern Suburbs CPT','Northern Suburbs CPT','Cape Town','Stellenbosch'],
+    'Johannesburgo':['Sandton-Rosebank','Johannesburgo','Midrand','Soweto'],
+    'Otras ciudades':['Umhlanga','Durban North','Durban','Pretoria East','Pretoria','Port Elizabeth','Nelspruit','Bloemfontein','East London ZA','Polokwane'],
+  },
+  VE: {
+    'Caracas':['Chacao Caracas','Baruta Caracas','El Hatillo Caracas','Caracas','Sucre Caracas','Libertador Caracas'],
+    'Otras ciudades':['Valencia VE','Maracay','Maracaibo','Barquisimeto','Ciudad Guayana','Barcelona VE','San Cristóbal VE','Maturín','Cumaná'],
+  },
+  UY: {
+    'Montevideo':['Carrasco Montevideo','Pocitos Montevideo','Punta Carretas Montevideo','Palermo Montevideo','Centro Montevideo','Montevideo'],
+    'Otras localidades':['Maldonado-Punta del Este','Colonia del Sacramento','Las Piedras','Canelones','Salto','Paysandú','Rivera','Tacuarembó','Artigas'],
+  },
+  EC: {
+    'Quito':['González Suárez Quito','La Carolina Quito','Quito Norte','Quito','Quito Sur'],
+    'Guayaquil':['Los Ceibos Guayaquil','Urdesa Guayaquil','Guayaquil','Samborondón','Durán'],
+    'Otras ciudades':['Cuenca','Manta','Ambato','Machala','Santo Domingo EC','Loja','Portoviejo'],
+  },
+  BO: {
+    'Santa Cruz':['Zona Sur Santa Cruz','Santa Cruz de la Sierra'],
+    'La Paz':['La Paz Zona Sur','La Paz','El Alto'],
+    'Otras ciudades':['Cochabamba','Quillacollo','Sucre','Tarija','Oruro','Potosí','Cobija','Trinidad BO','Riberalta'],
+  },
+  PY: {
+    'Asunción':['Barrio Las Mercedes PY','Manorá Asunción','Asunción'],
+    'Otras ciudades':['Ciudad del Este','Luque','San Lorenzo PY','Fernando de la Mora','Lambaré','Encarnación','Capiatá','Ñemby','Limpio','Mariano Roque Alonso','Hernandarias'],
+  },
+  NG: {
+    'Lagos':['Ikoyi Lagos','Victoria Island Lagos','Lekki Lagos','Ikeja Lagos','Lagos','Surulere Lagos','Mushin Lagos'],
+    'Abuja':['Maitama Abuja','Wuse Abuja','Abuja','Garki Abuja'],
+    'Otras ciudades':['GRA Port Harcourt','Port Harcourt','Ibadan','Kano','Aba NG','Benin City NG','Jos','Kaduna','Zaria','Maiduguri','Enugu','Owerri'],
+  },
   OTHER: [],
+};
+
+const COMMUNE_LABEL = {
+  CL:'Comuna', US:'County / Área', GB:'Borough / Distrito', ES:'Municipio / Distrito',
+  DE:'Stadtteil / Kreis', FR:'Commune / Arrondissement', IT:'Quartiere / Comune',
+  AU:'Municipio (LGA)', CA:'Área / Condado', BR:'Município / Bairro',
+  AR:'Partido / Barrio', MX:'Alcaldía / Municipio', CO:'Localidad / Municipio',
+  PE:'Distrito', IN:'Distrito / Zona', ZA:'Municipality', VE:'Municipio',
+  UY:'Barrio / Ciudad', EC:'Cantón / Barrio', BO:'Municipio', PY:'Municipio',
+  NG:'Local Government Area',
 };
 
 function toggleCommuneField() {
@@ -1194,15 +1324,30 @@ function toggleCommuneField() {
   if (!countryEl) return;
   const country = countryEl.value;
 
-  // Cities / communes — populate <select>
-  const cities = CITIES_BY_COUNTRY[country] || [];
-  const sel = document.getElementById('r-commune');
+  const data = CITIES_BY_COUNTRY[country];
+  const sel   = document.getElementById('r-commune');
   const label = document.getElementById('commune-label');
+  if (label) label.textContent = COMMUNE_LABEL[country] || 'Ciudad / Área';
+
   if (sel) {
-    sel.innerHTML = '<option value="">— selecciona —</option>' +
-      cities.map(c => `<option value="${c}">${c}</option>`).join('');
+    sel.innerHTML = '<option value="">— selecciona —</option>';
+    if (!data) return;
+    if (Array.isArray(data)) {
+      data.forEach(c => {
+        const o = document.createElement('option'); o.value = c; o.textContent = c;
+        sel.appendChild(o);
+      });
+    } else {
+      Object.entries(data).forEach(([group, cities]) => {
+        const og = document.createElement('optgroup'); og.label = group;
+        cities.forEach(c => {
+          const o = document.createElement('option'); o.value = c; o.textContent = c;
+          og.appendChild(o);
+        });
+        sel.appendChild(og);
+      });
+    }
   }
-  if (label) label.textContent = country === 'CL' ? 'Comuna' : 'Ciudad';
 
   // Phone prefix badge
   const prefix = PHONE_PREFIX[country] || '+';
