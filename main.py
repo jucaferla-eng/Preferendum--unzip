@@ -2957,15 +2957,25 @@ def debates_for_me(
     return {'debates': eligible}
 
 @app.get('/ads/featured')
-def get_featured_ads(db: Session = Depends(get_db)):
-    """Returns up to 2 active ad campaigns to display in the debates list."""
+def get_featured_ads(user: User = Depends(get_optional_user), db: Session = Depends(get_db)):
+    """Returns up to 2 active ad campaigns to display in the debates list.
+    Si el usuario está autenticado, filtra por su se_tier."""
     now = datetime.utcnow()
-    campaigns = db.query(AdCampaign).filter(
+    candidates = db.query(AdCampaign).filter(
         AdCampaign.is_active == True,
         AdCampaign.budget_clp > AdCampaign.spent_clp,
     ).filter(
         (AdCampaign.end_date == None) | (AdCampaign.end_date > now)
-    ).order_by(AdCampaign.created_at.desc()).limit(2).all()
+    ).order_by(AdCampaign.created_at.desc()).all()
+
+    user_se = (getattr(user, 'se_tier', '') or '') if user else ''
+    campaigns = []
+    for c in candidates:
+        if user_se and not _tier_matches(user_se, c.target_se_tiers or 'A,B,C,D'):
+            continue
+        campaigns.append(c)
+        if len(campaigns) >= 2:
+            break
 
     ads = []
     for c in campaigns:

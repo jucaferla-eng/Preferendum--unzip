@@ -1673,7 +1673,7 @@ async function loadDebates(status = 'live') {
     // Si hay sesión activa, usar el endpoint autenticado que filtra por perfil del usuario
     const [dr, ar] = await Promise.all([
       fetch(debatesUrl, {headers: debatesHeaders}),
-      status === 'live' ? fetch(`${API}/ads/featured`).catch(() => null) : Promise.resolve(null),
+      status === 'live' ? fetch(`${API}/ads/featured`, {headers: token ? {'Authorization':'Bearer '+token} : {}}).catch(() => null) : Promise.resolve(null),
     ]);
     const debates = (await dr.json()).debates || [];
     const featuredAds = ar && ar.ok ? (await ar.json()).ads || [] : [];
