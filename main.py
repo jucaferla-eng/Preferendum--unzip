@@ -96,6 +96,7 @@ class User(Base):
     se_tier         = Column(String, default='')   # A/B/C/D — combinación de comuna + profesión
     income_index    = Column(Float, default=0.0)   # índice de ingreso de su comuna
     profession      = Column(String, default='')   # profesión declarada al registrarse
+    cargo           = Column(String, default='')   # cargo/posición jerárquica
     gender          = Column(String, default='F')
     dob             = Column(String, default='')
     national_id     = Column(String, default='')
@@ -587,7 +588,8 @@ def _migrate():
         # users — se_tier e income_index para matching de ads
         existing_user_cols = {c['name'] for c in inspector.get_columns('users')} if inspector.has_table('users') else set()
         for col, defn in [('se_tier', "TEXT DEFAULT ''"), ('income_index', 'FLOAT DEFAULT 0.0'),
-                          ('doc_serial', "TEXT DEFAULT ''"), ('profession', "TEXT DEFAULT ''")]:
+                          ('doc_serial', "TEXT DEFAULT ''"), ('profession', "TEXT DEFAULT ''"),
+                          ('cargo', "TEXT DEFAULT ''")]:
             if col not in existing_user_cols:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
@@ -1663,6 +1665,7 @@ class VoterRegisterInput(BaseModel):
     dob:         str = ''   # YYYY-MM-DD
     commune:     str = ''   # comuna declarada
     profession:  str = ''   # profesión declarada — complementa el proxy de ingreso por comuna
+    cargo:       str = ''   # cargo jerárquico (ceo, gerente, analista, etc.)
     device_fp:   str = ''
 
 
@@ -1703,6 +1706,7 @@ def voter_register(data: VoterRegisterInput, bg: BackgroundTasks, db: Session = 
         phone=data.phone, county=data.commune,
         gender=data.gender, dob=data.dob, national_id=data.national_id,
         profession=data.profession or '',
+        cargo=data.cargo or '',
     )
     db.add(user)
     db.commit()
@@ -2469,6 +2473,23 @@ _PROFESSION_TIER: dict[str, str] = {
     'servicios': 'D', 'hogar': 'D', 'desempleado': 'D',
 }
 
+# Cargo jerárquico — eleva el tier independientemente de profesión o comuna
+_CARGO_TIER: dict[str, str] = {
+    'ceo':              'A',  # CEO / Dueño / Fundador
+    'gerente_general':  'A',  # Gerente General
+    'director':         'A',  # Director / Socio
+    'gerente':          'A',  # Gerente de Área
+    'subgerente':       'B',  # Sub-Gerente
+    'jefe':             'B',  # Jefe de Departamento
+    'supervisor':       'B',  # Supervisor / Coordinador
+    'profesional':      'B',  # Profesional / Analista Senior
+    'analista':         'C',  # Analista / Especialista
+    'asistente':        'C',  # Asistente / Administrativo
+    'tecnico_cargo':    'C',  # Técnico / Operario
+    'practicante':      'D',  # Practicante / Junior
+    'independiente':    'B',  # Independiente / Freelance
+}
+
 def _tier_rank(t: str) -> int:
     return {'A': 4, 'B': 3, 'C': 2, 'D': 1}.get(t, 0)
 
@@ -2489,14 +2510,13 @@ def _assign_user_tier(user, db):
             user.income_index = commune_data.income_index
 
     profession_tier = _PROFESSION_TIER.get(getattr(user, 'profession', '') or '', None)
+    cargo_tier      = _CARGO_TIER.get(getattr(user, 'cargo', '') or '', None)
 
-    # Tier final: el más alto entre comuna y profesión (un médico en Maipú = tier A)
-    if commune_tier and profession_tier:
-        user.se_tier = commune_tier if _tier_rank(commune_tier) >= _tier_rank(profession_tier) else profession_tier
-    elif commune_tier:
-        user.se_tier = commune_tier
-    elif profession_tier:
-        user.se_tier = profession_tier
+    # Tier final: el más alto entre comuna, profesión y cargo
+    # (un CEO en Conchalí = tier A; un analista en Vitacura = tier A por comuna)
+    candidates = [t for t in [commune_tier, profession_tier, cargo_tier] if t]
+    if candidates:
+        user.se_tier = max(candidates, key=_tier_rank)
 
     db.commit()
 
