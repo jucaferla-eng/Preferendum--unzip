@@ -2537,6 +2537,18 @@ def _assign_user_tier(user, db):
         if commune_data:
             commune_tier      = commune_data.se_tier
             user.income_index = commune_data.income_index
+        elif country_code:
+            # 5. Promedio del país — cubre códigos postales no incluidos en la BD
+            from sqlalchemy import func as _sqlfunc
+            avg_index = db.query(_sqlfunc.avg(CommuneMarketData.income_index)).filter(
+                CommuneMarketData.country == country_code,
+                CommuneMarketData.income_index > 0,
+            ).scalar()
+            if avg_index:
+                from commune_agent import get_se_tier as _get_tier
+                avg_index = round(float(avg_index), 1)
+                commune_tier      = _get_tier(avg_index)
+                user.income_index = avg_index
 
     profession_tier = _PROFESSION_TIER.get(getattr(user, 'profession', '') or '', None)
     cargo_tier      = _CARGO_TIER.get(getattr(user, 'cargo', '') or '', None)
