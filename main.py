@@ -7254,18 +7254,20 @@ if (!secret) {
 
 
 @app.post('/admin/reassign-tiers')
-def admin_reassign_tiers(secret: str, db: Session = Depends(get_db)):
-    """Re-corre _assign_user_tier para usuarios con se_tier vacío (cuentas creadas antes
-    del fix de normalización país 'Chile' vs 'CL')."""
+def admin_reassign_tiers(secret: str, force: bool = False, db: Session = Depends(get_db)):
+    """Re-corre _assign_user_tier. force=true recalcula TODOS los usuarios."""
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
-    users = db.query(User).filter((User.se_tier == None) | (User.se_tier == '')).all()
+    if force:
+        users = db.query(User).all()
+    else:
+        users = db.query(User).filter((User.se_tier == None) | (User.se_tier == '')).all()
     updated = []
     for u in users:
         before = u.se_tier
         _assign_user_tier(u, db)
         if u.se_tier != before:
-            updated.append({'id': u.id, 'email': u.email, 'county': u.county, 'new_tier': u.se_tier})
+            updated.append({'id': u.id, 'email': u.email, 'county': u.county, 'before': before, 'new_tier': u.se_tier})
     return {'checked': len(users), 'updated': updated}
 
 
