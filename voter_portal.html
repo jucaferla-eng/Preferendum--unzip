@@ -364,10 +364,8 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         </select>
       </div>
       <div class="field" id="commune-field">
-        <label id="commune-label">Comuna / Ciudad</label>
-        <select id="r-commune">
-          <option value="">— selecciona —</option>
-        </select>
+        <label id="commune-label">Código Postal</label>
+        <input type="text" id="r-commune" placeholder="8320000" maxlength="12" autocomplete="postal-code" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:rgba(255,255,255,0.07);color:#fff;font-size:15px;">
       </div>
       <div class="field">
         <label>Profesión / Ocupación <span style="font-size:11px;color:#e05252;font-weight:400;">*</span></label>
@@ -1309,45 +1307,40 @@ const CITIES_BY_COUNTRY = {
   OTHER: [],
 };
 
-const COMMUNE_LABEL = {
-  CL:'Comuna', US:'County / Área', GB:'Borough / Distrito', ES:'Municipio / Distrito',
-  DE:'Stadtteil / Kreis', FR:'Commune / Arrondissement', IT:'Quartiere / Comune',
-  AU:'Municipio (LGA)', CA:'Área / Condado', BR:'Município / Bairro',
-  AR:'Partido / Barrio', MX:'Alcaldía / Municipio', CO:'Localidad / Municipio',
-  PE:'Distrito', IN:'Distrito / Zona', ZA:'Municipality', VE:'Municipio',
-  UY:'Barrio / Ciudad', EC:'Cantón / Barrio', BO:'Municipio', PY:'Municipio',
-  NG:'Local Government Area',
+const POSTAL_CONFIG = {
+  CL: {label:'Código Postal',      ph:'8320000'},
+  US: {label:'ZIP Code',           ph:'10007'},
+  GB: {label:'Postcode',           ph:'SW1A 1AA'},
+  ES: {label:'Código Postal',      ph:'28001'},
+  DE: {label:'PLZ',                ph:'80331'},
+  FR: {label:'Code Postal',        ph:'75001'},
+  IT: {label:'CAP',                ph:'20121'},
+  AU: {label:'Postcode',           ph:'2000'},
+  CA: {label:'Postal Code',        ph:'M5V 3A8'},
+  BR: {label:'CEP',                ph:'01310-100'},
+  AR: {label:'Código Postal',      ph:'C1425'},
+  MX: {label:'Código Postal',      ph:'06600'},
+  CO: {label:'Código Postal',      ph:'110111'},
+  PE: {label:'Código Postal',      ph:'15001'},
+  IN: {label:'PIN Code',           ph:'400001'},
+  ZA: {label:'Postal Code',        ph:'8001'},
+  VE: {label:'Código Postal',      ph:'1010'},
+  UY: {label:'Código Postal',      ph:'11000'},
+  EC: {label:'Código Postal',      ph:'170101'},
+  BO: {label:'Código Postal',      ph:'0101'},
+  PY: {label:'Código Postal',      ph:'1209'},
+  NG: {label:'Postal Code',        ph:'100001'},
 };
 
 function toggleCommuneField() {
   const countryEl = document.getElementById('r-country');
   if (!countryEl) return;
   const country = countryEl.value;
-
-  const data = CITIES_BY_COUNTRY[country];
-  const sel   = document.getElementById('r-commune');
+  const cfg   = POSTAL_CONFIG[country] || {label:'Código Postal', ph:''};
   const label = document.getElementById('commune-label');
-  if (label) label.textContent = COMMUNE_LABEL[country] || 'Ciudad / Área';
-
-  if (sel) {
-    sel.innerHTML = '<option value="">— selecciona —</option>';
-    if (!data) return;
-    if (Array.isArray(data)) {
-      data.forEach(c => {
-        const o = document.createElement('option'); o.value = c; o.textContent = c;
-        sel.appendChild(o);
-      });
-    } else {
-      Object.entries(data).forEach(([group, cities]) => {
-        const og = document.createElement('optgroup'); og.label = group;
-        cities.forEach(c => {
-          const o = document.createElement('option'); o.value = c; o.textContent = c;
-          og.appendChild(o);
-        });
-        sel.appendChild(og);
-      });
-    }
-  }
+  const input = document.getElementById('r-commune');
+  if (label) label.textContent = cfg.label;
+  if (input) { input.placeholder = cfg.ph; input.value = ''; }
 
   // Phone prefix badge
   const prefix = PHONE_PREFIX[country] || '+';
