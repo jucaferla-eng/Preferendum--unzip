@@ -2499,18 +2499,37 @@ def _assign_user_tier(user, db):
     if user.county:
         country_code = _country_code(user.country)
         raw = user.county.strip()
-        # 1. Exacto por país (ZIP code o nombre de comuna)
+        # 1. Exacto por país
         commune_data = db.query(CommuneMarketData).filter(
             CommuneMarketData.commune.ilike(raw),
             CommuneMarketData.country == country_code
         ).first()
-        # 2. Si no hay match exacto y parece ZIP (solo dígitos), busca prefijo 3 chars
-        if not commune_data and raw[:3].isdigit():
-            commune_data = db.query(CommuneMarketData).filter(
-                CommuneMarketData.commune.like(f'{raw[:3]}%'),
-                CommuneMarketData.country == country_code
-            ).first()
-        # 3. Fallback global por nombre parcial (usuarios registrados antes del ZIP)
+        # 2. Prefijos decrecientes: 6→5→4→3→2 chars (UK "SW1A"→"SW1"→"SW", ES/DE "28001"→"280"→"28")
+        if not commune_data:
+            for length in (6, 5, 4, 3, 2):
+                prefix = raw[:length].rstrip()
+                if not prefix or len(prefix) < length:
+                    continue
+                commune_data = db.query(CommuneMarketData).filter(
+                    CommuneMarketData.commune.like(f'{prefix}%'),
+                    CommuneMarketData.country == country_code
+                ).first()
+                if commune_data:
+                    break
+        # 3. Para UK: probar solo letras del inicio (área postal: "SW", "W", "NW"…)
+        if not commune_data and country_code == 'GB':
+            area = ''
+            for ch in raw:
+                if ch.isalpha():
+                    area += ch
+                else:
+                    break
+            if area:
+                commune_data = db.query(CommuneMarketData).filter(
+                    CommuneMarketData.commune.ilike(f'{area}%'),
+                    CommuneMarketData.country == 'GB'
+                ).first()
+        # 4. Fallback global por nombre parcial (usuarios registrados antes del ZIP)
         if not commune_data:
             commune_data = db.query(CommuneMarketData).filter(
                 CommuneMarketData.commune.ilike(f'%{raw}%')
@@ -6987,36 +7006,43 @@ def run_market_agent_uk_landregistry(secret: str, db: Session = Depends(get_db))
 @app.post('/admin/import-zip-data')
 def import_zip_data(secret: str, country: str = 'US',
                     bg: BackgroundTasks = None, db: Session = Depends(get_db)):
-    """Importa datos de código postal desde APIs públicas del censo.
-    US: Census Bureau ACS 5-year (~33,000 ZCTAs). Sin API key requerida.
-    Corre en background — puede tardar 2-5 min para EEUU completo.
+    """Importa datos de código postal / prefijo postal por país.
+    US: Census Bureau ACS 5-year (~33,000 ZCTAs). Tarda 2-5 min.
+    Resto: prefijos de código postal precargados (instantáneo).
+    country=ALL importa todos los países disponibles.
     """
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
 
+    def _upsert_batch(session, items):
+        for item in items:
+            existing = session.query(CommuneMarketData).filter_by(
+                country=item['country'], commune=item['commune']).first()
+            if existing:
+                existing.income_index = item['income_index']
+                existing.cpm_usd      = item['cpm_usd']
+                existing.se_tier      = item['se_tier']
+                existing.population   = item['population']
+                existing.price_m2_avg = 0
+            else:
+                session.add(CommuneMarketData(**item))
+        session.commit()
+
     def _do_import():
-        from zipcode_agent import run_zip_import
-        result = run_zip_import(country)
-        if not result['data']:
-            return
         with SessionLocal() as session:
-            for item in result['data']:
-                existing = session.query(CommuneMarketData).filter_by(
-                    country=item['country'], commune=item['commune']).first()
-                if existing:
-                    existing.income_index = item['income_index']
-                    existing.cpm_usd      = item['cpm_usd']
-                    existing.se_tier      = item['se_tier']
-                    existing.population   = item['population']
-                    existing.price_m2_avg = 0
-                else:
-                    session.add(CommuneMarketData(**item))
-            session.commit()
+            if country.upper() == 'ALL':
+                from zipcode_agent import run_all_countries_import
+                result = run_all_countries_import()
+            else:
+                from zipcode_agent import run_zip_import
+                result = run_zip_import(country.upper())
+            if result['data']:
+                _upsert_batch(session, result['data'])
 
     if bg:
         bg.add_task(_do_import)
         return {'ok': True, 'status': 'running_in_background', 'country': country,
-                'message': 'Import iniciado. Revisa /admin/tier-summary en 5 min.'}
+                'message': 'Import iniciado. Revisa /admin/tier-summary en unos minutos.'}
     else:
         _do_import()
         return {'ok': True, 'status': 'done', 'country': country}
