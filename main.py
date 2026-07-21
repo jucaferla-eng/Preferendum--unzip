@@ -1664,8 +1664,8 @@ class VoterRegisterInput(BaseModel):
     gender:      str = ''
     dob:         str = ''   # YYYY-MM-DD
     commune:     str = ''   # comuna declarada
-    profession:  str = ''   # profesión declarada — complementa el proxy de ingreso por comuna
-    cargo:       str = ''   # cargo jerárquico (ceo, gerente, analista, etc.)
+    profession:  str        # profesión declarada — obligatoria para tier
+    cargo:       str        # cargo jerárquico (ceo, gerente, analista, etc.) — obligatorio
     device_fp:   str = ''
 
 

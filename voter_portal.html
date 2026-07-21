@@ -370,7 +370,7 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         </select>
       </div>
       <div class="field">
-        <label>Profesión / Ocupación <span style="font-size:11px;color:#7a7570;font-weight:400;">— opcional</span></label>
+        <label>Profesión / Ocupación <span style="font-size:11px;color:#e05252;font-weight:400;">*</span></label>
         <select id="r-profession">
           <option value="">— selecciona —</option>
           <optgroup label="Salud">
@@ -429,7 +429,7 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         </select>
       </div>
       <div class="field">
-        <label>Cargo <span style="font-size:11px;color:#7a7570;font-weight:400;">— opcional</span></label>
+        <label>Cargo <span style="font-size:11px;color:#e05252;font-weight:400;">*</span></label>
         <select id="r-cargo">
           <option value="">— selecciona —</option>
           <optgroup label="Alta Dirección">
@@ -1235,6 +1235,8 @@ async function doRegister() {
   if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'Nombre, email y contraseña son obligatorios'; return; }
   if (pass.length < 6) { document.getElementById('r-err').textContent = 'La contraseña debe tener mínimo 6 caracteres'; return; }
   if (!rut) { document.getElementById('r-err').textContent = (document.getElementById('r-id-label')?.textContent?.replace(' *','') || 'Documento de identidad') + ' es obligatorio'; return; }
+  if (!profession) { document.getElementById('r-err').textContent = 'Selecciona tu profesión / ocupación'; return; }
+  if (!cargo) { document.getElementById('r-err').textContent = 'Selecciona tu cargo'; return; }
   document.getElementById('r-err').textContent = '';
 
   const btn = document.querySelector('#tab-register .btn');
