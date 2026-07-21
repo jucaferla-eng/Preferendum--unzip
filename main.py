@@ -7271,6 +7271,35 @@ def admin_reassign_tiers(secret: str, force: bool = False, db: Session = Depends
     return {'checked': len(users), 'updated': updated}
 
 
+@app.get('/admin/debug-user')
+def admin_debug_user(secret: str, email: str, db: Session = Depends(get_db)):
+    """Muestra datos de targeting de un usuario para diagnóstico."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    u = db.query(User).filter(User.email == email).first()
+    if not u:
+        raise HTTPException(404, 'User not found')
+    commune_row = None
+    if u.county:
+        commune_row = db.query(CommuneMarketData).filter(
+            CommuneMarketData.commune.ilike(u.county.strip()),
+            CommuneMarketData.country == _country_code(u.country)
+        ).first()
+        if not commune_row:
+            commune_row = db.query(CommuneMarketData).filter(
+                CommuneMarketData.commune.ilike(f'%{u.county.strip()}%')
+            ).first()
+    return {
+        'id': u.id, 'email': u.email, 'name': u.name,
+        'country': u.country, 'county': u.county,
+        'profession': getattr(u, 'profession', ''),
+        'se_tier': u.se_tier, 'income_index': u.income_index,
+        'commune_match': {
+            'commune': commune_row.commune, 'se_tier': commune_row.se_tier,
+            'income_index': commune_row.income_index,
+        } if commune_row else None,
+    }
+
 @app.post('/admin/seed-opinions')
 def seed_opinions(secret: str, debate_id: int, count: int = 8, db: Session = Depends(get_db)):
     """Agrega opiniones de prueba a un debate para que aparezcan los ads (necesita ≥6)."""
