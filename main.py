@@ -2512,11 +2512,23 @@ def _assign_user_tier(user, db):
     profession_tier = _PROFESSION_TIER.get(getattr(user, 'profession', '') or '', None)
     cargo_tier      = _CARGO_TIER.get(getattr(user, 'cargo', '') or '', None)
 
-    # Tier final: el más alto entre comuna, profesión y cargo
-    # (un CEO en Conchalí = tier A; un analista en Vitacura = tier A por comuna)
-    candidates = [t for t in [commune_tier, profession_tier, cargo_tier] if t]
-    if candidates:
-        user.se_tier = max(candidates, key=_tier_rank)
+    # Tier base: el más alto entre comuna y profesión (datos más confiables)
+    base_candidates = [t for t in [commune_tier, profession_tier] if t]
+    base_tier = max(base_candidates, key=_tier_rank) if base_candidates else None
+
+    # Cargo sube máximo UN nivel sobre el tier base (evita que alguien mienta poniendo CEO)
+    if base_tier and cargo_tier:
+        base_rank  = _tier_rank(base_tier)
+        cargo_rank = _tier_rank(cargo_tier)
+        if cargo_rank > base_rank + 1:
+            # Cargo demasiado alto para la base — sube solo un nivel
+            tier_ladder = ['D', 'C', 'B', 'A']
+            cargo_tier  = tier_ladder[min(base_rank, 3)]  # base_rank ya es 1-based index
+        user.se_tier = max(base_tier, cargo_tier, key=_tier_rank)
+    elif base_tier:
+        user.se_tier = base_tier
+    elif cargo_tier:
+        user.se_tier = cargo_tier
 
     db.commit()
 
