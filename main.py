@@ -7300,6 +7300,18 @@ def admin_debug_user(secret: str, email: str, db: Session = Depends(get_db)):
         } if commune_row else None,
     }
 
+@app.post('/admin/fix-user-tier')
+def admin_fix_user_tier(secret: str, email: str, db: Session = Depends(get_db)):
+    """Fuerza recalculo de se_tier para un usuario específico."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    u = db.query(User).filter(User.email == email).first()
+    if not u:
+        raise HTTPException(404, 'User not found')
+    before = u.se_tier
+    _assign_user_tier(u, db)
+    return {'email': email, 'county': u.county, 'before': before, 'se_tier': u.se_tier, 'income_index': u.income_index}
+
 @app.post('/admin/seed-opinions')
 def seed_opinions(secret: str, debate_id: int, count: int = 8, db: Session = Depends(get_db)):
     """Agrega opiniones de prueba a un debate para que aparezcan los ads (necesita ≥6)."""
