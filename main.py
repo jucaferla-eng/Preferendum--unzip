@@ -6299,7 +6299,6 @@ def admin_search_users(q: str, secret: str, db: Session = Depends(get_db)):
                         'selfie_verified': u.selfie_verified, 'verify_level': u.verify_level,
                         'se_tier': u.se_tier, 'commune': u.commune, 'country': u.country,
                         'profession': u.profession, 'cargo': u.cargo, 'company_size': u.company_size,
-                        'zipcode': u.zipcode,
                         'created_at': str(u.created_at)} for u in users]}
 
 @app.post('/admin/users/reset-password')
