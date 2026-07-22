@@ -1430,8 +1430,8 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
     </a>
     <a href="/marketers" class="role-card">
       <span class="role-arrow">→</span>
-      <div class="role-name">I'm a Conversation Sponsor</div>
-      <div class="role-phrase">"This consultation was facilitated by [Your Brand]." Sponsor public choice — not advertising.</div>
+      <div class="role-name">I want to sponsor consultations</div>
+      <div class="role-phrase">"Keep participation free. Enable better decisions."</div>
     </a>
   </div>
   <button class="back-btn" onclick="showPage1()">← Back</button>
