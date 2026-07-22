@@ -2554,21 +2554,29 @@ def _assign_user_tier(user, db):
                 commune_tier      = _get_tier(avg_index)
                 user.income_index = avg_index
 
-    profession_tier = _PROFESSION_TIER.get(getattr(user, 'profession', '') or '', None)
-    cargo_tier      = _CARGO_TIER.get(getattr(user, 'cargo', '') or '', None)
+    profession_tier  = _PROFESSION_TIER.get(getattr(user, 'profession', '') or '', None)
+    cargo_tier       = _CARGO_TIER.get(getattr(user, 'cargo', '') or '', None)
+    company_size     = getattr(user, 'company_size', '') or ''
 
-    # Tier base: el más alto entre comuna y profesión (datos más confiables)
+    # Empresa grande (251+ empleados) sube el cargo 1 nivel adicional
+    # Lógica: gerente general de Copec ≠ gerente general de empresa de 5 personas
+    _BIG_COMPANY_SIZES = {'+1000', '251-1000'}
+    if cargo_tier and company_size in _BIG_COMPANY_SIZES:
+        tier_ladder  = ['D', 'C', 'B', 'A']
+        cargo_rank   = _tier_rank(cargo_tier)
+        cargo_tier   = tier_ladder[min(cargo_rank, 3)]  # sube 1 nivel (ya está en índice 0-3)
+
+    # Tier base: el más alto entre comuna y profesión
     base_candidates = [t for t in [commune_tier, profession_tier] if t]
     base_tier = max(base_candidates, key=_tier_rank) if base_candidates else None
 
-    # Cargo sube máximo UN nivel sobre el tier base (evita que alguien mienta poniendo CEO)
+    # Cargo (ya ajustado por tamaño empresa) sube máximo UN nivel sobre el tier base
     if base_tier and cargo_tier:
         base_rank  = _tier_rank(base_tier)
         cargo_rank = _tier_rank(cargo_tier)
         if cargo_rank > base_rank + 1:
-            # Cargo demasiado alto para la base — sube solo un nivel
             tier_ladder = ['D', 'C', 'B', 'A']
-            cargo_tier  = tier_ladder[min(base_rank, 3)]  # base_rank ya es 1-based index
+            cargo_tier  = tier_ladder[min(base_rank, 3)]
         user.se_tier = max(base_tier, cargo_tier, key=_tier_rank)
     elif base_tier:
         user.se_tier = base_tier
