@@ -457,6 +457,17 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
           </optgroup>
         </select>
       </div>
+      <div class="form-group">
+        <label>Número de empleados en tu empresa</label>
+        <select id="r-company-size">
+          <option value="">— selecciona —</option>
+          <option value="1-10">1 – 10 empleados</option>
+          <option value="11-50">11 – 50 empleados</option>
+          <option value="51-250">51 – 250 empleados</option>
+          <option value="251-1000">251 – 1,000 empleados</option>
+          <option value="+1000">+1,000 empleados</option>
+        </select>
+      </div>
       <button class="btn" onclick="doRegister()">Crear cuenta →</button>
       <p class="auth-err" id="r-err"></p>
     </div>
@@ -1367,8 +1378,9 @@ async function doRegister() {
   const gender  = document.getElementById('r-gender').value;
   const country = document.getElementById('r-country').value;
   const commune    = document.getElementById('r-commune').value.trim();
-  const profession = document.getElementById('r-profession').value;
-  const cargo      = document.getElementById('r-cargo').value;
+  const profession   = document.getElementById('r-profession').value;
+  const cargo        = document.getElementById('r-cargo').value;
+  const company_size = document.getElementById('r-company-size').value;
 
   if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'Nombre, email y contraseña son obligatorios'; return; }
   if (pass.length < 6) { document.getElementById('r-err').textContent = 'La contraseña debe tener mínimo 6 caracteres'; return; }
@@ -1385,7 +1397,7 @@ async function doRegister() {
     const r = await fetch(`${API}/voter/register`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({name, email, password: pass, country,
-        phone, national_id: rut, dob, gender, commune, profession, cargo, device_fp: deviceFpReg})
+        phone, national_id: rut, dob, gender, commune, profession, cargo, company_size, device_fp: deviceFpReg})
     });
     const d = await r.json();
     btn.disabled = false; btn.textContent = 'Create Account →';

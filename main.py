@@ -97,6 +97,7 @@ class User(Base):
     income_index    = Column(Float, default=0.0)   # índice de ingreso de su comuna
     profession      = Column(String, default='')   # profesión declarada al registrarse
     cargo           = Column(String, default='')   # cargo/posición jerárquica
+    company_size    = Column(String, default='')   # tamaño de empresa: 1-10, 11-50, etc.
     gender          = Column(String, default='F')
     dob             = Column(String, default='')
     national_id     = Column(String, default='')
@@ -589,7 +590,8 @@ def _migrate():
         existing_user_cols = {c['name'] for c in inspector.get_columns('users')} if inspector.has_table('users') else set()
         for col, defn in [('se_tier', "TEXT DEFAULT ''"), ('income_index', 'FLOAT DEFAULT 0.0'),
                           ('doc_serial', "TEXT DEFAULT ''"), ('profession', "TEXT DEFAULT ''"),
-                          ('cargo', "TEXT DEFAULT ''")]:
+                          ('cargo', "TEXT DEFAULT ''"),
+                          ('company_size', "TEXT DEFAULT ''")]:
             if col not in existing_user_cols:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
@@ -1664,9 +1666,10 @@ class VoterRegisterInput(BaseModel):
     gender:      str = ''
     dob:         str = ''   # YYYY-MM-DD
     commune:     str = ''   # comuna declarada
-    profession:  str        # profesión declarada — obligatoria para tier
-    cargo:       str        # cargo jerárquico (ceo, gerente, analista, etc.) — obligatorio
-    device_fp:   str = ''
+    profession:   str        # profesión declarada — obligatoria para tier
+    cargo:        str        # cargo jerárquico (ceo, gerente, analista, etc.) — obligatorio
+    company_size: str = ''   # tamaño de empresa (opcional)
+    device_fp:    str = ''
 
 
 @app.post('/voter/register')
@@ -1707,6 +1710,7 @@ def voter_register(data: VoterRegisterInput, bg: BackgroundTasks, db: Session = 
         gender=data.gender, dob=data.dob, national_id=data.national_id,
         profession=data.profession or '',
         cargo=data.cargo or '',
+        company_size=data.company_size or '',
     )
     db.add(user)
     db.commit()
