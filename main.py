@@ -1426,7 +1426,7 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
     <a href="/organizers" class="role-card">
       <span class="role-arrow">→</span>
       <div class="role-name">I want to run a consultation</div>
-      <div class="role-phrase">"Do you want to ask your peers to express their preferences?"</div>
+      <div class="role-phrase">"Do you want to ask your peers to express their preferences to discover collective preferences and define the path forward?"</div>
     </a>
     <a href="/marketers" class="role-card">
       <span class="role-arrow">→</span>
