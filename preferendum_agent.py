@@ -875,8 +875,35 @@ CIVIC_CATEGORIES = [
     'agriculture', 'transport', 'pymes', 'regional',
 ]
 
-# Simple dedup — stores hashes of debate titles created this session
-_created_this_run: set = set()
+# Dedup persistente — guarda hashes de debates creados en los últimos 60 días
+_DEDUP_FILE = '/tmp/preferendum_debate_hashes.json'
+
+def _load_dedup_hashes() -> set:
+    try:
+        with open(_DEDUP_FILE) as f:
+            data = json.load(f)
+        cutoff = (datetime.utcnow() - timedelta(days=60)).isoformat()
+        return {h for h, ts in data.items() if ts > cutoff}
+    except Exception:
+        return set()
+
+def _save_dedup_hash(h: str):
+    try:
+        data = {}
+        try:
+            with open(_DEDUP_FILE) as f:
+                data = json.load(f)
+        except Exception:
+            pass
+        data[h] = datetime.utcnow().isoformat()
+        cutoff = (datetime.utcnow() - timedelta(days=60)).isoformat()
+        data = {k: v for k, v in data.items() if v > cutoff}
+        with open(_DEDUP_FILE, 'w') as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+_created_this_run: set = _load_dedup_hashes()
 
 
 def _fetch_article_body(url: str, max_chars: int = 1500) -> str:
@@ -1033,9 +1060,9 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional."""
 
 def _find_similar_debate(question: str, country_code: str) -> dict | None:
     """
-    Search existing live debates for one that covers the same topic.
+    Search existing debates (live + closed last 60 days) for the same topic.
     Uses keyword overlap — if 3+ significant words match an existing title,
-    we consider it the same debate and converge new participants there.
+    we consider it a duplicate and skip creation.
     Returns the matching debate dict or None.
     """
     STOP_WORDS = {'el','la','los','las','un','una','de','del','en','que','qué',
@@ -1046,23 +1073,40 @@ def _find_similar_debate(question: str, country_code: str) -> dict | None:
         return {w for w in words if w not in STOP_WORDS}
 
     q_kw = keywords(question)
+    all_debates = []
     try:
-        r = _requests.get(f'{BACKEND_URL}/debates?limit=50', timeout=10)
-        if not r.ok:
-            return None
-        debates = r.json().get('debates', [])
-        for d in debates:
-            if d.get('scope_country') != country_code and country_code != 'GL':
-                continue
-            if d.get('status') != 'live':
-                continue
-            d_kw = keywords(d.get('title', ''))
-            overlap = len(q_kw & d_kw)
-            if overlap >= 3:
-                print(f'[Convergence] Merging into existing debate #{d["id"]} (overlap={overlap}): {d["title"][:60]}')
-                return d
+        # Debates live activos
+        r = _requests.get(f'{BACKEND_URL}/debates?limit=100&status=live&country=ALL', timeout=10)
+        if r.ok:
+            all_debates.extend(r.json().get('debates', []))
+        # Debates cerrados recientes (últimos 60 días)
+        r2 = _requests.get(f'{BACKEND_URL}/debates?limit=100&status=expired&country=ALL', timeout=10)
+        if r2.ok:
+            all_debates.extend(r2.json().get('debates', []))
     except Exception as e:
         print(f'[Convergence] Search error: {e}')
+        return None
+
+    cutoff = datetime.utcnow() - timedelta(days=60)
+    for d in all_debates:
+        # Filtrar por país
+        d_country = d.get('scope_country') or ''
+        if d_country not in (country_code, 'GL', 'ALL', 'GLOBAL', ''):
+            continue
+        # Para expirados, solo revisar los últimos 60 días
+        closes_at = d.get('closes_at') or ''
+        if closes_at:
+            try:
+                closed_dt = datetime.fromisoformat(closes_at.replace('Z',''))
+                if closed_dt < cutoff:
+                    continue
+            except Exception:
+                pass
+        d_kw = keywords(d.get('title', ''))
+        overlap = len(q_kw & d_kw)
+        if overlap >= 3:
+            print(f'[Convergence] Duplicate found #{d["id"]} (overlap={overlap}): {d["title"][:60]}')
+            return d
     return None
 
 
@@ -1140,8 +1184,8 @@ def run_global_debates(max_per_feed: int = 2) -> dict:
             if q_hash in _created_this_run:
                 total_skipped += 1
                 continue
-            _created_this_run.add(title_hash)
-            _created_this_run.add(q_hash)
+            _created_this_run.add(title_hash); _save_dedup_hash(title_hash)
+            _created_this_run.add(q_hash); _save_dedup_hash(q_hash)
             debate['scope'] = 'global'
             if _create_debate_via_api(debate, 'GL'):
                 created += 1
@@ -1210,8 +1254,8 @@ def run_topic_debates(max_per_topic: int = 1) -> dict:
                 total_skipped += 1
                 continue
 
-            _created_this_run.add(title_hash)
-            _created_this_run.add(q_hash)
+            _created_this_run.add(title_hash); _save_dedup_hash(title_hash)
+            _created_this_run.add(q_hash); _save_dedup_hash(q_hash)
             if is_global:
                 debate['scope'] = 'global'
 
@@ -1282,8 +1326,8 @@ def run_daily_debates() -> dict:
                 total_skipped += 1
                 continue
 
-            _created_this_run.add(title_hash)
-            _created_this_run.add(q_hash)
+            _created_this_run.add(title_hash); _save_dedup_hash(title_hash)
+            _created_this_run.add(q_hash); _save_dedup_hash(q_hash)
 
             if _create_debate_via_api(debate, country['code']):
                 created_for_country += 1
@@ -1377,8 +1421,8 @@ def run_local_media_debates(max_per_country: int = 1) -> dict:
                     total_skipped += 1
                     continue
 
-                _created_this_run.add(title_hash)
-                _created_this_run.add(q_hash)
+                _created_this_run.add(title_hash); _save_dedup_hash(title_hash)
+                _created_this_run.add(q_hash); _save_dedup_hash(q_hash)
 
                 if _create_debate_via_api(debate, country_code):
                     created_for_country += 1
@@ -1702,8 +1746,8 @@ def run_culture_debates(max_per_country: int = 2) -> dict:
                 total_skipped += 1
                 continue
 
-            _created_this_run.add(topic_hash)
-            _created_this_run.add(q_hash)
+            _created_this_run.add(topic_hash); _save_dedup_hash(topic_hash)
+            _created_this_run.add(q_hash); _save_dedup_hash(q_hash)
 
             if _create_debate_via_api(debate, country_code):
                 created_for_country += 1
@@ -1742,7 +1786,7 @@ def run_culture_debates(max_per_country: int = 2) -> dict:
             q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
             if q_hash in _created_this_run:
                 continue
-            _created_this_run.add(q_hash)
+            _created_this_run.add(q_hash); _save_dedup_hash(q_hash)
             if _create_debate_via_api(debate, country['code']):
                 created_for_country += 1
                 total_created += 1
@@ -1937,8 +1981,8 @@ def run_general_knowledge_debates(max_debates: int = 5) -> dict:
             total_skipped += 1
             continue
 
-        _created_this_run.add(topic_hash)
-        _created_this_run.add(q_hash)
+        _created_this_run.add(topic_hash); _save_dedup_hash(topic_hash)
+        _created_this_run.add(q_hash); _save_dedup_hash(q_hash)
         debate['scope'] = 'global'
 
         if _create_debate_via_api(debate, 'GL'):
@@ -2007,8 +2051,8 @@ def run_regional_debates(max_per_region: int = 1, force: bool = False) -> dict:
             q_hash = hashlib.sha256(debate['question'].encode()).hexdigest()[:16]
             if q_hash in _created_this_run:
                 continue
-            _created_this_run.add(title_hash)
-            _created_this_run.add(q_hash)
+            _created_this_run.add(title_hash); _save_dedup_hash(title_hash)
+            _created_this_run.add(q_hash); _save_dedup_hash(q_hash)
             if force:
                 # Bypass dedup — create directly
                 from datetime import timedelta
