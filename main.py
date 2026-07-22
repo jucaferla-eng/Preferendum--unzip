@@ -6297,7 +6297,8 @@ def admin_search_users(q: str, secret: str, db: Session = Depends(get_db)):
     return {'users': [{'id': u.id, 'email': u.email, 'name': u.name, 'role': u.role,
                         'email_verified': u.email_verified, 'phone_verified': u.phone_verified,
                         'selfie_verified': u.selfie_verified, 'verify_level': u.verify_level,
-                        'se_tier': u.se_tier, 'commune': u.commune, 'country': u.country,
+                        'se_tier': u.se_tier, 'commune': u.county, 'country': u.country,
+                        'income_index': u.income_index,
                         'profession': u.profession, 'cargo': u.cargo, 'company_size': u.company_size,
                         'created_at': str(u.created_at)} for u in users]}
 
