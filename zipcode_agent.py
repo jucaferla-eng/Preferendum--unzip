@@ -1505,6 +1505,579 @@ POSTAL_PREFIX_DATA: dict[str, list] = {
         ('640',   18, 150_000), # Maiduguri
         ('840',   18, 100_000), # Zaria
     ],
+
+    # ══════════════════════════════════════════════════════════════
+    # EMIRATOS ÁRABES UNIDOS — AE
+    # ══════════════════════════════════════════════════════════════
+    'AE': [
+        ('10', 100, 100_000), # Downtown Dubai / Palm Jumeirah / DIFC
+        ('20',  92, 120_000), # Dubai Marina / JBR / JLT
+        ('30',  82,  90_000), # Business Bay / Jumeirah
+        ('40',  88, 100_000), # Abu Dhabi Corniche / Al Reem Island
+        ('50',  80,  80_000), # Abu Dhabi Yas Island / Saadiyat
+        ('60',  55, 200_000), # Sharjah premium
+        ('61',  42, 300_000), # Sharjah general
+        ('70',  35, 250_000), # Ajman
+        ('71',  40, 150_000), # Ras Al Khaimah
+        ('72',  30, 100_000), # Fujairah
+        ('73',  28,  80_000), # Umm Al Quwain
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # AUSTRIA — AT
+    # ══════════════════════════════════════════════════════════════
+    'AT': [
+        ('10', 100, 400_000), # Viena distritos interiores (1.-9. Bezirk)
+        ('11',  75, 300_000), # Viena distritos exteriores
+        ('20',  50, 150_000), # Baja Austria cerca de Viena
+        ('21',  45, 100_000), # Baja Austria general
+        ('30',  45, 200_000), # Alta Austria norte
+        ('40',  55, 200_000), # Linz
+        ('50',  82, 150_000), # Salzburgo ciudad
+        ('51',  65, 100_000), # Salzburgo Land
+        ('52',  55,  80_000), # Salzburgo rural
+        ('60',  72, 130_000), # Innsbruck / Tirol
+        ('61',  88,  50_000), # Kitzbühel y resorts de Tirol
+        ('62',  58,  80_000), # Tirol medio
+        ('63',  65,  90_000), # Vorarlberg (Bregenz/Dornbirn)
+        ('64',  58,  60_000), # Vorarlberg medio
+        ('70',  38,  80_000), # Burgenland
+        ('80',  60, 180_000), # Graz / Estiria
+        ('81',  42, 100_000), # Estiria media
+        ('82',  35,  80_000), # Estiria rural
+        ('90',  52, 100_000), # Klagenfurt / Carintia
+        ('91',  40,  80_000), # Carintia general
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # CHINA — CN
+    # ══════════════════════════════════════════════════════════════
+    'CN': [
+        ('100', 100, 5_000_000), # Beijing centro (Dongcheng/Xicheng)
+        ('101',  72, 3_000_000), # Beijing suburbios
+        ('102',  55, 2_000_000), # Beijing outer
+        ('200', 100, 5_000_000), # Shanghai Huangpu/Jing'an
+        ('201',  75, 4_000_000), # Shanghai Pudong/Changning
+        ('202',  55, 2_000_000), # Shanghai lejano
+        ('310',  68, 1_500_000), # Hangzhou
+        ('315',  65, 1_000_000), # Ningbo
+        ('350',  55,   800_000), # Fuzhou
+        ('361',  70,   800_000), # Xiamen
+        ('370',  60,   900_000), # Qingdao
+        ('410',  45, 1_200_000), # Zhengzhou
+        ('420',  52, 1_500_000), # Wuhan
+        ('430',  50, 1_000_000), # Changsha
+        ('510',  78, 2_500_000), # Guangzhou
+        ('511',  62, 1_500_000), # Foshan
+        ('518',  95, 2_000_000), # Shenzhen Futian/Nanshan
+        ('519',  75, 1_500_000), # Shenzhen outer
+        ('520',  55,   800_000), # Dongguan
+        ('530',  45,   800_000), # Nanning
+        ('570',  60,   500_000), # Hainan/Sanya
+        ('610',  58, 1_800_000), # Chengdu
+        ('550',  35,   600_000), # Guiyang
+        ('650',  40,   700_000), # Kunming
+        ('710',  48, 1_200_000), # Xi'an
+        ('730',  35,   500_000), # Lanzhou
+        ('830',  38,   400_000), # Urumqi
+        ('750',  32,   300_000), # Yinchuan
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # CHEQUIA — CZ
+    # ══════════════════════════════════════════════════════════════
+    'CZ': [
+        ('10', 100, 600_000), # Praga 1-4 (centro)
+        ('11',  80, 400_000), # Praga 5-8
+        ('12',  68, 300_000), # Praga 9-12
+        ('14',  58, 200_000), # Praga outer
+        ('15',  52, 150_000), # Praga farther
+        ('16',  48, 150_000), # Praga suburbios
+        ('25',  50, 200_000), # Bohemia Central (cerca de Praga)
+        ('27',  35, 150_000), # Bohemia Norte oeste
+        ('36',  55, 180_000), # Bohemia Oeste / Plzeň
+        ('46',  42, 100_000), # Liberec
+        ('50',  45, 150_000), # Hradec Králové
+        ('58',  40, 100_000), # Bohemia Este / Jihlava
+        ('60',  72, 400_000), # Brno centro
+        ('61',  58, 200_000), # Brno suburbios
+        ('62',  50, 150_000), # Brno outer
+        ('70',  48, 300_000), # Ostrava
+        ('71',  38, 150_000), # Ostrava suburbios
+        ('75',  45, 150_000), # Zlín
+        ('79',  45, 150_000), # Olomouc
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # GRECIA — GR
+    # ══════════════════════════════════════════════════════════════
+    'GR': [
+        ('10', 100, 500_000), # Atenas centro (Kolonaki/Syntagma)
+        ('11',  85, 300_000), # Atenas norte premium (Kifisia)
+        ('12',  45, 400_000), # Atenas oeste (Peristeri)
+        ('14',  80, 250_000), # Atenas Marousi/Kifisia
+        ('15',  75, 200_000), # Atenas norte suburbio
+        ('16',  88, 150_000), # Atenas sur premium (Glyfada/Vouliagmeni)
+        ('17',  55, 300_000), # Atenas sur (Kallithea)
+        ('18',  62, 400_000), # Pireo premium
+        ('19',  78, 150_000), # Attica este (Vari/Voula)
+        ('54',  70, 300_000), # Tesalónica centro
+        ('55',  62, 200_000), # Tesalónica este
+        ('56',  42, 200_000), # Tesalónica oeste
+        ('57',  48, 150_000), # Tesalónica suburbios
+        ('26',  45, 200_000), # Patras
+        ('41',  40, 150_000), # Larissa
+        ('71',  50, 180_000), # Heraklion Creta
+        ('85',  55, 100_000), # Rodas
+        ('49',  52,  80_000), # Corfú
+        ('82',  40,  80_000), # Lesbos
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # HUNGRÍA — HU
+    # ══════════════════════════════════════════════════════════════
+    'HU': [
+        ('10', 100, 300_000), # Budapest 1.-4. distritos
+        ('11',  88, 400_000), # Budapest 5.-9.
+        ('12',  72, 300_000), # Budapest 10.-14.
+        ('13',  60, 250_000), # Budapest 15.-19.
+        ('14',  52, 200_000), # Budapest 20.-23.
+        ('20',  55, 400_000), # Suburbios Budapest (Pest county)
+        ('21',  45, 200_000), # Suburbios más lejanos
+        ('22',  40, 150_000), # Pest county sur
+        ('23',  38, 100_000), # Pest county este
+        ('27',  30, 100_000), # Nógrád
+        ('36',  42, 100_000), # Eger
+        ('40',  55, 200_000), # Debrecen
+        ('42',  40, 150_000), # Debrecen outer
+        ('43',  35, 120_000), # Nyíregyháza
+        ('44',  32, 180_000), # Miskolc
+        ('50',  35, 150_000), # Szolnok
+        ('60',  45, 150_000), # Kecskemét
+        ('70',  48, 180_000), # Pécs
+        ('80',  52, 130_000), # Győr
+        ('84',  40, 100_000), # Veszprém
+        ('90',  62,  80_000), # Sopron (cerca de Austria)
+        ('94',  35, 100_000), # Zalaegerszeg
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # ISRAEL — IL
+    # ══════════════════════════════════════════════════════════════
+    'IL': [
+        ('60', 100, 450_000), # Tel Aviv Rothschild/Neve Tzedek
+        ('61',  90, 400_000), # Tel Aviv centro
+        ('62',  88, 150_000), # Tel Aviv norte (Ramat Aviv)
+        ('63',  70, 200_000), # Tel Aviv sur
+        ('66',  95,  50_000), # Herzliya Pituah (premium)
+        ('52',  80, 150_000), # Givatayim / Ramat Gan premium
+        ('67',  72, 200_000), # Ramat Gan general
+        ('68',  45, 200_000), # Bnei Brak
+        ('46',  65, 200_000), # Hod HaSharon / Kfar Saba
+        ('40',  60, 200_000), # Netanya
+        ('32',  70, 100_000), # Haifa Carmel
+        ('33',  55, 200_000), # Haifa centro
+        ('35',  45, 150_000), # Hadera
+        ('74',  45, 200_000), # Ashdod
+        ('77',  38, 250_000), # Beer Sheva
+        ('90',  72, 300_000), # Jerusalén centro
+        ('91',  65, 200_000), # Jerusalén norte
+        ('92',  45, 150_000), # Jerusalén sur
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # IRAK — IQ
+    # ══════════════════════════════════════════════════════════════
+    'IQ': [
+        ('10', 100, 300_000), # Bagdad Karrada/Mansour premium
+        ('11',  80, 400_000), # Bagdad Zayouna/Jadriya
+        ('12',  70, 500_000), # Bagdad Karada
+        ('13',  50, 600_000), # Bagdad oeste
+        ('14',  45, 500_000), # Bagdad este
+        ('15',  35, 400_000), # Bagdad outer
+        ('16',  28, 300_000), # Bagdad suburbios
+        ('36',  60, 200_000), # Basra ciudad
+        ('37',  55, 150_000), # Basra zonas petroleras
+        ('38',  30, 200_000), # Basra rural
+        ('44',  75, 200_000), # Erbil (Kurdistan)
+        ('45',  62, 150_000), # Sulaymaniyah
+        ('46',  50, 100_000), # Dohuk
+        ('56',  35, 300_000), # Mosul
+        ('60',  42, 200_000), # Kirkuk
+        ('61',  38, 150_000), # Najaf
+        ('54',  38, 150_000), # Karbala
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # IRÁN — IR
+    # ══════════════════════════════════════════════════════════════
+    'IR': [
+        ('11', 100, 500_000), # Teherán norte (Shemiran/Zafaraniyeh)
+        ('13',  90, 300_000), # Teherán Elahiyeh/Jordan
+        ('12',  85, 400_000), # Teherán centro premium
+        ('14',  80, 300_000), # Teherán Saadat Abad
+        ('15',  65, 500_000), # Teherán oeste
+        ('16',  55, 600_000), # Teherán este
+        ('17',  45, 600_000), # Teherán sur
+        ('18',  40, 500_000), # Teherán suroeste
+        ('19',  32, 400_000), # Teherán sur lejano
+        ('38',  55, 500_000), # Karaj
+        ('31',  65, 600_000), # Isfahan
+        ('32',  48, 300_000), # Isfahan outer
+        ('51',  60, 700_000), # Mashhad
+        ('52',  42, 300_000), # Mashhad outer
+        ('71',  55, 500_000), # Shiraz
+        ('72',  40, 300_000), # Shiraz outer
+        ('41',  52, 600_000), # Tabriz
+        ('76',  78, 100_000), # Kish Island (zona libre)
+        ('79',  45, 200_000), # Bandar Abbas
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # JAPÓN — JP
+    # ══════════════════════════════════════════════════════════════
+    'JP': [
+        ('100', 100, 100_000), # Tokyo Chiyoda (zona imperial/financiera)
+        ('106', 98,   80_000), # Tokyo Minato Azabu/Roppongi
+        ('107', 95,   80_000), # Tokyo Akasaka/Roppongi Hills
+        ('105', 92,  100_000), # Tokyo Minato
+        ('108', 88,  100_000), # Tokyo Shiba/Takanawa
+        ('150', 88,  200_000), # Tokyo Shibuya
+        ('153', 85,  150_000), # Tokyo Meguro
+        ('145', 80,  200_000), # Tokyo Shinagawa
+        ('160', 82,  200_000), # Tokyo Shinjuku
+        ('155', 78,  250_000), # Tokyo Setagaya premium
+        ('141', 78,  150_000), # Tokyo Shinagawa estación
+        ('135', 75,  200_000), # Tokyo Koto (Toyosu/Ariake)
+        ('167', 75,  150_000), # Tokyo Suginami premium
+        ('171', 70,  250_000), # Tokyo Toshima/Ikebukuro
+        ('180', 72,  300_000), # Tokyo Nerima/Suginami
+        ('130', 65,  300_000), # Tokyo Sumida
+        ('111', 62,  200_000), # Tokyo Taito/Asakusa
+        ('110', 62,  200_000), # Tokyo Taito
+        ('125', 50,  300_000), # Tokyo Katsushika
+        ('120', 48,  400_000), # Tokyo Adachi
+        ('190', 58,  400_000), # Tokyo oeste (Tachikawa)
+        ('194', 45,  300_000), # Tokyo lejano oeste
+        ('220', 78,  300_000), # Yokohama Nishi
+        ('231', 72,  200_000), # Yokohama centro
+        ('221', 65,  300_000), # Yokohama Kanagawa
+        ('530', 82,  200_000), # Osaka Kita (Umeda/Nakanoshima)
+        ('540', 70,  300_000), # Osaka centro
+        ('542', 68,  200_000), # Osaka Namba
+        ('550', 65,  200_000), # Osaka Fukushima
+        ('600', 72,  200_000), # Kyoto centro
+        ('603', 65,  150_000), # Kyoto norte
+        ('460', 72,  200_000), # Nagoya Naka
+        ('450', 70,  300_000), # Nagoya estación
+        ('464', 68,  200_000), # Nagoya Chikusa
+        ('810', 62,  300_000), # Fukuoka Chuo
+        ('812', 60,  300_000), # Fukuoka Hakata
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # COREA DEL SUR — KR
+    # ══════════════════════════════════════════════════════════════
+    'KR': [
+        ('06', 100, 600_000), # Seúl Gangnam/Seocho (premium)
+        ('05',  88, 500_000), # Seúl Songpa/Gwangjin
+        ('13',  88, 400_000), # Seongnam/Bundang (Gyeonggi premium)
+        ('07',  85, 400_000), # Seúl Mapo/Yongsan
+        ('03',  80, 300_000), # Seúl Jongno/Jung
+        ('04',  72, 300_000), # Seúl Jung/Seongdong
+        ('08',  65, 500_000), # Seúl Yangcheon/Gangseo
+        ('01',  55, 500_000), # Seúl Dobong/Nowon
+        ('02',  58, 400_000), # Seúl Seongbuk/Jungnang
+        ('16',  62, 500_000), # Suwon
+        ('10',  55, 400_000), # Gyeonggi norte
+        ('14',  52, 300_000), # Gyeonggi este
+        ('17',  55, 400_000), # Gyeonggi sur
+        ('38',  65, 300_000), # Sejong City (nueva capital)
+        ('21',  58, 300_000), # Incheon centro
+        ('22',  45, 300_000), # Incheon outer
+        ('35',  60, 400_000), # Daejeon centro
+        ('41',  58, 400_000), # Daegu centro
+        ('46',  82, 200_000), # Busan Haeundae (premium)
+        ('47',  65, 400_000), # Busan centro
+        ('48',  48, 300_000), # Busan Saha/outer
+        ('63',  62, 200_000), # Jeju Island
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # KAZAJISTÁN — KZ
+    # ══════════════════════════════════════════════════════════════
+    'KZ': [
+        ('010', 100, 400_000), # Astana/Nur-Sultan centro
+        ('011',  72, 300_000), # Astana outer
+        ('050',  95, 500_000), # Almaty centro premium (Medeu/Bostandyk)
+        ('051',  80, 400_000), # Almaty inner
+        ('052',  60, 300_000), # Almaty outer
+        ('053',  45, 200_000), # Almaty suburbios
+        ('040',  58, 200_000), # Atyrau (ciudad petrolera)
+        ('060',  45, 150_000), # Aktau
+        ('071',  48, 300_000), # Shymkent
+        ('080',  42, 200_000), # Aktobe
+        ('100',  40, 400_000), # Karaganda
+        ('110',  35, 200_000), # Pavlodar
+        ('120',  32, 150_000), # Semey
+        ('130',  38, 150_000), # Ust-Kamenogorsk
+        ('140',  30, 150_000), # Petropavl
+        ('090',  32, 150_000), # Oral
+        ('070',  28, 200_000), # Kyzylorda
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # MALASIA — MY
+    # ══════════════════════════════════════════════════════════════
+    'MY': [
+        ('50', 100, 300_000), # KL Bukit Bintang / KLCC
+        ('51',  88, 200_000), # KL centro
+        ('47',  80, 400_000), # Subang Jaya / Damansara
+        ('52',  75, 300_000), # KL norte
+        ('41',  72, 600_000), # Petaling Jaya
+        ('53',  65, 300_000), # KL outer
+        ('40',  70, 400_000), # Shah Alam
+        ('54',  60, 250_000), # KL oeste
+        ('55',  58, 250_000), # KL sur
+        ('56',  55, 300_000), # KL Cheras
+        ('57',  50, 300_000), # KL Kepong
+        ('68',  60, 300_000), # Ampang / Hulu Langat
+        ('10', 78, 300_000), # Penang George Town
+        ('11',  65, 200_000), # Penang sur
+        ('12',  60, 150_000), # Penang inner
+        ('13',  50, 100_000), # Penang outer
+        ('80',  70, 400_000), # Johor Bahru centro
+        ('81',  58, 300_000), # Johor Bahru este
+        ('82',  48, 200_000), # Johor inner
+        ('88',  55, 200_000), # Kota Kinabalu (Sabah)
+        ('93',  50, 200_000), # Kuching (Sarawak)
+        ('25',  42, 200_000), # Kuantan
+        ('30',  48, 300_000), # Ipoh
+        ('15',  35, 200_000), # Kota Bharu (Kelantan)
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # POLONIA — PL
+    # ══════════════════════════════════════════════════════════════
+    'PL': [
+        ('00', 100, 400_000), # Varsovia centro (Śródmieście)
+        ('02',  88, 300_000), # Varsovia Mokotów premium
+        ('01',  82, 250_000), # Varsovia norte
+        ('04',  72, 300_000), # Varsovia sur
+        ('05',  68, 400_000), # Varsovia suburbios oeste
+        ('06',  60, 300_000), # Varsovia outer
+        ('07',  52, 200_000), # Varsovia suburbial
+        ('30',  88, 300_000), # Cracovia centro (Stare Miasto)
+        ('31',  82, 250_000), # Cracovia premium
+        ('32',  55, 200_000), # Cracovia norte
+        ('33',  48, 150_000), # Cracovia outer
+        ('50',  78, 300_000), # Wroclaw centro
+        ('51',  65, 200_000), # Wroclaw norte
+        ('52',  55, 200_000), # Wroclaw outer
+        ('60',  72, 300_000), # Poznan centro
+        ('61',  68, 250_000), # Poznan inner
+        ('62',  55, 200_000), # Poznan outer
+        ('80',  75, 250_000), # Gdansk centro
+        ('81',  78, 150_000), # Gdynia (premium)
+        ('82',  58, 200_000), # Gdansk outer
+        ('83',  48, 150_000), # Tricity outer
+        ('40',  55, 300_000), # Katowice
+        ('70',  60, 250_000), # Szczecin centro
+        ('20',  50, 200_000), # Lublin
+        ('10',  45, 150_000), # Olsztyn
+        ('15',  48, 200_000), # Białystok
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # CATAR — QA
+    # ══════════════════════════════════════════════════════════════
+    'QA': [
+        ('20', 100, 100_000), # Doha West Bay / Pearl Qatar
+        ('21',  95,  50_000), # Doha Diplomatic Zone
+        ('22',  90,  80_000), # Lusail City
+        ('23',  80, 150_000), # Doha centro
+        ('24',  70, 200_000), # Doha residencial
+        ('25',  58, 150_000), # Doha sur
+        ('26',  48, 100_000), # Doha outer
+        ('30',  55, 150_000), # Al Rayyan
+        ('27',  45, 100_000), # Al Wakrah
+        ('28',  38,  80_000), # Al Khor
+        ('29',  42,  60_000), # Mesaieed
+        ('31',  40,  80_000), # Umm Slal
+        ('32',  30,  50_000), # Al Shamal
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # RUMANÍA — RO
+    # ══════════════════════════════════════════════════════════════
+    'RO': [
+        ('01', 100, 300_000), # Bucarest sector 1 (Floreasca/Dorobanți)
+        ('02',  85, 350_000), # Bucarest sector 2 (Herăstrău)
+        ('03',  65, 350_000), # Bucarest sector 3
+        ('04',  55, 350_000), # Bucarest sector 4 sur
+        ('05',  48, 350_000), # Bucarest sector 5 sur
+        ('06',  58, 350_000), # Bucarest sector 6
+        ('07',  60, 300_000), # Ilfov county (suburbios)
+        ('30',  72, 300_000), # Timișoara centro
+        ('31',  55, 200_000), # Timișoara outer
+        ('40',  80, 300_000), # Cluj-Napoca centro
+        ('41',  62, 200_000), # Cluj-Napoca outer
+        ('50',  68, 250_000), # Brașov centro
+        ('51',  50, 150_000), # Brașov outer
+        ('60',  58, 200_000), # Sibiu
+        ('70',  55, 300_000), # Iași centro
+        ('71',  42, 200_000), # Iași outer
+        ('23',  55, 250_000), # Constanța
+        ('90',  62, 100_000), # Costa del Mar Negro
+        ('20',  48, 200_000), # Ploiești
+        ('10',  45, 180_000), # Pitești
+        ('80',  38, 250_000), # Galați/Brăila
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # RUSIA — RU
+    # ══════════════════════════════════════════════════════════════
+    'RU': [
+        ('121', 100, 300_000), # Moscú Fili/Khamovniki (premium oeste)
+        ('123',  95, 300_000), # Moscú Presnensky/Patriarshiye Prudy
+        ('117',  90, 400_000), # Moscú suroeste premium (Lomonosovskiy)
+        ('119',  88, 300_000), # Moscú Lomonosovskiy/MGU
+        ('101',  85, 200_000), # Moscú centro (Kitai-Gorod)
+        ('103',  82, 200_000), # Moscú Tverskoy
+        ('115',  72, 300_000), # Moscú Donskoy/Zamoskvorechye
+        ('109',  78, 300_000), # Moscú Taganka
+        ('105',  80, 300_000), # Moscú Sokolniki
+        ('107',  75, 300_000), # Moscú Baumanskaya
+        ('125',  70, 400_000), # Moscú norte
+        ('127',  65, 400_000), # Moscú Dmitrovsky
+        ('129',  68, 300_000), # Moscú Ostankino
+        ('113',  60, 300_000), # Moscú Nagatino
+        ('111',  65, 400_000), # Moscú Perovo
+        ('354',  65, 300_000), # Sochi
+        ('199',  80, 200_000), # San Petersburgo Petrogradsky
+        ('197',  72, 200_000), # San Petersburgo Vasilievsky Island
+        ('190',  78, 300_000), # San Petersburgo centro
+        ('191',  72, 250_000), # San Petersburgo centro este
+        ('194',  65, 300_000), # San Petersburgo norte
+        ('192',  60, 300_000), # San Petersburgo sur
+        ('196',  50, 250_000), # San Petersburgo sur outer
+        ('620',  52, 500_000), # Ekaterinburg
+        ('630',  48, 600_000), # Novosibirsk
+        ('350',  48, 600_000), # Krasnodar
+        ('344',  45, 500_000), # Rostov-on-Don
+        ('420',  52, 400_000), # Kazán
+        ('443',  48, 400_000), # Samara
+        ('450',  45, 400_000), # Ufá
+        ('454',  42, 400_000), # Cheliábinsk
+        ('660',  42, 400_000), # Krasnoyarsk
+        ('690',  45, 200_000), # Vladivostok
+        ('614',  42, 300_000), # Perm
+        ('400',  40, 500_000), # Volgogrado
+        ('664',  38, 200_000), # Irkutsk
+        ('670',  30, 200_000), # Ulán Udé
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # ARABIA SAUDITA — SA
+    # ══════════════════════════════════════════════════════════════
+    'SA': [
+        ('11', 100, 800_000), # Riad centro / Al Olaya / King Fahd Road
+        ('32',  90, 100_000), # Dhahran Aramco
+        ('12',  92, 600_000), # Yeda (Jeddah) centro / Al Hamra
+        ('13',  88, 300_000), # Al Khobar premium
+        ('21',  85, 400_000), # Yeda Corniche
+        ('22',  68, 300_000), # Yeda este
+        ('23',  55, 300_000), # Yeda sur
+        ('31',  78, 400_000), # Dammam
+        ('33',  72, 200_000), # Jubail industrial premium
+        ('24',  65, 500_000), # Medina
+        ('14',  70, 500_000), # La Meca
+        ('25',  45, 200_000), # Tabuk
+        ('26',  50, 150_000), # Yanbu
+        ('28',  42, 200_000), # Abha
+        ('34',  38, 200_000), # Hafar Al-Batin
+        ('35',  45, 150_000), # Qatif
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # TAILANDIA — TH
+    # ══════════════════════════════════════════════════════════════
+    'TH': [
+        ('10', 100, 800_000), # Bangkok Sukhumvit / Silom / Sathon
+        ('11',  85, 600_000), # Bangkok centro
+        ('12',  65, 500_000), # Bangkok norte
+        ('13',  55, 400_000), # Bangkok este
+        ('14',  45, 400_000), # Bangkok outer
+        ('15',  55, 300_000), # Pathum Thani
+        ('76',  80, 200_000), # Phuket
+        ('83',  72, 100_000), # Phuket ciudad
+        ('20',  58, 300_000), # Chonburi / Pattaya
+        ('21',  45, 200_000), # Chonburi inner
+        ('77',  65, 200_000), # Surat Thani / Koh Samui
+        ('50',  65, 300_000), # Chiang Mai
+        ('52',  50, 200_000), # Chiang Mai outer
+        ('51',  42, 150_000), # Chiang Rai
+        ('53',  35, 100_000), # Chiang Mai rural
+        ('73',  50, 150_000), # Nakhon Pathom
+        ('74',  48, 150_000), # Samut Sakhon
+        ('40',  42, 200_000), # Khon Kaen
+        ('41',  38, 200_000), # Udon Thani
+        ('80',  38, 200_000), # Nakhon Si Thammarat
+        ('84',  45, 150_000), # Surat Thani
+        ('90',  45, 200_000), # Songkhla / Hat Yai
+        ('25',  40, 200_000), # Ayutthaya
+        ('57',  28,  80_000), # Mae Hong Son
+        ('94',  28, 100_000), # Pattani
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # TURQUÍA — TR
+    # ══════════════════════════════════════════════════════════════
+    'TR': [
+        ('34', 100, 3_000_000), # Estambul (ambos lados)
+        ('35',  88, 800_000),   # İzmir Konak / Alsancak
+        ('48',  82, 300_000),   # Muğla / Bodrum / Marmaris
+        ('61',  80, 400_000),   # Trabzon (alto turismo)
+        ('06',  78, 800_000),   # Ankara Çankaya / Kavaklidere
+        ('07',  72, 500_000),   # Antalya centro
+        ('09',  68, 400_000),   # Aydın / Bodrum interior
+        ('77',  55, 200_000),   # Yalova
+        ('59',  52, 200_000),   # Tekirdağ
+        ('41',  65, 400_000),   # Kocaeli / İzmit
+        ('16',  60, 500_000),   # Bursa centro
+        ('26',  52, 400_000),   # Eskişehir
+        ('42',  50, 500_000),   # Konya
+        ('33',  48, 400_000),   # Mersin
+        ('27',  45, 500_000),   # Gaziantep
+        ('38',  45, 300_000),   # Kayseri
+        ('71',  38, 200_000),   # Kırıkkale
+        ('54',  48, 300_000),   # Sakarya / Adapazarı
+        ('55',  42, 300_000),   # Samsun
+        ('45',  42, 250_000),   # Manisa
+        ('44',  38, 200_000),   # Malatya
+        ('31',  38, 200_000),   # Hatay
+        ('78',  35, 100_000),   # Karabük
+        ('67',  35, 200_000),   # Zonguldak
+        ('22',  38, 150_000),   # Edirne
+        ('52',  32, 150_000),   # Ordu
+        ('53',  35, 150_000),   # Rize
+        ('70',  32, 100_000),   # Karaman
+        ('60',  28, 150_000),   # Tokat
+        ('58',  32, 150_000),   # Sivas
+        ('46',  35, 200_000),   # Kahramanmaraş
+        ('47',  28, 150_000),   # Mardin
+        ('43',  35, 100_000),   # Kütahya
+        ('25',  28, 200_000),   # Erzurum
+        ('36',  22, 100_000),   # Kars
+        ('63',  28, 200_000),   # Şanlıurfa
+        ('65',  25, 200_000),   # Van
+        ('56',  22, 100_000),   # Siirt
+        ('73',  18, 100_000),   # Şırnak
+        ('49',  20, 100_000),   # Muş
+        ('75',  18,  80_000),   # Ardahan
+        ('76',  20,  80_000),   # Iğdır
+        ('69',  20,  60_000),   # Bayburt
+    ],
 }
 
 

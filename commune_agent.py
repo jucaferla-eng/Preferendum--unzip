@@ -67,6 +67,11 @@ CPM_BASE_BY_COUNTRY = {
     'MX':  6.0, 'CO':  5.0, 'AR':  5.0, 'ZA':  4.0, 'UY':  5.0,
     'EC':  4.0, 'VE':  3.0, 'BO':  3.0, 'PY':  3.0, 'PE':  4.0,
     'IN':  3.0, 'NG':  2.0,
+    # Nuevos países 2026-07
+    'AE': 12.0, 'AT': 11.0, 'CN':  5.0, 'CZ':  6.0, 'GR':  5.0,
+    'HU':  5.0, 'IL': 10.0, 'IQ':  2.0, 'IR':  1.5, 'JP': 12.0,
+    'KR': 10.0, 'KZ':  3.0, 'MY':  4.0, 'PL':  6.0, 'QA': 15.0,
+    'RO':  4.0, 'RU':  3.0, 'SA':  8.0, 'TH':  3.5, 'TR':  4.0,
 }
 
 # ── DATOS GLOBALES — (nombre, usd_m2_mes, población) ──────────
