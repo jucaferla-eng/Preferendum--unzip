@@ -2601,9 +2601,9 @@ def _assign_user_tier(user, db):
                 age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
                 tier_ladder = ['D', 'C', 'B', 'A']
                 current_rank = _tier_rank(user.se_tier)
-                if age < 30:
-                    # Junior: baja 1 nivel por menor experiencia
-                    user.se_tier = tier_ladder[max(current_rank - 1, 0)]
+                if age < 33:
+                    # Junior: baja 2 niveles por menor experiencia
+                    user.se_tier = tier_ladder[max(current_rank - 2, 0)]
                 elif age > 45:
                     # Senior: sube 1 nivel por experiencia acumulada
                     user.se_tier = tier_ladder[min(current_rank + 1, 3)]
