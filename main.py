@@ -2584,6 +2584,32 @@ def _assign_user_tier(user, db):
     elif cargo_tier:
         user.se_tier = cargo_tier
 
+    # Ajuste por edad/experiencia: junior baja 1 nivel, senior sube 1 nivel
+    # Lógica: doctor de 27 años ≠ doctor de 50 años en ingreso real
+    if user.se_tier and getattr(user, 'dob', ''):
+        try:
+            from datetime import date as _date
+            dob_str = user.dob.strip()
+            for _fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d'):
+                try:
+                    born = datetime.strptime(dob_str, _fmt).date()
+                    break
+                except ValueError:
+                    born = None
+            if born:
+                today = _date.today()
+                age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+                tier_ladder = ['D', 'C', 'B', 'A']
+                current_rank = _tier_rank(user.se_tier)
+                if age < 30:
+                    # Junior: baja 1 nivel por menor experiencia
+                    user.se_tier = tier_ladder[max(current_rank - 1, 0)]
+                elif age > 45:
+                    # Senior: sube 1 nivel por experiencia acumulada
+                    user.se_tier = tier_ladder[min(current_rank + 1, 3)]
+        except Exception:
+            pass  # si el dob es inválido, no modifica el tier
+
     db.commit()
 
 
