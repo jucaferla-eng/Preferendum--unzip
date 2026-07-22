@@ -7039,17 +7039,19 @@ def import_zip_data(secret: str, country: str = 'US',
         raise HTTPException(403, 'Forbidden')
 
     def _upsert_batch(session, items):
+        # Solo campos que existen en el modelo CommuneMarketData
+        VALID_COLS = {'country','commune','income_index','cpm_usd','se_tier','price_m2_avg'}
         for item in items:
+            clean = {k: v for k, v in item.items() if k in VALID_COLS}
             existing = session.query(CommuneMarketData).filter_by(
-                country=item['country'], commune=item['commune']).first()
+                country=clean['country'], commune=clean['commune']).first()
             if existing:
-                existing.income_index = item['income_index']
-                existing.cpm_usd      = item['cpm_usd']
-                existing.se_tier      = item['se_tier']
-                existing.population   = item['population']
+                existing.income_index = clean['income_index']
+                existing.cpm_usd      = clean['cpm_usd']
+                existing.se_tier      = clean['se_tier']
                 existing.price_m2_avg = 0
             else:
-                session.add(CommuneMarketData(**item))
+                session.add(CommuneMarketData(**clean))
         session.commit()
 
     def _do_import():
