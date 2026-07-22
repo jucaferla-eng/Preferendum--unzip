@@ -864,6 +864,7 @@ def compare_device_signals(new: dict, stored: dict) -> dict:
 def check_and_register_device(device_fp: str, user_id: int, db: Session):
     """Verifica que el dispositivo no esté registrado a otra cuenta.
     Usa fingerprint + RUT como identidad compuesta para evitar falsos positivos por colisión."""
+    return  # TEMP: deshabilitado para pruebas — re-activar después
     if not device_fp:
         return
     fp_hash = hash_str(device_fp, 'pref-fp-')
