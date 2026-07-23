@@ -623,11 +623,12 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
               <div class="field form-full" style="border-top:1px solid var(--border);padding-top:20px;margin-top:4px;">
                 <label>Marcas competidoras bloqueadas <span style="color:var(--muted);font-weight:400;">(tu ad no aparece junto a estas marcas)</span></label>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;" id="competitor-tags"></div>
-                <div style="display:flex;gap:8px;margin-top:8px;">
-                  <input type="text" id="competitor-input" placeholder="Nombre de marca competidora…"
-                    style="flex:1;background:var(--ink3);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--paper);font-size:13px;outline:none;"
-                    onkeydown="if(event.key==='Enter'){event.preventDefault();addCompetitor();}"/>
-                  <button type="button" onclick="addCompetitor()" style="background:var(--ink3);border:1px solid var(--border);border-radius:8px;padding:10px 16px;color:var(--muted);cursor:pointer;font-size:13px;">+ Agregar</button>
+                <div style="position:relative;margin-top:8px;">
+                  <input type="text" id="competitor-input" placeholder="Escribe el nombre de la marca competidora…"
+                    style="width:100%;box-sizing:border-box;background:var(--ink3);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--paper);font-size:13px;outline:none;"
+                    oninput="searchBrands(this.value)"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();addCompetitor(document.getElementById('competitor-input').value);}"/>
+                  <div id="brand-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:#1e1e2e;border:1px solid var(--border);border-radius:8px;margin-top:4px;z-index:100;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>
                 </div>
                 <input type="hidden" id="nc-competitors"/>
               </div>
@@ -1543,12 +1544,39 @@ function toggleAppear(id) {
   document.getElementById('nc-categories').value = [...selectedAppear].join(',');
 }
 
-function addCompetitor() {
-  const input = document.getElementById('competitor-input');
-  const name = input.value.trim();
-  if (!name || competitorList.includes(name)) { input.value = ''; return; }
+let _brandSearchTimer = null;
+async function searchBrands(q) {
+  clearTimeout(_brandSearchTimer);
+  const box = document.getElementById('brand-suggestions');
+  if (!q || q.length < 1) { box.style.display = 'none'; return; }
+  _brandSearchTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`${API}/marketer/brands?q=${encodeURIComponent(q)}`);
+      const d = await r.json();
+      const brands = d.brands || [];
+      if (!brands.length) { box.style.display = 'none'; return; }
+      box.innerHTML = brands.map(b => `
+        <div onclick="addCompetitor('${b.replace(/'/g,"\\'")}');document.getElementById('brand-suggestions').style.display='none';"
+          style="padding:10px 14px;cursor:pointer;font-size:13px;color:var(--paper);border-bottom:1px solid var(--border);"
+          onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background=''">${b}</div>
+      `).join('');
+      box.style.display = 'block';
+    } catch(e) { box.style.display = 'none'; }
+  }, 200);
+}
+
+function addCompetitor(name) {
+  if (!name) {
+    const input = document.getElementById('competitor-input');
+    name = input.value.trim();
+  }
+  if (!name || competitorList.includes(name)) {
+    document.getElementById('competitor-input').value = '';
+    return;
+  }
   competitorList.push(name);
-  input.value = '';
+  document.getElementById('competitor-input').value = '';
+  document.getElementById('brand-suggestions').style.display = 'none';
   renderCompetitorTags();
 }
 

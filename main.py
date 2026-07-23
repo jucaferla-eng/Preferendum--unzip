@@ -6839,6 +6839,19 @@ _COMMUNE_NAMES: dict[tuple, str] = {
     ('ZA', '9301'): 'Bloemfontein',
 }
 
+@app.get('/marketer/brands')
+def get_active_brands(q: str = '', db: Session = Depends(get_db)):
+    """Retorna marcas con campañas activas para autocomplete de competidoras bloqueadas."""
+    query = db.query(AdCampaign.advertiser_name).filter(
+        AdCampaign.is_active == True,
+        AdCampaign.advertiser_name != None,
+        AdCampaign.advertiser_name != '',
+    )
+    if q:
+        query = query.filter(AdCampaign.advertiser_name.ilike(f'%{q}%'))
+    rows = query.distinct().order_by(AdCampaign.advertiser_name).limit(10).all()
+    return {'brands': [r[0] for r in rows]}
+
 @app.get('/marketer/communes')
 def get_marketer_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
     """Tabla de comunas con índice de ingreso y CPM — viene del agente de datos."""
