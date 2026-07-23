@@ -5205,6 +5205,133 @@ def marketer_status(user: User = Depends(get_current_user), db: Session = Depend
         'pending_authorization_requests': pending_employees,
     }
 
+_COMMUNE_NAMES: dict[tuple, str] = {
+    # España
+    ('ES','08'):'Barcelona', ('ES','28'):'Madrid', ('ES','20'):'San Sebastián', ('ES','48'):'Bilbao',
+    ('ES','46'):'Valencia', ('ES','41'):'Sevilla', ('ES','07'):'Palma de Mallorca', ('ES','29'):'Málaga',
+    ('ES','50'):'Zaragoza', ('ES','03'):'Alicante', ('ES','35'):'Las Palmas', ('ES','15'):'A Coruña',
+    ('ES','36'):'Vigo', ('ES','47'):'Valladolid', ('ES','30'):'Murcia', ('ES','31'):'Pamplona',
+    ('ES','38'):'Santa Cruz de Tenerife', ('ES','18'):'Granada', ('ES','14'):'Córdoba', ('ES','37'):'Salamanca',
+    ('ES','02'):'Albacete', ('ES','04'):'Almería', ('ES','06'):'Badajoz', ('ES','09'):'Burgos',
+    ('ES','10'):'Cáceres', ('ES','11'):'Cádiz', ('ES','12'):'Castellón', ('ES','13'):'Ciudad Real',
+    ('ES','16'):'Cuenca', ('ES','17'):'Girona', ('ES','19'):'Guadalajara', ('ES','21'):'Huelva',
+    ('ES','22'):'Huesca', ('ES','23'):'Jaén', ('ES','24'):'León', ('ES','25'):'Lleida',
+    ('ES','26'):'La Rioja', ('ES','27'):'Lugo', ('ES','32'):'Ourense', ('ES','33'):'Asturias',
+    ('ES','34'):'Palencia', ('ES','39'):'Cantabria', ('ES','40'):'Segovia', ('ES','42'):'Soria',
+    ('ES','43'):'Tarragona', ('ES','44'):'Teruel', ('ES','45'):'Toledo', ('ES','49'):'Zamora',
+    # Alemania
+    ('DE','80'):'München', ('DE','60'):'Frankfurt', ('DE','20'):'Hamburg', ('DE','10'):'Berlin Centro',
+    ('DE','70'):'Stuttgart', ('DE','40'):'Düsseldorf', ('DE','50'):'Köln', ('DE','30'):'Hannover',
+    ('DE','01'):'Dresden', ('DE','04'):'Leipzig', ('DE','28'):'Bremen', ('DE','90'):'Nürnberg',
+    # Francia
+    ('FR','75'):'París', ('FR','92'):'Hauts-de-Seine', ('FR','93'):'Seine-Saint-Denis',
+    ('FR','94'):'Val-de-Marne', ('FR','69'):'Lyon', ('FR','13'):'Marseille', ('FR','31'):'Toulouse',
+    ('FR','44'):'Nantes', ('FR','67'):'Strasbourg', ('FR','33'):'Bordeaux', ('FR','59'):'Lille',
+    # Italia
+    ('IT','20'):'Milano', ('IT','00'):'Roma', ('IT','10'):'Torino', ('IT','40'):'Bologna',
+    ('IT','50'):'Firenze', ('IT','80'):'Napoli', ('IT','90'):'Palermo', ('IT','16'):'Genova',
+    ('IT','35'):'Padova', ('IT','37'):'Verona', ('IT','70'):'Bari',
+    # Reino Unido (ya tiene nombres reales en GB)
+    # Japón
+    ('JP','100'):'Tokyo Chiyoda', ('JP','106'):'Tokyo Azabu', ('JP','107'):'Tokyo Akasaka',
+    ('JP','105'):'Tokyo Minato', ('JP','108'):'Tokyo Shiba', ('JP','150'):'Tokyo Shibuya',
+    ('JP','153'):'Tokyo Meguro', ('JP','145'):'Tokyo Shinagawa', ('JP','160'):'Tokyo Shinjuku',
+    ('JP','155'):'Tokyo Setagaya', ('JP','141'):'Tokyo Shinagawa Sur', ('JP','135'):'Tokyo Toyosu',
+    ('JP','167'):'Tokyo Suginami', ('JP','171'):'Tokyo Ikebukuro', ('JP','180'):'Tokyo Nerima',
+    ('JP','130'):'Tokyo Sumida', ('JP','111'):'Tokyo Asakusa', ('JP','110'):'Tokyo Taito',
+    ('JP','125'):'Tokyo Katsushika', ('JP','120'):'Tokyo Adachi', ('JP','190'):'Tokyo Tachikawa',
+    ('JP','194'):'Tokyo Hachioji', ('JP','220'):'Yokohama Nishi', ('JP','231'):'Yokohama Centro',
+    ('JP','221'):'Yokohama Kanagawa', ('JP','530'):'Osaka Kita', ('JP','540'):'Osaka Centro',
+    ('JP','542'):'Osaka Namba', ('JP','550'):'Osaka Fukushima', ('JP','600'):'Kyoto Centro',
+    ('JP','603'):'Kyoto Norte', ('JP','460'):'Nagoya Naka', ('JP','450'):'Nagoya Estación',
+    ('JP','464'):'Nagoya Chikusa', ('JP','810'):'Fukuoka Chuo', ('JP','812'):'Fukuoka Hakata',
+    # China
+    ('CN','100'):'Beijing Centro', ('CN','101'):'Beijing Suburbios', ('CN','102'):'Beijing Outer',
+    ('CN','200'):'Shanghai Centro', ('CN','201'):'Shanghai Pudong', ('CN','202'):'Shanghai Outer',
+    ('CN','310'):'Hangzhou', ('CN','315'):'Ningbo', ('CN','350'):'Fuzhou', ('CN','361'):'Xiamen',
+    ('CN','370'):'Qingdao', ('CN','410'):'Zhengzhou', ('CN','420'):'Wuhan', ('CN','430'):'Changsha',
+    ('CN','510'):'Guangzhou', ('CN','511'):'Foshan', ('CN','518'):'Shenzhen Futian',
+    ('CN','519'):'Shenzhen Outer', ('CN','520'):'Dongguan', ('CN','530'):'Nanning',
+    ('CN','570'):'Hainan/Sanya', ('CN','610'):'Chengdu', ('CN','550'):'Guiyang',
+    ('CN','650'):'Kunming', ('CN','710'):"Xi'an", ('CN','730'):'Lanzhou',
+    ('CN','830'):'Urumqi', ('CN','750'):'Yinchuan',
+    # Corea del Sur
+    ('KR','06'):'Seúl Gangnam', ('KR','05'):'Seúl Songpa', ('KR','13'):'Seongnam/Bundang',
+    ('KR','07'):'Seúl Mapo/Yongsan', ('KR','03'):'Seúl Jongno', ('KR','04'):'Seúl Seongdong',
+    ('KR','08'):'Seúl Gangseo', ('KR','01'):'Seúl Nowon', ('KR','02'):'Seúl Seongbuk',
+    ('KR','16'):'Suwon', ('KR','10'):'Gyeonggi Norte', ('KR','14'):'Gyeonggi Este',
+    ('KR','17'):'Gyeonggi Sur', ('KR','38'):'Sejong City', ('KR','21'):'Incheon Centro',
+    ('KR','22'):'Incheon Outer', ('KR','35'):'Daejeon', ('KR','41'):'Daegu Centro',
+    ('KR','46'):'Busan Haeundae', ('KR','47'):'Busan Centro', ('KR','48'):'Busan Sur',
+    ('KR','63'):'Jeju Island',
+    # Turquía
+    ('TR','34'):'Estambul', ('TR','35'):'İzmir', ('TR','48'):'Bodrum/Marmaris',
+    ('TR','06'):'Ankara', ('TR','07'):'Antalya', ('TR','09'):'Aydın',
+    ('TR','77'):'Yalova', ('TR','41'):'Kocaeli', ('TR','16'):'Bursa',
+    ('TR','26'):'Eskişehir', ('TR','42'):'Konya', ('TR','33'):'Mersin',
+    ('TR','27'):'Gaziantep', ('TR','38'):'Kayseri', ('TR','54'):'Sakarya',
+    ('TR','55'):'Samsun', ('TR','61'):'Trabzon',
+    # Rusia
+    ('RU','121'):'Moscú Khamovniki', ('RU','123'):'Moscú Presnensky', ('RU','117'):'Moscú SW Premium',
+    ('RU','119'):'Moscú Lomonosovskiy', ('RU','101'):'Moscú Centro', ('RU','103'):'Moscú Tverskoy',
+    ('RU','115'):'Moscú Zamoskvorechye', ('RU','109'):'Moscú Taganka', ('RU','105'):'Moscú Sokolniki',
+    ('RU','354'):'Sochi', ('RU','199'):'San Petersburgo Petrogradsky',
+    ('RU','197'):'San Petersburgo Vasilievsky', ('RU','190'):'San Petersburgo Centro',
+    ('RU','194'):'San Petersburgo Norte', ('RU','620'):'Ekaterinburg',
+    ('RU','630'):'Novosibirsk', ('RU','350'):'Krasnodar', ('RU','344'):'Rostov-on-Don',
+    ('RU','420'):'Kazán', ('RU','690'):'Vladivostok', ('RU','660'):'Krasnoyarsk',
+    # Arabia Saudita
+    ('SA','11'):'Riad Centro', ('SA','32'):'Dhahran Aramco', ('SA','12'):'Yeda Centro',
+    ('SA','13'):'Al Khobar', ('SA','21'):'Yeda Corniche', ('SA','31'):'Dammam',
+    ('SA','24'):'Medina', ('SA','14'):'La Meca',
+    # Emiratos Árabes
+    ('AE','10'):'Downtown Dubai / Palm Jumeirah', ('AE','20'):'Dubai Marina / JBR',
+    ('AE','30'):'Business Bay / Jumeirah', ('AE','40'):'Abu Dhabi Corniche',
+    ('AE','50'):'Abu Dhabi Yas Island', ('AE','60'):'Sharjah Premium',
+    ('AE','61'):'Sharjah', ('AE','70'):'Ajman', ('AE','71'):'Ras Al Khaimah',
+    ('AE','72'):'Fujairah',
+    # Catar
+    ('QA','20'):'Doha West Bay / Pearl Qatar', ('QA','21'):'Doha Diplomatic Zone',
+    ('QA','22'):'Lusail City', ('QA','23'):'Doha Centro', ('QA','24'):'Doha Residencial',
+    ('QA','30'):'Al Rayyan', ('QA','27'):'Al Wakrah',
+    # Israel
+    ('IL','60'):'Tel Aviv Rothschild', ('IL','61'):'Tel Aviv Centro', ('IL','62'):'Ramat Aviv',
+    ('IL','66'):'Herzliya Pituah', ('IL','52'):'Ramat Gan Premium', ('IL','32'):'Haifa Carmel',
+    ('IL','90'):'Jerusalén Centro', ('IL','77'):'Beer Sheva',
+    # Polonia
+    ('PL','00'):'Varsovia Centro', ('PL','02'):'Varsovia Mokotów', ('PL','30'):'Cracovia Centro',
+    ('PL','50'):'Wroclaw Centro', ('PL','60'):'Poznan Centro', ('PL','80'):'Gdansk Centro',
+    ('PL','81'):'Gdynia', ('PL','40'):'Katowice', ('PL','70'):'Szczecin',
+    # Austria
+    ('AT','10'):'Viena Interior', ('AT','11'):'Viena Exterior', ('AT','50'):'Salzburgo',
+    ('AT','61'):'Kitzbühel', ('AT','60'):'Innsbruck', ('AT','80'):'Graz',
+    # Chequia
+    ('CZ','10'):'Praga Centro', ('CZ','11'):'Praga Inner', ('CZ','60'):'Brno Centro',
+    ('CZ','70'):'Ostrava', ('CZ','36'):'Plzeň',
+    # Grecia
+    ('GR','10'):'Atenas Centro', ('GR','16'):'Atenas Sur Premium', ('GR','11'):'Atenas Kifisia',
+    ('GR','54'):'Tesalónica', ('GR','71'):'Heraklion Creta', ('GR','85'):'Rodas',
+    # Hungría
+    ('HU','10'):'Budapest Centro', ('HU','11'):'Budapest Inner', ('HU','40'):'Debrecen',
+    ('HU','60'):'Kecskemét', ('HU','70'):'Pécs', ('HU','80'):'Győr', ('HU','90'):'Sopron',
+    # Rumanía
+    ('RO','01'):'Bucarest Sector 1', ('RO','02'):'Bucarest Sector 2', ('RO','40'):'Cluj-Napoca',
+    ('RO','30'):'Timișoara', ('RO','50'):'Brașov', ('RO','60'):'Sibiu', ('RO','70'):'Iași',
+    # Malasia
+    ('MY','50'):'KL Bukit Bintang / KLCC', ('MY','47'):'Subang Jaya / Damansara',
+    ('MY','10'):'Penang George Town', ('MY','80'):'Johor Bahru',
+    # Tailandia
+    ('TH','10'):'Bangkok Sukhumvit / Silom', ('TH','76'):'Phuket', ('TH','50'):'Chiang Mai',
+    ('TH','20'):'Pattaya', ('TH','77'):'Koh Samui',
+    # Kazajistán
+    ('KZ','010'):'Astana Centro', ('KZ','050'):'Almaty Centro', ('KZ','040'):'Atyrau',
+    # Irak
+    ('IQ','10'):'Bagdad Karrada/Mansour', ('IQ','44'):'Erbil', ('IQ','36'):'Basra',
+    # Irán
+    ('IR','11'):'Teherán Norte', ('IR','13'):'Teherán Elahiyeh', ('IR','76'):'Kish Island',
+    ('IR','31'):'Isfahan', ('IR','51'):'Mashhad',
+}
+
 @app.get('/marketer/communes')
 def get_marketer_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
     """Tabla de comunas con índice de ingreso y CPM — viene del agente de datos."""
@@ -5215,6 +5342,7 @@ def get_marketer_communes(country: str = None, se_tier: str = None, db: Session 
     rows = rows.order_by(CommuneMarketData.income_index.desc()).all()
     if rows:
         return {'communes': [{'country': r.country, 'commune': r.commune,
+            'name': _COMMUNE_NAMES.get((r.country, r.commune), r.commune),
             'income_index': r.income_index, 'cpm_usd': r.cpm_usd, 'se_tier': r.se_tier} for r in rows],
             'source': 'database'}
     fallback = get_fallback_table()
