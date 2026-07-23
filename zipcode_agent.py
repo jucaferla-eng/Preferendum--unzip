@@ -81,6 +81,227 @@ def process_us_zip_data(raw: list[dict]) -> list[dict]:
 # income_index referencia: área más cara del país = 100
 POSTAL_PREFIX_DATA: dict[str, list] = {
 
+    # ── ESTADOS UNIDOS — primeros 3 dígitos del ZIP (prefijos SCF) ──
+    # Referencia: Tribeca/SoHo NYC (100) = 100
+    'US': [
+        # Nueva York — Manhattan
+        ('100', 100,  1_629_000), # Tribeca / SoHo / Financial District
+        ('101',  92,    400_000), # Midtown / Upper East Side
+        ('102',  88,    300_000), # Upper West Side / Harlem sur
+        ('103',  60,    500_000), # Staten Island
+        ('104',  45,  1_427_000), # Bronx
+        # Nueva York — outer boroughs
+        ('110',  65,  2_271_000), # Queens centro
+        ('111',  72,    400_000), # Forest Hills / Jamaica Estates
+        ('112',  70,  2_576_000), # Brooklyn Prospect Park / Park Slope
+        ('113',  58,    500_000), # Brooklyn outer
+        ('114',  58,    400_000), # Queens outer
+        ('115',  75,    800_000), # Long Island Nassau
+        ('116',  65,    400_000), # Long Island central
+        ('117',  70,    600_000), # Long Island south shore
+        ('118',  68,    400_000), # Long Island Hempstead
+        ('119',  95,    200_000), # Hamptons / East End
+        # Nueva Jersey
+        ('070',  55,    280_000), # Newark
+        ('071',  58,    200_000), # NJ Hudson
+        ('072',  65,    300_000), # NJ central
+        ('073',  70,    400_000), # NJ Middlesex
+        ('074',  68,    300_000), # NJ Monmouth
+        ('075',  72,    200_000), # NJ shore
+        ('077',  75,    300_000), # NJ Shore premium
+        ('079',  80,    200_000), # NJ Bergen/Morris (suburbs NYC)
+        ('085',  78,    400_000), # NJ Princeton / Mercer
+        ('086',  82,    200_000), # NJ Somerset premium
+        # Washington DC área
+        ('200',  88,    689_000), # Washington DC
+        ('201',  85,    200_000), # DC Metro norte
+        ('202',  85,    200_000), # DC central
+        ('203',  80,    200_000), # DC sureste
+        ('204',  75,    200_000), # DC outer
+        ('205',  78,    200_000), # DC Metro
+        ('220',  88,    238_000), # Arlington VA
+        ('221',  85,    160_000), # Alexandria VA
+        ('222',  82,    300_000), # Fairfax VA
+        ('223',  80,    400_000), # Fairfax outer VA
+        ('240',  45,    200_000), # Virginia occidental
+        # Boston área
+        ('021',  88,    675_000), # Boston
+        ('022',  92,    118_000), # Cambridge / Brookline
+        ('023',  85,     88_000), # Newton MA
+        ('024',  80,    300_000), # Boston suburbios premium
+        ('025',  70,    300_000), # Boston outer
+        ('026',  65,    200_000), # Framingham / Natick
+        ('027',  75,    200_000), # Quincy / Braintree
+        # Los Angeles
+        ('900',  78,  3_900_000), # LA Central
+        ('901',  95,     35_000), # Beverly Hills
+        ('902',  90,    100_000), # Santa Monica / Culver City
+        ('903',  82,    200_000), # Inglewood / Hawthorne
+        ('904',  78,    400_000), # Torrance / South Bay
+        ('905',  72,    400_000), # Long Beach
+        ('906',  30,    500_000), # Compton / Watts
+        ('907',  55,    400_000), # Carson / Gardena
+        ('908',  65,    300_000), # San Pedro
+        ('910',  85,    300_000), # Pasadena
+        ('911',  80,    300_000), # Alhambra / Arcadia
+        ('912',  70,    400_000), # El Monte
+        ('913',  88,    200_000), # Burbank / Glendale premium
+        ('914',  90,    200_000), # Glendale
+        ('915',  75,    400_000), # Covina / West Covina
+        ('916',  70,    300_000), # Pomona
+        ('917',  68,    300_000), # Ontario / Rancho Cucamonga
+        ('918',  85,    200_000), # Malibu / Ventura premium
+        ('919',  92,    100_000), # San Diego La Jolla premium
+        ('920',  80,    500_000), # San Diego Mission Valley
+        ('921',  75,    400_000), # San Diego outer
+        ('922',  72,    300_000), # San Diego east
+        # San Francisco Bay Area
+        ('940',  88,    450_000), # SF Mission / Castro
+        ('941', 100,    422_000), # SF Pac Heights / Marina / Nob Hill
+        ('942',  90,    200_000), # SF SoMa / Potrero
+        ('943',  85,    200_000), # Palo Alto / Menlo Park
+        ('944',  95,    100_000), # Silicon Valley (Mountain View/Sunnyvale)
+        ('945',  65,    440_000), # Oakland
+        ('946',  72,    300_000), # Fremont / Hayward
+        ('947',  80,    200_000), # Berkeley
+        ('948',  82,    300_000), # San Mateo / Redwood City
+        ('949',  95,     80_000), # Marin County (Sausalito/Mill Valley)
+        ('950',  78,    200_000), # San Jose norte
+        ('951',  75,    400_000), # San Jose sur
+        ('952',  70,    300_000), # Santa Clara
+        # Chicago
+        ('606',  90,  2_700_000), # Chicago Lincoln Park / Gold Coast
+        ('607',  78,    500_000), # Chicago norte (Lakeview/Wicker Park)
+        ('608',  65,    400_000), # Chicago west
+        ('609',  55,    400_000), # Chicago south
+        ('600',  82,    200_000), # Chicago Loop
+        ('601',  72,    300_000), # Chicago outer norte
+        ('602',  60,    300_000), # Chicago outer sur
+        ('603',  88,    400_000), # Evanston / North Shore
+        ('604',  82,    200_000), # Oak Park / River Forest
+        ('605',  78,    300_000), # Naperville / Downers Grove
+        # Houston
+        ('770',  65,  2_300_000), # Houston
+        ('771',  78,    200_000), # Houston Heights / Montrose
+        ('772',  60,    400_000), # Houston south
+        ('773',  55,    300_000), # Houston outer
+        ('774',  70,    200_000), # Pasadena TX / Pearland
+        ('775',  82,    200_000), # The Woodlands / Sugar Land premium
+        # Dallas / Fort Worth
+        ('750',  72,  1_300_000), # Dallas
+        ('751',  85,    200_000), # Dallas Highland Park / Preston Hollow
+        ('752',  65,    400_000), # Dallas outer
+        ('753',  78,    200_000), # Plano / Allen
+        ('754',  60,    300_000), # Garland / Mesquite
+        ('760',  65,    900_000), # Fort Worth
+        ('761',  70,    200_000), # Fort Worth north
+        ('762',  78,    200_000), # Arlington TX
+        # Atlanta
+        ('303',  85,    500_000), # Atlanta Buckhead / Midtown
+        ('300',  75,    500_000), # Atlanta
+        ('301',  65,    300_000), # Atlanta south
+        ('302',  60,    300_000), # Atlanta east
+        ('304',  82,    200_000), # Marietta / Cobb County premium
+        ('305',  78,    300_000), # Alpharetta / Johns Creek
+        # Miami / South Florida
+        ('331',  88,    200_000), # Miami Beach / Brickell
+        ('330',  82,    500_000), # Miami
+        ('333',  75,    200_000), # Ft Lauderdale
+        ('334',  70,    300_000), # Palm Beach
+        ('337',  80,    100_000), # Palm Beach premium
+        # Seattle
+        ('980',  88,    750_000), # Seattle
+        ('981',  85,    200_000), # Seattle Bellevue
+        ('982',  80,    200_000), # Bellevue / Redmond (Microsoft/Amazon)
+        ('983',  72,    300_000), # Tacoma
+        ('984',  78,    200_000), # Olympia
+        # Denver / Colorado
+        ('802',  82,    700_000), # Denver
+        ('803',  90,    100_000), # Boulder
+        ('804',  78,    200_000), # Denver Cherry Creek
+        ('805',  72,    300_000), # Denver outer
+        ('806',  88,     50_000), # Aspen / ski resorts
+        ('809',  75,    200_000), # Colorado Springs
+        # Phoenix
+        ('850',  72,  1_600_000), # Phoenix
+        ('851',  78,    200_000), # Scottsdale
+        ('852',  65,    300_000), # Phoenix west
+        ('853',  68,    300_000), # Tempe / Chandler
+        ('854',  82,    100_000), # Scottsdale premium (Paradise Valley)
+        # Minneapolis / Twin Cities
+        ('554',  80,    300_000), # Minneapolis
+        ('551',  82,    200_000), # St Paul
+        ('553',  78,    200_000), # Bloomington / Eden Prairie
+        # Portland Oregon
+        ('972',  80,    650_000), # Portland
+        ('970',  82,    100_000), # Portland west hills
+        ('971',  75,    200_000), # Portland outer
+        ('974',  72,    200_000), # Salem OR
+        # Las Vegas
+        ('891',  65,  2_200_000), # Las Vegas Strip
+        ('890',  60,    400_000), # Las Vegas outer
+        ('889',  72,    100_000), # Henderson NV
+        # Otras ciudades importantes
+        ('191',  82,    600_000), # Philadelphia
+        ('192',  78,    300_000), # Philadelphia suburbs Main Line
+        ('193',  80,    200_000), # Philadelphia premium suburbs
+        ('432',  72,    800_000), # Columbus OH
+        ('441',  70,    380_000), # Cleveland
+        ('442',  78,    100_000), # Cleveland Heights / Shaker
+        ('481',  80,    700_000), # Detroit
+        ('482',  75,    200_000), # Detroit Royal Oak / Birmingham
+        ('532',  78,    600_000), # Milwaukee
+        ('372',  75,    700_000), # Nashville
+        ('282',  80,    500_000), # Charlotte
+        ('271',  75,    300_000), # Raleigh
+        ('275',  80,    200_000), # Chapel Hill / Research Triangle
+        ('023',  82,    200_000), # Providence RI
+        ('063',  88,    100_000), # Greenwich CT (premium)
+        ('064',  82,    200_000), # Stamford CT
+        ('065',  78,    300_000), # Hartford CT
+        ('011',  75,    650_000), # Springfield MA
+        ('012',  80,    175_000), # Northampton / Pioneer Valley
+        ('489',  72,    300_000), # Ann Arbor MI
+        ('430',  78,    800_000), # Columbus OH premium
+        ('452',  75,    300_000), # Cincinnati
+        ('462',  72,    900_000), # Indianapolis
+        ('531',  80,    600_000), # Madison WI
+        ('671',  72,    500_000), # Kansas City MO
+        ('631',  78,    300_000), # St Louis
+        ('701',  75,    400_000), # New Orleans
+        ('730',  72,    600_000), # Oklahoma City
+        ('741',  75,    200_000), # Tulsa
+        ('787',  82,    950_000), # Austin TX
+        ('782',  78,    200_000), # San Antonio TX
+        ('799',  65,    700_000), # El Paso TX
+        ('871',  72,    900_000), # Albuquerque NM
+        ('841',  80,    200_000), # Salt Lake City
+        ('967',  75,    100_000), # Honolulu HI
+        ('998',  65,    300_000), # Anchorage AK
+        ('320',  70,    500_000), # Jacksonville FL
+        ('321',  75,    300_000), # Orlando FL
+        ('322',  72,    200_000), # Gainesville FL
+        ('326',  65,    400_000), # Tallahassee FL
+        ('341',  80,    400_000), # Naples / Sarasota FL premium
+        ('342',  78,    300_000), # Sarasota FL
+        ('346',  75,    200_000), # Tampa FL
+        ('335',  80,    300_000), # Tampa premium
+        ('298',  72,    400_000), # Columbia SC
+        ('292',  75,    400_000), # Charleston SC
+        ('288',  70,    300_000), # Greensboro NC
+        ('244',  68,    300_000), # Richmond VA
+        ('245',  72,    100_000), # Charlottesville VA
+        ('212',  78,    600_000), # Baltimore
+        ('210',  82,    100_000), # Baltimore premium (Roland Park)
+        ('015',  72,    200_000), # Worcester MA
+        ('030',  75,    400_000), # Manchester NH
+        ('040',  72,    200_000), # Portland ME
+        ('058',  80,    100_000), # Burlington VT
+        ('014',  70,    200_000), # Lowell MA
+        ('028',  75,    300_000), # New Haven CT
+        ('069',  78,    100_000), # Bridgeport CT
+    ],
+
     # ── REINO UNIDO — área de código postal (letras iniciales) ──
     # Referencia: Kensington & Chelsea (W8, SW3, SW7) = 100
     'GB': [
