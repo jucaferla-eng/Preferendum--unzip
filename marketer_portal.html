@@ -619,8 +619,21 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
                 <label>Video URL <span style="color:var(--muted);font-weight:400;">(YouTube, Vimeo o MP4 directo — opcional)</span></label>
                 <input type="url" id="nc-video-url" placeholder="https://youtube.com/watch?v=... o https://vimeo.com/..."/>
               </div>
-              <!-- ── BRAND SAFETY ── -->
+              <!-- ── BLOQUEO DE COMPETIDORES ── -->
               <div class="field form-full" style="border-top:1px solid var(--border);padding-top:20px;margin-top:4px;">
+                <label>Marcas competidoras bloqueadas <span style="color:var(--muted);font-weight:400;">(tu ad no aparece junto a estas marcas)</span></label>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;" id="competitor-tags"></div>
+                <div style="display:flex;gap:8px;margin-top:8px;">
+                  <input type="text" id="competitor-input" placeholder="Nombre de marca competidora…"
+                    style="flex:1;background:var(--ink3);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--paper);font-size:13px;outline:none;"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();addCompetitor();}"/>
+                  <button type="button" onclick="addCompetitor()" style="background:var(--ink3);border:1px solid var(--border);border-radius:8px;padding:10px 16px;color:var(--muted);cursor:pointer;font-size:13px;">+ Agregar</button>
+                </div>
+                <input type="hidden" id="nc-competitors"/>
+              </div>
+
+              <!-- ── BRAND SAFETY ── -->
+              <div class="field form-full">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
                   <label style="color:var(--gold);font-size:12px;letter-spacing:1px;">BRAND SAFETY</label>
                   <span style="font-size:11px;color:var(--muted);">Tu marca nunca aparecerá en debates de estas categorías</span>
@@ -647,19 +660,6 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
                   </div>
                   <input type="hidden" id="nc-categories"/>
                 </div>
-              </div>
-
-              <!-- ── BLOQUEO DE COMPETIDORES ── -->
-              <div class="field form-full">
-                <label>Marcas competidoras bloqueadas <span style="color:var(--muted);font-weight:400;">(tu ad no aparece junto a estas marcas)</span></label>
-                <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px;" id="competitor-tags"></div>
-                <div style="display:flex;gap:8px;margin-top:8px;">
-                  <input type="text" id="competitor-input" placeholder="Nombre de marca competidora…"
-                    style="flex:1;background:var(--ink3);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--paper);font-size:13px;outline:none;"
-                    onkeydown="if(event.key==='Enter'){event.preventDefault();addCompetitor();}"/>
-                  <button type="button" onclick="addCompetitor()" style="background:var(--ink3);border:1px solid var(--border);border-radius:8px;padding:10px 16px;color:var(--muted);cursor:pointer;font-size:13px;">+ Agregar</button>
-                </div>
-                <input type="hidden" id="nc-competitors"/>
               </div>
             </div>
             <button class="btn-primary" onclick="createCampaign()" style="margin-top:8px;">Launch Campaign</button>
