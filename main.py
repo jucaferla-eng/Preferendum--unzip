@@ -3478,8 +3478,12 @@ def get_opinions(debate_id: int,
     now_ts = datetime.utcnow()
     recent = db.query(AdCampaign).filter(
         AdCampaign.is_active == True,
-        AdCampaign.budget_clp > AdCampaign.spent_clp,
         (AdCampaign.end_date == None) | (AdCampaign.end_date > now_ts),
+    ).filter(
+        # Incluir campañas sin presupuesto definido (pruebas) y las que aún tienen saldo
+        (AdCampaign.budget_clp == None) |
+        (AdCampaign.budget_clp == 0) |
+        (AdCampaign.budget_clp > AdCampaign.spent_clp)
     ).order_by(AdCampaign.created_at.desc()).limit(10).all()
     matched_ids = {c.get('id') for c in matched}
     user_se = (getattr(user, 'se_tier', '') or '') if user else ''
@@ -3500,6 +3504,9 @@ def get_opinions(debate_id: int,
     matched = prepend + matched  # newest campaigns show first
 
     static_ads = db.query(DebateAd).filter(DebateAd.debate_id == debate_id).all()
+    # Si no hay ads específicos del debate, usar los globales como fallback
+    if not static_ads:
+        static_ads = db.query(DebateAd).order_by(DebateAd.impressions.asc()).limit(4).all()
 
     result  = []
     ad_idx  = 0
