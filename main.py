@@ -9823,6 +9823,180 @@ def admin_audience_stats(secret: str, db: Session = Depends(get_db)):
     }
 
 
+COUNTRY_NAMES = {
+    'US':'United States','CL':'Chile','AR':'Argentina','BR':'Brazil','MX':'Mexico',
+    'CO':'Colombia','PE':'Peru','VE':'Venezuela','EC':'Ecuador','BO':'Bolivia',
+    'PY':'Paraguay','UY':'Uruguay','GB':'United Kingdom','DE':'Germany','FR':'France',
+    'ES':'Spain','IT':'Italy','PT':'Portugal','NL':'Netherlands','BE':'Belgium',
+    'CH':'Switzerland','AT':'Austria','PL':'Poland','CZ':'Czech Republic','RO':'Romania',
+    'HU':'Hungary','GR':'Greece','TR':'Turkey','RU':'Russia','UA':'Ukraine',
+    'CA':'Canada','AU':'Australia','NZ':'New Zealand','ZA':'South Africa',
+    'NG':'Nigeria','EG':'Egypt','MA':'Morocco','SN':'Senegal','CI':"Côte d'Ivoire",
+    'CM':'Cameroon','CN':'China','JP':'Japan','KR':'South Korea','IN':'India',
+    'ID':'Indonesia','TH':'Thailand','MY':'Malaysia','PH':'Philippines','VN':'Vietnam',
+    'SA':'Saudi Arabia','AE':'UAE','KW':'Kuwait','QA':'Qatar','IL':'Israel',
+    'JO':'Jordan','IQ':'Iraq','IR':'Iran','KZ':'Kazakhstan','TW':'Taiwan','HK':'Hong Kong',
+    'DO':'Dominican Republic','SG':'Singapore',
+}
+
+@app.get('/admin/audience-dashboard')
+def admin_audience_dashboard(secret: str, db: Session = Depends(get_db)):
+    """Dashboard HTML de inventario de audiencia — para presentaciones a anunciantes."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+
+    from commune_agent import CPM_BASE_BY_COUNTRY
+    from sqlalchemy import func as sqlfunc
+    from fastapi.responses import HTMLResponse
+
+    TIER_CPM_MULT = {'A': 3.0, 'B': 1.5, 'C': 0.8, 'D': 0.4}
+
+    rows = (db.query(User.country, User.se_tier, sqlfunc.count(User.id))
+              .filter(User.se_tier.in_(['A', 'B', 'C', 'D']))
+              .group_by(User.country, User.se_tier)
+              .all())
+
+    by_country: dict = {}
+    for country, tier, cnt in rows:
+        cc = (country or 'XX').upper()
+        if cc not in by_country:
+            by_country[cc] = {'A': 0, 'B': 0, 'C': 0, 'D': 0}
+        by_country[cc][tier] = cnt
+
+    output = {}
+    for cc, tiers in by_country.items():
+        cpm_base = CPM_BASE_BY_COUNTRY.get(cc, 5.0)
+        total = sum(tiers.values())
+        weighted_cpm = sum(tiers.get(t, 0) * cpm_base * m for t, m in TIER_CPM_MULT.items())
+        avg_cpm = round(weighted_cpm / total, 2) if total else 0
+        est_value_usd = round(weighted_cpm / 1000, 2)
+        output[cc] = {'tiers': tiers, 'total_users': total,
+                      'cpm_base_usd': cpm_base, 'avg_cpm_usd': avg_cpm,
+                      'est_inventory_value_usd': est_value_usd}
+
+    output = dict(sorted(output.items(), key=lambda x: x[1]['total_users'], reverse=True))
+    grand_total = sum(v['total_users'] for v in output.values())
+    tier_a_total = sum(v['tiers'].get('A', 0) for v in output.values())
+    total_countries = len(output)
+    total_inventory = round(sum(v['est_inventory_value_usd'] for v in output.values()), 2)
+
+    rows_html = ''
+    for cc, d in output.items():
+        name = COUNTRY_NAMES.get(cc, cc)
+        t = d['tiers']
+        rows_html += f'''
+        <tr>
+          <td><span class="flag">{cc}</span> {name}</td>
+          <td class="tier-a">{t["A"]:,}</td>
+          <td class="tier-b">{t["B"]:,}</td>
+          <td class="tier-c">{t["C"]:,}</td>
+          <td class="tier-d">{t["D"]:,}</td>
+          <td class="bold">{d["total_users"]:,}</td>
+          <td>${d["cpm_base_usd"]:.1f}</td>
+          <td class="bold">${d["avg_cpm_usd"]:.2f}</td>
+          <td class="green">${d["est_inventory_value_usd"]:.2f}</td>
+        </tr>'''
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preferendum — Audience Inventory</title>
+<style>
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          background: #0f0f1a; color: #e8e8f0; min-height: 100vh; padding: 32px 24px; }}
+  h1 {{ font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 4px; }}
+  .subtitle {{ color: #8888aa; font-size: 14px; margin-bottom: 32px; }}
+  .cards {{ display: flex; gap: 16px; margin-bottom: 32px; flex-wrap: wrap; }}
+  .card {{ background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px;
+           padding: 20px 28px; flex: 1; min-width: 180px; }}
+  .card-label {{ font-size: 12px; color: #8888aa; text-transform: uppercase;
+                 letter-spacing: 1px; margin-bottom: 8px; }}
+  .card-value {{ font-size: 36px; font-weight: 700; color: #fff; }}
+  .card-value.gold {{ color: #f5c842; }}
+  .card-value.green {{ color: #4ade80; }}
+  .card-value.blue {{ color: #60a5fa; }}
+  table {{ width: 100%; border-collapse: collapse; background: #1a1a2e;
+           border-radius: 12px; overflow: hidden; border: 1px solid #2a2a4a; }}
+  thead {{ background: #12122a; }}
+  th {{ padding: 14px 16px; text-align: left; font-size: 11px; color: #8888aa;
+        text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }}
+  td {{ padding: 12px 16px; font-size: 14px; border-top: 1px solid #1f1f38; }}
+  tr:hover td {{ background: #1f1f38; }}
+  .flag {{ font-weight: 700; color: #8888aa; font-size: 12px; }}
+  .tier-a {{ color: #f5c842; font-weight: 600; }}
+  .tier-b {{ color: #60a5fa; font-weight: 600; }}
+  .tier-c {{ color: #a78bfa; font-weight: 600; }}
+  .tier-d {{ color: #6b7280; }}
+  .bold {{ font-weight: 700; color: #fff; }}
+  .green {{ color: #4ade80; font-weight: 600; }}
+  .legend {{ display: flex; gap: 20px; margin-top: 20px; flex-wrap: wrap; }}
+  .legend-item {{ font-size: 12px; color: #8888aa; display: flex; align-items: center; gap: 6px; }}
+  .dot {{ width: 10px; height: 10px; border-radius: 50%; }}
+  .dot-a {{ background: #f5c842; }}
+  .dot-b {{ background: #60a5fa; }}
+  .dot-c {{ background: #a78bfa; }}
+  .dot-d {{ background: #6b7280; }}
+  .timestamp {{ font-size: 11px; color: #555577; margin-top: 24px; text-align: right; }}
+</style>
+</head>
+<body>
+  <h1>Preferendum — Audience Inventory</h1>
+  <p class="subtitle">Verified users by country and income tier · Real-time data</p>
+
+  <div class="cards">
+    <div class="card">
+      <div class="card-label">Total Verified Users</div>
+      <div class="card-value blue">{grand_total:,}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Premium Tier A Users</div>
+      <div class="card-value gold">{tier_a_total:,}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Countries Active</div>
+      <div class="card-value">{total_countries}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Est. Inventory Value / Cycle</div>
+      <div class="card-value green">${total_inventory:,.2f}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Country</th>
+        <th>Tier A ★</th>
+        <th>Tier B</th>
+        <th>Tier C</th>
+        <th>Tier D</th>
+        <th>Total</th>
+        <th>CPM Base</th>
+        <th>Avg CPM</th>
+        <th>Est. Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows_html}
+    </tbody>
+  </table>
+
+  <div class="legend">
+    <div class="legend-item"><div class="dot dot-a"></div> Tier A — High income (top earners per country)</div>
+    <div class="legend-item"><div class="dot dot-b"></div> Tier B — Upper middle income</div>
+    <div class="legend-item"><div class="dot dot-c"></div> Tier C — Middle income</div>
+    <div class="legend-item"><div class="dot dot-d"></div> Tier D — Entry level income</div>
+  </div>
+  <p class="timestamp">All users biometrically verified · 1 person = 1 account · Preferendum © 2026</p>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html)
+
+
 @app.post('/admin/fix-user-tier')
 def admin_fix_user_tier(secret: str, email: str, db: Session = Depends(get_db)):
     """Fuerza recalculo de se_tier para un usuario específico."""
