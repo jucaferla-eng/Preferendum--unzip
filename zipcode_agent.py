@@ -1609,6 +1609,19 @@ POSTAL_PREFIX_DATA: dict[str, list] = {
         ('6101',  34, 120_000), # Maturín
         ('5101',  34, 130_000), # San Cristóbal
         ('6301',  34,  70_000), # Cumaná
+        ('7001',  42,  90_000), # Barquisimeto Norte
+        ('3201',  38, 100_000), # Puerto Ordaz premium
+        ('3001',  38, 130_000), # Barquisimeto Sur
+        ('4601',  30,  80_000), # Maturín interior
+        ('1011',  95,  30_000), # Caracas Los Palos Grandes (premium)
+        ('1012',  90,  40_000), # Caracas La Florida / San Román
+        ('1013',  75,  80_000), # Caracas Chacao Norte
+        ('1025',  35, 200_000), # Caracas Catia / Caricuao
+        ('2101',  48, 180_000), # Maracay El Bosque
+        ('2105',  38, 120_000), # Maracay Las Delicias
+        ('4005',  38, 200_000), # Maracaibo Este
+        ('4002',  30, 300_000), # Maracaibo popular
+        ('1016',  42, 300_000), # Caracas populares (oeste)
     ],
 
     # ── URUGUAY — primeros 4 dígitos ─────────────────────────────
@@ -1633,6 +1646,18 @@ POSTAL_PREFIX_DATA: dict[str, list] = {
         ('40000',  26,  30_000), # Rivera
         ('45000',  26,  25_000), # Tacuarembó
         ('30000',  24,  20_000), # Artigas
+        ('11700',  68,  40_000), # Montevideo Brazo Oriental
+        ('11900',  65,  50_000), # Montevideo Prado / Casabó
+        ('13000',  50, 100_000), # Ciudad de la Costa
+        ('14000',  48,  80_000), # Progreso / Canelones Interior
+        ('17000',  36,  80_000), # Florida
+        ('65000',  34,  30_000), # Melo / Cerro Largo
+        ('70000',  32,  40_000), # Fray Bentos / Rio Negro
+        ('50100',  38,  50_000), # Salto Centro
+        ('75000',  28,  30_000), # Minas / Lavalleja
+        ('20100',  90,  15_000), # Punta del Este Premium (Cantegril)
+        ('20200',  80,  20_000), # Maldonado Ciudad
+        ('97000',  40,  25_000), # Colonia del Sacramento Centro
     ],
 
     # ── ECUADOR — primeros 2 dígitos ─────────────────────────────
@@ -1675,6 +1700,18 @@ POSTAL_PREFIX_DATA: dict[str, list] = {
         ('0400',  36,  80_000), # Oruro
         ('0500',  44,  60_000), # Tarija
         ('0800',  28,  80_000), # Potosí
+        ('0601',  44, 200_000), # Cochabamba Norte
+        ('0602',  38, 150_000), # Quillacollo / Sacaba
+        ('0603',  32, 150_000), # Cochabamba rural
+        ('0501',  40,  60_000), # Tarija suburbios
+        ('0401',  30,  80_000), # Oruro Norte
+        ('0301',  35,  50_000), # Trinidad (Beni)
+        ('0901',  70,  80_000), # Calacoto premium (La Paz)
+        ('0903',  55, 120_000), # La Paz El Alto Sur
+        ('0921',  22, 250_000), # El Alto Ciudad
+        ('0200',  62,  60_000), # Cobija (Pando)
+        ('0911',  58,  60_000), # La Paz Zona Norte
+        ('1001',  40,  50_000), # Sucre Norte
     ],
 
     # ── PARAGUAY — primeros 4 dígitos ────────────────────────────
@@ -1694,6 +1731,17 @@ POSTAL_PREFIX_DATA: dict[str, list] = {
         ('2780',  38,  80_000), # Capiatá
         ('2000',  42,  60_000), # Encarnación
         ('2300',  36,  60_000), # Mariano Roque Alonso
+        ('2950',  40,  50_000), # Areguá
+        ('2200',  38,  50_000), # Ypacaraí
+        ('2910',  42,  50_000), # Itauguá
+        ('2160',  36,  50_000), # Limpio
+        ('3310',  38,  60_000), # Coronel Oviedo
+        ('4210',  35,  50_000), # Caazapá
+        ('6000',  36,  60_000), # Villarrica
+        ('7000',  32,  50_000), # Concepción
+        ('8000',  30,  50_000), # Pilar
+        ('6810',  35,  60_000), # Caaguazú
+        ('1906',  38,  30_000), # Asunción Sajonia
     ],
 
     # ── NIGERIA — primeros 3 dígitos ─────────────────────────────
@@ -2298,6 +2346,617 @@ POSTAL_PREFIX_DATA: dict[str, list] = {
         ('75',  18,  80_000),   # Ardahan
         ('76',  20,  80_000),   # Iğdır
         ('69',  20,  60_000),   # Bayburt
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # PORTUGAL — PT  (primeros 2 dígitos del CP de 4 dígitos, 1000-9999)
+    # ══════════════════════════════════════════════════════════════
+    'PT': [
+        # Lisboa (1xxx)
+        ('12', 100,  80_000), # Lisboa Chiado / Bairro Alto
+        ('11',  90,  80_000), # Lisboa Campo de Ourique / Estrela
+        ('10',  85,  60_000), # Lisboa Centro / Alfama
+        ('13',  80,  70_000), # Lisboa Belém / Ajuda
+        ('14',  75,  80_000), # Lisboa Penha de França / Areeiro
+        ('15',  68,  90_000), # Lisboa Benfica / Carnide
+        ('16',  70,  90_000), # Lisboa Lumiar / Telheiras
+        ('17',  74,  80_000), # Lisboa Alvalade
+        ('18',  60,  80_000), # Lisboa Sacavém / Loures
+        ('19',  62,  80_000), # Lisboa Olivais / Oriente
+        # Arredores de Lisboa (2xxx)
+        ('26',  68,  80_000), # Sintra / Queluz
+        ('27',  72,  80_000), # Amadora / Cascais
+        ('28',  70, 150_000), # Almada / Seixal
+        ('29',  55, 150_000), # Setúbal
+        # Centro (3xxx)
+        ('30',  68, 130_000), # Coimbra Centro
+        ('31',  56,  80_000), # Pombal / Cantanhede
+        ('32',  52,  80_000), # Leiria
+        ('33',  48,  60_000), # Figueira da Foz
+        ('34',  45,  70_000), # Viseu
+        ('35',  42,  50_000), # Guarda
+        # Porto / Norte (4xxx)
+        ('41', 100, 130_000), # Porto Foz / Boavista Premium
+        ('40',  88, 150_000), # Porto Baixa / Ribeira
+        ('42',  80, 200_000), # Porto Gondomar / Campanhã
+        ('43',  82, 100_000), # Matosinhos / Leça
+        ('44',  78, 200_000), # Vila Nova de Gaia
+        ('45',  70, 100_000), # Espinho / Santa Maria da Feira
+        ('46',  68, 130_000), # Aveiro
+        ('47',  74, 180_000), # Braga Centro
+        ('48',  66, 130_000), # Guimarães
+        ('49',  58,  90_000), # Viana do Castelo
+        # Interior Norte (5xxx)
+        ('50',  40,  70_000), # Lamego / Régua
+        ('51',  36,  50_000), # Peso da Régua
+        ('52',  33,  45_000), # Bragança
+        ('53',  36,  55_000), # Chaves
+        ('54',  38,  60_000), # Vila Real
+        # Beiras Interiores (6xxx)
+        ('60',  36,  45_000), # Covilhã
+        ('61',  33,  35_000), # Fundão
+        ('62',  38,  50_000), # Castelo Branco
+        ('63',  30,  28_000), # Portalegre
+        # Alentejo (7xxx)
+        ('70',  40,  70_000), # Évora
+        ('71',  33,  50_000), # Beja
+        ('72',  35,  40_000), # Santiago do Cacém / Sines
+        ('73',  36,  45_000), # Elvas
+        # Algarve (8xxx)
+        ('80',  70,  90_000), # Faro
+        ('81',  78, 100_000), # Loulé / Vilamoura
+        ('82',  82,  90_000), # Albufeira
+        ('83',  78,  80_000), # Portimão / Lagos
+        ('84',  70,  60_000), # Tavira / Olhão
+        # Açores e Madeira (9xxx)
+        ('90',  60,  40_000), # Ponta Delgada (Açores)
+        ('91',  50,  25_000), # Angra do Heroísmo (Açores)
+        ('94',  65,  70_000), # Funchal (Madeira)
+        ('95',  55,  40_000), # Santa Cruz (Madeira)
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # SUIZA — CH  (primeros 2 dígitos del CP de 4 dígitos, 1000-9999)
+    # ══════════════════════════════════════════════════════════════
+    'CH': [
+        # Zúrich (8xxx)
+        ('80', 100, 200_000), # Zúrich Seefeld / Enge / Altstadt
+        ('81',  88, 100_000), # Zúrich Fluntern / Witikon
+        ('82',  85, 120_000), # Küsnacht / Zollikon (orilla lago)
+        ('83',  78, 100_000), # Richterswil / Wädenswil
+        ('84',  82,  80_000), # Meilen / Herrliberg (lago premium)
+        ('85',  76, 130_000), # Winterthur Centro
+        ('86',  64,  80_000), # Winterthur Norte
+        ('87',  60,  60_000), # Winterthur Töss
+        ('88',  70,  80_000), # Rapperswil-Jona
+        ('89',  68,  60_000), # Uster / Pfäffikon (Zürichsee)
+        # Ginebra (12xx-13xx)
+        ('12', 100, 200_000), # Ginebra Centro / Eaux-Vives
+        ('13',  80, 100_000), # Ginebra Carouge / Plan-les-Ouates
+        # Lausana / Vaud (10xx-11xx)
+        ('10',  95, 150_000), # Lausana / Pully
+        ('11',  76, 100_000), # Morges / Nyon / Vaud Norte
+        # Berna (30xx-34xx)
+        ('30',  88, 130_000), # Berna Centro / Kirchenfeld
+        ('31',  76, 150_000), # Berna Köniz / Muri
+        ('32',  64,  90_000), # Biel / Bienne
+        ('33',  58,  80_000), # Thun
+        ('34',  54,  70_000), # Langnau / Burgdorf
+        ('36',  56,  50_000), # Interlaken / Grindelwald
+        # Basilea (40xx-42xx)
+        ('40',  88, 180_000), # Basilea Centro / Gundeldingen
+        ('41',  74, 100_000), # Basilea Riehen / Bettingen
+        ('42',  62,  80_000), # Liestal / Arlesheim
+        # Argovia (50xx-53xx)
+        ('45',  60,  80_000), # Solothurn / Olten
+        ('50',  68,  90_000), # Aarau
+        ('53',  70,  80_000), # Baden
+        # Lucerna / Suiza Central (60xx-69xx)
+        ('60',  76, 180_000), # Lucerna Centro
+        ('61',  64,  90_000), # Emmen / Kriens
+        ('62',  52,  70_000), # Sursee / Willisau
+        ('63',  82,  60_000), # Zug (premium)
+        ('64',  66,  50_000), # Schwyz / Brunnen
+        # Grisones (70xx-72xx)
+        ('70',  74,  70_000), # Chur / Graubünden
+        ('71',  78,  40_000), # Davos
+        ('72',  80,  30_000), # St. Moritz / Engadina Alta
+        # Valais / Neuchâtel / Friburgo
+        ('17',  64,  80_000), # Friburgo / Freiburg
+        ('19',  60,  80_000), # Sion / Sierre (Valais)
+        ('20',  64,  80_000), # Neuchâtel
+        # Ticino (65xx-69xx)
+        ('65',  76,  90_000), # Lugano
+        ('66',  62,  60_000), # Bellinzona / Locarno
+        # San Galo (90xx-94xx)
+        ('90',  68, 130_000), # San Galo / St. Gallen Centro
+        ('91',  58,  80_000), # Rorschach / Gossau
+        ('94',  54,  60_000), # Appenzell / Herisau
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # BÉLGICA — BE  (primeros 2 dígitos del CP de 4 dígitos, 1000-9999)
+    # ══════════════════════════════════════════════════════════════
+    'BE': [
+        # Bruselas (10xx-19xx)
+        ('10', 100, 200_000), # Bruselas Ixelles / Etterbeek / Pentagone
+        ('11',  88, 150_000), # Bruselas Uccle / Woluwe-Saint-Pierre
+        ('12',  80, 100_000), # Brabante Valón / Waterloo
+        ('13',  74, 100_000), # Ottignies / Louvain-la-Neuve
+        ('14',  68,  80_000), # Nivelles / Braine-l'Alleud
+        ('15',  65,  60_000), # Halle / Braine-le-Château
+        ('16',  62,  50_000), # Rhode-Saint-Genèse
+        ('18',  70,  80_000), # Vilvoorde / Machelen
+        ('19',  66,  60_000), # Grimbergen / Diegem
+        # Amberes (20xx-29xx)
+        ('20',  92, 200_000), # Amberes Centro / Eilandje
+        ('21',  76, 150_000), # Amberes Norte / Merksem
+        ('22',  64, 150_000), # Mechelen Ciudad
+        ('23',  56, 120_000), # Turnhout / Mol interior
+        ('24',  52,  80_000), # Mol / Geel (Kempen)
+        # Lovaina y Limburgo (30xx-39xx)
+        ('30',  86,  90_000), # Lovaina / Leuven Centro
+        ('31',  70,  80_000), # Lovaina Este / Tervuren
+        ('32',  58,  70_000), # Tienen
+        ('33',  52,  60_000), # Diest
+        ('35',  60,  80_000), # Hasselt Centro
+        ('36',  52,  70_000), # Genk
+        ('37',  48,  60_000), # Tongeren
+        ('38',  46,  60_000), # Sint-Truiden
+        # Lieja (40xx-49xx)
+        ('40',  78, 180_000), # Lieja Centro / Guillemins
+        ('41',  64, 130_000), # Lieja Seraing / Ans
+        ('42',  50,  90_000), # Herstal / Visé
+        ('43',  46,  70_000), # Huy
+        ('44',  43,  60_000), # Waremme / Hannut
+        # Namur (50xx-59xx)
+        ('50',  64,  90_000), # Namur Centro
+        ('51',  50,  60_000), # Namur Este / Gembloux
+        ('52',  44,  50_000), # Dinant
+        ('53',  40,  40_000), # Philippeville / Couvin
+        # Hainaut / Charleroi (60xx-79xx)
+        ('60',  68, 180_000), # Charleroi Centro
+        ('61',  54, 120_000), # Charleroi Este / Fleurus
+        ('62',  43,  90_000), # Thuin / Beaumont
+        ('67',  50,  40_000), # Arlon / Luxemburgo belga
+        ('68',  43,  40_000), # Bastogne / La Roche-en-Ardenne
+        ('70',  64,  90_000), # Mons Centro
+        ('71',  50,  90_000), # La Louvière
+        ('72',  44,  70_000), # Soignies
+        ('73',  40,  60_000), # Ath / Enghien
+        # Flandes Occidental (80xx-89xx — Brujas / Bélgica Costa)
+        ('80',  80, 130_000), # Brujas / Brugge Centro
+        ('81',  68,  80_000), # Brujas Este / Beernem
+        ('82',  62,  70_000), # Torhout / Tielt
+        ('83',  70,  70_000), # Ieper / Ypres
+        ('84',  68,  80_000), # Kortrijk Centro
+        ('85',  62,  60_000), # Roeselare
+        ('86',  58,  60_000), # Ostende
+        ('87',  54,  50_000), # Veurne / De Panne (Costa)
+        # Flandes Oriental (90xx-99xx — Gante)
+        ('90',  86, 220_000), # Gante / Gent Centro
+        ('91',  73, 100_000), # Gante Este / Wetteren
+        ('92',  64,  80_000), # Lokeren / Sint-Niklaas
+        ('93',  58,  70_000), # Oudenaarde
+        ('94',  60,  70_000), # Aalst Centro
+        ('95',  53,  80_000), # Dendermonde
+        ('96',  50,  60_000), # Geraardsbergen
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # PAÍSES BAJOS — NL  (primeros 2 dígitos del CP de 4 dígitos, 1000-9999)
+    # ══════════════════════════════════════════════════════════════
+    'NL': [
+        # Ámsterdam (10xx-11xx)
+        ('10', 100, 130_000), # Ámsterdam Centrum / Jordaan / Oud-Zuid
+        ('11',  70,  90_000), # Ámsterdam Zuidoost / Bijlmer
+        # Noord-Holland
+        ('12',  82,  70_000), # Hilversum / Laren / 't Gooi
+        ('13',  65, 200_000), # Almere (Flevoland)
+        ('14',  70,  50_000), # Bussum / Naarden
+        ('20',  84,  90_000), # Haarlem
+        ('21',  72,  60_000), # Haarlem suburbios / Heemstede
+        # Zuid-Holland
+        ('22',  70,  80_000), # Katwijk / Noordwijk
+        ('23',  78,  90_000), # Leiden Centro
+        ('24',  74,  60_000), # Alphen aan den Rijn
+        ('25',  88, 180_000), # Den Haag Centrum / Statenkwartier
+        ('26',  76, 100_000), # Delft
+        ('27',  68,  80_000), # Zoetermeer / Leidschendam
+        ('28',  60,  80_000), # Gouda
+        ('30',  78, 120_000), # Rotterdam Centrum / Kralingen
+        ('31',  62, 100_000), # Rotterdam Noord / Schiedam
+        ('32',  54,  90_000), # Spijkenisse / Barendrecht
+        ('33',  58,  90_000), # Dordrecht
+        ('34',  52,  60_000), # Gorinchem
+        # Utrecht
+        ('35',  82, 170_000), # Utrecht Centrum
+        ('36',  70, 100_000), # Nieuwegein / IJsselstein
+        ('37',  64,  80_000), # Veenendaal / Zeist
+        ('38',  68, 100_000), # Amersfoort
+        # Noord-Brabant
+        ('42',  66, 120_000), # 's-Hertogenbosch área
+        ('44',  54,  80_000), # Waalwijk
+        ('46',  54,  80_000), # Bergen op Zoom
+        ('47',  56,  80_000), # Helmond
+        ('48',  64, 170_000), # Breda
+        ('49',  52,  80_000), # Roosendaal
+        ('50',  62, 180_000), # Tilburg Centro
+        ('52',  68, 120_000), # 's-Hertogenbosch / Den Bosch
+        ('55',  72, 180_000), # Eindhoven área
+        ('56',  76, 180_000), # Eindhoven Centrum
+        ('57',  62,  80_000), # Veldhoven / Waalre
+        ('58',  56,  80_000), # Weert
+        ('59',  60,  80_000), # Venlo
+        # Limburg / Gelderland
+        ('62',  74,  90_000), # Maastricht
+        ('63',  62,  80_000), # Nijmegen área
+        ('65',  70, 130_000), # Nijmegen Centrum
+        ('68',  62, 130_000), # Arnhem
+        # Overijssel / Gelderland
+        ('73',  65, 130_000), # Apeldoorn
+        ('74',  62,  80_000), # Deventer
+        ('75',  60, 130_000), # Enschede
+        ('76',  54,  80_000), # Almelo
+        # Overijssel / Drenthe
+        ('80',  68,  90_000), # Zwolle
+        ('83',  55,  60_000), # Hoogeveen / Drenthe Sur
+        # Friesland / Groningen
+        ('89',  55,  70_000), # Leeuwarden
+        ('97',  68, 180_000), # Groningen Centrum
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # INDONESIA — ID  (primeros 2 dígitos del CP de 5 dígitos, 10000-99999)
+    # ══════════════════════════════════════════════════════════════
+    'ID': [
+        # Jakarta (10xxx-14xxx)
+        ('10', 100, 400_000), # Jakarta Pusat (Menteng / Gambir premium)
+        ('12',  90, 500_000), # Jakarta Selatan (Kebayoran Baru / Setiabudi)
+        ('11',  68, 600_000), # Jakarta Barat
+        ('13',  62, 600_000), # Jakarta Timur
+        ('14',  55, 500_000), # Jakarta Utara
+        # Jabodetabek
+        ('15',  74, 800_000), # Tangerang Selatan / BSD City / Serpong
+        ('16',  62, 700_000), # Bogor / Depok
+        ('17',  68, 700_000), # Bekasi
+        ('18',  58, 400_000), # Tangerang Kota
+        # Sumatra
+        ('20',  68, 400_000), # Medan Centro (Medan Baru / Petisah)
+        ('25',  48, 200_000), # Padang (Sumatra Barat)
+        ('28',  58, 250_000), # Pekanbaru (Riau)
+        ('29',  70, 200_000), # Batam (Kepulauan Riau — zona libre)
+        ('30',  52, 400_000), # Palembang
+        # Java Barat
+        ('40',  78, 300_000), # Bandung Centro (Dago / Coblong premium)
+        ('42',  55, 200_000), # Serang / Cilegon (Banten)
+        ('43',  48, 200_000), # Sukabumi
+        ('45',  44, 200_000), # Cirebon
+        # Jawa Tengah / DIY
+        ('50',  62, 350_000), # Semarang Centro
+        ('51',  50, 250_000), # Salatiga / Semarang suburbios
+        ('55',  58, 250_000), # Yogyakarta
+        ('57',  52, 250_000), # Solo / Surakarta
+        # Jawa Timur
+        ('60',  82, 500_000), # Surabaya Centro (Gubeng / Genteng premium)
+        ('61',  65, 600_000), # Surabaya Norte / Gresik
+        ('62',  58, 500_000), # Surabaya Sur / Sidoarjo
+        ('65',  58, 300_000), # Malang
+        # Kalimantan
+        ('75',  52, 200_000), # Samarinda (Kalimantan Timur)
+        ('76',  62, 200_000), # Balikpapan (Kalimantan Timur)
+        ('78',  46, 200_000), # Pontianak (Kalimantan Barat)
+        # Bali / Nusa Tenggara
+        ('80',  86, 300_000), # Denpasar / Bali Sur (Kuta / Seminyak)
+        ('83',  52, 150_000), # Mataram / Lombok
+        # Sulawesi / Papua
+        ('90',  62, 400_000), # Makassar Centro (Sulawesi Selatan)
+        ('91',  48, 300_000), # Makassar Norte / Maros
+        ('95',  48, 150_000), # Manado (Sulawesi Utara)
+        ('99',  38, 150_000), # Jayapura (Papua)
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # EGIPTO — EG  (primeros 2 dígitos del CP de 5 dígitos, 11000-92999)
+    # ══════════════════════════════════════════════════════════════
+    'EG': [
+        # El Cairo y Gran Cairo (11xxx-12xxx)
+        ('11',  70, 800_000), # El Cairo Zamalek / Heliopolis / Maadi / Nasr City
+        ('12',  65, 600_000), # Giza / Mohandessin / Dokki / 6th October
+        # Alejandría (21xxx)
+        ('21',  58, 500_000), # Alejandría Centro / Smouha / Sidi Bishr
+        # Canal de Suez
+        ('41',  48, 150_000), # Ismailia
+        ('42',  52, 200_000), # Port Said
+        ('43',  45, 150_000), # Suez
+        # Delta del Nilo
+        ('31',  42, 400_000), # Tanta / Gharbiya
+        ('33',  36, 300_000), # Damietta / Kafr el-Sheikh Norte
+        ('34',  38, 400_000), # Mahalla el-Kobra / Kafr el-Sheikh
+        ('35',  40, 500_000), # Mansoura / Dakahlia
+        ('36',  35, 300_000), # Benha / Qalyubiya
+        # Sinai
+        ('44',  45, 150_000), # El-Arish / Sinai Norte
+        ('46',  55, 100_000), # Sharm El Sheikh / Sinai Sur
+        # Marsa Matruh / Costero Norte
+        ('51',  30, 100_000), # Marsa Matruh
+        # Medio Egipto
+        ('25',  36, 300_000), # El Fayum
+        ('62',  35, 300_000), # Beni Suef
+        ('71',  38, 400_000), # Asiut
+        # Mar Rojo
+        ('84',  52, 150_000), # Hurghada / Mar Rojo
+        # Alto Egipto
+        ('81',  40, 300_000), # Aswan
+        ('82',  42, 300_000), # Luxor
+        ('85',  32, 200_000), # Qena
+        ('92',  30, 150_000), # Sohag
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # MARRUECOS — MA  (primeros 2 dígitos del CP de 5 dígitos, 10000-93000)
+    # ══════════════════════════════════════════════════════════════
+    'MA': [
+        # Rabat / Salé (10xxx-11xxx)
+        ('10',  92, 300_000), # Rabat Agdal / Hassan / Hay Riad
+        ('11',  78, 200_000), # Rabat Salé / Témara
+        # Casablanca (20xxx-22xxx)
+        ('20', 100, 800_000), # Casablanca Centro / Maarif / Anfa
+        ('21',  82, 500_000), # Casablanca Norte / Sidi Maarouf
+        ('22',  68, 400_000), # Casablanca Sur / Aïn Sebaâ
+        # Beni Mellal / El Jadida / Settat
+        ('23',  44, 150_000), # Beni Mellal / Khouribga
+        ('24',  48, 150_000), # El Jadida / Azemmour
+        ('26',  40, 100_000), # Settat
+        # Fès (30xxx-31xxx)
+        ('30',  62, 300_000), # Fès Ville Nouvelle / Agdal
+        ('31',  48, 200_000), # Fès Médina / Saïss
+        # Kenitra
+        ('14',  55, 200_000), # Kenitra / Sidi Slimane
+        # Marrakech (40xxx-42xxx)
+        ('40',  82, 400_000), # Marrakech Guéliz / Hivernage
+        ('41',  65, 300_000), # Marrakech Médina
+        ('42',  56, 200_000), # Marrakech afueras / Menara
+        # Essaouira / Safi
+        ('44',  42,  80_000), # Essaouira
+        ('46',  40, 120_000), # Safi
+        # Meknès (50xxx-51xxx)
+        ('50',  52, 250_000), # Meknès Centro
+        ('51',  40, 150_000), # Meknès rural / Ifrane
+        # Interior / Sahara
+        ('52',  28,  80_000), # Errachidia / Midelt
+        # Oujda / Oriental (60xxx-62xxx)
+        ('60',  50, 200_000), # Oujda
+        ('62',  40, 150_000), # Nador
+        # Laayoune / Sahara Occidental
+        ('70',  36,  80_000), # Laayoune
+        ('73',  30,  50_000), # Dakhla
+        # Agadir / Souss (80xxx-81xxx)
+        ('80',  70, 200_000), # Agadir Centro / Talborjt
+        ('81',  62, 150_000), # Agadir afueras / Inezgane
+        # Tánger / Norte (90xxx-93xxx)
+        ('90',  76, 300_000), # Tánger Centro / Marchane
+        ('91',  62, 200_000), # Tánger Malabata / Achakar
+        ('93',  58, 200_000), # Tétouan
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # TAIWÁN — TW  (primeros 3 dígitos del CP de 3 o 5 dígitos)
+    # ══════════════════════════════════════════════════════════════
+    'TW': [
+        # Taipéi (100-116) — prefijo 3 dígitos
+        ('106', 100, 120_000), # Taipéi Da'an (más premium)
+        ('110',  92,  80_000), # Taipéi Xinyi (Taipei 101 / Xinyi Dist)
+        ('104',  85,  80_000), # Taipéi Zhongshan
+        ('105',  88,  80_000), # Taipéi Songshan
+        ('100',  80,  80_000), # Taipéi Zhongzheng (gobierno/histórico)
+        ('114',  82, 100_000), # Taipéi Neihu (parque tecnológico)
+        ('111',  70, 120_000), # Taipéi Shilin
+        ('112',  68,  80_000), # Taipéi Beitou
+        ('115',  72,  60_000), # Taipéi Nangang
+        ('116',  65, 100_000), # Taipéi Wenshan
+        ('103',  62,  80_000), # Taipéi Datong
+        ('108',  52,  80_000), # Taipéi Wanhua
+        # Nueva Taipéi (22x-25x)
+        ('220',  78, 400_000), # Nueva Taipéi Banqiao
+        ('231',  72, 250_000), # Nueva Taipéi Xindian
+        ('235',  70, 250_000), # Nueva Taipéi Zhonghe / Yonghe
+        ('241',  68, 200_000), # Nueva Taipéi Sanchong
+        ('251',  75, 150_000), # Nueva Taipéi Tamsui / Danshui
+        # Keelung (200-206)
+        ('200',  65, 150_000), # Keelung Ciudad
+        # Taoyuan (320-338)
+        ('320',  72, 400_000), # Taoyuan Ciudad
+        ('330',  65, 200_000), # Taoyuan Zhongli
+        # Hsinchu (300-315)
+        ('300',  80, 200_000), # Hsinchu Ciudad (hub tecnológico)
+        ('302',  70, 100_000), # Hsinchu County
+        # Taichung (400-439)
+        ('404',  82, 400_000), # Taichung Xitun / Nantun (premium)
+        ('408',  75, 300_000), # Taichung Beitun / Norte
+        ('401',  68, 200_000), # Taichung Centro
+        ('413',  55, 200_000), # Taichung Dali
+        # Tainan (700-745)
+        ('700',  70, 500_000), # Tainan Centro / Anping
+        ('704',  62, 300_000), # Tainan Norte / Rende
+        ('708',  55, 200_000), # Tainan Sur / Yongkang
+        # Kaohsiung (800-852)
+        ('800',  82, 600_000), # Kaohsiung Xinxing / Lingya
+        ('806',  78, 300_000), # Kaohsiung Zuoying (premium)
+        ('830',  65, 300_000), # Kaohsiung Fengshan
+        ('802',  58, 250_000), # Kaohsiung Qianzhen / Nanzih
+        # Sur / Este
+        ('900',  44, 200_000), # Pingtung Ciudad
+        ('970',  42,  80_000), # Hualien Ciudad
+        ('950',  38,  80_000), # Taitung Ciudad
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # HONG KONG — HK  (distritos 01-18, sin CP estándar)
+    # ══════════════════════════════════════════════════════════════
+    'HK': [
+        # Hong Kong Island
+        ('01', 100,  80_000), # Central y Western (CBD premium — Hong Kong Island)
+        ('02',  92,  60_000), # Wan Chai
+        ('03',  75, 100_000), # Eastern / Quarry Bay
+        ('04',  65,  80_000), # Southern / Aberdeen
+        # Kowloon
+        ('05',  88, 100_000), # Yau Tsim Mong (Tsim Sha Tsui / Jordan)
+        ('06',  65, 130_000), # Sham Shui Po
+        ('07',  70,  80_000), # Kowloon City
+        ('08',  60,  80_000), # Wong Tai Sin
+        ('09',  58, 150_000), # Kwun Tong
+        # Nuevos Territorios
+        ('10',  65, 120_000), # Kwai Tsing
+        ('11',  70,  80_000), # Tsuen Wan
+        ('12',  55, 150_000), # Tuen Mun
+        ('13',  60, 200_000), # Yuen Long
+        ('14',  42,  80_000), # New Territories Norte
+        ('15',  52,  90_000), # Tai Po
+        ('16',  68, 150_000), # Sha Tin
+        ('17',  74,  80_000), # Sai Kung / Clearwater Bay
+        # Islas
+        ('18',  52,  50_000), # Isla Lantau / Outlying Islands
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # REPÚBLICA DOMINICANA — DO  (primeros 2 dígitos del CP de 5 dígitos)
+    # ══════════════════════════════════════════════════════════════
+    'DO': [
+        # Santo Domingo (10xxx)
+        ('10', 100, 200_000), # Santo Domingo Piantini / Naco (premium)
+        # Santo Domingo Este / Norte
+        ('11',  75, 400_000), # Santo Domingo Norte / Villa Mella
+        ('14',  60, 200_000), # Santo Domingo Este / Boca Chica
+        # Interior / Este
+        ('21',  48, 100_000), # San Pedro de Macorís
+        ('22',  55, 100_000), # La Romana / Casa de Campo
+        ('23',  70,  80_000), # Punta Cana / Bávaro (turismo)
+        ('31',  36, 100_000), # San Francisco de Macorís
+        ('41',  38,  80_000), # La Vega
+        ('42',  33,  60_000), # Bonao
+        ('48',  36,  60_000), # Moca
+        # Norte / Cibao
+        ('51',  62, 200_000), # Santiago Centro
+        ('57',  45, 100_000), # Puerto Plata
+        # Sur
+        ('81',  30,  60_000), # Barahona
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # JORDANIA — JO  (primeros 2 dígitos del CP de 5 dígitos)
+    # ══════════════════════════════════════════════════════════════
+    'JO': [
+        # Ammán (11xxx)
+        ('11',  75, 800_000), # Ammán (Abdoun / Shmaisani / Jabal Amman)
+        # Principales ciudades
+        ('13',  42, 500_000), # Zarqa
+        ('17',  46,  80_000), # Madaba
+        ('19',  52, 100_000), # Salt / Balqa
+        ('21',  50, 400_000), # Irbid
+        ('25',  36, 150_000), # Mafraq
+        ('26',  40,  80_000), # Ajloun / Jerash
+        # Sur
+        ('61',  33, 100_000), # Karak
+        ('66',  30,  60_000), # Tafilah
+        ('71',  28,  60_000), # Ma'an / Wadi Rum
+        # Aqaba (77xxx)
+        ('77',  62,  80_000), # Aqaba
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # KUWAIT — KW  (primeros 2 dígitos del CP de 5 dígitos)
+    # ══════════════════════════════════════════════════════════════
+    'KW': [
+        # Kuwait City
+        ('13', 100, 100_000), # Kuwait City Centro / Sharq (premium)
+        ('22',  72,  60_000), # Salmiya / Salwa
+        ('25',  65,  60_000), # Rumaithiya / Bayan
+        # Hawalli
+        ('32',  75, 200_000), # Hawalli
+        ('43',  68,  50_000), # Bayan / Mishref
+        # Al Jahra
+        ('42',  44, 200_000), # Al Jahra
+        # Ahmadi (61xxx-64xxx)
+        ('47',  70,  40_000), # Sabah Al-Ahmad (nueva ciudad)
+        ('61',  65, 200_000), # Ahmadi (zona petrolera)
+        ('62',  46, 150_000), # Fahaheel
+        ('63',  52,  60_000), # Abu Halifa
+        ('64',  50,  60_000), # Mahboula
+        # Mubarak Al-Kabeer
+        ('77',  62,  80_000), # Mubarak Al-Kabeer
+        # Farwaniya
+        ('81',  56, 400_000), # Farwaniya
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # SENEGAL — SN  (prefijos de área — Dakar 10xxx, regiones 2x-6xxx)
+    # ══════════════════════════════════════════════════════════════
+    'SN': [
+        # Dakar (10xxx-15xxx)
+        ('10', 100,  80_000), # Dakar Plateau / Almadies (premium)
+        ('11',  85, 100_000), # Dakar Mermoz / Fann / Point E
+        ('12',  70, 200_000), # Dakar Médina / Liberté
+        ('13',  55, 400_000), # Dakar Pikine
+        ('14',  42, 500_000), # Guédiawaye
+        ('15',  40, 200_000), # Rufisque / Diamniadio
+        # Interior y Ciudades Medianas
+        ('18',  36, 200_000), # Touba (ciudad santa)
+        ('20',  35, 300_000), # Thiès
+        ('22',  30, 150_000), # Saint-Louis
+        ('23',  25, 100_000), # Diourbel
+        ('30',  32, 200_000), # Kaolack
+        ('40',  28,  80_000), # Ziguinchor
+        # Interior profundo
+        ('50',  18,  80_000), # Kolda / Sédhiou
+        ('60',  16,  80_000), # Tambacounda / Kédougou
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # COSTA DE MARFIL — CI  (prefijos de distrito de Abidján 01-08, interior 20-70)
+    # ══════════════════════════════════════════════════════════════
+    'CI': [
+        # Abidján (comunas)
+        ('01', 100, 200_000), # Abidján Plateau / Zone 4 (CBD premium)
+        ('02',  86, 200_000), # Abidján Cocody / Riviera
+        ('03',  70, 400_000), # Abidján Marcory / Treichville
+        ('04',  52, 600_000), # Abidján Yopougon
+        ('05',  42, 700_000), # Abidján Abobo
+        ('06',  55, 300_000), # Abidján Koumassi / Port-Bouët
+        ('07',  62, 150_000), # Abidján Deux Plateaux / Angré
+        ('08',  45, 200_000), # Abidján Adjamé / Attécoubé
+        # Interior del país
+        ('20',  36, 400_000), # Bouaké
+        ('30',  30, 200_000), # Daloa
+        ('40',  33, 200_000), # San-Pédro
+        ('41',  26, 150_000), # Korhogo / Savanes
+        ('50',  24, 100_000), # Man / Ouest
+        ('60',  22, 100_000), # Abengourou
+        ('70',  20, 100_000), # Odienné / Nord-Ouest
+    ],
+
+    # ══════════════════════════════════════════════════════════════
+    # CAMERÚN — CM  (prefijos de área — Douala 40xxx, Yaundé 30xxx)
+    # ══════════════════════════════════════════════════════════════
+    'CM': [
+        # Douala (40xxx-43xxx)
+        ('40', 100, 400_000), # Douala Akwa / Bonanjo (CBD premium)
+        ('41',  76, 400_000), # Douala Bali / Bonabéri
+        ('42',  60, 500_000), # Douala Makepe / Logbaba
+        ('43',  45, 600_000), # Douala New Bell / Nkongmamba
+        # Yaundé (30xxx-33xxx)
+        ('30',  86, 300_000), # Yaundé Bastos / Nlongkak (premium)
+        ('31',  70, 300_000), # Yaundé Centro / Mvog-Mbi
+        ('32',  52, 400_000), # Yaundé Messa / Tsinga
+        ('33',  40, 500_000), # Yaundé Essos / Mimboman
+        # Interior
+        ('20',  36, 200_000), # Bafoussam / Ouest
+        ('21',  30, 150_000), # Bamenda / Nord-Ouest
+        ('50',  25, 150_000), # Garoua / Nord
+        ('60',  22, 100_000), # Ngaoundéré / Adamawa
+        ('70',  18, 100_000), # Maroua / Extrême-Nord
+        ('10',  32, 100_000), # Bertoua / Est
+        ('11',  28,  80_000), # Ebolowa / Sud
     ],
 }
 
