@@ -9764,6 +9764,65 @@ def admin_tier_summary(secret: str, db: Session = Depends(get_db)):
         'sin_tier': dist.get('sin_tier', 0),
     }
 
+@app.get('/admin/audience-stats')
+def admin_audience_stats(secret: str, db: Session = Depends(get_db)):
+    """Inventario de audiencia por país y tier — para pricing de campañas publicitarias."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+
+    from commune_agent import CPM_BASE_BY_COUNTRY
+    from sqlalchemy import func as sqlfunc
+
+    # Multiplicadores CPM por tier: A es premium, D es bajo
+    TIER_CPM_MULT = {'A': 3.0, 'B': 1.5, 'C': 0.8, 'D': 0.4}
+
+    rows = (db.query(User.country, User.se_tier, sqlfunc.count(User.id))
+              .filter(User.se_tier.in_(['A', 'B', 'C', 'D']))
+              .group_by(User.country, User.se_tier)
+              .all())
+
+    # Agrupar por país
+    by_country: dict = {}
+    for country, tier, cnt in rows:
+        cc = (country or 'XX').upper()
+        if cc not in by_country:
+            by_country[cc] = {'A': 0, 'B': 0, 'C': 0, 'D': 0}
+        by_country[cc][tier] = cnt
+
+    # Calcular métricas por país
+    output = {}
+    for cc, tiers in by_country.items():
+        cpm_base = CPM_BASE_BY_COUNTRY.get(cc, 5.0)
+        total = sum(tiers.values())
+        # CPM ponderado por la mezcla de tiers
+        weighted_cpm = sum(tiers.get(t, 0) * cpm_base * m for t, m in TIER_CPM_MULT.items())
+        avg_cpm = round(weighted_cpm / total, 2) if total else 0
+        # Valor estimado de inventario si todos votan 1 vez (CPM = por 1000, aquí por usuario)
+        est_value_usd = round(weighted_cpm / 1000, 2)
+        output[cc] = {
+            'tiers': tiers,
+            'total_users': total,
+            'cpm_base_usd': cpm_base,
+            'avg_cpm_usd': avg_cpm,
+            'est_inventory_value_usd': est_value_usd,
+        }
+
+    # Ordenar por total de usuarios desc
+    output = dict(sorted(output.items(), key=lambda x: x[1]['total_users'], reverse=True))
+
+    grand_total = sum(v['total_users'] for v in output.values())
+    tier_a_total = sum(v['tiers'].get('A', 0) for v in output.values())
+
+    return {
+        'summary': {
+            'total_users_with_tier': grand_total,
+            'tier_a_users': tier_a_total,
+            'countries': len(output),
+        },
+        'by_country': output,
+    }
+
+
 @app.post('/admin/fix-user-tier')
 def admin_fix_user_tier(secret: str, email: str, db: Session = Depends(get_db)):
     """Fuerza recalculo de se_tier para un usuario específico."""
