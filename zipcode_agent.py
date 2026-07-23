@@ -2335,12 +2335,7 @@ def process_prefix_data(country: str) -> list[dict]:
 
 
 def run_zip_import(country: str) -> dict:
-    """Dispatcher principal. Llama Census API para US, prefijo para el resto."""
-    if country == 'US':
-        raw, errors = fetch_all_us_zips()
-        data = process_us_zip_data(raw)
-        return {'data': data, 'errors': errors, 'total': len(data)}
-
+    """Dispatcher principal. Usa POSTAL_PREFIX_DATA para todos los países incluyendo US."""
     if country in POSTAL_PREFIX_DATA:
         data = process_prefix_data(country)
         return {'data': data, 'errors': [], 'total': len(data)}
@@ -2351,7 +2346,7 @@ def run_zip_import(country: str) -> dict:
 def run_all_countries_import() -> dict:
     """Importa todos los países disponibles."""
     all_data, all_errors, total = [], [], 0
-    all_countries = ['US'] + list(POSTAL_PREFIX_DATA.keys())
+    all_countries = list(POSTAL_PREFIX_DATA.keys())
     for cc in all_countries:
         result = run_zip_import(cc)
         all_data.extend(result['data'])
