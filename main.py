@@ -7471,6 +7471,18 @@ def admin_debug_user(secret: str, email: str, db: Session = Depends(get_db)):
         } if commune_row else None,
     }
 
+@app.get('/admin/communes-by-country')
+def admin_communes_by_country(secret: str, db: Session = Depends(get_db)):
+    """Cuenta registros CommuneMarketData por país."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from sqlalchemy import func as _f
+    rows = db.query(CommuneMarketData.country, _f.count(CommuneMarketData.id))\
+             .group_by(CommuneMarketData.country)\
+             .order_by(CommuneMarketData.country).all()
+    result = {cc: count for cc, count in rows}
+    return {'total_paises': len(result), 'por_pais': result}
+
 @app.get('/admin/tier-summary')
 def admin_tier_summary(secret: str, db: Session = Depends(get_db)):
     """Distribución de se_tier entre todos los usuarios."""
