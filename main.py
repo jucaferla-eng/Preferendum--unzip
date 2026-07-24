@@ -10016,6 +10016,22 @@ def admin_fix_user_tier(secret: str, email: str, db: Session = Depends(get_db)):
     _assign_user_tier(u, db)
     return {'email': email, 'county': u.county, 'before': before, 'se_tier': u.se_tier, 'income_index': u.income_index}
 
+@app.post('/admin/debates/{debate_id}/force-verify')
+def admin_force_verify(debate_id: int, secret: str, db: Session = Depends(get_db)):
+    """Fuerza un debate a fase de verificación — para demos y pruebas."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+    now = datetime.utcnow()
+    debate.closes_at      = now - timedelta(hours=1)
+    debate.verify_opens   = now - timedelta(minutes=30)
+    debate.verify_closes  = now + timedelta(days=7)
+    db.commit()
+    return {'ok': True, 'debate_id': debate_id, 'status': 'verify', 'message': 'Debate forzado a fase de verificación'}
+
+
 @app.post('/admin/seed-opinions')
 def seed_opinions(secret: str, debate_id: int, count: int = 8, db: Session = Depends(get_db)):
     """Agrega opiniones de prueba a un debate para que aparezcan los ads (necesita ≥6)."""
