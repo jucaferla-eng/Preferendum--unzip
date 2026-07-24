@@ -3828,8 +3828,8 @@ def _cast_vote_inner(debate_id: int, data, user, db):
     if user.national_id:
         db.add(NationalIdVoteLog(debate_id=debate_id, national_id_hash=nid_hash))
     if fp_hash:
-        # Store device fingerprint in IMEILog if not already registered for this user
-        existing_fp = db.query(IMEILog).filter(IMEILog.user_id == user.id).first()
+        # Store device fingerprint in IMEILog if not already registered for this hash
+        existing_fp = db.query(IMEILog).filter(IMEILog.imei_hash == fp_hash).first()
         if not existing_fp:
             db.add(IMEILog(user_id=user.id, imei_hash=fp_hash, device_info='browser-fp'))
         db.add(ImeiVoteLog(debate_id=debate_id, imei_hash=fp_hash))
