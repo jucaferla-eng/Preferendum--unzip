@@ -10025,9 +10025,9 @@ def admin_force_verify(debate_id: int, secret: str, db: Session = Depends(get_db
     if not debate:
         raise HTTPException(404, 'Debate not found')
     now = datetime.utcnow()
-    debate.closes_at      = now - timedelta(hours=1)
-    debate.verify_opens   = now - timedelta(minutes=30)
-    debate.verify_closes  = now + timedelta(days=7)
+    debate.closes_at         = now - timedelta(hours=1)
+    debate.verify_opens_at   = now - timedelta(minutes=30)
+    debate.verify_closes_at  = now + timedelta(days=7)
     db.commit()
     return {'ok': True, 'debate_id': debate_id, 'status': 'verify', 'message': 'Debate forzado a fase de verificación'}
 
