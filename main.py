@@ -3688,6 +3688,16 @@ async def get_face_vote_token(
 
 @app.post('/debates/{debate_id}/vote')
 def cast_vote(debate_id: int, data: CastVoteRequest, user: User = Depends(get_verified_user), db: Session = Depends(get_db)):
+    try:
+     return _cast_vote_inner(debate_id, data, user, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f'[cast_vote UNHANDLED] {traceback.format_exc()}')
+        raise HTTPException(500, f'Error interno al votar: {type(e).__name__}: {e}')
+
+def _cast_vote_inner(debate_id: int, data, user, db):
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
         raise HTTPException(404, 'Consultation not found')
