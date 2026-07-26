@@ -41,17 +41,30 @@ for _c in ['EC','VE','BO','PY','PE','IN','NG','EG','MA','SN','CI','CM','IQ','IR'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CORTES POR PERCENTIL DE INGRESO FINAL (Metodología v2)
+#
+# H1  — ingreso muy alto (USA, Suiza, Japón...):       A=top 20%, B=sig 20%
+# H2  — ingreso alto/medio-alto (Francia, Corea...):   A=top 12%, B=sig 20%
+# M1  — ingreso medio (Chile, México, Turquía...):     A=top 7%,  B=sig 18%
+# M1g — M1 con Gini muy alto (Brasil, Sudáfrica...):   A=top 5%,  B=sig 15%
+# M2L — ingreso medio-bajo/bajo (Nigeria, India...):   A=top 3%,  B=sig 12%
 # ─────────────────────────────────────────────────────────────────────────────
 TIER_CUTS: dict[str, dict[str, int]] = {
     'H1':  {'A': 80, 'B': 60, 'C': 35, 'D': 15},
     'H2':  {'A': 88, 'B': 68, 'C': 40, 'D': 18},
     'M1':  {'A': 93, 'B': 75, 'C': 45, 'D': 20},
+    'M1g': {'A': 95, 'B': 80, 'C': 50, 'D': 20},   # M1 con desigualdad muy alta
     'M2L': {'A': 97, 'B': 85, 'C': 50, 'D': 20},
 }
 
+# Países con desigualdad muy alta (Gini ≥ 0.50) dentro de grupo M1
+# Aplican cortes más estrictos (grupo M1g en vez de M1 estándar)
+HIGH_GINI_COUNTRIES = {'BR', 'ZA', 'CO', 'MX'}
+
 # Umbral geográfico mínimo para que una persona califique como Tier A
 # Si tiene el percentil de ingreso para A pero vive en zona baja → baja a B
-A_GEO_THRESHOLD: dict[str, int] = {'H1': 75, 'H2': 80, 'M1': 85, 'M2L': 90}
+A_GEO_THRESHOLD: dict[str, int] = {
+    'H1': 75, 'H2': 80, 'M1': 85, 'M1g': 85, 'M2L': 90,
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FÓRMULA GEOSCORE
@@ -67,11 +80,19 @@ def rent_index_to_score(ri: float) -> float:
 def compute_geo_score(rent_pct: float, rent_index: float) -> float:
     return round(0.70 * rent_pct + 0.30 * rent_index_to_score(rent_index), 1)
 
+def get_effective_group(country: str) -> str:
+    """Retorna el grupo efectivo del país, considerando ajuste por desigualdad alta."""
+    group = COUNTRY_INCOME_GROUP.get(country, 'M1')
+    if group == 'M1' and country in HIGH_GINI_COUNTRIES:
+        return 'M1g'
+    return group
+
 def assign_tier(income_pct: float, rent_pct: float, country: str) -> str:
     """Asigna tier A-E según metodología v2.
     Para A: exige AMBAS condiciones (percentil de ingreso + zona geográfica).
+    Brasil/Sudáfrica/Colombia/México usan cortes más estrictos (M1g: A=top 5%).
     """
-    group = COUNTRY_INCOME_GROUP.get(country, 'M1')
+    group = get_effective_group(country)
     cuts  = TIER_CUTS[group]
     geo_t = A_GEO_THRESHOLD[group]
     if income_pct >= cuts['A']:
