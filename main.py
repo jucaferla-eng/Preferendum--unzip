@@ -10208,6 +10208,57 @@ def admin_bls_occupation_lookup(secret: str, title: str):
     return data
 
 
+@app.get('/marketer/project-campaign')
+def marketer_project_campaign(
+    countries: str,
+    tiers: str,
+    age_min: int = 18,
+    age_max: int = 65,
+    budget_usd: float = 100000,
+    brand: str = '',
+    campaign_name: str = '',
+):
+    """
+    Proyecta alcance y costo de una campaña multi-país.
+    countries: códigos separados por coma (ej: FR,ES,BR,CL)
+    tiers: A,B o B,C  etc.
+    Usa datos demográficos reales WorldBank/ITU 2024.
+    """
+    from campaign_projector import project_campaign
+    cc_list = [c.strip().upper() for c in countries.split(',') if c.strip()]
+    tier_list = [t.strip().upper() for t in tiers.split(',') if t.strip()]
+    return project_campaign(
+        countries=cc_list,
+        tiers=tier_list,
+        age_min=age_min,
+        age_max=age_max,
+        budget_usd=budget_usd,
+        campaign_name=campaign_name or f'Campaña {brand}',
+        brand=brand,
+    )
+
+
+@app.get('/marketer/project-brazil-ab')
+def marketer_brazil_ab(budget_usd: float = 200000):
+    """Análisis rápido: Brasil tier A+B mayores de 25 años."""
+    from campaign_projector import brazil_ab_25plus
+    return brazil_ab_25plus(budget_usd)
+
+
+@app.get('/marketer/demo/peugeot-students')
+def demo_peugeot_students(budget_usd: float = 500000):
+    """Demo Peugeot 208 — Estudiantes universitarios, 18–26 años, tier B+C, 19 países."""
+    from campaign_projector import peugeot_students
+    return peugeot_students(budget_usd)
+
+
+@app.get('/marketer/demo/peugeot-families')
+def demo_peugeot_families(budget_usd: float = 750000):
+    """Demo Peugeot Rifter/Traveller — Familias, 28–55 años, tier A+B, 19 países."""
+    from campaign_projector import peugeot_families
+    return peugeot_families(budget_usd)
+
+
 @app.post('/admin/debates/{debate_id}/force-verify')
 def admin_force_verify(debate_id: int, secret: str, db: Session = Depends(get_db)):
     """Fuerza un debate a fase de verificación — para demos y pruebas."""
