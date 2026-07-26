@@ -2496,6 +2496,42 @@ _PROFESSION_TIER: dict[str, str] = {
     'servicios': 'D', 'hogar': 'D', 'desempleado': 'D',
 }
 
+# Mapeo profesión → SOC code BLS para usuarios USA (datos reales BLS OES 2025)
+_US_PROFESSION_SOC: dict[str, str] = {
+    'medico':          '29-1215',  # Family Medicine Physicians
+    'dentista':        '29-1021',  # Dentists, General
+    'abogado':         '23-1011',  # Lawyers
+    'juez':            '23-1023',  # Judges, Magistrate Judges, and Magistrates
+    'economista':      '19-3011',  # Economists
+    'ing_civil':       '17-2051',  # Civil Engineers
+    'ing_comercial':   '11-1021',  # General and Operations Managers
+    'empresario':      '11-1011',  # Chief Executives
+    'ejecutivo':       '11-1011',  # Chief Executives
+    'financiero':      '11-3031',  # Financial Managers
+    'farmaceutico':    '29-1051',  # Pharmacists
+    'psicologo':       '19-3039',  # Psychologists, All Other
+    'contador':        '13-2011',  # Accountants and Auditors
+    'ing_informatica': '15-1252',  # Software Developers
+    'arquitecto':      '17-1011',  # Architects
+    'ing_otro':        '17-2199',  # Engineers, All Other
+    'consultor':       '13-1111',  # Management Analysts
+    'marketing':       '11-2021',  # Marketing Managers
+    'profesor_univ':   '25-1099',  # Postsecondary Teachers, All Other
+    'cientifico':      '19-1099',  # Life Scientists, All Other
+    'periodista':      '27-3021',  # News Analysts, Reporters, and Journalists
+    'artista':         '27-1013',  # Fine Artists
+    'ventas':          '41-4012',  # Sales Representatives, Wholesale and Manufacturing
+    'profesor_escuela':'25-2021',  # Elementary School Teachers
+    'tecnico':         '17-3029',  # Engineering Technologists and Technicians, Other
+    'enfermero':       '29-1141',  # Registered Nurses
+    'comercio':        '41-2031',  # Retail Salespersons
+    'mecanico':        '49-3023',  # Automotive Service Technicians and Mechanics
+    'construccion':    '47-2061',  # Construction Laborers
+    'transporte':      '53-3032',  # Heavy and Tractor-Trailer Truck Drivers
+    'servicios':       '35-2021',  # Food Preparation Workers
+    'hogar':           '37-2012',  # Maids and Housekeeping Cleaners
+}
+
 # Cargo jerárquico — eleva el tier independientemente de profesión o comuna
 _CARGO_TIER: dict[str, str] = {
     'ceo':              'A',  # CEO / Dueño / Fundador
@@ -2573,7 +2609,26 @@ def _assign_user_tier(user, db):
                 commune_tier      = _get_tier(avg_index)
                 user.income_index = avg_index
 
-    profession_tier  = _PROFESSION_TIER.get(getattr(user, 'profession', '') or '', None)
+    user_profession = getattr(user, 'profession', '') or ''
+    user_country_code = _country_code(user.country)
+
+    # Para usuarios USA: usar scores reales del BLS OES 2025
+    profession_tier = None
+    if user_country_code == 'US' and user_profession:
+        soc_code = _US_PROFESSION_SOC.get(user_profession)
+        if soc_code:
+            try:
+                from usa_data_agent import get_occupation_score, profession_score_to_tier
+                bls_data = get_occupation_score(soc_code)
+                if bls_data:
+                    profession_tier = profession_score_to_tier(bls_data['profession_score'])
+            except Exception:
+                profession_tier = _PROFESSION_TIER.get(user_profession)
+        else:
+            profession_tier = _PROFESSION_TIER.get(user_profession)
+    else:
+        profession_tier = _PROFESSION_TIER.get(user_profession, None)
+
     cargo_tier       = _CARGO_TIER.get(getattr(user, 'cargo', '') or '', None)
     company_size     = getattr(user, 'company_size', '') or ''
 
@@ -10081,6 +10136,58 @@ def admin_rental_agent_status(secret: str, country: str = 'CL', db: Session = De
         'tiers':       tier_counts,
         'top_10':      [{'commune': r.commune, 'income_index': r.income_index, 'se_tier': r.se_tier, 'sample_count': r.sample_count, 'source': r.portal} for r in rows[:10]],
     }
+
+
+@app.post('/admin/import-usa-bea')
+def admin_import_usa_bea(secret: str, db: Session = Depends(get_db)):
+    """Importa 3,115 condados USA desde BEA CAINC1 2024 a commune_market_data."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        from usa_data_agent import import_bea_to_db as _import
+        result_holder['result'] = _import(db)
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=600)
+    if not result_holder:
+        return {'ok': True, 'message': 'Import iniciado en background (timeout 10min — ver logs)'}
+    return result_holder.get('result', {'ok': False, 'message': 'Sin respuesta'})
+
+
+@app.get('/admin/usa-data-agent/stats')
+def admin_usa_data_stats(secret: str):
+    """Estadísticas del agente USA — condados BEA + ocupaciones BLS cargados en memoria."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from usa_data_agent import get_stats
+    return get_stats()
+
+
+@app.get('/admin/usa-data-agent/county')
+def admin_usa_county_lookup(secret: str, county: str, state: str = ''):
+    """Busca un condado en los datos BEA — verifica el ingreso y tier asignado."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from usa_data_agent import get_county_data
+    data = get_county_data(county, state)
+    if not data:
+        raise HTTPException(404, f'Condado no encontrado: {county}')
+    return data
+
+
+@app.get('/admin/usa-data-agent/occupation')
+def admin_bls_occupation_lookup(secret: str, title: str):
+    """Busca una ocupación en los datos BLS — verifica el salario mediano y score."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from usa_data_agent import get_occupation_score, profession_score_to_tier
+    data = get_occupation_score(title)
+    if not data:
+        raise HTTPException(404, f'Ocupación no encontrada: {title}')
+    data['tier_h1'] = profession_score_to_tier(data['profession_score'])
+    return data
 
 
 @app.post('/admin/debates/{debate_id}/force-verify')
