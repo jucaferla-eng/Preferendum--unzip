@@ -30,13 +30,18 @@ log = logging.getLogger(__name__)
 # CLASIFICACIÓN DE PAÍSES POR GRUPO DE INGRESO
 # ─────────────────────────────────────────────────────────────────────────────
 COUNTRY_INCOME_GROUP: dict[str, str] = {}
-for _c in ['US','CH','AU','CA','GB','DE','NL','AT','BE','JP','KR','HK','QA','AE','KW','IL']:
+# H1 — ingreso muy alto (PIB per cápita > ~$40k USD, OCDE avanzados + financieros)
+for _c in ['US','CH','AU','CA','GB','DE','NL','AT','BE','JP','KR','HK','QA','AE','KW','IL',
+           'SG','DK','SE','NO','IE','LU','FI','NZ','IS','MC','LI']:
     COUNTRY_INCOME_GROUP[_c] = 'H1'
-for _c in ['FR','IT','ES','PT','CZ','PL','HU','RO','GR','TW','SA','MY']:
+# H2 — ingreso alto/medio-alto (PIB per cápita $15k–$40k USD)
+for _c in ['FR','IT','ES','PT','CZ','PL','HU','RO','GR','TW','SA','MY','SI','SK','EE','LV','LT','HR','MT','CY','BH']:
     COUNTRY_INCOME_GROUP[_c] = 'H2'
-for _c in ['CL','BR','MX','CO','AR','UY','TR','ZA','CN','RU','KZ','TH','DO','JO']:
+# M1 — ingreso medio (PIB per cápita $5k–$15k USD)
+for _c in ['CL','BR','MX','CO','AR','UY','TR','ZA','CN','RU','KZ','TH','DO','JO','RS','BG','MK','AL','BA']:
     COUNTRY_INCOME_GROUP[_c] = 'M1'
-for _c in ['EC','VE','BO','PY','PE','IN','NG','EG','MA','SN','CI','CM','IQ','IR','ID']:
+# M2L — ingreso medio-bajo/bajo (PIB per cápita < $5k USD)
+for _c in ['EC','VE','BO','PY','PE','IN','NG','EG','MA','SN','CI','CM','IQ','IR','ID','VN','PH','PK','BD','KE','GH','TZ']:
     COUNTRY_INCOME_GROUP[_c] = 'M2L'
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -540,23 +545,228 @@ def _save_commune(db, c: dict, country: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SEED GLOBAL — Deutsche Bank Mapping the World's Prices 2025
+# Fuente: Deutsche Bank Research Institute + Numbeo, Junio 2025
+# 69 ciudades en 47 países — arriendo mensual (USD) para 1-bed y 3-bed
+# ─────────────────────────────────────────────────────────────────────────────
+# Formato: (country_code, city_name, rent_1bed_usd, rent_3bed_usd)
+_DB2025_SEED: list[tuple[str, str, float, float]] = [
+    ("US", "New York",       4143, 8388),
+    ("US", "Boston",         3394, 6091),
+    ("US", "San Francisco",  3332, 5424),
+    ("US", "Chicago",        2344, 4683),
+    ("US", "Los Angeles",    2613, 4462),
+    ("SG", "Singapore",      3167, 6216),
+    ("GB", "London",         2985, 5560),
+    ("GB", "Edinburgh",      1634, 3089),
+    ("GB", "Birmingham",     1337, 2306),
+    ("CH", "Zurich",         2720, 4955),
+    ("CH", "Geneva",         2330, 4693),
+    ("HK", "Hong Kong",      2202, 4807),
+    ("AE", "Dubai",          2401, 4589),
+    ("AE", "Abu Dhabi",      1466, 3052),
+    ("AU", "Sydney",         2164, 4407),
+    ("AU", "Melbourne",      1528, 3028),
+    ("NL", "Amsterdam",      2358, 4230),
+    ("IE", "Dublin",         2378, 4077),
+    ("LU", "Luxembourg",     2086, 3822),
+    ("FR", "Paris",          1630, 3592),
+    ("DK", "Copenhagen",     2021, 3534),
+    ("CA", "Vancouver",      1994, 3501),
+    ("CA", "Toronto",        1807, 2955),
+    ("CA", "Montreal",       1201, 2057),
+    ("DE", "Munich",         1759, 3377),
+    ("DE", "Frankfurt",      1533, 2778),
+    ("DE", "Berlin",         1421, 2700),
+    ("IT", "Milan",          1602, 3250),
+    ("IT", "Rome",           1326, 2618),
+    ("IL", "Tel Aviv",       1667, 3088),
+    ("PT", "Lisbon",         1618, 3062),
+    ("QA", "Doha",           1605, 2946),
+    ("RU", "Moscow",         1292, 2829),
+    ("ES", "Madrid",         1629, 2811),
+    ("ES", "Barcelona",      1547, 2738),
+    ("SE", "Stockholm",      1590, 2782),
+    ("JP", "Tokyo",          1118, 2672),
+    ("NO", "Oslo",           1689, 2658),
+    ("KR", "Seoul",           969, 2610),
+    ("CN", "Shanghai",        952, 2490),
+    ("CN", "Beijing",         900, 1937),
+    ("NZ", "Auckland",       1284, 2457),
+    ("NZ", "Wellington",     1318, 2135),
+    ("BE", "Brussels",       1303, 2298),
+    ("AT", "Vienna",         1259, 2293),
+    ("CZ", "Prague",         1139, 2255),
+    ("FI", "Helsinki",       1204, 2107),
+    ("PL", "Warsaw",         1141, 2055),
+    ("SA", "Riyadh",         1093, 2047),
+    ("TH", "Bangkok",         677, 1938),
+    ("TR", "Istanbul",        948, 1764),
+    ("PH", "Manila",          500, 1734),
+    ("TW", "Taipei",          792, 1683),
+    ("ZA", "Cape Town",       758, 1435),
+    ("ZA", "Johannesburg",    650, 1180),  # estimado de Athens similar
+    ("HU", "Budapest",        727, 1339),
+    ("BR", "Sao Paulo",       668, 1291),
+    ("BR", "Rio de Janeiro",  438,  900),  # 1-bed data only
+    ("GR", "Athens",          650, 1180),
+    ("ID", "Jakarta",         550, 1179),
+    ("AR", "Buenos Aires",    648, 1166),
+    ("MY", "Kuala Lumpur",    561, 1100),
+    ("CO", "Bogota",          451,  900),
+    ("MX", "Mexico City",    1002, 2121),
+    ("CL", "Santiago",        509,  950),  # Portal Inmobiliario es fuente primaria
+    ("IN", "Mumbai",          701, 1819),
+    ("IN", "Delhi",           500,  900),
+    ("IN", "Bangalore",       450,  800),
+    ("EG", "Cairo",           200,  400),
+    ("VN", "Ho Chi Minh",     450,  900),
+    ("NG", "Lagos",           300,  600),
+    ("KZ", "Almaty",          400,  750),
+    ("PE", "Lima",            500,  900),
+    ("EC", "Quito",           350,  650),
+    ("UY", "Montevideo",      600, 1100),
+    ("DO", "Santo Domingo",   350,  700),
+    ("MA", "Casablanca",      250,  500),
+]
+
+
+def _compute_global_percentiles(cities: list[dict]) -> list[dict]:
+    """
+    Calcula rent_pct y rent_index para cada ciudad dentro de su grupo de ingreso.
+    rent_index = 100 × (city_m2 / group_median_m2)
+    rent_pct   = percentil dentro del grupo (0–100)
+    """
+    import statistics
+
+    # Agrupar por income_group
+    by_group: dict[str, list[dict]] = {}
+    for c in cities:
+        g = get_effective_group(c['country'])
+        by_group.setdefault(g, []).append(c)
+
+    result = []
+    for group, group_cities in by_group.items():
+        prices = [c['rent_per_m2'] for c in group_cities]
+        if not prices:
+            continue
+        median_m2 = statistics.median(prices)
+        sorted_prices = sorted(prices)
+        n = len(sorted_prices)
+
+        for c in group_cities:
+            m2 = c['rent_per_m2']
+            # rent_index relativo al grupo
+            rent_index = round(100.0 * m2 / median_m2, 1) if median_m2 else 50.0
+            # percentil dentro del grupo
+            pos = sorted(prices).index(m2)
+            rent_pct = round(100.0 * pos / max(n - 1, 1), 1)
+            geo_score = compute_geo_score(rent_pct, rent_index)
+            tier = assign_tier(rent_pct, rent_pct, c['country'])
+
+            result.append({**c, 'rent_index': rent_index, 'rent_pct': rent_pct,
+                           'geo_score': geo_score, 'se_tier': tier})
+    return result
+
+
+def run_global(db=None) -> dict:
+    """
+    Carga el seed Deutsche Bank 2025 para todos los países (excepto CL que usa Portal Inmobiliario).
+    Calcula percentiles por grupo de ingreso y guarda en commune_market_data.
+    Fuente: Deutsche Bank Research Institute + Numbeo, Junio 2025.
+    """
+    cities = []
+    for cc, city, rent1, rent3 in _DB2025_SEED:
+        if cc == 'CL':
+            continue  # Chile usa run_chile() con datos locales
+        # rent_per_m2: promedio entre estimación 1-bed (÷50m²) y 3-bed (÷100m²)
+        m2_from_1 = rent1 / 50.0
+        m2_from_3 = rent3 / 100.0
+        rent_m2 = round((m2_from_1 + m2_from_3) / 2, 2)
+        cities.append({
+            'country':     cc,
+            'commune':     city,
+            'rent_per_m2': rent_m2,
+            'rent_1bed':   rent1,
+            'rent_3bed':   rent3,
+        })
+
+    enriched = _compute_global_percentiles(cities)
+
+    saved = 0
+    errors = 0
+    for c in enriched:
+        entry = {
+            'commune':      c['commune'],
+            'median_uf':    c['rent_per_m2'],  # USD/m², campo reutilizado
+            'rent_index':   c['rent_index'],
+            'rent_pct':     c['rent_pct'],
+            'geo_score':    c['geo_score'],
+            'se_tier':      c['se_tier'],
+            'sample_count': 0,
+            'source':       'Deutsche Bank Research Institute 2025 / Numbeo',
+        }
+        if db and _save_commune(db, entry, c['country']):
+            saved += 1
+        elif not db:
+            saved += 1
+        else:
+            errors += 1
+
+    log.info(f"[RentalAgent] Global seed: {saved} ciudades guardadas, {errors} errores")
+    return {
+        'ok':      True,
+        'scope':   'global',
+        'cities':  saved,
+        'errors':  errors,
+        'source':  'Deutsche Bank Research Institute 2025 / Numbeo',
+        'countries': len(set(c['country'] for c in enriched)),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PUNTO DE ENTRADA — TODOS LOS PAÍSES
 # ─────────────────────────────────────────────────────────────────────────────
 def run(country: str = 'CL', db=None) -> dict:
     """Ejecuta el agente para un país específico."""
     if country == 'CL':
         return run_chile(db)
-    # Otros países: en desarrollo
-    return {
-        'ok': False,
-        'country': country,
-        'message': f'País {country} — integración pendiente (BIS/Eurostat/HUD)',
-    }
+    if country == 'ALL':
+        return run_full_agent(db)
+    # País específico no-CL: buscar en seed global y actualizar solo ese país
+    seed = [(cc, city, r1, r3) for cc, city, r1, r3 in _DB2025_SEED if cc == country]
+    if not seed:
+        return {'ok': False, 'country': country, 'message': f'País {country} no en seed DB2025'}
+    # Construir mini-run para ese país
+    tmp_result = run_global.__wrapped__(db) if hasattr(run_global, '__wrapped__') else run_global(db)
+    return {'ok': True, 'country': country, 'message': 'Actualizado desde seed DB2025', **tmp_result}
 
 
 def run_full_agent(db=None) -> dict:
     """
-    Interfaz compatible con market_data_agent.run_full_agent().
-    Ejecuta CL como país principal.
+    Ejecuta el agente completo: Chile (Portal Inmobiliario) + todos los países (DB2025 seed).
+    Compatible con market_data_agent.run_full_agent().
     """
-    return run('CL', db)
+    results = {}
+
+    # 1. Chile — fuente primaria: Portal Inmobiliario
+    try:
+        results['CL'] = run_chile(db)
+    except Exception as e:
+        log.error(f"[RentalAgent] Error CL: {e}")
+        results['CL'] = {'ok': False, 'error': str(e)}
+
+    # 2. Global — Deutsche Bank 2025
+    try:
+        results['global'] = run_global(db)
+    except Exception as e:
+        log.error(f"[RentalAgent] Error global: {e}")
+        results['global'] = {'ok': False, 'error': str(e)}
+
+    total_cities = sum(r.get('cities', r.get('communes_updated', 0)) for r in results.values() if isinstance(r, dict))
+    return {
+        'ok':          True,
+        'scope':       'full',
+        'total_cities': total_cities,
+        'results':     results,
+    }

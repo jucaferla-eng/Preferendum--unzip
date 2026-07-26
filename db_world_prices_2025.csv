@@ -1,0 +1,71 @@
+economy,city,country_code,rent_3bed_usd,rent_1bed_usd,price_m2_buy_usd,rent_per_m2_usd
+United States,New York,US,8388,4143,18532,83.4
+United States,Boston,US,6091,3394,9168,64.4
+United States,San Francisco,US,5424,3332,10857,60.4
+United States,Chicago,US,4683,2344,3453,46.9
+United States,Los Angeles,US,4462,2613,7693,48.4
+Singapore,Singapore,SG,6216,3167,22955,62.8
+United Kingdom,London,GB,5560,2985,20953,57.7
+United Kingdom,Edinburgh,GB,3089,1634,6919,31.8
+United Kingdom,Birmingham,GB,2306,1337,3846,24.9
+Switzerland,Zurich,CH,4955,2720,23938,52.0
+Switzerland,Geneva,CH,4693,2330,21491,46.8
+Hong Kong,Hong Kong,HK,4807,2202,25946,46.1
+United Arab Emirates,Dubai,AE,4589,2401,7602,47.0
+United Arab Emirates,Abu Dhabi,AE,3052,1466,5977,29.9
+Australia,Sydney,AU,4407,2164,13104,43.7
+Australia,Melbourne,AU,3028,1528,7033,30.4
+Netherlands,Amsterdam,NL,4230,2358,10792,44.7
+Ireland,Dublin,IE,4077,2378,7760,44.2
+Luxembourg,Luxembourg,LU,3822,2086,11831,40.0
+France,Paris,FR,3592,1630,14286,34.3
+Denmark,Copenhagen,DK,3534,2021,9167,37.9
+Canada,Vancouver,CA,3501,1994,10023,37.4
+Canada,Toronto,CA,2955,1807,9106,32.8
+Canada,Montreal,CA,2057,1201,7028,22.3
+Germany,Munich,DE,3377,1759,13396,34.5
+Germany,Frankfurt,DE,2778,1533,9229,29.2
+Germany,Berlin,DE,2700,1421,8716,27.7
+Italy,Milan,IT,3250,1602,9901,32.3
+Italy,Rome,IT,2618,1326,8005,26.4
+Israel,Tel Aviv,IL,3088,1667,18468,32.1
+Portugal,Lisbon,PT,3062,1618,7193,31.5
+Qatar,Doha,QA,2946,1605,4944,30.8
+Russia,Moscow,RU,2829,1292,8701,27.1
+Spain,Madrid,ES,2811,1629,7870,30.3
+Spain,Barcelona,ES,2738,1547,6351,29.2
+Sweden,Stockholm,SE,2782,1590,11805,29.8
+Japan,Tokyo,JP,2672,1118,10199,24.5
+Norway,Oslo,NO,2658,1689,10520,30.2
+South Korea,Seoul,KR,2610,969,22875,22.7
+China,Shanghai,CN,2490,952,14767,22.0
+China,Beijing,CN,1937,900,15090,18.7
+New Zealand,Auckland,NZ,2457,1284,8357,25.1
+New Zealand,Wellington,NZ,2135,1318,6393,23.9
+Belgium,Brussels,BE,2298,1303,4689,24.5
+Austria,Vienna,AT,2293,1259,10881,24.1
+Czech Republic,Prague,CZ,2255,1139,8866,22.7
+Finland,Helsinki,FI,2107,1204,9333,22.6
+Poland,Warsaw,PL,2055,1141,6674,21.7
+Saudi Arabia,Riyadh,SA,2047,1093,,21.2
+Thailand,Bangkok,TH,1938,677,5974,16.5
+Turkey,Istanbul,TR,1764,948,3036,18.3
+Philippines,Manila,PH,1734,500,3566,13.7
+Taiwan,Taipei,TW,1683,792,14648,16.3
+South Africa,Cape Town,ZA,1435,758,,14.8
+Hungary,Budapest,HU,1339,727,4730,14.0
+Brazil,Sao Paulo,BR,1291,668,,13.1
+Brazil,Rio de Janeiro,BR,,438,,8.8
+Greece,Athens,GR,1180,650,3766,12.4
+Indonesia,Jakarta,ID,1179,,,11.8
+Argentina,Buenos Aires,AR,1166,648,2699,12.3
+Malaysia,Kuala Lumpur,MY,,561,3045,11.2
+Colombia,Bogota,CO,,451,,9.0
+Mexico,Mexico City,MX,2121,1002,3533,20.6
+Chile,Santiago,CL,509,509,,7.6
+India,Mumbai,IN,1819,701,6932,16.1
+India,Delhi,IN,,,,
+India,Bangalore,IN,,,,
+Egypt,Cairo,EG,,,,
+South Africa,Johannesburg,ZA,,,,
+Vietnam,Ho Chi Minh,VN,,,,

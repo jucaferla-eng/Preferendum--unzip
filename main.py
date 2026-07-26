@@ -10138,6 +10138,24 @@ def admin_rental_agent_status(secret: str, country: str = 'CL', db: Session = De
     }
 
 
+@app.post('/admin/rental-price-agent/run-global')
+def admin_run_rental_global(secret: str, db: Session = Depends(get_db)):
+    """Carga seed Deutsche Bank 2025 para todos los países (47 países, ~75 ciudades)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        from rental_price_agent import run_global as _run_global
+        result_holder['result'] = _run_global(db)
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=120)
+    if not result_holder:
+        return {'ok': True, 'message': 'Agente iniciado en background'}
+    return result_holder.get('result', {'ok': False})
+
+
 @app.post('/admin/import-usa-bea')
 def admin_import_usa_bea(secret: str, db: Session = Depends(get_db)):
     """Importa 3,115 condados USA desde BEA CAINC1 2024 a commune_market_data."""
