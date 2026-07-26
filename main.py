@@ -671,6 +671,20 @@ def _migrate():
                 conn.commit()
             except Exception:
                 pass
+        # commune_market_data — nuevas columnas metodología v2 (2026-07-26)
+        existing_cmd_cols = {c['name'] for c in inspector.get_columns('commune_market_data')} if inspector.has_table('commune_market_data') else set()
+        for col, defn in [
+            ('rent_index', 'FLOAT DEFAULT 100.0'),
+            ('rent_pct',   'FLOAT DEFAULT 50.0'),
+            ('geo_score',  'FLOAT DEFAULT 50.0'),
+            ('source_name', "TEXT DEFAULT ''"),
+        ]:
+            if col not in existing_cmd_cols:
+                try:
+                    conn.execute(text(f'ALTER TABLE commune_market_data ADD COLUMN {col} {defn}'))
+                    conn.commit()
+                except Exception:
+                    pass
 _migrate()
 
 # ══════════════════════════════════════════════════════════════
@@ -713,12 +727,17 @@ try:
 
     def _run_annual_rental_prices_job():
         try:
-            from market_data_agent import run_full_agent
-            print('[Scheduler] Iniciando actualización anual de precios arriendo por m²...')
-            result = run_full_agent()
-            print(f'[Scheduler] Precios actualizados — comunas: {result.get("total_communes", 0)}, fuente: {result.get("source", "?")}')
+            from rental_price_agent import run_full_agent
+            from database import SessionLocal as _SL
+            print('[Scheduler] Iniciando RentalPriceAgent — actualización anual precios m²...')
+            _db = _SL()
+            try:
+                result = run_full_agent(_db)
+                print(f'[Scheduler] Precios actualizados — comunas: {result.get("total_communes", 0)}, API hits: {result.get("api_hits", 0)}, fuente: {result.get("source", "?")}')
+            finally:
+                _db.close()
         except Exception as e:
-            print(f'[Scheduler] Error en rental prices update: {e}')
+            print(f'[Scheduler] Error en RentalPriceAgent: {e}')
 
     _scheduler = BackgroundScheduler(timezone='UTC')
     _scheduler.add_job(
@@ -10024,6 +10043,45 @@ def admin_fix_user_tier(secret: str, email: str, db: Session = Depends(get_db)):
     before = u.se_tier
     _assign_user_tier(u, db)
     return {'email': email, 'county': u.county, 'before': before, 'se_tier': u.se_tier, 'income_index': u.income_index}
+
+@app.post('/admin/rental-price-agent/run')
+def admin_run_rental_agent(secret: str, country: str = 'CL', db: Session = Depends(get_db)):
+    """Ejecuta el RentalPriceAgent para un país — actualiza precios m² desde Portal Inmobiliario."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        from rental_price_agent import run as _agent_run
+        result_holder['result'] = _agent_run(country, db)
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=300)
+    if not result_holder:
+        return {'ok': True, 'message': 'Agente iniciado en background (timeout 5min — ver logs)'}
+    return result_holder.get('result', {'ok': False, 'message': 'Sin respuesta del agente'})
+
+
+@app.get('/admin/rental-price-agent/status')
+def admin_rental_agent_status(secret: str, country: str = 'CL', db: Session = Depends(get_db)):
+    """Muestra estado actual de commune_market_data — último run del agente."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    rows = db.query(CommuneMarketData).filter(CommuneMarketData.country == country).order_by(CommuneMarketData.income_index.desc()).all()
+    if not rows:
+        return {'country': country, 'total': 0, 'message': 'Sin datos — corre /admin/rental-price-agent/run primero'}
+    last_update = max((r.updated_at for r in rows if r.updated_at), default=None)
+    tier_counts = {}
+    for r in rows:
+        tier_counts[r.se_tier] = tier_counts.get(r.se_tier, 0) + 1
+    return {
+        'country':     country,
+        'total':       len(rows),
+        'last_update': last_update.isoformat() if last_update else None,
+        'tiers':       tier_counts,
+        'top_10':      [{'commune': r.commune, 'income_index': r.income_index, 'se_tier': r.se_tier, 'sample_count': r.sample_count, 'source': r.portal} for r in rows[:10]],
+    }
+
 
 @app.post('/admin/debates/{debate_id}/force-verify')
 def admin_force_verify(debate_id: int, secret: str, db: Session = Depends(get_db)):
