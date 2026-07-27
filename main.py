@@ -2705,10 +2705,22 @@ def _assign_user_tier(user, db):
                 commune_tier      = tier_row[0]
                 user.income_index = round(float(avg_index), 1) if avg_index else 50.0
 
-    user_profession = getattr(user, 'profession', '') or ''
+    user_profession   = getattr(user, 'profession', '') or ''
     user_country_code = _country_code(user.country)
 
-    # Ingresos anuales estimados por país (mediana en USD) — usado como base del fallback por comuna
+    # Países con GDP per cápita < $10K — el m² de arriendo es el clasificador primario de tier
+    # En estos países la data de ocupaciones es menos confiable que el mercado inmobiliario local
+    _LOW_GDP_COUNTRIES = {
+        'AR', 'BO', 'CO', 'EC', 'PY', 'PE',          # Sudamérica < 10K
+        'SV', 'GT', 'HN', 'NI', 'PY',                # Centroamérica
+        'NG', 'KE', 'GH', 'TZ', 'UG', 'ET', 'EG',   # África
+        'IN', 'PK', 'BD', 'LK', 'NP',                 # Asia Sur
+        'ID', 'PH', 'VN', 'MM', 'KH',                 # Asia SE
+        'MA', 'TN', 'DZ',                              # Norte África
+    }
+    _is_low_gdp = user_country_code in _LOW_GDP_COUNTRIES
+
+    # Ingresos anuales estimados por país (mediana en USD) — fallback global
     _COUNTRY_MEDIAN_INCOME_USD: dict[str, float] = {
         'US': 56000, 'CA': 45000, 'GB': 38000, 'AU': 50000, 'NZ': 42000,
         'DE': 40000, 'FR': 35000, 'ES': 28000, 'IT': 28000, 'NL': 42000,
@@ -2823,9 +2835,14 @@ def _assign_user_tier(user, db):
         cargo_rank   = _tier_rank(cargo_tier)
         cargo_tier   = tier_ladder[min(cargo_rank, 3)]  # sube 1 nivel (ya está en índice 0-3)
 
-    # Tier base: el más alto entre comuna y profesión
-    base_candidates = [t for t in [commune_tier, profession_tier] if t]
-    base_tier = max(base_candidates, key=_tier_rank) if base_candidates else None
+    # Tier base:
+    # - Países GDP < $10K: commune_tier (m² arriendo) es el clasificador primario
+    # - Países GDP >= $10K: el más alto entre commune y profesión
+    if _is_low_gdp and commune_tier:
+        base_tier = commune_tier  # m² arriendo manda
+    else:
+        base_candidates = [t for t in [commune_tier, profession_tier] if t]
+        base_tier = max(base_candidates, key=_tier_rank) if base_candidates else None
 
     # Cargo (ya ajustado por tamaño empresa) sube máximo UN nivel sobre el tier base
     if base_tier and cargo_tier:
@@ -2840,31 +2857,79 @@ def _assign_user_tier(user, db):
     elif cargo_tier:
         user.se_tier = cargo_tier
 
-    # Ajuste por edad/experiencia: junior baja 1 nivel, senior sube 1 nivel
-    # Lógica: doctor de 27 años ≠ doctor de 50 años en ingreso real
-    if user.se_tier and getattr(user, 'dob', ''):
+    # ── Ajuste de estimated_income_usd por tamaño de empresa y edad ─────────────
+    # Multiplicadores por tamaño de empresa: empresa grande paga más por mismo cargo
+    _COMPANY_SIZE_MULT = {
+        '1-10':    0.72,
+        '11-50':   0.85,
+        '51-250':  1.00,
+        '251-1000': 1.13,
+        '+1000':   1.22,
+    }
+    # Multiplicadores por edad: curva de carrera típica
+    _AGE_INCOME_MULT = {
+        (0,  24): 0.55,
+        (25, 29): 0.72,
+        (30, 34): 0.87,
+        (35, 44): 1.00,  # pico de carrera
+        (45, 54): 1.08,
+        (55, 64): 1.05,
+        (65, 99): 0.85,
+    }
+
+    user_age_val = None
+    if getattr(user, 'dob', ''):
         try:
             from datetime import date as _date
             dob_str = user.dob.strip()
+            born = None
             for _fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d'):
                 try:
                     born = datetime.strptime(dob_str, _fmt).date()
                     break
                 except ValueError:
-                    born = None
+                    pass
             if born:
                 today = _date.today()
-                age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
-                tier_ladder = ['D', 'C', 'B', 'A']
-                current_rank = _tier_rank(user.se_tier)
-                if age < 33:
-                    # Junior: baja 2 niveles por menor experiencia
-                    user.se_tier = tier_ladder[max(current_rank - 2, 0)]
-                elif age > 45:
-                    # Senior: sube 1 nivel por experiencia acumulada
-                    user.se_tier = tier_ladder[min(current_rank + 1, 3)]
+                user_age_val = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
         except Exception:
-            pass  # si el dob es inválido, no modifica el tier
+            pass
+
+    # Aplicar multiplicadores al ingreso estimado
+    if user.estimated_income_usd and user.estimated_income_usd > 0:
+        size_mult = _COMPANY_SIZE_MULT.get(company_size, 1.00)
+        age_mult  = 1.00
+        if user_age_val:
+            for (lo, hi), m in _AGE_INCOME_MULT.items():
+                if lo <= user_age_val <= hi:
+                    age_mult = m
+                    break
+        user.estimated_income_usd = round(user.estimated_income_usd * size_mult * age_mult, 0)
+
+    # ── Ajuste de tier por edad ───────────────────────────────────────────────
+    if user.se_tier and user_age_val:
+        try:
+            tier_ladder  = ['D', 'C', 'B', 'A']
+            current_rank = _tier_rank(user.se_tier)
+            if user_age_val < 33:
+                user.se_tier = tier_ladder[max(current_rank - 2, 0)]
+            elif user_age_val > 45:
+                user.se_tier = tier_ladder[min(current_rank + 1, 3)]
+        except Exception:
+            pass
+
+    # ── Fallback: ingreso per cápita del país cuando no hay otro dato ─────────
+    # Para países con GDP < $10K, el m² de arriendo ya domina via commune_tier.
+    # Este fallback asegura que estimated_income_usd nunca quede None.
+    if not user.estimated_income_usd:
+        country_median = _COUNTRY_MEDIAN_INCOME_USD.get(user_country_code)
+        if country_median:
+            if user.income_index and user.income_index > 0:
+                # Escalar por posición relativa en el país
+                user.estimated_income_usd = round(country_median * (user.income_index / 50.0), 0)
+            else:
+                # Sin dato de commune: usar directamente la mediana del país
+                user.estimated_income_usd = float(country_median)
 
     db.commit()
 
