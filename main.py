@@ -10178,6 +10178,24 @@ def admin_import_usa_bea(secret: str, db: Session = Depends(get_db)):
     return result_holder.get('result', {'ok': False, 'message': 'Sin respuesta'})
 
 
+@app.post('/admin/import-nuts-eurostat')
+def admin_import_nuts(secret: str, db: Session = Depends(get_db)):
+    """Importa 244 regiones NUTS2 Europa desde Eurostat (ingreso disponible real EUR/hab)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        from nuts_income_agent import run_nuts_import as _import
+        result_holder['result'] = _import(db)
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=120)
+    if not result_holder:
+        return {'ok': True, 'message': 'Import NUTS iniciado (ver logs)'}
+    return result_holder.get('result', {'ok': False})
+
+
 @app.get('/admin/usa-data-agent/stats')
 def admin_usa_data_stats(secret: str):
     """Estadísticas del agente USA — condados BEA + ocupaciones BLS cargados en memoria."""
