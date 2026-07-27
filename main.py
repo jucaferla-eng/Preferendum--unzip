@@ -676,10 +676,11 @@ def _migrate():
         # commune_market_data — nuevas columnas metodología v2 (2026-07-26)
         existing_cmd_cols = {c['name'] for c in inspector.get_columns('commune_market_data')} if inspector.has_table('commune_market_data') else set()
         for col, defn in [
-            ('rent_index', 'FLOAT DEFAULT 100.0'),
-            ('rent_pct',   'FLOAT DEFAULT 50.0'),
-            ('geo_score',  'FLOAT DEFAULT 50.0'),
+            ('rent_index',  'FLOAT DEFAULT 100.0'),
+            ('rent_pct',    'FLOAT DEFAULT 50.0'),
+            ('geo_score',   'FLOAT DEFAULT 50.0'),
             ('source_name', "TEXT DEFAULT ''"),
+            ('income_pct',  'FLOAT DEFAULT 50.0'),
         ]:
             if col not in existing_cmd_cols:
                 try:
