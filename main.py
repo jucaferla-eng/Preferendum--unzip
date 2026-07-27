@@ -10258,6 +10258,36 @@ def admin_occupation_lookup(secret: str, country: str, profession: str, db: Sess
     }
 
 
+@app.post('/admin/nuts-pipeline/run')
+def admin_nuts_pipeline_run(secret: str, db: Session = Depends(get_db)):
+    """Pipeline NUTS 2/3 completo (handoff Perplexity 2026-07-27).
+    Crea tablas rip_countries/rip_regions/rip_import_batches/rip_observations,
+    carga 50-country seed y descarga 244 regiones NUTS2 reales de Eurostat.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        from nuts_pipeline import run_nuts_pipeline
+        result_holder['result'] = run_nuts_pipeline(db)
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=120)
+    if not result_holder:
+        return {'ok': True, 'message': 'Pipeline NUTS iniciado (ver logs)'}
+    return result_holder.get('result', {'ok': False})
+
+
+@app.get('/admin/nuts-pipeline/summary')
+def admin_nuts_pipeline_summary(secret: str, db: Session = Depends(get_db)):
+    """Estado del pipeline NUTS — países, regiones, observaciones, últimos batches."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from nuts_pipeline import get_pipeline_summary
+    return get_pipeline_summary(db)
+
+
 @app.get('/admin/usa-data-agent/stats')
 def admin_usa_data_stats(secret: str):
     """Estadísticas del agente USA — condados BEA + ocupaciones BLS cargados en memoria."""
