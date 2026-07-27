@@ -2702,21 +2702,58 @@ def _assign_user_tier(user, db):
 
     profession_tier = None
     if user_profession:
+        import re as _re
+        _is_soc = bool(_re.match(r'^\d{2}-\d{4}$', user_profession))
         try:
             from usa_data_agent import profession_score_to_tier
-            if user_country_code == 'US':
-                # USA: promedio de profession_score por major_group en occupation_unified
+            if _is_soc:
+                # Nuevo sistema: SOC code directo de la lista BLS universal
+                if user_country_code == 'US':
+                    row = db.execute(text("""
+                        SELECT profession_score FROM occupation_unified
+                        WHERE occupation_code=:code AND country_iso='US'
+                    """), {'code': user_profession}).fetchone()
+                    if row and row[0] is not None:
+                        profession_tier = profession_score_to_tier(float(row[0]))
+                else:
+                    # No-USA: SOC → ISCO group → ingreso local del país
+                    isco_row = db.execute(text("""
+                        SELECT isco_group FROM occupation_unified
+                        WHERE occupation_code=:code AND country_iso='US'
+                    """), {'code': user_profession}).fetchone()
+                    if isco_row and isco_row[0]:
+                        isco_grp = isco_row[0]
+                        row = db.execute(text("""
+                            SELECT profession_score FROM occupation_unified
+                            WHERE country_iso=:cc AND isco_group=:ig
+                              AND occupation_type='ISCO' AND profession_score IS NOT NULL
+                            LIMIT 1
+                        """), {'cc': user_country_code, 'ig': isco_grp}).fetchone()
+                        if row and row[0] is not None:
+                            profession_tier = profession_score_to_tier(float(row[0]))
+                        else:
+                            # Fallback: promedio global ISCO
+                            row = db.execute(text("""
+                                SELECT AVG(profession_score) FROM occupation_unified
+                                WHERE isco_group=:ig AND occupation_type='ISCO'
+                                  AND profession_score IS NOT NULL
+                            """), {'ig': isco_grp}).fetchone()
+                            if row and row[0] is not None:
+                                profession_tier = profession_score_to_tier(float(row[0]))
+            elif user_country_code == 'US':
+                # Legacy codes — USA: lookup por major_group
                 major_group = _US_PROFESSION_SOC.get(user_profession)
                 if major_group:
                     row = db.execute(text("""
                         SELECT AVG(profession_score) FROM occupation_unified
-                        WHERE country_iso='US' AND major_group=:mg
-                          AND profession_score IS NOT NULL
+                        WHERE country_iso='US'
+                          AND SUBSTRING(occupation_code, 1, 2) = SUBSTRING(:mg, 1, 2)
+                          AND occupation_type='SOC' AND profession_score IS NOT NULL
                     """), {'mg': major_group}).fetchone()
                     if row and row[0] is not None:
                         profession_tier = profession_score_to_tier(float(row[0]))
             else:
-                # No-USA: score del grupo ISCO para el país del usuario
+                # Legacy codes — no-USA: lookup por ISCO group
                 isco_grp = _OCC_TO_ISCO.get(user_profession)
                 if isco_grp:
                     row = db.execute(text("""
@@ -2727,15 +2764,6 @@ def _assign_user_tier(user, db):
                     """), {'cc': user_country_code, 'ig': isco_grp}).fetchone()
                     if row and row[0] is not None:
                         profession_tier = profession_score_to_tier(float(row[0]))
-                    else:
-                        # Fallback: usar promedio global ISCO de occupation_unified
-                        row = db.execute(text("""
-                            SELECT AVG(profession_score) FROM occupation_unified
-                            WHERE isco_group=:ig AND occupation_type='ISCO'
-                              AND profession_score IS NOT NULL
-                        """), {'ig': isco_grp}).fetchone()
-                        if row and row[0] is not None:
-                            profession_tier = profession_score_to_tier(float(row[0]))
         except Exception:
             pass
         if not profession_tier:
@@ -10406,6 +10434,57 @@ def admin_bls_occupation_lookup(secret: str, title: str):
         raise HTTPException(404, f'Ocupación no encontrada: {title}')
     data['tier_h1'] = profession_score_to_tier(data['profession_score'])
     return data
+
+
+_BLS_MAJOR_GROUP_NAMES: dict[str, str] = {
+    '11-0000': 'Management',
+    '13-0000': 'Business and Financial Operations',
+    '15-0000': 'Computer and Mathematical',
+    '17-0000': 'Architecture and Engineering',
+    '19-0000': 'Life, Physical, and Social Science',
+    '21-0000': 'Community and Social Service',
+    '23-0000': 'Legal',
+    '25-0000': 'Educational Instruction and Library',
+    '27-0000': 'Arts, Design, Entertainment, Sports, and Media',
+    '29-0000': 'Healthcare Practitioners and Technical',
+    '31-0000': 'Healthcare Support',
+    '33-0000': 'Protective Service',
+    '35-0000': 'Food Preparation and Serving Related',
+    '37-0000': 'Building and Grounds Cleaning and Maintenance',
+    '39-0000': 'Personal Care and Service',
+    '41-0000': 'Sales and Related',
+    '43-0000': 'Office and Administrative Support',
+    '45-0000': 'Farming, Fishing, and Forestry',
+    '47-0000': 'Construction and Extraction',
+    '49-0000': 'Installation, Maintenance, and Repair',
+    '51-0000': 'Production',
+    '53-0000': 'Transportation and Material Moving',
+}
+
+
+@app.get('/api/occupations')
+def api_list_occupations(db: Session = Depends(get_db)):
+    """Lista las 818 ocupaciones BLS — usada por el formulario de registro."""
+    rows = db.execute(text("""
+        SELECT occupation_code, title, isco_group, isco_label, profession_score
+        FROM occupation_unified
+        WHERE country_iso = 'US' AND occupation_type = 'SOC'
+          AND title IS NOT NULL
+        ORDER BY isco_group, title
+    """)).fetchall()
+    result = []
+    for r in rows:
+        soc, title, isco_grp, isco_label, score = r
+        major_group = soc[:2] + '-0000' if soc else ''
+        result.append({
+            'code': soc,
+            'title': title,
+            'group': major_group,
+            'group_name': _BLS_MAJOR_GROUP_NAMES.get(major_group, ''),
+            'isco': isco_grp,
+            'score': round(float(score), 1) if score else None,
+        })
+    return result
 
 
 @app.get('/marketer/project-campaign')

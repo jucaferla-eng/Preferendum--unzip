@@ -367,57 +367,15 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         <label id="commune-label">Código Postal</label>
         <input type="text" id="r-commune" placeholder="8320000" maxlength="12" autocomplete="postal-code" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:rgba(255,255,255,0.07);color:#fff;font-size:15px;">
       </div>
-      <div class="field">
+      <div class="field" style="position:relative;">
         <label>Ocupación <span style="font-size:11px;color:#e05252;font-weight:400;">*</span></label>
-        <select id="r-profession">
-          <option value="">— selecciona tu ocupación —</option>
-          <optgroup label="Dirección y Gestión">
-            <option value="mgmt">Dirección / Gerencia / Management</option>
-          </optgroup>
-          <optgroup label="Negocios y Finanzas">
-            <option value="biz_fin">Negocios, Finanzas y Banca</option>
-            <option value="admin">Administración y Apoyo de Oficina</option>
-            <option value="sales">Ventas y Comercio</option>
-          </optgroup>
-          <optgroup label="Tecnología y Ciencias">
-            <option value="computer">Computación, TI y Matemáticas</option>
-            <option value="engineering">Arquitectura e Ingeniería</option>
-            <option value="science">Ciencias (Biología, Química, Social)</option>
-          </optgroup>
-          <optgroup label="Salud">
-            <option value="healthcare_pro">Salud — Profesional (Médico, Dentista, Farmacéutico)</option>
-            <option value="healthcare_sup">Salud — Técnico y Apoyo (Auxiliar, Técnico en Salud)</option>
-          </optgroup>
-          <optgroup label="Legal, Social y Educación">
-            <option value="legal">Legal / Derecho / Jurídico</option>
-            <option value="social_svc">Servicios Sociales y Comunitarios</option>
-            <option value="education">Educación y Docencia</option>
-          </optgroup>
-          <optgroup label="Arte y Comunicación">
-            <option value="arts_media">Arte, Diseño, Medios y Comunicación</option>
-          </optgroup>
-          <optgroup label="Servicios">
-            <option value="protective">Seguridad y Servicios de Protección</option>
-            <option value="food_svc">Alimentación, Gastronomía y Hostelería</option>
-            <option value="personal_care">Cuidado Personal y Belleza</option>
-          </optgroup>
-          <optgroup label="Trabajo Técnico y Manual">
-            <option value="construction">Construcción y Obras</option>
-            <option value="installation">Instalación y Mantenimiento Industrial</option>
-            <option value="production">Producción / Manufactura / Operario</option>
-            <option value="transport">Transporte, Logística y Distribución</option>
-            <option value="cleaning">Limpieza, Mantenimiento y Jardinería</option>
-          </optgroup>
-          <optgroup label="Otros Sectores">
-            <option value="agriculture">Agricultura, Pesca y Forestal</option>
-          </optgroup>
-          <optgroup label="No en actividad laboral">
-            <option value="student">Estudiante</option>
-            <option value="retired">Jubilado / Pensionado</option>
-            <option value="homemaker">Labores del hogar</option>
-            <option value="unemployed">En búsqueda de trabajo</option>
-          </optgroup>
-        </select>
+        <input type="text" id="occ-search"
+               placeholder="Escribe para buscar tu ocupación..."
+               autocomplete="off"
+               style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:rgba(255,255,255,0.07);color:#fff;font-size:15px;box-sizing:border-box;">
+        <div id="occ-results" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:260px;overflow-y:auto;background:#0f1c35;border:1px solid rgba(255,255,255,0.18);border-top:none;border-radius:0 0 8px 8px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);"></div>
+        <input type="hidden" id="r-profession" value="">
+        <div id="occ-hint" style="font-size:11px;color:#8899bb;margin-top:4px;">Ej: Software Developer, Civil Engineer, Registered Nurse, Lawyer…</div>
       </div>
       <div class="field">
         <label>Número de empleados en tu empresa</label>
@@ -613,6 +571,67 @@ const API = '';
 let token = localStorage.getItem('pref_voter_token') || '';
 let userCountry = localStorage.getItem('pref_voter_country') || 'CL';
 let userSelfieVerified = localStorage.getItem('pref_selfie_verified') === 'true';
+
+// ── Occupation search ─────────────────────────────────────────────────────────
+let _occData = null;
+
+async function _loadOccData() {
+  if (_occData) return _occData;
+  try {
+    const r = await fetch(`${API}/api/occupations`);
+    _occData = await r.json();
+  } catch(e) { _occData = []; }
+  return _occData;
+}
+
+function _setupOccSearch() {
+  const input   = document.getElementById('occ-search');
+  const results = document.getElementById('occ-results');
+  if (!input) return;
+
+  input.addEventListener('focus', () => _loadOccData());
+
+  input.addEventListener('input', async function() {
+    const q = this.value.trim().toLowerCase();
+    if (q.length < 2) { results.style.display = 'none'; return; }
+    const occs = await _loadOccData();
+    const matches = occs.filter(o => o.title.toLowerCase().includes(q)).slice(0, 18);
+    if (!matches.length) { results.style.display = 'none'; return; }
+    results.innerHTML = matches.map(o => {
+      const hi = o.title.replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'gi'), m => `<strong>${m}</strong>`);
+      return `<div class="occ-item" data-code="${o.code}" data-title="${o.title.replace(/"/g,'&quot;')}"
+                   style="padding:9px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.06);">
+                <div style="font-size:14px;color:#e8f0ff;">${hi}</div>
+                <div style="font-size:11px;color:#6677aa;margin-top:1px;">${o.group_name}</div>
+              </div>`;
+    }).join('');
+    results.style.display = 'block';
+  });
+
+  results.addEventListener('click', function(e) {
+    const item = e.target.closest('.occ-item');
+    if (!item) return;
+    document.getElementById('r-profession').value = item.dataset.code;
+    input.value = item.dataset.title;
+    results.style.display = 'none';
+    document.getElementById('occ-hint').style.display = 'none';
+  });
+
+  document.addEventListener('click', function(e) {
+    if (!e.target.closest('#occ-search') && !e.target.closest('#occ-results'))
+      results.style.display = 'none';
+  });
+
+  // Hover highlight
+  results.addEventListener('mouseover', e => {
+    const item = e.target.closest('.occ-item');
+    results.querySelectorAll('.occ-item').forEach(el => el.style.background = '');
+    if (item) item.style.background = 'rgba(255,255,255,0.07)';
+  });
+}
+
+window.addEventListener('DOMContentLoaded', _setupOccSearch);
+// ─────────────────────────────────────────────────────────────────────────────
 
 const LANG_BY_COUNTRY = {
   CL:'es', AR:'es', PE:'es', MX:'es', CO:'es', ES:'es', UY:'es',
