@@ -368,92 +368,54 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         <input type="text" id="r-commune" placeholder="8320000" maxlength="12" autocomplete="postal-code" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:rgba(255,255,255,0.07);color:#fff;font-size:15px;">
       </div>
       <div class="field">
-        <label>Profesión / Ocupación <span style="font-size:11px;color:#e05252;font-weight:400;">*</span></label>
+        <label>Ocupación <span style="font-size:11px;color:#e05252;font-weight:400;">*</span></label>
         <select id="r-profession">
-          <option value="">— selecciona —</option>
+          <option value="">— selecciona tu ocupación —</option>
+          <optgroup label="Dirección y Gestión">
+            <option value="mgmt">Dirección / Gerencia / Management</option>
+          </optgroup>
+          <optgroup label="Negocios y Finanzas">
+            <option value="biz_fin">Negocios, Finanzas y Banca</option>
+            <option value="admin">Administración y Apoyo de Oficina</option>
+            <option value="sales">Ventas y Comercio</option>
+          </optgroup>
+          <optgroup label="Tecnología y Ciencias">
+            <option value="computer">Computación, TI y Matemáticas</option>
+            <option value="engineering">Arquitectura e Ingeniería</option>
+            <option value="science">Ciencias (Biología, Química, Social)</option>
+          </optgroup>
           <optgroup label="Salud">
-            <option value="medico">Médico / Doctor</option>
-            <option value="dentista">Dentista / Odontólogo</option>
-            <option value="enfermero">Enfermero / Kinesiólgo</option>
-            <option value="farmaceutico">Farmacéutico</option>
-            <option value="psicologo">Psicólogo</option>
+            <option value="healthcare_pro">Salud — Profesional (Médico, Dentista, Farmacéutico)</option>
+            <option value="healthcare_sup">Salud — Técnico y Apoyo (Auxiliar, Técnico en Salud)</option>
           </optgroup>
-          <optgroup label="Derecho y Finanzas">
-            <option value="abogado">Abogado</option>
-            <option value="juez">Juez / Fiscal</option>
-            <option value="economista">Economista</option>
-            <option value="contador">Contador / Auditor</option>
-            <option value="financiero">Analista / Gestor Financiero</option>
+          <optgroup label="Legal, Social y Educación">
+            <option value="legal">Legal / Derecho / Jurídico</option>
+            <option value="social_svc">Servicios Sociales y Comunitarios</option>
+            <option value="education">Educación y Docencia</option>
           </optgroup>
-          <optgroup label="Ingeniería y Tecnología">
-            <option value="ing_civil">Ingeniero Civil</option>
-            <option value="ing_comercial">Ingeniero Comercial</option>
-            <option value="ing_informatica">Ingeniero Informático / Desarrollador</option>
-            <option value="arquitecto">Arquitecto</option>
-            <option value="ing_otro">Otro Ingeniero</option>
+          <optgroup label="Arte y Comunicación">
+            <option value="arts_media">Arte, Diseño, Medios y Comunicación</option>
           </optgroup>
-          <optgroup label="Empresa y Gestión">
-            <option value="empresario">Empresario / Emprendedor</option>
-            <option value="ejecutivo">Ejecutivo / Gerente</option>
-            <option value="consultor">Consultor</option>
-            <option value="marketing">Marketing / Publicidad</option>
-            <option value="ventas">Ventas / Comercial</option>
+          <optgroup label="Servicios">
+            <option value="protective">Seguridad y Servicios de Protección</option>
+            <option value="food_svc">Alimentación, Gastronomía y Hostelería</option>
+            <option value="personal_care">Cuidado Personal y Belleza</option>
           </optgroup>
-          <optgroup label="Educación y Ciencias">
-            <option value="profesor_univ">Profesor Universitario</option>
-            <option value="profesor_escuela">Profesor / Docente</option>
-            <option value="cientifico">Científico / Investigador</option>
+          <optgroup label="Trabajo Técnico y Manual">
+            <option value="construction">Construcción y Obras</option>
+            <option value="installation">Instalación y Mantenimiento Industrial</option>
+            <option value="production">Producción / Manufactura / Operario</option>
+            <option value="transport">Transporte, Logística y Distribución</option>
+            <option value="cleaning">Limpieza, Mantenimiento y Jardinería</option>
           </optgroup>
-          <optgroup label="Arte, Medios y Comunicación">
-            <option value="periodista">Periodista / Comunicador</option>
-            <option value="artista">Artista / Diseñador</option>
-            <option value="actor">Actor / Músico</option>
+          <optgroup label="Otros Sectores">
+            <option value="agriculture">Agricultura, Pesca y Forestal</option>
           </optgroup>
-          <optgroup label="Oficios y Servicios">
-            <option value="tecnico">Técnico Especializado</option>
-            <option value="mecanico">Mecánico / Electricista</option>
-            <option value="construccion">Construcción / Maestro</option>
-            <option value="transporte">Conductor / Transporte</option>
-            <option value="comercio">Comerciante / Emprendedor informal</option>
-            <option value="servicios">Servicios / Atención al cliente</option>
-          </optgroup>
-          <optgroup label="Otros">
-            <option value="estudiante">Estudiante</option>
-            <option value="jubilado">Jubilado / Pensionado</option>
-            <option value="hogar">Labores del hogar</option>
-            <option value="desempleado">En búsqueda de trabajo</option>
-            <option value="otro">Otra profesión</option>
-          </optgroup>
-        </select>
-      </div>
-      <div class="field">
-        <label>Cargo <span style="font-size:11px;color:#e05252;font-weight:400;">*</span></label>
-        <select id="r-cargo">
-          <option value="">— selecciona —</option>
-          <optgroup label="Alta Dirección">
-            <option value="ceo">CEO / Dueño / Fundador</option>
-            <option value="gerente_general">Gerente General</option>
-            <option value="director">Director / Socio</option>
-          </optgroup>
-          <optgroup label="Gerencia Media">
-            <option value="gerente">Gerente de Área</option>
-            <option value="subgerente">Sub-Gerente</option>
-            <option value="jefe">Jefe de Departamento</option>
-          </optgroup>
-          <optgroup label="Profesional">
-            <option value="supervisor">Supervisor / Coordinador</option>
-            <option value="profesional">Profesional / Analista Senior</option>
-            <option value="analista">Analista / Especialista</option>
-          </optgroup>
-          <optgroup label="Operativo">
-            <option value="asistente">Asistente / Administrativo</option>
-            <option value="tecnico_cargo">Técnico / Operario</option>
-            <option value="practicante">Practicante / Junior</option>
-          </optgroup>
-          <optgroup label="Otros">
-            <option value="independiente">Independiente / Freelance</option>
-            <option value="estudiante_cargo">Estudiante</option>
-            <option value="jubilado_cargo">Jubilado</option>
+          <optgroup label="No en actividad laboral">
+            <option value="student">Estudiante</option>
+            <option value="retired">Jubilado / Pensionado</option>
+            <option value="homemaker">Labores del hogar</option>
+            <option value="unemployed">En búsqueda de trabajo</option>
           </optgroup>
         </select>
       </div>
@@ -1379,14 +1341,12 @@ async function doRegister() {
   const country = document.getElementById('r-country').value;
   const commune    = document.getElementById('r-commune').value.trim();
   const profession   = document.getElementById('r-profession').value;
-  const cargo        = document.getElementById('r-cargo').value;
   const company_size = document.getElementById('r-company-size').value;
 
   if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'Nombre, email y contraseña son obligatorios'; return; }
   if (pass.length < 6) { document.getElementById('r-err').textContent = 'La contraseña debe tener mínimo 6 caracteres'; return; }
   if (!rut) { document.getElementById('r-err').textContent = (document.getElementById('r-id-label')?.textContent?.replace(' *','') || 'Documento de identidad') + ' es obligatorio'; return; }
-  if (!profession) { document.getElementById('r-err').textContent = 'Selecciona tu profesión / ocupación'; return; }
-  if (!cargo) { document.getElementById('r-err').textContent = 'Selecciona tu cargo'; return; }
+  if (!profession) { document.getElementById('r-err').textContent = 'Selecciona tu ocupación'; return; }
   document.getElementById('r-err').textContent = '';
 
   const btn = document.querySelector('#tab-register .btn');
@@ -1397,7 +1357,7 @@ async function doRegister() {
     const r = await fetch(`${API}/voter/register`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({name, email, password: pass, country,
-        phone, national_id: rut, dob, gender, commune, profession, cargo, company_size, device_fp: deviceFpReg,
+        phone, national_id: rut, dob, gender, commune, profession, cargo: '', company_size, device_fp: deviceFpReg,
         ref_source: sessionStorage.getItem('pref_ref_source') || ''})
     });
     const d = await r.json();

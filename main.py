@@ -2489,6 +2489,34 @@ def _send_supervisor_authorization_email(supervisor_email, employee_name, employ
 
 # Profesiones que indican ingreso alto (elevan tier a A si la comuna lo permite)
 _PROFESSION_TIER: dict[str, str] = {
+    # Códigos nuevos (22 categorías BLS universales)
+    'mgmt':           'A',  # Dirección/Gerencia
+    'legal':          'A',  # Derecho/Jurídico
+    'healthcare_pro': 'A',  # Salud Profesional
+    'computer':       'A',  # TI/Computación
+    'engineering':    'B',  # Arquitectura/Ingeniería
+    'biz_fin':        'B',  # Negocios/Finanzas
+    'science':        'B',  # Ciencias
+    'education':      'B',  # Educación/Docencia
+    'installation':   'B',  # Instalación Industrial
+    'arts_media':     'C',  # Arte/Medios
+    'construction':   'C',  # Construcción
+    'production':     'C',  # Manufactura/Operario
+    'transport':      'C',  # Transporte/Logística
+    'sales':          'C',  # Ventas
+    'admin':          'C',  # Administración/Oficina
+    'protective':     'C',  # Seguridad
+    'healthcare_sup': 'C',  # Salud Técnico/Apoyo
+    'social_svc':     'C',  # Servicios Sociales
+    'agriculture':    'C',  # Agricultura
+    'cleaning':       'D',  # Limpieza/Mantenimiento
+    'food_svc':       'D',  # Alimentación/Gastronomía
+    'personal_care':  'D',  # Cuidado Personal
+    'student':        'C',  # Estudiante
+    'retired':        'C',  # Jubilado
+    'homemaker':      'D',  # Labores del hogar
+    'unemployed':     'D',  # En búsqueda de trabajo
+    # Códigos legacy (usuarios existentes)
     'medico': 'A', 'dentista': 'A', 'abogado': 'A', 'juez': 'A',
     'economista': 'A', 'ing_civil': 'A', 'ing_comercial': 'A',
     'empresario': 'A', 'ejecutivo': 'A', 'financiero': 'A',
@@ -2502,40 +2530,87 @@ _PROFESSION_TIER: dict[str, str] = {
     'servicios': 'D', 'hogar': 'D', 'desempleado': 'D',
 }
 
-# Mapeo profesión → SOC code BLS para usuarios USA (datos reales BLS OES 2025)
+# Mapeo ocupación → BLS major_group para lookup en occupation_unified (USA)
 _US_PROFESSION_SOC: dict[str, str] = {
-    'medico':          '29-1215',  # Family Medicine Physicians
-    'dentista':        '29-1021',  # Dentists, General
-    'abogado':         '23-1011',  # Lawyers
-    'juez':            '23-1023',  # Judges, Magistrate Judges, and Magistrates
-    'economista':      '19-3011',  # Economists
-    'ing_civil':       '17-2051',  # Civil Engineers
-    'ing_comercial':   '11-1021',  # General and Operations Managers
-    'empresario':      '11-1011',  # Chief Executives
-    'ejecutivo':       '11-1011',  # Chief Executives
-    'financiero':      '11-3031',  # Financial Managers
-    'farmaceutico':    '29-1051',  # Pharmacists
-    'psicologo':       '19-3039',  # Psychologists, All Other
-    'contador':        '13-2011',  # Accountants and Auditors
-    'ing_informatica': '15-1252',  # Software Developers
-    'arquitecto':      '17-1011',  # Architects
-    'ing_otro':        '17-2199',  # Engineers, All Other
-    'consultor':       '13-1111',  # Management Analysts
-    'marketing':       '11-2021',  # Marketing Managers
-    'profesor_univ':   '25-1099',  # Postsecondary Teachers, All Other
-    'cientifico':      '19-1099',  # Life Scientists, All Other
-    'periodista':      '27-3021',  # News Analysts, Reporters, and Journalists
-    'artista':         '27-1013',  # Fine Artists
-    'ventas':          '41-4012',  # Sales Representatives, Wholesale and Manufacturing
-    'profesor_escuela':'25-2021',  # Elementary School Teachers
-    'tecnico':         '17-3029',  # Engineering Technologists and Technicians, Other
-    'enfermero':       '29-1141',  # Registered Nurses
-    'comercio':        '41-2031',  # Retail Salespersons
-    'mecanico':        '49-3023',  # Automotive Service Technicians and Mechanics
-    'construccion':    '47-2061',  # Construction Laborers
-    'transporte':      '53-3032',  # Heavy and Tractor-Trailer Truck Drivers
-    'servicios':       '35-2021',  # Food Preparation Workers
-    'hogar':           '37-2012',  # Maids and Housekeeping Cleaners
+    # Códigos nuevos (categorías BLS)
+    'mgmt':           '11-0000',
+    'biz_fin':        '13-0000',
+    'computer':       '15-0000',
+    'engineering':    '17-0000',
+    'science':        '19-0000',
+    'social_svc':     '21-0000',
+    'legal':          '23-0000',
+    'education':      '25-0000',
+    'arts_media':     '27-0000',
+    'healthcare_pro': '29-0000',
+    'healthcare_sup': '31-0000',
+    'protective':     '33-0000',
+    'food_svc':       '35-0000',
+    'cleaning':       '37-0000',
+    'personal_care':  '39-0000',
+    'sales':          '41-0000',
+    'admin':          '43-0000',
+    'agriculture':    '45-0000',
+    'construction':   '47-0000',
+    'installation':   '49-0000',
+    'production':     '51-0000',
+    'transport':      '53-0000',
+    # Códigos legacy → major_group más cercano
+    'medico':          '29-0000',
+    'dentista':        '29-0000',
+    'abogado':         '23-0000',
+    'juez':            '23-0000',
+    'economista':      '19-0000',
+    'ing_civil':       '17-0000',
+    'ing_comercial':   '11-0000',
+    'empresario':      '11-0000',
+    'ejecutivo':       '11-0000',
+    'financiero':      '13-0000',
+    'farmaceutico':    '29-0000',
+    'psicologo':       '19-0000',
+    'contador':        '13-0000',
+    'ing_informatica': '15-0000',
+    'arquitecto':      '17-0000',
+    'ing_otro':        '17-0000',
+    'consultor':       '13-0000',
+    'marketing':       '11-0000',
+    'profesor_univ':   '25-0000',
+    'cientifico':      '19-0000',
+    'periodista':      '27-0000',
+    'artista':         '27-0000',
+    'ventas':          '41-0000',
+    'profesor_escuela':'25-0000',
+    'tecnico':         '17-0000',
+    'enfermero':       '29-0000',
+    'comercio':        '41-0000',
+    'mecanico':        '49-0000',
+    'construccion':    '47-0000',
+    'transporte':      '53-0000',
+    'servicios':       '35-0000',
+    'hogar':           '37-0000',
+}
+
+# Mapeo ocupación → ISCO group para lookup en occupation_unified (no-USA)
+_OCC_TO_ISCO: dict[str, int] = {
+    # Códigos nuevos
+    'mgmt': 1, 'biz_fin': 2, 'computer': 2, 'engineering': 2,
+    'science': 2, 'social_svc': 2, 'legal': 2, 'education': 2,
+    'arts_media': 2, 'healthcare_pro': 2, 'healthcare_sup': 3,
+    'protective': 5, 'food_svc': 5, 'cleaning': 9, 'personal_care': 5,
+    'sales': 5, 'admin': 4, 'agriculture': 6, 'construction': 7,
+    'installation': 7, 'production': 8, 'transport': 8,
+    # Códigos legacy
+    'medico': 2, 'dentista': 2, 'abogado': 2, 'juez': 2,
+    'economista': 2, 'ing_civil': 2, 'ing_comercial': 1,
+    'empresario': 1, 'ejecutivo': 1, 'financiero': 2,
+    'farmaceutico': 2, 'psicologo': 2, 'contador': 2,
+    'ing_informatica': 2, 'arquitecto': 2, 'ing_otro': 2,
+    'consultor': 2, 'marketing': 1, 'profesor_univ': 2,
+    'cientifico': 2, 'periodista': 2, 'artista': 2,
+    'ventas': 5, 'profesor_escuela': 2, 'tecnico': 3,
+    'enfermero': 3, 'comercio': 5, 'mecanico': 7,
+    'construccion': 7, 'transporte': 8, 'servicios': 5,
+    'hogar': 9,
 }
 
 # Cargo jerárquico — eleva el tier independientemente de profesión o comuna
@@ -2625,35 +2700,46 @@ def _assign_user_tier(user, db):
     user_profession = getattr(user, 'profession', '') or ''
     user_country_code = _country_code(user.country)
 
-    # Para usuarios USA: usar scores reales del BLS OES 2025
     profession_tier = None
-    if user_country_code == 'US' and user_profession:
-        soc_code = _US_PROFESSION_SOC.get(user_profession)
-        if soc_code:
-            try:
-                from usa_data_agent import get_occupation_score, profession_score_to_tier
-                bls_data = get_occupation_score(soc_code)
-                if bls_data:
-                    profession_tier = profession_score_to_tier(bls_data['profession_score'])
-            except Exception:
-                profession_tier = _PROFESSION_TIER.get(user_profession)
-        else:
-            profession_tier = _PROFESSION_TIER.get(user_profession)
-    elif user_profession:
-        # Para otros países: usar datos reales de occupation_salary (INE Chile, IBGE, INEGI, etc.)
-        # Fallback al dict estático si no hay dato real para ese país
+    if user_profession:
         try:
-            from occupation_salary_agent import get_profession_score_from_db
             from usa_data_agent import profession_score_to_tier
-            p_score = get_profession_score_from_db(user_country_code, user_profession, db)
-            if p_score is not None:
-                profession_tier = profession_score_to_tier(p_score)
+            if user_country_code == 'US':
+                # USA: promedio de profession_score por major_group en occupation_unified
+                major_group = _US_PROFESSION_SOC.get(user_profession)
+                if major_group:
+                    row = db.execute(text("""
+                        SELECT AVG(profession_score) FROM occupation_unified
+                        WHERE country_iso='US' AND major_group=:mg
+                          AND profession_score IS NOT NULL
+                    """), {'mg': major_group}).fetchone()
+                    if row and row[0] is not None:
+                        profession_tier = profession_score_to_tier(float(row[0]))
+            else:
+                # No-USA: score del grupo ISCO para el país del usuario
+                isco_grp = _OCC_TO_ISCO.get(user_profession)
+                if isco_grp:
+                    row = db.execute(text("""
+                        SELECT profession_score FROM occupation_unified
+                        WHERE country_iso=:cc AND isco_group=:ig
+                          AND occupation_type='ISCO' AND profession_score IS NOT NULL
+                        LIMIT 1
+                    """), {'cc': user_country_code, 'ig': isco_grp}).fetchone()
+                    if row and row[0] is not None:
+                        profession_tier = profession_score_to_tier(float(row[0]))
+                    else:
+                        # Fallback: usar promedio global ISCO de occupation_unified
+                        row = db.execute(text("""
+                            SELECT AVG(profession_score) FROM occupation_unified
+                            WHERE isco_group=:ig AND occupation_type='ISCO'
+                              AND profession_score IS NOT NULL
+                        """), {'ig': isco_grp}).fetchone()
+                        if row and row[0] is not None:
+                            profession_tier = profession_score_to_tier(float(row[0]))
         except Exception:
             pass
         if not profession_tier:
             profession_tier = _PROFESSION_TIER.get(user_profession, None)
-    else:
-        profession_tier = _PROFESSION_TIER.get(user_profession, None)
 
     cargo_tier       = _CARGO_TIER.get(getattr(user, 'cargo', '') or '', None)
     company_size     = getattr(user, 'company_size', '') or ''
