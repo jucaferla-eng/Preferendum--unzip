@@ -2708,30 +2708,19 @@ def _assign_user_tier(user, db):
     user_profession   = getattr(user, 'profession', '') or ''
     user_country_code = _country_code(user.country)
 
-    # Países con GDP per cápita < $10K — el m² de arriendo es el clasificador primario de tier
-    # En estos países la data de ocupaciones es menos confiable que el mercado inmobiliario local
-    _LOW_GDP_COUNTRIES = {
-        'AR', 'BO', 'CO', 'EC', 'PY', 'PE',          # Sudamérica < 10K
-        'SV', 'GT', 'HN', 'NI', 'PY',                # Centroamérica
-        'NG', 'KE', 'GH', 'TZ', 'UG', 'ET', 'EG',   # África
-        'IN', 'PK', 'BD', 'LK', 'NP',                 # Asia Sur
-        'ID', 'PH', 'VN', 'MM', 'KH',                 # Asia SE
-        'MA', 'TN', 'DZ',                              # Norte África
-    }
-    _is_low_gdp = user_country_code in _LOW_GDP_COUNTRIES
+    # Consultar GDP per cápita real desde world_countries (Banco Mundial, 264 países)
+    _wc = db.execute(text(
+        "SELECT gdp_per_capita_usd FROM world_countries WHERE iso2 = :cc"
+    ), {'cc': user_country_code}).fetchone()
+    _country_gdp = float(_wc[0]) if _wc and _wc[0] else None
 
-    # Ingresos anuales estimados por país (mediana en USD) — fallback global
-    _COUNTRY_MEDIAN_INCOME_USD: dict[str, float] = {
-        'US': 56000, 'CA': 45000, 'GB': 38000, 'AU': 50000, 'NZ': 42000,
-        'DE': 40000, 'FR': 35000, 'ES': 28000, 'IT': 28000, 'NL': 42000,
-        'BE': 38000, 'CH': 65000, 'AT': 38000, 'SE': 38000, 'NO': 55000,
-        'DK': 52000, 'FI': 38000, 'PT': 20000, 'PL': 16000, 'CZ': 18000,
-        'JP': 35000, 'KR': 30000, 'SG': 45000, 'HK': 40000, 'TW': 28000,
-        'CL': 15000, 'MX': 10000, 'BR': 8000,  'CO': 7000,  'AR': 5000,
-        'PE': 7000,  'EC': 6000,  'UY': 15000, 'BO': 4000,  'PY': 5000,
-        'ZA': 6000,  'NG': 2500,  'KE': 2000,  'EG': 3000,  'MA': 4000,
-        'IN': 2500,  'CN': 12000, 'TH': 7000,  'ID': 4000,  'PH': 3500,
-    }
+    # Países con GDP per cápita < $10K → m² de arriendo es el clasificador primario de tier
+    _is_low_gdp = bool(_country_gdp and _country_gdp < 10000)
+
+    # Ingreso mediano estimado ≈ GDP per cápita × 0.50
+    # (el GDP incluye utilidades empresariales y gasto público; el ingreso
+    #  personal mediano es ~50% del GDP per cápita en la mayoría de países)
+    _country_median_income = (_country_gdp * 0.50) if _country_gdp else None
 
     profession_tier = None
     if user_profession:
@@ -2819,10 +2808,9 @@ def _assign_user_tier(user, db):
         if not profession_tier:
             profession_tier = _PROFESSION_TIER.get(user_profession, None)
 
-    # Fallback de ingreso por commune/país cuando no hay dato de ocupación
-    if not user.estimated_income_usd and user.income_index and user.income_index > 0:
-        country_median = _COUNTRY_MEDIAN_INCOME_USD.get(user_country_code, 15000)
-        user.estimated_income_usd = round(country_median * (user.income_index / 50.0), 0)
+    # Fallback de ingreso por commune cuando no hay dato de ocupación
+    if not user.estimated_income_usd and _country_median_income and user.income_index and user.income_index > 0:
+        user.estimated_income_usd = round(_country_median_income * (user.income_index / 50.0), 0)
 
     cargo_tier       = _CARGO_TIER.get(getattr(user, 'cargo', '') or '', None)
     company_size     = getattr(user, 'company_size', '') or ''
@@ -2921,15 +2909,13 @@ def _assign_user_tier(user, db):
     # ── Fallback: ingreso per cápita del país cuando no hay otro dato ─────────
     # Para países con GDP < $10K, el m² de arriendo ya domina via commune_tier.
     # Este fallback asegura que estimated_income_usd nunca quede None.
-    if not user.estimated_income_usd:
-        country_median = _COUNTRY_MEDIAN_INCOME_USD.get(user_country_code)
-        if country_median:
-            if user.income_index and user.income_index > 0:
-                # Escalar por posición relativa en el país
-                user.estimated_income_usd = round(country_median * (user.income_index / 50.0), 0)
-            else:
-                # Sin dato de commune: usar directamente la mediana del país
-                user.estimated_income_usd = float(country_median)
+    if not user.estimated_income_usd and _country_median_income:
+        if user.income_index and user.income_index > 0:
+            # Escalar por posición relativa en el país (income_index 50 = mediana)
+            user.estimated_income_usd = round(_country_median_income * (user.income_index / 50.0), 0)
+        else:
+            # Sin dato de commune: usar directamente la mediana del país
+            user.estimated_income_usd = round(_country_median_income, 0)
 
     db.commit()
 
