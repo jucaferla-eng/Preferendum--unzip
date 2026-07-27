@@ -10196,6 +10196,46 @@ def admin_import_nuts(secret: str, db: Session = Depends(get_db)):
     return result_holder.get('result', {'ok': False})
 
 
+@app.post('/admin/import-occupation-salary')
+def admin_import_occupation(secret: str, countries: str = '', db: Session = Depends(get_db)):
+    """Importa salario mediano por grupo ISCO-08 a occupation_salary.
+    countries: lista separada por coma (ej: CL,BR,MX). Vacío = todos.
+    Chile se descarga en tiempo real desde INE ESI SDMX.
+    Resto usa seeds publicados (BR/MX/CO/AR/ZA/KR) — marcan fuente como 'seed'.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    country_list = [c.strip().upper() for c in countries.split(',') if c.strip()] or None
+    import threading
+    result_holder = {}
+    def _run():
+        from occupation_salary_agent import run_occupation_import as _import
+        result_holder['result'] = _import(db, country_list)
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=120)
+    if not result_holder:
+        return {'ok': True, 'message': 'Occupation salary import iniciado (ver logs)'}
+    return result_holder.get('result', {'ok': False})
+
+
+@app.get('/admin/occupation-salary/lookup')
+def admin_occupation_lookup(secret: str, country: str, profession: str, db: Session = Depends(get_db)):
+    """Busca profession_score real para un país y profesión (ej: country=CL&profession=medico)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from occupation_salary_agent import get_profession_score_from_db, PROFESSION_TO_ISCO
+    score = get_profession_score_from_db(country.upper(), profession.lower(), db)
+    isco = PROFESSION_TO_ISCO.get(profession.lower())
+    return {
+        'country': country.upper(),
+        'profession': profession.lower(),
+        'isco_group': isco,
+        'profession_score': score,
+        'found': score is not None,
+    }
+
+
 @app.get('/admin/usa-data-agent/stats')
 def admin_usa_data_stats(secret: str):
     """Estadísticas del agente USA — condados BEA + ocupaciones BLS cargados en memoria."""
