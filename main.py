@@ -93,9 +93,10 @@ class User(Base):
     password        = Column(String)
     country         = Column(String, default='CL')
     county          = Column(String, default='')   # comuna declarada — nunca dirección exacta
-    se_tier         = Column(String, default='')   # A/B/C/D — combinación de comuna + profesión
-    income_index    = Column(Float, default=0.0)   # índice de ingreso de su comuna
-    profession      = Column(String, default='')   # profesión declarada al registrarse
+    se_tier              = Column(String, default='')   # A/B/C/D — combinación de comuna + profesión
+    income_index         = Column(Float, default=0.0)   # índice de ingreso de su comuna
+    estimated_income_usd = Column(Float, default=None)  # ingreso anual estimado en USD (ocupación + ubicación)
+    profession           = Column(String, default='')   # profesión declarada al registrarse
     cargo           = Column(String, default='')   # cargo/posición jerárquica
     company_size    = Column(String, default='')   # tamaño de empresa: 1-10, 11-50, etc.
     ref_source      = Column(String, default='')   # canal de adquisición: fb, ig, tiktok, etc.
@@ -199,6 +200,8 @@ class Debate(Base):
     target_age_min   = Column(Integer, default=13)
     target_age_max   = Column(Integer, default=99)
     target_se_tiers  = Column(String, default='A,B,C,D')  # nivel socioeconómico del debate
+    income_min_usd   = Column(Float, default=None)         # ingreso anual mínimo en USD (None = sin límite)
+    income_max_usd   = Column(Float, default=None)         # ingreso anual máximo en USD (None = sin límite)
     category         = Column(String, default='general')   # deportes / política / economía / salud / etc.
     status           = Column(String, default='live')
     opens_at         = Column(DateTime, default=datetime.utcnow)
@@ -565,6 +568,8 @@ def _migrate():
             ('category',            "TEXT DEFAULT 'general'"),
             ('cover_image_url',     "TEXT DEFAULT ''"),
             ('is_anonymous',        "BOOLEAN DEFAULT FALSE"),
+            ('income_min_usd',      "FLOAT DEFAULT NULL"),
+            ('income_max_usd',      "FLOAT DEFAULT NULL"),
         ]:
             if col not in existing_debate_cols:
                 try:
@@ -591,6 +596,7 @@ def _migrate():
         # users — se_tier e income_index para matching de ads
         existing_user_cols = {c['name'] for c in inspector.get_columns('users')} if inspector.has_table('users') else set()
         for col, defn in [('se_tier', "TEXT DEFAULT ''"), ('income_index', 'FLOAT DEFAULT 0.0'),
+                          ('estimated_income_usd', 'FLOAT DEFAULT NULL'),
                           ('doc_serial', "TEXT DEFAULT ''"), ('profession', "TEXT DEFAULT ''"),
                           ('cargo', "TEXT DEFAULT ''"),
                           ('company_size', "TEXT DEFAULT ''"),
@@ -1170,6 +1176,8 @@ class DebateCreate(BaseModel):
     target_age_min:      int = 13
     target_age_max:      int = 99
     target_se_tiers:     str = 'A,B,C,D'
+    income_min_usd:      float = None   # ingreso anual mínimo en USD — None = sin filtro
+    income_max_usd:      float = None   # ingreso anual máximo en USD — None = sin filtro
     category:            str = 'general'
     closes_at:           str
     verify_days:         int = 15
@@ -2700,6 +2708,19 @@ def _assign_user_tier(user, db):
     user_profession = getattr(user, 'profession', '') or ''
     user_country_code = _country_code(user.country)
 
+    # Ingresos anuales estimados por país (mediana en USD) — usado como base del fallback por comuna
+    _COUNTRY_MEDIAN_INCOME_USD: dict[str, float] = {
+        'US': 56000, 'CA': 45000, 'GB': 38000, 'AU': 50000, 'NZ': 42000,
+        'DE': 40000, 'FR': 35000, 'ES': 28000, 'IT': 28000, 'NL': 42000,
+        'BE': 38000, 'CH': 65000, 'AT': 38000, 'SE': 38000, 'NO': 55000,
+        'DK': 52000, 'FI': 38000, 'PT': 20000, 'PL': 16000, 'CZ': 18000,
+        'JP': 35000, 'KR': 30000, 'SG': 45000, 'HK': 40000, 'TW': 28000,
+        'CL': 15000, 'MX': 10000, 'BR': 8000,  'CO': 7000,  'AR': 5000,
+        'PE': 7000,  'EC': 6000,  'UY': 15000, 'BO': 4000,  'PY': 5000,
+        'ZA': 6000,  'NG': 2500,  'KE': 2000,  'EG': 3000,  'MA': 4000,
+        'IN': 2500,  'CN': 12000, 'TH': 7000,  'ID': 4000,  'PH': 3500,
+    }
+
     profession_tier = None
     if user_profession:
         import re as _re
@@ -2707,14 +2728,15 @@ def _assign_user_tier(user, db):
         try:
             from usa_data_agent import profession_score_to_tier
             if _is_soc:
-                # Nuevo sistema: SOC code directo de la lista BLS universal
+                # Nuevo sistema: SOC code universal de la lista BLS
                 if user_country_code == 'US':
                     row = db.execute(text("""
-                        SELECT profession_score FROM occupation_unified
+                        SELECT profession_score, median_annual_usd FROM occupation_unified
                         WHERE occupation_code=:code AND country_iso='US'
                     """), {'code': user_profession}).fetchone()
                     if row and row[0] is not None:
                         profession_tier = profession_score_to_tier(float(row[0]))
+                        if row[1]: user.estimated_income_usd = float(row[1])
                 else:
                     # No-USA: SOC → ISCO group → ingreso local del país
                     isco_row = db.execute(text("""
@@ -2724,50 +2746,60 @@ def _assign_user_tier(user, db):
                     if isco_row and isco_row[0]:
                         isco_grp = isco_row[0]
                         row = db.execute(text("""
-                            SELECT profession_score FROM occupation_unified
+                            SELECT profession_score, median_annual_usd FROM occupation_unified
                             WHERE country_iso=:cc AND isco_group=:ig
                               AND occupation_type='ISCO' AND profession_score IS NOT NULL
                             LIMIT 1
                         """), {'cc': user_country_code, 'ig': isco_grp}).fetchone()
                         if row and row[0] is not None:
                             profession_tier = profession_score_to_tier(float(row[0]))
+                            if row[1]: user.estimated_income_usd = float(row[1])
                         else:
                             # Fallback: promedio global ISCO
                             row = db.execute(text("""
-                                SELECT AVG(profession_score) FROM occupation_unified
+                                SELECT AVG(profession_score), AVG(median_annual_usd)
+                                FROM occupation_unified
                                 WHERE isco_group=:ig AND occupation_type='ISCO'
                                   AND profession_score IS NOT NULL
                             """), {'ig': isco_grp}).fetchone()
                             if row and row[0] is not None:
                                 profession_tier = profession_score_to_tier(float(row[0]))
+                                if row[1]: user.estimated_income_usd = float(row[1])
             elif user_country_code == 'US':
                 # Legacy codes — USA: lookup por major_group
                 major_group = _US_PROFESSION_SOC.get(user_profession)
                 if major_group:
                     row = db.execute(text("""
-                        SELECT AVG(profession_score) FROM occupation_unified
+                        SELECT AVG(profession_score), AVG(median_annual_usd) FROM occupation_unified
                         WHERE country_iso='US'
                           AND SUBSTRING(occupation_code, 1, 2) = SUBSTRING(:mg, 1, 2)
                           AND occupation_type='SOC' AND profession_score IS NOT NULL
                     """), {'mg': major_group}).fetchone()
                     if row and row[0] is not None:
                         profession_tier = profession_score_to_tier(float(row[0]))
+                        if row[1]: user.estimated_income_usd = float(row[1])
             else:
                 # Legacy codes — no-USA: lookup por ISCO group
                 isco_grp = _OCC_TO_ISCO.get(user_profession)
                 if isco_grp:
                     row = db.execute(text("""
-                        SELECT profession_score FROM occupation_unified
+                        SELECT profession_score, median_annual_usd FROM occupation_unified
                         WHERE country_iso=:cc AND isco_group=:ig
                           AND occupation_type='ISCO' AND profession_score IS NOT NULL
                         LIMIT 1
                     """), {'cc': user_country_code, 'ig': isco_grp}).fetchone()
                     if row and row[0] is not None:
                         profession_tier = profession_score_to_tier(float(row[0]))
+                        if row[1]: user.estimated_income_usd = float(row[1])
         except Exception:
             pass
         if not profession_tier:
             profession_tier = _PROFESSION_TIER.get(user_profession, None)
+
+    # Fallback de ingreso por commune/país cuando no hay dato de ocupación
+    if not user.estimated_income_usd and user.income_index and user.income_index > 0:
+        country_median = _COUNTRY_MEDIAN_INCOME_USD.get(user_country_code, 15000)
+        user.estimated_income_usd = round(country_median * (user.income_index / 50.0), 0)
 
     cargo_tier       = _CARGO_TIER.get(getattr(user, 'cargo', '') or '', None)
     company_size     = getattr(user, 'company_size', '') or ''
@@ -3272,6 +3304,14 @@ def debates_for_me(
             if d.target_age_max and user_age > d.target_age_max:
                 continue
 
+        # Filtro por ingreso estimado (solo si el debate tiene umbral Y el usuario tiene ingreso calculado)
+        user_income = getattr(user, 'estimated_income_usd', None) if user else None
+        if user_income is not None:
+            if getattr(d, 'income_min_usd', None) and user_income < d.income_min_usd:
+                continue
+            if getattr(d, 'income_max_usd', None) and user_income > d.income_max_usd:
+                continue
+
         try:
             eligible.append(format_debate(d))
         except Exception:
@@ -3293,11 +3333,20 @@ def get_featured_ads(user: User = Depends(get_optional_user), db: Session = Depe
         (AdCampaign.end_date == None) | (AdCampaign.end_date > now)
     ).order_by(AdCampaign.created_at.desc()).all()
 
-    user_se = (getattr(user, 'se_tier', '') or '') if user else ''
+    user_se     = (getattr(user, 'se_tier', '') or '') if user else ''
+    user_income = (getattr(user, 'estimated_income_usd', None)) if user else None
     campaigns = []
     for c in candidates:
         if user_se and not _tier_matches(user_se, c.target_se_tiers or 'A,B,C,D'):
             continue
+        # Filtro por ingreso USD (target_income_min/max en campaigns ahora son USD)
+        if user_income is not None:
+            inc_min = getattr(c, 'target_income_min', 0.0) or 0.0
+            inc_max = getattr(c, 'target_income_max', 9999999.0) or 9999999.0
+            if inc_min > 0 and user_income < inc_min:
+                continue
+            if inc_max < 9999.0 and user_income > inc_max:
+                continue
         campaigns.append(c)
         if len(campaigns) >= 2:
             break
@@ -3353,6 +3402,8 @@ def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
         target_gender=data.target_gender,
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
+        income_min_usd=getattr(data, 'income_min_usd', None),
+        income_max_usd=getattr(data, 'income_max_usd', None),
         category=getattr(data, 'category', 'general') or 'general',
         closes_at=closes, verify_opens_at=verify_opens, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
@@ -4351,6 +4402,8 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
         target_gender=data.target_gender,
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
+        income_min_usd=getattr(data, 'income_min_usd', None),
+        income_max_usd=getattr(data, 'income_max_usd', None),
         category=getattr(data, 'category', 'general') or 'general',
         closes_at=closes, verify_opens_at=verify_opens, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
