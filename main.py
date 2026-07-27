@@ -2603,17 +2603,24 @@ def _assign_user_tier(user, db):
             commune_tier      = commune_data.se_tier
             user.income_index = commune_data.income_index
         elif country_code:
-            # 5. Promedio del país — cubre códigos postales no incluidos en la BD
+            # 5. Fallback país — usa la moda del se_tier real de ese país (no get_se_tier(avg_index)
+            # porque rent_index y income_index tienen escalas distintas según la fuente del dato)
             from sqlalchemy import func as _sqlfunc
+            tier_row = db.execute(text("""
+                SELECT se_tier, COUNT(*) AS cnt
+                FROM commune_market_data
+                WHERE country = :cc
+                  AND se_tier IS NOT NULL AND se_tier != ''
+                  AND LENGTH(se_tier) = 1
+                GROUP BY se_tier ORDER BY cnt DESC LIMIT 1
+            """), {'cc': country_code}).fetchone()
             avg_index = db.query(_sqlfunc.avg(CommuneMarketData.income_index)).filter(
                 CommuneMarketData.country == country_code,
                 CommuneMarketData.income_index > 0,
             ).scalar()
-            if avg_index:
-                from commune_agent import get_se_tier as _get_tier
-                avg_index = round(float(avg_index), 1)
-                commune_tier      = _get_tier(avg_index)
-                user.income_index = avg_index
+            if tier_row:
+                commune_tier      = tier_row[0]
+                user.income_index = round(float(avg_index), 1) if avg_index else 50.0
 
     user_profession = getattr(user, 'profession', '') or ''
     user_country_code = _country_code(user.country)
