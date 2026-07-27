@@ -2632,6 +2632,19 @@ def _assign_user_tier(user, db):
                 profession_tier = _PROFESSION_TIER.get(user_profession)
         else:
             profession_tier = _PROFESSION_TIER.get(user_profession)
+    elif user_profession:
+        # Para otros países: usar datos reales de occupation_salary (INE Chile, IBGE, INEGI, etc.)
+        # Fallback al dict estático si no hay dato real para ese país
+        try:
+            from occupation_salary_agent import get_profession_score_from_db
+            from usa_data_agent import profession_score_to_tier
+            p_score = get_profession_score_from_db(user_country_code, user_profession, db)
+            if p_score is not None:
+                profession_tier = profession_score_to_tier(p_score)
+        except Exception:
+            pass
+        if not profession_tier:
+            profession_tier = _PROFESSION_TIER.get(user_profession, None)
     else:
         profession_tier = _PROFESSION_TIER.get(user_profession, None)
 
