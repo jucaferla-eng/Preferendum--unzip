@@ -98,6 +98,7 @@ class User(Base):
     profession      = Column(String, default='')   # profesión declarada al registrarse
     cargo           = Column(String, default='')   # cargo/posición jerárquica
     company_size    = Column(String, default='')   # tamaño de empresa: 1-10, 11-50, etc.
+    ref_source      = Column(String, default='')   # canal de adquisición: fb, ig, tiktok, etc.
     gender          = Column(String, default='F')
     dob             = Column(String, default='')
     national_id     = Column(String, default='')
@@ -591,7 +592,8 @@ def _migrate():
         for col, defn in [('se_tier', "TEXT DEFAULT ''"), ('income_index', 'FLOAT DEFAULT 0.0'),
                           ('doc_serial', "TEXT DEFAULT ''"), ('profession', "TEXT DEFAULT ''"),
                           ('cargo', "TEXT DEFAULT ''"),
-                          ('company_size', "TEXT DEFAULT ''")]:
+                          ('company_size', "TEXT DEFAULT ''"),
+                          ('ref_source', "TEXT DEFAULT ''")]:
             if col not in existing_user_cols:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
@@ -1688,6 +1690,7 @@ class VoterRegisterInput(BaseModel):
     profession:   str        # profesión declarada — obligatoria para tier
     cargo:        str        # cargo jerárquico (ceo, gerente, analista, etc.) — obligatorio
     company_size: str = ''   # tamaño de empresa (opcional)
+    ref_source:   str = ''   # canal de adquisición: fb, ig, tiktok, direct, etc.
     device_fp:    str = ''
 
 
@@ -1730,6 +1733,7 @@ def voter_register(data: VoterRegisterInput, bg: BackgroundTasks, db: Session = 
         profession=data.profession or '',
         cargo=data.cargo or '',
         company_size=data.company_size or '',
+        ref_source=data.ref_source or '',
     )
     db.add(user)
     db.commit()
@@ -10543,6 +10547,78 @@ def admin_reset_organizers(secret: str, db: Session = Depends(get_db)):
 # ══════════════════════════════════════════════════════════════
 # EXECUTIVE DEMO — Preferendum Intelligence Platform
 # Private page for partner / investor meetings
+# ══════════════════════════════════════════════════════════════
+# PILOT DASHBOARD — real-time metrics for agency/brand during live pilot
+# ══════════════════════════════════════════════════════════════
+
+@app.get('/pilot/{debate_id}/live')
+def pilot_live_dashboard(debate_id: int, db: Session = Depends(get_db)):
+    """Real-time pilot metrics for agency/brand. No auth required (debate_id is the access token)."""
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+
+    # All votes for this debate
+    votes = db.query(DebateVote).filter(DebateVote.debate_id == debate_id).all()
+    total_votes = len(votes)
+
+    # All users who voted — join to get their ref_source, country, se_tier
+    voter_ids = [v.voter_id for v in votes if v.voter_id]
+    users_map = {}
+    if voter_ids:
+        for u in db.query(User).filter(User.id.in_(voter_ids)).all():
+            users_map[u.id] = u
+
+    # Registrations by channel (ref_source)
+    by_channel: dict = {}
+    by_country: dict = {}
+    by_tier: dict = {}
+    for v in votes:
+        u = users_map.get(v.voter_id)
+        if not u:
+            continue
+        ch = u.ref_source or 'direct'
+        by_channel[ch] = by_channel.get(ch, 0) + 1
+        co = u.country or 'XX'
+        by_country[co] = by_country.get(co, 0) + 1
+        tier = u.se_tier or '?'
+        by_tier[tier] = by_tier.get(tier, 0) + 1
+
+    # Votes by option
+    counts = {}
+    try:
+        counts = json.loads(debate.vote_counts or '{}')
+    except Exception:
+        pass
+
+    # Reward codes claimed
+    total_codes = db.query(DebateRewardCode).filter(DebateRewardCode.debate_id == debate_id).count()
+    claimed_codes = db.query(DebateRewardCode).filter(
+        DebateRewardCode.debate_id == debate_id,
+        DebateRewardCode.claimed == True
+    ).count()
+
+    # Votes per hour (last 24h)
+    from collections import defaultdict
+    hourly: dict = defaultdict(int)
+    for v in votes:
+        if v.created_at:
+            h = v.created_at.strftime('%Y-%m-%dT%H:00')
+            hourly[h] += 1
+
+    return {
+        'debate_id': debate_id,
+        'title': debate.title,
+        'total_votes': total_votes,
+        'results': counts,
+        'by_channel': dict(sorted(by_channel.items(), key=lambda x: -x[1])),
+        'by_country': dict(sorted(by_country.items(), key=lambda x: -x[1])),
+        'by_tier': dict(sorted(by_tier.items())),
+        'reward_codes': {'total': total_codes, 'claimed': claimed_codes, 'remaining': total_codes - claimed_codes},
+        'votes_by_hour': dict(sorted(hourly.items())),
+        'updated_at': datetime.utcnow().isoformat(),
+    }
+
 # ══════════════════════════════════════════════════════════════
 
 @app.get('/sable', response_class=HTMLResponse)

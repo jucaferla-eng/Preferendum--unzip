@@ -1397,7 +1397,8 @@ async function doRegister() {
     const r = await fetch(`${API}/voter/register`, {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({name, email, password: pass, country,
-        phone, national_id: rut, dob, gender, commune, profession, cargo, company_size, device_fp: deviceFpReg})
+        phone, national_id: rut, dob, gender, commune, profession, cargo, company_size, device_fp: deviceFpReg,
+        ref_source: sessionStorage.getItem('pref_ref_source') || ''})
     });
     const d = await r.json();
     btn.disabled = false; btn.textContent = 'Create Account →';
@@ -2603,6 +2604,30 @@ async function shareViaWhatsApp(title, instName, debId) {
   if (!w) window.location.href = waUrl;
 }
 
+async function shareViaWhatsAppWithReward(title, instName, debId, rewardDesc) {
+  const url = `${location.origin}/voter?debate=${debId}`;
+  const inst = instName || 'Preferendum';
+  const prizeNote = rewardDesc ? `\n🎁 Premio: ${rewardDesc}` : '';
+  const text = `Participé en la consulta de *${inst}* en Preferendum:\n"${title}"${prizeNote}\n\n¿Tú qué prefieres? Vota y gana tu premio:\n${url}`;
+  const db = currentDebate;
+  if (db) {
+    try {
+      const results = db.results || [];
+      const total = db.total_votes || 0;
+      const canvas = await _generatePoster(title, '', inst, results, total);
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
+      const file = new File([blob], 'preferendum.png', { type: 'image/png' });
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], text, url });
+        return;
+      }
+    } catch(_) {}
+  }
+  const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  const w = window.open(waUrl, '_blank');
+  if (!w) window.location.href = waUrl;
+}
+
 async function shareMyVote(option, title, debId) {
   const instName = currentDebate?.inst_name || 'Preferendum';
   const results = currentDebate?.results || [];
@@ -2850,16 +2875,44 @@ async function showVoteSuccess(data, optIdx) {
     ? `${Math.round(data.blockchain_accuracy * 100)}%`
     : data.blockchain_tx ? '100%' : 'N/A';
 
+  // Premio/descuento de la marca — código único del pool + descripción del debate
+  const rewardCode = data.reward_code || '';
+  const rewardDesc = currentDebate?.reward || '';
+  let rewardHtml = '';
+  if (rewardCode || rewardDesc) {
+    const copyTarget = rewardCode || rewardDesc;
+    const copyId = 'copy-reward-' + Date.now();
+    rewardHtml = `
+    <div style="margin:16px 0 4px;background:linear-gradient(135deg,#064e3b,#1e3a5f);border-radius:14px;padding:18px 16px;text-align:center;border:1.5px solid rgba(110,231,183,0.3);">
+      <div style="font-size:28px;margin-bottom:6px;">🎁</div>
+      <div style="font-size:12px;font-weight:700;color:#6ee7b7;letter-spacing:.07em;text-transform:uppercase;margin-bottom:6px;">Tu premio por participar</div>
+      ${rewardDesc ? `<div style="font-size:14px;color:rgba(255,255,255,0.85);margin-bottom:10px;">${esc(rewardDesc)}</div>` : ''}
+      ${rewardCode ? `
+      <div style="background:rgba(0,0,0,0.3);border-radius:8px;padding:10px 14px;font-family:monospace;font-size:18px;font-weight:800;color:#fbbf24;letter-spacing:.12em;margin-bottom:10px;">${esc(rewardCode)}</div>` : ''}
+      <button id="${copyId}" onclick="(function(btn){const txt='${copyTarget.replace(/'/g,"\\'")}';navigator.clipboard&&navigator.clipboard.writeText(txt).then(()=>{btn.textContent='✓ Copiado';btn.style.background='rgba(16,185,129,0.3)';setTimeout(()=>{btn.textContent='Copiar código';btn.style.background='rgba(255,255,255,0.12)'},2500)})})(document.getElementById('${copyId}'))"
+        style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);border-radius:8px;color:#fff;font-size:13px;font-weight:700;padding:8px 20px;cursor:pointer;">
+        Copiar código
+      </button>
+      <div style="font-size:11px;color:#a7f3d0;margin-top:10px;">Válido en tiendas y online · Comparte y que tus amigos también participen</div>
+    </div>`;
+  }
+
+  // WhatsApp menciona el premio si existe para motivar participación
+  const waShareFn = (rewardCode || rewardDesc)
+    ? `shareViaWhatsAppWithReward('${esc(currentDebate?.title||'')}','${esc(currentDebate?.inst_name||'')}',${debId},'${esc(rewardDesc)}')`
+    : `shareViaWhatsApp('${esc(currentDebate?.title||'')}','${esc(currentDebate?.inst_name||'')}',${debId})`;
+
   content.innerHTML = `
     <div class="success-card">
       <div class="success-icon">✓</div>
       <div class="success-title">Voto registrado en blockchain</div>
       <div class="success-text">Tu voto por <strong>"${esc(option)}"</strong> fue anclado en Polygon Mainnet. Tu identidad está verificada — tu privacidad protegida.</div>
+      ${rewardHtml}
       <div class="vcode-box">${esc(vcode)}</div>
       <div class="vcode-label">Guarda este código — te permitirá verificar cómo fue contabilizado tu voto cuando termine el período de votación</div>
       ${data.blockchain_tx ? `<a class="verify-link" href="https://polygonscan.com/tx/${data.blockchain_tx}" target="_blank" rel="noopener">Ver en Polygon blockchain ↗</a>` : ''}
       <div style="display:flex;gap:10px;margin-top:14px;">
-        <button onclick="shareViaWhatsApp('${esc(currentDebate?.title||'')}','${esc(currentDebate?.inst_name||'')}',${debId})"
+        <button onclick="${waShareFn}"
           class="share-btn share-btn-wa" style="flex:1;padding:13px;">
           <span style="font-size:18px;">💬</span> WhatsApp
         </button>
@@ -2974,6 +3027,12 @@ function showError(msg, detail) {
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtDate(s) { try { return new Date(s).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); } catch{ return s; } }
 function fmtDateTime(s) { try { const utc = s && !s.endsWith('Z') && !s.includes('+') ? s + 'Z' : s; const d = new Date(utc); return d.toLocaleDateString('es-CL',{day:'2-digit',month:'short',year:'numeric'}) + ' · ' + d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}); } catch{ return s; } }
+
+// Capturar ref= de URL (canal de publicidad: fb, ig, tiktok, etc.) y persistir en sessionStorage
+(function() {
+  const ref = new URLSearchParams(location.search).get('ref');
+  if (ref) sessionStorage.setItem('pref_ref_source', ref.slice(0, 32));
+})();
 
 // Init country-dependent fields once DOM is fully ready
 document.addEventListener('DOMContentLoaded', toggleCommuneField);
