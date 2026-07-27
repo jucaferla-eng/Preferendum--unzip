@@ -2730,13 +2730,24 @@ def _assign_user_tier(user, db):
             if _is_soc:
                 # Nuevo sistema: SOC code universal de la lista BLS
                 if user_country_code == 'US':
+                    # 1. Intentar salario específico por MSA/condado del usuario
+                    msa_income = None
+                    if getattr(user, 'county', ''):
+                        try:
+                            from bls_oews_msa_agent import get_msa_salary
+                            msa_data = get_msa_salary(user_profession, user.county, db)
+                            if msa_data and msa_data.get('median_annual_usd'):
+                                msa_income = msa_data['median_annual_usd']
+                        except Exception:
+                            pass
+                    # 2. Fallback: mediana nacional
                     row = db.execute(text("""
                         SELECT profession_score, median_annual_usd FROM occupation_unified
                         WHERE occupation_code=:code AND country_iso='US'
                     """), {'code': user_profession}).fetchone()
                     if row and row[0] is not None:
                         profession_tier = profession_score_to_tier(float(row[0]))
-                        if row[1]: user.estimated_income_usd = float(row[1])
+                        user.estimated_income_usd = msa_income or (float(row[1]) if row[1] else None)
                 else:
                     # No-USA: SOC → ISCO group → ingreso local del país
                     isco_row = db.execute(text("""
@@ -10513,6 +10524,54 @@ _BLS_MAJOR_GROUP_NAMES: dict[str, str] = {
     '51-0000': 'Production',
     '53-0000': 'Transportation and Material Moving',
 }
+
+
+@app.post('/admin/import-oews-msa')
+async def admin_import_oews_msa(
+    secret: str,
+    year: int = 2023,
+    file: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Importa datos BLS OEWS por MSA.
+    Sube el archivo oesm23ma.zip manualmente (BLS bloquea descargas automáticas).
+    Uso: POST /admin/import-oews-msa?secret=XXX con el ZIP adjunto como 'file'.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    if not file:
+        raise HTTPException(400, 'Se requiere el archivo ZIP de BLS OEWS (oesm23ma.zip). '
+                                 'Descárgalo de https://www.bls.gov/oes/tables.htm')
+    zip_bytes = await file.read()
+    if len(zip_bytes) < 1000:
+        raise HTTPException(400, 'Archivo demasiado pequeño — verifica que subiste el ZIP correcto')
+    try:
+        from bls_oews_msa_agent import run_oews_msa_import
+        result = run_oews_msa_import(db, zip_bytes, year=year)
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get('/admin/oews-msa/summary')
+def admin_oews_msa_summary(secret: str, db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from bls_oews_msa_agent import get_oews_summary
+    return get_oews_summary(db)
+
+
+@app.get('/admin/oews-msa/lookup')
+def admin_oews_msa_lookup(secret: str, soc_code: str, commune: str, db: Session = Depends(get_db)):
+    """Busca el salario de una ocupación en el MSA más cercano a la commune."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from bls_oews_msa_agent import get_msa_salary
+    result = get_msa_salary(soc_code, commune, db)
+    if not result:
+        raise HTTPException(404, f'No se encontró dato para SOC {soc_code} en área "{commune}"')
+    return result
 
 
 @app.get('/api/occupations')
