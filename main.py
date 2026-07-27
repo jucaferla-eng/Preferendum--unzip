@@ -524,6 +524,7 @@ class CommuneMarketData(Base):
     commune      = Column(String, index=True)
     price_m2_avg = Column(Float, default=0.0)
     income_index = Column(Float, default=100.0)  # mediana global = 100
+    income_pct   = Column(Float, default=50.0)   # percentil dentro del grupo de ingreso
     cpm_usd      = Column(Float, default=6.0)
     se_tier      = Column(String, default='C')   # A / B / C / D
     portal       = Column(String)
