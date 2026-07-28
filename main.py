@@ -600,7 +600,8 @@ def _migrate():
                           ('doc_serial', "TEXT DEFAULT ''"), ('profession', "TEXT DEFAULT ''"),
                           ('cargo', "TEXT DEFAULT ''"),
                           ('company_size', "TEXT DEFAULT ''"),
-                          ('ref_source', "TEXT DEFAULT ''")]:
+                          ('ref_source', "TEXT DEFAULT ''"),
+                          ('hnw_score', 'FLOAT DEFAULT 0.0')]:
             if col not in existing_user_cols:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
@@ -2641,6 +2642,85 @@ _CARGO_TIER: dict[str, str] = {
 def _tier_rank(t: str) -> int:
     return {'A': 4, 'B': 3, 'C': 2, 'D': 1}.get(t, 0)
 
+# Palabras clave en títulos/categorías de debates que indican perfil HNW
+_HNW_DEBATE_KEYWORDS = [
+    'inversion', 'inversión', 'bolsa', 'mercado financiero', 'cripto', 'bitcoin',
+    'bienes raices', 'bienes raíces', 'inmobiliaria', 'real estate', 'propiedad',
+    'lujo', 'luxury', 'premium', 'porsche', 'ferrari', 'rolex', 'lvmh',
+    'viaje', 'turismo', 'primera clase', 'yate', 'aviacion', 'aviación',
+    'impuesto', 'riqueza', 'patrimonio', 'dividendo', 'hedge fund',
+    'startup', 'venture', 'emprendimiento', 'empresa', 'fusión', 'adquisicion',
+    'exportacion', 'exportación', 'comercio internacional',
+]
+
+_HNW_DEBATE_CATEGORIES = {'economia', 'finanzas', 'negocios', 'tecnologia', 'lujo', 'viajes'}
+
+_HNW_CARGO = {'ceo', 'chairman', 'director', 'gerente_general', 'founder', 'socio', 'president'}
+_HNW_CARGO_MID = {'gerente', 'subgerente', 'vp', 'cfo', 'cto', 'coo'}
+_HNW_COMPANY_BIG = {'500+', '201-500'}
+_HNW_COMPANY_MID = {'51-200', '100-499'}
+
+
+def _calculate_hnw_score(user, db) -> float:
+    """
+    Score 0-100 de probabilidad de ser High Net Worth (patrimonio >$1M USD).
+    Combina 4 señales: zona, cargo, empresa y comportamiento en debates.
+    No reemplaza se_tier — es una capa adicional para targeting de lujo.
+    """
+    score = 0.0
+
+    # ── Señal 1: Zona donde vive (35 pts) ────────────────────────────────────
+    # Tier A desde la comuna (no solo desde la profesión) = vive en zona cara
+    commune_tier = None
+    if user.county and _country_code(getattr(user, 'country', 'CL') or 'CL'):
+        row = db.execute(text("""
+            SELECT se_tier FROM commune_market_data
+            WHERE commune ILIKE :c
+            LIMIT 1
+        """), {'c': user.county.strip()}).fetchone()
+        if row:
+            commune_tier = row[0]
+
+    if commune_tier == 'A':
+        score += 35
+    elif commune_tier == 'B':
+        score += 15
+    elif commune_tier == 'C':
+        score += 5
+
+    # ── Señal 2: Cargo jerárquico (25 pts) ───────────────────────────────────
+    cargo = (getattr(user, 'cargo', '') or '').lower().strip()
+    if cargo in _HNW_CARGO:
+        score += 25
+    elif cargo in _HNW_CARGO_MID:
+        score += 10
+
+    # ── Señal 3: Tamaño de empresa (15 pts) ──────────────────────────────────
+    company = (getattr(user, 'company_size', '') or '').strip()
+    if company in _HNW_COMPANY_BIG:
+        score += 15
+    elif company in _HNW_COMPANY_MID:
+        score += 7
+
+    # ── Señal 4: Comportamiento en debates (25 pts) ───────────────────────────
+    # Cuenta debates de lujo/inversión/viajes en los que el usuario ha votado
+    try:
+        kw_conditions = ' OR '.join([f"LOWER(d.title) LIKE '%{kw}%'" for kw in _HNW_DEBATE_KEYWORDS[:12]])
+        cat_list = "','".join(_HNW_DEBATE_CATEGORIES)
+        hnw_votes = db.execute(text(f"""
+            SELECT COUNT(DISTINCT d.id)
+            FROM debate_votes v
+            JOIN debates d ON d.id = v.debate_id
+            WHERE v.user_id = :uid
+              AND (d.category IN ('{cat_list}') OR {kw_conditions})
+        """), {'uid': user.id}).scalar() or 0
+        score += min(25, int(hnw_votes) * 5)
+    except Exception:
+        pass
+
+    return round(min(100.0, score), 1)
+
+
 def _assign_user_tier(user, db):
     """Asigna se_tier e income_index combinando comuna + profesión declarada."""
     commune_tier = None
@@ -2948,6 +3028,14 @@ def _assign_user_tier(user, db):
         else:
             # Sin dato de commune: usar directamente la mediana del país
             user.estimated_income_usd = round(_country_median_income, 0)
+
+    # ── HNW Score ─────────────────────────────────────────────────────────────
+    try:
+        hnw = _calculate_hnw_score(user, db)
+        if hasattr(user, 'hnw_score'):
+            user.hnw_score = hnw
+    except Exception:
+        pass
 
     db.commit()
 
@@ -10207,6 +10295,64 @@ def admin_users_breakdown(secret: str, db: Session = Depends(get_db)):
         'by_tier': [{'tier': r[0], 'total': r[1], 'avg_income_usd': r[2]} for r in by_tier],
         'top_earners': [{'name': r[0], 'profession': r[1], 'cargo': r[2], 'tier': r[3], 'income_usd': r[4], 'country': r[5]} for r in top_earners],
     }
+
+
+@app.get('/admin/users/hnw')
+def admin_hnw_breakdown(secret: str, min_score: float = 50, db: Session = Depends(get_db)):
+    """Distribución de usuarios por HNW score. min_score filtra el umbral mínimo."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+
+    dist = db.execute(text("""
+        SELECT
+            CASE
+                WHEN hnw_score >= 75 THEN 'HNW alto (75-100)'
+                WHEN hnw_score >= 50 THEN 'HNW medio (50-74)'
+                WHEN hnw_score >= 25 THEN 'Aspiracional (25-49)'
+                ELSE 'Masa (0-24)'
+            END as segmento,
+            COUNT(*) as total,
+            ROUND(AVG(estimated_income_usd)::numeric, 0) as avg_income
+        FROM users
+        WHERE hnw_score IS NOT NULL
+        GROUP BY 1 ORDER BY MIN(hnw_score) DESC
+    """)).fetchall()
+
+    top_hnw = db.execute(text("""
+        SELECT name, cargo, profession, company_size, se_tier,
+               ROUND(hnw_score::numeric, 1) as hnw,
+               ROUND(estimated_income_usd::numeric, 0) as income, country
+        FROM users
+        WHERE hnw_score >= :min
+        ORDER BY hnw_score DESC LIMIT 20
+    """), {'min': min_score}).fetchall()
+
+    return {
+        'distribucion': [{'segmento': r[0], 'total': r[1], 'avg_income_usd': r[2]} for r in dist],
+        'top_hnw': [{'name': r[0], 'cargo': r[1], 'profession': r[2], 'company': r[3],
+                     'tier': r[4], 'hnw_score': r[5], 'income_usd': r[6], 'country': r[7]}
+                    for r in top_hnw],
+        'umbral_usado': min_score,
+    }
+
+
+@app.post('/admin/recalculate-hnw')
+def admin_recalculate_hnw(secret: str, db: Session = Depends(get_db)):
+    """Recalcula hnw_score para todos los usuarios sin hacer reassign-tiers completo."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    users = db.query(User).all()
+    updated = 0
+    for u in users:
+        try:
+            hnw = _calculate_hnw_score(u, db)
+            if hasattr(u, 'hnw_score'):
+                u.hnw_score = hnw
+                updated += 1
+        except Exception:
+            pass
+    db.commit()
+    return {'updated': updated, 'total': len(users)}
 
 
 @app.get('/admin/communes-by-country')
