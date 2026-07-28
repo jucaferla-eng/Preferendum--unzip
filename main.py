@@ -10162,6 +10162,53 @@ def admin_debug_user(secret: str, email: str, db: Session = Depends(get_db)):
         } if commune_row else None,
     }
 
+@app.get('/admin/users/breakdown')
+def admin_users_breakdown(secret: str, db: Session = Depends(get_db)):
+    """Desglose de usuarios por profesión, cargo y tier."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+
+    by_profession = db.execute(text("""
+        SELECT profession, COUNT(*) as total,
+               COUNT(CASE WHEN se_tier='A' THEN 1 END) as tier_a,
+               COUNT(CASE WHEN se_tier='B' THEN 1 END) as tier_b
+        FROM users
+        WHERE profession IS NOT NULL AND profession != ''
+        GROUP BY profession ORDER BY total DESC
+    """)).fetchall()
+
+    by_cargo = db.execute(text("""
+        SELECT job_position, COUNT(*) as total,
+               COUNT(CASE WHEN se_tier='A' THEN 1 END) as tier_a
+        FROM users
+        WHERE job_position IS NOT NULL AND job_position != ''
+        GROUP BY job_position ORDER BY total DESC
+    """)).fetchall()
+
+    by_tier = db.execute(text("""
+        SELECT se_tier, COUNT(*) as total,
+               ROUND(AVG(estimated_income_usd)::numeric, 0) as avg_income_usd
+        FROM users
+        WHERE se_tier IS NOT NULL
+        GROUP BY se_tier ORDER BY se_tier
+    """)).fetchall()
+
+    top_earners = db.execute(text("""
+        SELECT name, profession, job_position, se_tier,
+               ROUND(estimated_income_usd::numeric, 0) as income_usd, country
+        FROM users
+        WHERE estimated_income_usd IS NOT NULL
+        ORDER BY estimated_income_usd DESC LIMIT 10
+    """)).fetchall()
+
+    return {
+        'by_profession': [{'profession': r[0], 'total': r[1], 'tier_a': r[2], 'tier_b': r[3]} for r in by_profession],
+        'by_cargo': [{'cargo': r[0], 'total': r[1], 'tier_a': r[2]} for r in by_cargo],
+        'by_tier': [{'tier': r[0], 'total': r[1], 'avg_income_usd': r[2]} for r in by_tier],
+        'top_earners': [{'name': r[0], 'profession': r[1], 'cargo': r[2], 'tier': r[3], 'income_usd': r[4], 'country': r[5]} for r in top_earners],
+    }
+
+
 @app.get('/admin/communes-by-country')
 def admin_communes_by_country(secret: str, db: Session = Depends(get_db)):
     """Cuenta registros CommuneMarketData por país."""
