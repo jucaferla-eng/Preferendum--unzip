@@ -10569,13 +10569,25 @@ def admin_import_ilo_wages(secret: str, db: Session = Depends(get_db)):
     result_holder = {}
     def _run():
         try:
-            from db import SessionLocal
-            from ilo_ilostat_agent import run_ilo_import
-            local_db = SessionLocal()
+            import os as _os
+            from sqlalchemy import create_engine as _ce
+            from sqlalchemy.orm import sessionmaker as _sm
+            _db_url = _os.getenv('DATABASE_URL', '')
+            if not _db_url:
+                result_holder['result'] = {'ok': False, 'error': 'DATABASE_URL no configurado en Render'}
+                return
+            # Render usa postgres:// — SQLAlchemy requiere postgresql://
+            if _db_url.startswith('postgres://'):
+                _db_url = 'postgresql://' + _db_url[len('postgres://'):]
+            _engine = _ce(_db_url)
+            _Session = _sm(bind=_engine)
+            local_db = _Session()
             try:
+                from ilo_ilostat_agent import run_ilo_import
                 result_holder['result'] = run_ilo_import(local_db)
             finally:
                 local_db.close()
+                _engine.dispose()
         except Exception as e:
             result_holder['result'] = {'ok': False, 'error': str(e)}
     t = threading.Thread(target=_run)
