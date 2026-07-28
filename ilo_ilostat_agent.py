@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 ilo_ilostat_agent.py
 ════════════════════
