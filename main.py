@@ -10569,8 +10569,13 @@ def admin_import_ilo_wages(secret: str, db: Session = Depends(get_db)):
     result_holder = {}
     def _run():
         try:
+            from db import SessionLocal
             from ilo_ilostat_agent import run_ilo_import
-            result_holder['result'] = run_ilo_import(db)
+            local_db = SessionLocal()
+            try:
+                result_holder['result'] = run_ilo_import(local_db)
+            finally:
+                local_db.close()
         except Exception as e:
             result_holder['result'] = {'ok': False, 'error': str(e)}
     t = threading.Thread(target=_run)
