@@ -399,6 +399,8 @@ class AdCampaign(Base):
     target_debate_ids   = Column(String, default='')   # '4,6,9' — override directo, bypass matrix
     link_url            = Column(String, default='')   # destino al hacer clic en "Ver más"
     min_per_capita_usd  = Column(Float, default=0.0)   # filtro GNI per cápita mínimo del país
+    target_hnw_only     = Column(Boolean, default=False) # True = solo usuarios verified_hnw
+    min_hnw_score       = Column(Float, default=0.0)     # hnw_score mínimo (0 = sin límite)
 
 class AdImpressionLog(Base):
     __tablename__ = 'ad_impression_logs'
@@ -688,6 +690,8 @@ def _migrate():
             ('spent_clp',           'FLOAT DEFAULT 0.0'),
             ('video_url',           "TEXT DEFAULT ''"),
             ('min_per_capita_usd',  'REAL DEFAULT 0.0'),
+            ('target_hnw_only',     'BOOLEAN DEFAULT FALSE'),
+            ('min_hnw_score',       'REAL DEFAULT 0.0'),
         ]:
             if col not in existing_ad_cols:
                 try:
@@ -1326,6 +1330,8 @@ class CampaignCreate(BaseModel):
     video_url:           str = ''
     link_url:            str = ''
     min_per_capita_usd:  float = 0.0
+    target_hnw_only:     bool  = False   # True = solo usuarios verified_hnw
+    min_hnw_score:       float = 0.0     # hnw_score mínimo (ej: 50.0)
 
 class AdViewInput(BaseModel):
     campaign_id: int
@@ -3930,10 +3936,21 @@ def _match_campaigns(user, debate, db) -> list:
                 continue
 
         # ── SE TIER FILTER — usuario debe pertenecer al tier objetivo ──
-        # Si el usuario tiene se_tier asignado y la campaña restringe tiers,
-        # sólo mostrar si el tier del usuario está en target_se_tiers.
         if user and getattr(user, 'se_tier', ''):
             if not _tier_matches(user.se_tier, c.target_se_tiers or 'A,B,C,D'):
+                continue
+
+        # ── HNW FILTER — Porsche, LVMH, Rolex, etc. ──
+        # target_hnw_only=True → solo usuarios con verified_hnw=True
+        # min_hnw_score > 0   → solo usuarios con hnw_score >= umbral
+        if user:
+            hnw_only = getattr(c, 'target_hnw_only', False) or False
+            min_hnw  = float(getattr(c, 'min_hnw_score', 0.0) or 0.0)
+            user_hnw_verified = bool(getattr(user, 'verified_hnw', False))
+            user_hnw_score    = float(getattr(user, 'hnw_score', 0.0) or 0.0)
+            if hnw_only and not user_hnw_verified:
+                continue
+            if min_hnw > 0 and user_hnw_score < min_hnw:
                 continue
 
         valid_orm.append(c)
@@ -4888,6 +4905,8 @@ def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
         video_url           = data.video_url,
         link_url            = data.link_url,
         min_per_capita_usd  = data.min_per_capita_usd,
+        target_hnw_only     = getattr(data, 'target_hnw_only', False) or False,
+        min_hnw_score       = getattr(data, 'min_hnw_score', 0.0) or 0.0,
         start_date          = datetime.fromisoformat(data.start_date),
         end_date            = datetime.fromisoformat(data.end_date),
         is_active           = True,
@@ -4929,6 +4948,8 @@ def update_campaign(campaign_id: int, data: CampaignCreate, db: Session = Depend
     campaign.ad_image_url        = data.ad_image_url
     campaign.video_url           = getattr(data, 'video_url', '') or ''
     campaign.min_per_capita_usd  = getattr(data, 'min_per_capita_usd', 0.0) or 0.0
+    campaign.target_hnw_only     = getattr(data, 'target_hnw_only', False) or False
+    campaign.min_hnw_score       = getattr(data, 'min_hnw_score', 0.0) or 0.0
     campaign.target_age_min      = data.target_age_min
     campaign.target_age_max      = data.target_age_max
     if data.start_date:
@@ -5078,6 +5099,8 @@ def _format_campaign(c: AdCampaign) -> dict:
         'target_age_min':     c.target_age_min or 13,
         'target_age_max':     c.target_age_max or 99,
         'min_per_capita_usd': getattr(c, 'min_per_capita_usd', 0) or 0,
+        'target_hnw_only':    bool(getattr(c, 'target_hnw_only', False)),
+        'min_hnw_score':      float(getattr(c, 'min_hnw_score', 0.0) or 0.0),
         'video_url':          getattr(c, 'video_url', '') or '',
         'logo_url':           getattr(c, 'logo_url', '') or '',
         'ad_copy':            getattr(c, 'ad_copy', '') or '',
