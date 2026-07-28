@@ -316,6 +316,54 @@ class DebateRewardCode(Base):
     claimed_at  = Column(DateTime, nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
+class Sponsor(Base):
+    __tablename__ = 'sponsors'
+    id                   = Column(Integer, primary_key=True)
+    name                 = Column(String, nullable=False)      # "Emirates"
+    logo_url             = Column(String, default='')
+    industry             = Column(String, default='')          # airline / hotel / bank
+    contact_email        = Column(String, default='')
+    discount_code_prefix = Column(String, default='')          # "EMI" → EMI-XXXX-YY
+    created_at           = Column(DateTime, default=datetime.utcnow)
+
+class SponsoredDebate(Base):
+    __tablename__ = 'sponsored_debates'
+    id            = Column(Integer, primary_key=True)
+    debate_id     = Column(Integer, index=True, unique=True)
+    sponsor_id    = Column(Integer, index=True)
+    discount_pct  = Column(Integer, default=15)           # 15%
+    discount_text = Column(String, default='')            # "15% off your next Emirates flight"
+    total_invited = Column(Integer, default=0)
+    total_voted   = Column(Integer, default=0)
+    is_active     = Column(Boolean, default=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+class SponsorCampaign(Base):
+    __tablename__ = 'sponsor_campaigns'
+    id                  = Column(Integer, primary_key=True)
+    sponsored_debate_id = Column(Integer, index=True)
+    sponsor_id          = Column(Integer, index=True)
+    name                = Column(String, default='')
+    total_emails        = Column(Integer, default=0)
+    sent                = Column(Integer, default=0)
+    voted               = Column(Integer, default=0)
+    status              = Column(String, default='draft')  # draft / sending / sent
+    created_at          = Column(DateTime, default=datetime.utcnow)
+
+class SponsorInvitee(Base):
+    __tablename__ = 'sponsor_invitees'
+    id            = Column(Integer, primary_key=True)
+    campaign_id   = Column(Integer, index=True)
+    sponsor_id    = Column(Integer, index=True)
+    email         = Column(String, index=True)
+    invite_token  = Column(String, unique=True, index=True)
+    sent          = Column(Boolean, default=False)
+    registered    = Column(Boolean, default=False)
+    voted         = Column(Boolean, default=False)
+    user_id       = Column(Integer, nullable=True)
+    discount_code = Column(String, default='')
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
 class AdCampaign(Base):
     __tablename__ = 'ad_campaigns'
     id                  = Column(Integer, primary_key=True)
@@ -601,7 +649,9 @@ def _migrate():
                           ('cargo', "TEXT DEFAULT ''"),
                           ('company_size', "TEXT DEFAULT ''"),
                           ('ref_source', "TEXT DEFAULT ''"),
-                          ('hnw_score', 'FLOAT DEFAULT 0.0')]:
+                          ('hnw_score', 'FLOAT DEFAULT 0.0'),
+                          ('verified_hnw', 'BOOLEAN DEFAULT FALSE'),
+                          ('hnw_source', "TEXT DEFAULT ''")]:
             if col not in existing_user_cols:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
@@ -941,7 +991,7 @@ def get_debate_status(debate):
         return 'verifying'
     return 'verified'
 
-def format_debate(debate, has_voted=False):
+def format_debate(debate, has_voted=False, sponsor_info=None):
     opts = json.loads(debate.options or '[]')
     counts = json.loads(debate.vote_counts or '{}')
     imgs = json.loads(debate.option_images or '[]')
@@ -952,7 +1002,7 @@ def format_debate(debate, has_voted=False):
         c = counts.get(opt, 0)
         pct = round(c / total * 100, 1) if total > 0 else 0
         results.append({'option': opt, 'index': i, 'count': c, 'pct': pct})
-    return {
+    d = {
         'id': debate.id,
         'title': debate.title,
         'context': debate.context,
@@ -983,7 +1033,19 @@ def format_debate(debate, has_voted=False):
         'is_anonymous': bool(debate.is_anonymous),
         'has_voted': has_voted,
         'created_at': debate.created_at.isoformat(),
+        'is_sponsored': False,
+        'sponsor_name': '',
+        'sponsor_logo_url': '',
+        'sponsor_discount_pct': 0,
+        'sponsor_discount_text': '',
     }
+    if sponsor_info:
+        d['is_sponsored'] = True
+        d['sponsor_name'] = sponsor_info.get('name', '')
+        d['sponsor_logo_url'] = sponsor_info.get('logo_url', '')
+        d['sponsor_discount_pct'] = sponsor_info.get('discount_pct', 0)
+        d['sponsor_discount_text'] = sponsor_info.get('discount_text', '')
+    return d
 
 # ══════════════════════════════════════════════════════════════
 # EMAIL SENDER
@@ -1045,6 +1107,41 @@ def send_email_otp(email, code, name=''):
     except Exception as e:
         print(f'[Gmail Error] {e}')
         print(f'[DEV EMAIL] To: {email} | Code: {code}')
+        return False
+
+
+def _send_html_email(to_email: str, subject: str, html_body: str) -> bool:
+    resend_key = os.getenv('RESEND_API_KEY')
+    if resend_key:
+        try:
+            resp = _requests.post(
+                'https://api.resend.com/emails',
+                json={'from': 'Preferendum <noreply@preferendum.com>', 'to': [to_email],
+                      'subject': subject, 'html': html_body},
+                headers={'Authorization': f'Bearer {resend_key}'},
+                timeout=10,
+            )
+            if resp.status_code in (200, 201):
+                return True
+        except Exception as e:
+            print(f'[Resend Error] {e}')
+    gmail_user = os.getenv('GMAIL_USER', 'jucaferla@gmail.com')
+    gmail_pass = os.getenv('GMAIL_APP_PASSWORD')
+    if not gmail_pass:
+        print(f'[DEV EMAIL] To: {to_email} | Subject: {subject}')
+        return True
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = f'Preferendum <{gmail_user}>'
+        msg['To'] = to_email
+        msg.attach(MIMEText(html_body, 'html'))
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(gmail_user, gmail_pass)
+            server.sendmail(gmail_user, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        print(f'[Email Error] {e}')
         return False
 
 
@@ -3410,7 +3507,8 @@ def list_debates(
     safe = []
     for d in debates:
         try:
-            safe.append(format_debate(d))
+            sp_info = _get_sponsor_info(d.id, db)
+            safe.append(format_debate(d, sponsor_info=sp_info))
         except Exception:
             pass
     return {'debates': safe}
@@ -3615,7 +3713,8 @@ def get_debate(debate_id: int, db: Session = Depends(get_db)):
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
         raise HTTPException(404, 'Consultation not found')
-    return format_debate(debate)
+    sp_info = _get_sponsor_info(debate_id, db)
+    return format_debate(debate, sponsor_info=sp_info)
 
 @app.post('/debates')
 def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
@@ -4349,6 +4448,34 @@ def _cast_vote_inner(debate_id: int, data, user, db):
             reward_code = unclaimed.code
     except Exception as e:
         print(f'[cast_vote] reward_code query error (non-fatal): {e}')
+    # Sponsored consultation: generate discount code + tag user as verified HNW
+    sponsor_discount_code = None
+    sponsor_name = None
+    sponsor_discount_pct = None
+    sponsor_discount_text = None
+    try:
+        sp_debate = db.query(SponsoredDebate).filter(
+            SponsoredDebate.debate_id == debate_id,
+            SponsoredDebate.is_active == True
+        ).first()
+        if sp_debate:
+            sponsor = db.query(Sponsor).filter(Sponsor.id == sp_debate.sponsor_id).first()
+            if sponsor:
+                prefix = sponsor.discount_code_prefix or sponsor.name[:3].upper()
+                rand_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+                sponsor_discount_code = f"{prefix}-{rand_part[:4]}-{rand_part[4:]}"
+                sponsor_name = sponsor.name
+                sponsor_discount_pct = sp_debate.discount_pct
+                sponsor_discount_text = sp_debate.discount_text
+                sp_debate.total_voted = (sp_debate.total_voted or 0) + 1
+                if hasattr(user, 'verified_hnw'):
+                    user.verified_hnw = True
+                if hasattr(user, 'hnw_source') and not (user.hnw_source or '').strip():
+                    user.hnw_source = sponsor.name.lower().replace(' ', '_')
+                if hasattr(user, 'hnw_score'):
+                    user.hnw_score = max(float(user.hnw_score or 0), 75.0)
+    except Exception as e:
+        print(f'[cast_vote] sponsor check error (non-fatal): {e}')
     try:
         db.commit()
     except Exception as e:
@@ -4364,6 +4491,10 @@ def _cast_vote_inner(debate_id: int, data, user, db):
         'total_votes': debate.total_votes,
         'current_results': counts,
         'reward_code': reward_code,
+        'sponsor_discount_code': sponsor_discount_code,
+        'sponsor_name': sponsor_name,
+        'sponsor_discount_pct': sponsor_discount_pct,
+        'sponsor_discount_text': sponsor_discount_text,
         'message': 'Vote registered. Save your verification code.',
     }
 
@@ -11345,6 +11476,219 @@ def admin_reset_organizers(secret: str, db: Session = Depends(get_db)):
     deleted_users = db.query(User).filter(User.id.in_(ids)).delete(synchronize_session=False)
     db.commit()
     return {'ok': True, 'deleted_users': deleted_users, 'deleted_profiles': deleted_profiles}
+
+
+# ══════════════════════════════════════════════════════════════
+# SPONSORED CONSULTATIONS — Sistema B2B de consultas patrocinadas
+# Aerolíneas / hoteles / bancos traen sus clientes HNW a votar
+# ══════════════════════════════════════════════════════════════
+
+def _check_admin(secret: str):
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+
+def _get_sponsor_info(debate_id: int, db: Session):
+    sp = db.query(SponsoredDebate).filter(
+        SponsoredDebate.debate_id == debate_id,
+        SponsoredDebate.is_active == True
+    ).first()
+    if not sp:
+        return None
+    sponsor = db.query(Sponsor).filter(Sponsor.id == sp.sponsor_id).first()
+    if not sponsor:
+        return None
+    return {
+        'name': sponsor.name,
+        'logo_url': sponsor.logo_url,
+        'discount_pct': sp.discount_pct,
+        'discount_text': sp.discount_text,
+    }
+
+@app.post('/admin/sponsors')
+def admin_create_sponsor(
+    secret: str,
+    name: str,
+    industry: str = '',
+    logo_url: str = '',
+    contact_email: str = '',
+    discount_code_prefix: str = '',
+    db: Session = Depends(get_db)
+):
+    _check_admin(secret)
+    prefix = discount_code_prefix.upper() or name[:3].upper()
+    sp = Sponsor(
+        name=name, industry=industry, logo_url=logo_url,
+        contact_email=contact_email, discount_code_prefix=prefix
+    )
+    db.add(sp)
+    db.commit()
+    db.refresh(sp)
+    return {'ok': True, 'sponsor_id': sp.id, 'name': sp.name, 'prefix': sp.discount_code_prefix}
+
+@app.get('/admin/sponsors')
+def admin_list_sponsors(secret: str, db: Session = Depends(get_db)):
+    _check_admin(secret)
+    sponsors = db.query(Sponsor).all()
+    return [{'id': s.id, 'name': s.name, 'industry': s.industry,
+             'contact_email': s.contact_email, 'prefix': s.discount_code_prefix} for s in sponsors]
+
+@app.post('/admin/sponsors/{sponsor_id}/debates/{debate_id}')
+def admin_link_sponsored_debate(
+    sponsor_id: int, debate_id: int, secret: str,
+    discount_pct: int = 15, discount_text: str = '',
+    db: Session = Depends(get_db)
+):
+    _check_admin(secret)
+    sponsor = db.query(Sponsor).filter(Sponsor.id == sponsor_id).first()
+    if not sponsor:
+        raise HTTPException(404, 'Sponsor not found')
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate not found')
+    existing = db.query(SponsoredDebate).filter(SponsoredDebate.debate_id == debate_id).first()
+    if existing:
+        existing.sponsor_id = sponsor_id
+        existing.discount_pct = discount_pct
+        existing.discount_text = discount_text or f'{discount_pct}% de descuento en tu próximo {sponsor.industry or "servicio"} con {sponsor.name}'
+        existing.is_active = True
+        db.commit()
+        return {'ok': True, 'updated': True, 'sponsored_debate_id': existing.id}
+    sd = SponsoredDebate(
+        debate_id=debate_id, sponsor_id=sponsor_id,
+        discount_pct=discount_pct,
+        discount_text=discount_text or f'{discount_pct}% de descuento en tu próximo {sponsor.industry or "servicio"} con {sponsor.name}'
+    )
+    db.add(sd)
+    db.commit()
+    db.refresh(sd)
+    return {'ok': True, 'sponsored_debate_id': sd.id, 'sponsor': sponsor.name, 'debate': debate.title}
+
+@app.post('/admin/sponsors/{sponsor_id}/campaigns')
+async def admin_create_campaign(
+    sponsor_id: int, secret: str,
+    debate_id: int,
+    campaign_name: str = 'Campaña',
+    emails_csv: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    _check_admin(secret)
+    sponsor = db.query(Sponsor).filter(Sponsor.id == sponsor_id).first()
+    if not sponsor:
+        raise HTTPException(404, 'Sponsor not found')
+    sp_debate = db.query(SponsoredDebate).filter(
+        SponsoredDebate.debate_id == debate_id,
+        SponsoredDebate.sponsor_id == sponsor_id
+    ).first()
+    if not sp_debate:
+        raise HTTPException(400, f'Debate {debate_id} no está vinculado a este sponsor. Usa POST /admin/sponsors/{sponsor_id}/debates/{debate_id} primero.')
+    raw = await emails_csv.read()
+    lines = raw.decode('utf-8', errors='ignore').splitlines()
+    emails = []
+    for line in lines:
+        line = line.strip().strip('"').strip("'")
+        if '@' in line and '.' in line:
+            emails.append(line.lower())
+    if not emails:
+        raise HTTPException(400, 'No se encontraron emails válidos en el CSV')
+    campaign = SponsorCampaign(
+        sponsored_debate_id=sp_debate.id, sponsor_id=sponsor_id,
+        name=campaign_name, total_emails=len(emails), status='draft'
+    )
+    db.add(campaign)
+    db.flush()
+    for email in emails:
+        token = uuid.uuid4().hex
+        db.add(SponsorInvitee(
+            campaign_id=campaign.id, sponsor_id=sponsor_id,
+            email=email, invite_token=token
+        ))
+    sp_debate.total_invited = (sp_debate.total_invited or 0) + len(emails)
+    db.commit()
+    return {'ok': True, 'campaign_id': campaign.id, 'emails_loaded': len(emails), 'status': 'draft'}
+
+@app.post('/admin/sponsors/{sponsor_id}/campaigns/{campaign_id}/send')
+def admin_send_campaign(
+    sponsor_id: int, campaign_id: int, secret: str,
+    base_url: str = 'https://preferendum.com',
+    db: Session = Depends(get_db)
+):
+    _check_admin(secret)
+    campaign = db.query(SponsorCampaign).filter(
+        SponsorCampaign.id == campaign_id,
+        SponsorCampaign.sponsor_id == sponsor_id
+    ).first()
+    if not campaign:
+        raise HTTPException(404, 'Campaign not found')
+    sponsor = db.query(Sponsor).filter(Sponsor.id == sponsor_id).first()
+    sp_debate = db.query(SponsoredDebate).filter(SponsoredDebate.id == campaign.sponsored_debate_id).first()
+    debate = db.query(Debate).filter(Debate.id == sp_debate.debate_id).first() if sp_debate else None
+    invitees = db.query(SponsorInvitee).filter(
+        SponsorInvitee.campaign_id == campaign_id,
+        SponsorInvitee.sent == False
+    ).all()
+    sent_count = 0
+    errors = []
+    for inv in invitees:
+        invite_url = f"{base_url}/?invite={inv.invite_token}&debate={sp_debate.debate_id if sp_debate else ''}"
+        subject = f"{sponsor.name} te invita a compartir tu opinión — {sp_debate.discount_pct}% de descuento"
+        html_body = f"""
+<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
+  <div style="background:#1a1a2e;padding:24px;text-align:center;">
+    <h2 style="color:#fff;margin:0">{sponsor.name}</h2>
+  </div>
+  <div style="padding:32px;">
+    <h3 style="color:#1a1a2e">Te invitamos a dar tu opinión</h3>
+    <p>{sponsor.name} quiere conocer tu experiencia y preferencias.</p>
+    <p><strong>Como agradecimiento, recibirás {sp_debate.discount_pct}% de descuento</strong> en tu próximo servicio con nosotros al completar la consulta.</p>
+    {'<p style="color:#666">Consulta: ' + debate.title + '</p>' if debate else ''}
+    <div style="text-align:center;margin:32px 0;">
+      <a href="{invite_url}" style="background:#3b82f6;color:#fff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:bold;">
+        Votar ahora y obtener {sp_debate.discount_pct}% de descuento
+      </a>
+    </div>
+    <p style="color:#999;font-size:12px;">Tu código de descuento se generará automáticamente al completar tu voto.</p>
+  </div>
+</div>"""
+        try:
+            _send_html_email(inv.email, subject, html_body)
+            inv.sent = True
+            sent_count += 1
+        except Exception as e:
+            errors.append({'email': inv.email, 'error': str(e)})
+    campaign.sent = sent_count
+    campaign.status = 'sent' if sent_count > 0 else 'draft'
+    db.commit()
+    return {'ok': True, 'sent': sent_count, 'errors': len(errors), 'error_detail': errors[:5]}
+
+@app.get('/admin/sponsors/{sponsor_id}/dashboard')
+def admin_sponsor_dashboard(sponsor_id: int, secret: str, db: Session = Depends(get_db)):
+    _check_admin(secret)
+    sponsor = db.query(Sponsor).filter(Sponsor.id == sponsor_id).first()
+    if not sponsor:
+        raise HTTPException(404, 'Sponsor not found')
+    sp_debates = db.query(SponsoredDebate).filter(SponsoredDebate.sponsor_id == sponsor_id).all()
+    campaigns = db.query(SponsorCampaign).filter(SponsorCampaign.sponsor_id == sponsor_id).all()
+    verified_hnw_from_sponsor = db.query(User).filter(
+        User.hnw_source == sponsor.name.lower().replace(' ', '_')
+    ).count()
+    debates_detail = []
+    for sd in sp_debates:
+        debate = db.query(Debate).filter(Debate.id == sd.debate_id).first()
+        debates_detail.append({
+            'debate_id': sd.debate_id,
+            'debate_title': debate.title if debate else '',
+            'discount_pct': sd.discount_pct,
+            'total_invited': sd.total_invited,
+            'total_voted': sd.total_voted,
+            'conversion_pct': round(sd.total_voted / sd.total_invited * 100, 1) if sd.total_invited else 0,
+        })
+    return {
+        'sponsor': {'id': sponsor.id, 'name': sponsor.name, 'industry': sponsor.industry},
+        'verified_hnw_users_acquired': verified_hnw_from_sponsor,
+        'debates': debates_detail,
+        'campaigns': [{'id': c.id, 'name': c.name, 'total_emails': c.total_emails,
+                       'sent': c.sent, 'voted': c.voted, 'status': c.status} for c in campaigns],
+    }
 
 
 # ══════════════════════════════════════════════════════════════

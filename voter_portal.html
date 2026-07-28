@@ -1861,7 +1861,13 @@ async function loadDebates(status = 'live') {
             }
           </div>
           <div class="debate-title">${esc(db.title)}</div>
-          ${db.reward ? `<div style="margin:8px 0 4px;background:linear-gradient(135deg,rgba(16,185,129,0.10),rgba(26,58,143,0.08));border:1px solid rgba(16,185,129,0.30);border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;color:#059669;display:flex;align-items:center;gap:6px;">🎁 ${esc(db.reward)}</div>` : ''}
+          ${db.is_sponsored ? `
+            <div style="margin:8px 0 4px;background:linear-gradient(135deg,rgba(251,191,36,0.12),rgba(245,158,11,0.08));border:1px solid rgba(245,158,11,0.35);border-radius:8px;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                ${db.sponsor_logo_url ? `<img src="${esc(db.sponsor_logo_url)}" style="height:22px;object-fit:contain;" alt="${esc(db.sponsor_name)}">` : `<span style="font-size:13px;font-weight:700;color:#92400e;">${esc(db.sponsor_name)}</span>`}
+              </div>
+              <div style="font-size:12px;font-weight:700;color:#b45309;background:rgba(245,158,11,0.15);padding:3px 10px;border-radius:20px;">🎁 ${db.sponsor_discount_pct}% descuento al votar</div>
+            </div>` : (db.reward ? `<div style="margin:8px 0 4px;background:linear-gradient(135deg,rgba(16,185,129,0.10),rgba(26,58,143,0.08));border:1px solid rgba(16,185,129,0.30);border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;color:#059669;display:flex;align-items:center;gap:6px;">🎁 ${esc(db.reward)}</div>` : '')}
           <div class="debate-meta">
             <span class="debate-votes">⬡ ${db.total_votes || 0} votos</span>
             <span>${countryLabel(db.scope_country)}</span>
@@ -2104,6 +2110,18 @@ function renderDebate(db, res, items) {
         ${db.closes_at ? `<span>${t('closes')} ${fmtDate(db.closes_at)}</span>` : ''}
       </div>
     </div>
+
+    ${db.is_sponsored ? `
+    <div style="background:linear-gradient(135deg,#fffbeb,#fef3c7);border:2px solid #f59e0b;border-radius:14px;padding:16px 20px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        ${db.sponsor_logo_url ? `<img src="${esc(db.sponsor_logo_url)}" style="height:32px;object-fit:contain;" alt="${esc(db.sponsor_name)}">` : `<span style="font-size:16px;font-weight:800;color:#92400e;">${esc(db.sponsor_name)}</span>`}
+        <div>
+          <div style="font-size:13px;font-weight:700;color:#92400e;">Consulta patrocinada por ${esc(db.sponsor_name)}</div>
+          <div style="font-size:12px;color:#b45309;margin-top:2px;">${esc(db.sponsor_discount_text || `Vota y obtén ${db.sponsor_discount_pct}% de descuento`)}</div>
+        </div>
+      </div>
+      <div style="background:#f59e0b;color:#fff;font-size:22px;font-weight:900;padding:8px 16px;border-radius:10px;white-space:nowrap;">-${db.sponsor_discount_pct}%</div>
+    </div>` : ''}
 
     ${hasImgs ? `
     <div class="phase-divider">
@@ -2857,8 +2875,27 @@ async function showVoteSuccess(data, optIdx) {
   // Premio/descuento de la marca — código único del pool + descripción del debate
   const rewardCode = data.reward_code || '';
   const rewardDesc = currentDebate?.reward || '';
+  // Código de descuento del sponsor (aerolínea, hotel, banco)
+  const sponsorCode = data.sponsor_discount_code || '';
+  const sponsorName = data.sponsor_name || '';
+  const sponsorPct  = data.sponsor_discount_pct || 0;
+  const sponsorText = data.sponsor_discount_text || '';
   let rewardHtml = '';
-  if (rewardCode || rewardDesc) {
+  if (sponsorCode) {
+    const copyId2 = 'copy-sponsor-' + Date.now();
+    rewardHtml = `
+    <div style="margin:16px 0 4px;background:linear-gradient(135deg,#78350f,#92400e);border-radius:14px;padding:20px 16px;text-align:center;border:2px solid #f59e0b;">
+      <div style="font-size:32px;margin-bottom:6px;">✈️</div>
+      <div style="font-size:12px;font-weight:700;color:#fde68a;letter-spacing:.07em;text-transform:uppercase;margin-bottom:4px;">Tu descuento exclusivo de ${esc(sponsorName)}</div>
+      <div style="font-size:14px;color:rgba(255,255,255,0.85);margin-bottom:14px;">${esc(sponsorText || sponsorPct + '% de descuento en tu próximo servicio')}</div>
+      <div style="background:rgba(0,0,0,0.4);border-radius:10px;padding:14px;font-family:monospace;font-size:22px;font-weight:900;color:#fbbf24;letter-spacing:.18em;margin-bottom:12px;">${esc(sponsorCode)}</div>
+      <button id="${copyId2}" onclick="(function(btn){const txt='${sponsorCode.replace(/'/g,"\\'")}';navigator.clipboard&&navigator.clipboard.writeText(txt).then(()=>{btn.textContent='✓ Copiado';btn.style.background='rgba(245,158,11,0.4)';setTimeout(()=>{btn.textContent='📋 Copiar código';btn.style.background='rgba(255,255,255,0.15)'},2500)})})(document.getElementById('${copyId2}'))"
+        style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.30);border-radius:8px;color:#fff;font-size:14px;font-weight:700;padding:10px 24px;cursor:pointer;">
+        📋 Copiar código
+      </button>
+      <div style="font-size:11px;color:#fde68a;margin-top:10px;">Este código es personal e intransferible · Enviado también a tu email</div>
+    </div>`;
+  } else if (rewardCode || rewardDesc) {
     const copyTarget = rewardCode || rewardDesc;
     const copyId = 'copy-reward-' + Date.now();
     rewardHtml = `
