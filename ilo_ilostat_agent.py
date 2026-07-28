@@ -24,7 +24,7 @@ from sqlalchemy import text
 # ── Indicador ILO ────────────────────────────────────────────────────────────
 _ILO_INDICATOR = 'EAR_4MTH_SEX_OCU_CUR_NB_A'
 _BULK_URL = (
-    'https://www.ilo.org/ilostat-files/WEB_bulk_download/indicator/'
+    'https://webapps.ilo.org/ilostat-files/WEB_bulk_download/indicator/'
     f'{_ILO_INDICATOR}.csv.gz'
 )
 

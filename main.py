@@ -10568,8 +10568,11 @@ def admin_import_ilo_wages(secret: str, db: Session = Depends(get_db)):
     import threading
     result_holder = {}
     def _run():
-        from ilo_ilostat_agent import run_ilo_import
-        result_holder['result'] = run_ilo_import(db)
+        try:
+            from ilo_ilostat_agent import run_ilo_import
+            result_holder['result'] = run_ilo_import(db)
+        except Exception as e:
+            result_holder['result'] = {'ok': False, 'error': str(e)}
     t = threading.Thread(target=_run)
     t.start()
     t.join(timeout=360)
