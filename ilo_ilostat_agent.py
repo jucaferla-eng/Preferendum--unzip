@@ -29,25 +29,26 @@ _BULK_URL = (
 )
 
 # ── DDL ───────────────────────────────────────────────────────────────────────
-DDL = """
-CREATE TABLE IF NOT EXISTS ilo_wages (
-    id              SERIAL PRIMARY KEY,
-    country_iso2    TEXT NOT NULL,
-    country_name    TEXT,
-    isco_group      INTEGER NOT NULL,
-    isco_label      TEXT,
-    monthly_local   REAL,
-    monthly_usd     REAL,
-    currency        TEXT,
-    year            INTEGER,
-    source          TEXT DEFAULT 'ILO ILOSTAT EAR_4MTH_SEX_OCU_CUR_NB_A',
-    updated_at      TIMESTAMP DEFAULT NOW(),
-    UNIQUE (country_iso2, isco_group)
-);
-
-CREATE INDEX IF NOT EXISTS idx_ilo_wages_iso2  ON ilo_wages(country_iso2);
-CREATE INDEX IF NOT EXISTS idx_ilo_wages_isco  ON ilo_wages(isco_group);
-"""
+_DDL_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS ilo_wages (
+        id              SERIAL PRIMARY KEY,
+        country_iso2    TEXT NOT NULL,
+        country_name    TEXT,
+        isco_group      INTEGER NOT NULL,
+        isco_label      TEXT,
+        monthly_local   REAL,
+        monthly_usd     REAL,
+        currency        TEXT,
+        year            INTEGER,
+        source          TEXT DEFAULT 'ILO ILOSTAT EAR_4MTH_SEX_OCU_CUR_NB_A',
+        updated_at      TIMESTAMP DEFAULT NOW(),
+        UNIQUE (country_iso2, isco_group)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_ilo_wages_iso2 ON ilo_wages(country_iso2)",
+    "CREATE INDEX IF NOT EXISTS idx_ilo_wages_isco ON ilo_wages(isco_group)",
+]
 
 # ── ISCO labels ───────────────────────────────────────────────────────────────
 ISCO_LABELS = {
@@ -277,9 +278,15 @@ def run_ilo_import(db, compressed: bytes | None = None) -> dict:
     Crea tabla ilo_wages e importa datos ILO.
     Si compressed es None, descarga automáticamente.
     """
-    # DDL
-    db.execute(text(DDL))
-    db.commit()
+    # DDL — ejecutar cada sentencia por separado
+    for stmt in _DDL_STATEMENTS:
+        try:
+            db.execute(text(stmt))
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            if 'already exists' not in str(e):
+                print(f'[ilo_ilostat] DDL warning: {e}')
     print('[ilo_ilostat] Tabla ilo_wages lista.')
 
     if compressed is None:
