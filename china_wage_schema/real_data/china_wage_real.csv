@@ -1,0 +1,98 @@
+admin_code,admin_level,region_name_en,region_name_zh,country_iso,macro_region,occupation_category,avg_annual_wage_cny,year,population,parent_admin_code,classification_system,wage_measure,data_availability,source,last_updated
+CN-NAT,0,National,全国,CN,,Total,102452,2024,,,GB_T_2260_MACRO,enterprises above designated size,national,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NAT,0,National,全国,CN,,Middle management and above,203014,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,national,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NAT,0,National,全国,CN,,Professional and technical personnel,148046,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,national,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NAT,0,National,全国,CN,,Office staff and related personnel,93189,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,national,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NAT,0,National,全国,CN,,Personnel engaged in social production services and life services,77584,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,national,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NAT,0,National,全国,CN,,Personnel engaged in production and manufacturing,78561,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,national,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NAT,0,National,全国,CN,,Total,124110,2024,,CN-NAT,GB_T_2260_MACRO,urban non-private units,national,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NAT,0,National,全国,CN,,Total,69476,2024,,CN-NAT,GB_T_2260_MACRO,urban private units,national,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-E,0,Eastern zone,东部地区,CN,Eastern,Total,112631,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-E,0,Eastern zone,东部地区,CN,Eastern,Middle management and above,235054,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-E,0,Eastern zone,东部地区,CN,Eastern,Professional and technical personnel,168801,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-E,0,Eastern zone,东部地区,CN,Eastern,Office staff and related personnel,104368,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-E,0,Eastern zone,东部地区,CN,Eastern,Personnel engaged in social production services and life services,84717,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-E,0,Eastern zone,东部地区,CN,Eastern,Personnel engaged in production and manufacturing,80406,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-E,0,Eastern zone,东部地区,CN,Eastern,Total,143712,2024,,CN-NAT,GB_T_2260_MACRO,urban non-private units,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-C,0,Central zone,中部地区,CN,Central,Total,81629,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-C,0,Central zone,中部地区,CN,Central,Middle management and above,142578,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-C,0,Central zone,中部地区,CN,Central,Professional and technical personnel,106362,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-C,0,Central zone,中部地区,CN,Central,Office staff and related personnel,72608,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-C,0,Central zone,中部地区,CN,Central,Personnel engaged in social production services and life services,63526,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-C,0,Central zone,中部地区,CN,Central,Personnel engaged in production and manufacturing,70858,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-C,0,Central zone,中部地区,CN,Central,Total,98090,2024,,CN-NAT,GB_T_2260_MACRO,urban non-private units,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-W,0,Western zone,西部地区,CN,Western,Total,93212,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-W,0,Western zone,西部地区,CN,Western,Middle management and above,170005,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-W,0,Western zone,西部地区,CN,Western,Professional and technical personnel,123264,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-W,0,Western zone,西部地区,CN,Western,Office staff and related personnel,80870,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-W,0,Western zone,西部地区,CN,Western,Personnel engaged in social production services and life services,69354,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-W,0,Western zone,西部地区,CN,Western,Personnel engaged in production and manufacturing,82077,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-W,0,Western zone,西部地区,CN,Western,Total,110376,2024,,CN-NAT,GB_T_2260_MACRO,urban non-private units,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NE,0,Northeastern zone,东北地区,CN,Northeastern,Total,88418,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NE,0,Northeastern zone,东北地区,CN,Northeastern,Middle management and above,164854,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NE,0,Northeastern zone,东北地区,CN,Northeastern,Professional and technical personnel,109414,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NE,0,Northeastern zone,东北地区,CN,Northeastern,Office staff and related personnel,80513,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NE,0,Northeastern zone,东北地区,CN,Northeastern,Personnel engaged in social production services and life services,71606,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NE,0,Northeastern zone,东北地区,CN,Northeastern,Personnel engaged in production and manufacturing,76779,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NE,0,Northeastern zone,东北地区,CN,Northeastern,Total,98889,2024,,CN-NAT,GB_T_2260_MACRO,urban non-private units,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+110000,1,Beijing,北京市,CN,Eastern,Total,224608,2024,,CN-E,GB_T_2260,urban non-private units,province,https://www.163.com/dy/article/KDEUGMIQ0552DMW3.html,2025-11-03
+110000,1,Beijing,北京市,CN,Eastern,Total,106905,2024,,CN-E,GB_T_2260,urban private units,province,https://www.163.com/dy/article/KDEUGMIQ0552DMW3.html,2025-11-03
+310000,1,Shanghai,上海市,CN,Eastern,Total,239557,2024,,CN-E,GB_T_2260,urban non-private units,province,https://www.163.com/dy/article/KDEUGMIQ0552DMW3.html,2025-11-03
+310000,1,Shanghai,上海市,CN,Eastern,Total,113914,2024,,CN-E,GB_T_2260,urban private units,province,https://www.163.com/dy/article/KDEUGMIQ0552DMW3.html,2025-11-03
+410000,1,Henan,河南省,CN,Central,Total,86199,2024,,CN-C,GB_T_2260,urban non-private units,province,https://www.163.com/dy/article/KDEUGMIQ0552DMW3.html,2025-11-03
+410000,1,Henan,河南省,CN,Central,Total,50625,2024,,CN-C,GB_T_2260,urban private units,province,https://www.163.com/dy/article/KDEUGMIQ0552DMW3.html,2025-11-03
+230000,1,Heilongjiang,黑龙江省,CN,Northeastern,Total,99007,2024,,CN-NE,GB_T_2260,urban non-private units,province,https://tjj.hlj.gov.cn/tjj/c106736/202506/c00_31850581.shtml,2025-06-19
+230000,1,Heilongjiang,黑龙江省,CN,Northeastern,Total,48621,2024,,CN-NE,GB_T_2260,urban private units,province,https://www.163.com/dy/article/KDEUGMIQ0552DMW3.html,2025-11-03
+120000,1,Tianjin,天津,CN,Eastern,,142437,2024,,CN-E,GB_T_2260,urban non-private units,province,http://district.ce.cn/newarea/roll/202506/t20250610_2322330.shtml,2025-2026
+120000,1,Tianjin,天津,CN,Eastern,,73657,2024,,CN-E,GB_T_2260,urban private units,province,http://district.ce.cn/newarea/roll/202506/t20250610_2322330.shtml,2025-2026
+130000,1,Hebei,河北,CN,Eastern,,97046,2024,,CN-E,GB_T_2260,urban non-private units,province,https://zc.51shebao.com/detail/836765,2025-2026
+130000,1,Hebei,河北,CN,Eastern,,52374,2024,,CN-E,GB_T_2260,urban private units,province,https://zc.51shebao.com/detail/836765,2025-2026
+140000,1,Shanxi,山西,CN,Central,,97781,2024,,CN-C,GB_T_2260,urban non-private units,province,http://www.sx-jc.gov.cn/xxgk/jjsj/sjjd/202506/t20250625_1960585.html,2025-2026
+140000,1,Shanxi,山西,CN,Central,,51010,2024,,CN-C,GB_T_2260,urban private units,province,http://wap.jcgov.gov.cn/dtxx/sxyw/202506/t20250617_2155944.shtml,2025-2026
+150000,1,Inner Mongolia,内蒙古,CN,Western,,113172,2024,,CN-W,GB_T_2260,urban non-private units,province,https://news.qq.com/rain/a/20250625A07VAS00,2025-2026
+150000,1,Inner Mongolia,内蒙古,CN,Western,,59217,2024,,CN-W,GB_T_2260,urban private units,province,https://www.onceneon.com/tjsj/sjjdfx/202506/t20250624_2745213.html,2025-2026
+210000,1,Liaoning,辽宁,CN,Northeastern,,99069,2024,,CN-NE,GB_T_2260,urban non-private units,province,https://rst.ln.gov.cn/eportal/ui?pageId=ab4555d39b8b4d06a3c48b4319b3801e&msgDataId=2a51258dd8914030b3e0cfbf281371a5,2025-2026
+210000,1,Liaoning,辽宁,CN,Northeastern,,55179,2024,,CN-NE,GB_T_2260,urban private units,province,https://rst.ln.gov.cn/eportal/ui?pageId=ab4555d39b8b4d06a3c48b4319b3801e&msgDataId=2a51258dd8914030b3e0cfbf281371a5,2025-2026
+220000,1,Jilin,吉林,CN,Northeastern,,98418,2024,,CN-NE,GB_T_2260,urban non-private units,province,https://news.cnjiwang.com/dyxw_kx/202510/3991282.html,2025-2026
+220000,1,Jilin,吉林,CN,Northeastern,,51584,2024,,CN-NE,GB_T_2260,urban private units,province,https://news.cnjiwang.com/dyxw_kx/202510/3991282.html,2025-2026
+320000,1,Jiangsu,江苏,CN,Eastern,,129220,2024,,CN-E,GB_T_2260,urban non-private units,province,https://www.xhby.net/content/s6853f0e4e4b0aedf59a3e80f.html,2025-2026
+320000,1,Jiangsu,江苏,CN,Eastern,,78114,2024,,CN-E,GB_T_2260,urban private units,province,https://www.xhby.net/content/s6853f0e4e4b0aedf59a3e80f.html,2025-2026
+330000,1,Zhejiang,浙江,CN,Eastern,,137239,2024,,CN-E,GB_T_2260,urban non-private units,province,https://www.163.com/dy/article/K247BBUA05459A4S.html,2025-2026
+330000,1,Zhejiang,浙江,CN,Eastern,,77230,2024,,CN-E,GB_T_2260,urban private units,province,https://www.163.com/dy/article/K247BBUA05459A4S.html,2025-2026
+340000,1,Anhui,安徽,CN,Central,,105416,2024,,CN-C,GB_T_2260,urban non-private units,province,http://www.ah.news.cn/20250701/796317af811d402d9f3109f492c83f23/c.html,2025-2026
+340000,1,Anhui,安徽,CN,Central,,60610,2024,,CN-C,GB_T_2260,urban private units,province,http://www.ah.news.cn/20250701/796317af811d402d9f3109f492c83f23/c.html,2025-2026
+350000,1,Fujian,福建,CN,Eastern,,112377,2024,,CN-E,GB_T_2260,urban non-private units,province,https://tjj.fujian.gov.cn/xxgk/tjxx/gzqk/202506/t20250612_6924342.htm,2025-2026
+350000,1,Fujian,福建,CN,Eastern,,69055,2024,,CN-E,GB_T_2260,urban private units,province,https://tjj.fujian.gov.cn/xxgk/tjxx/gzqk/202506/t20250612_6924342.htm,2025-2026
+360000,1,Jiangxi,江西,CN,Central,,95750,2024,,CN-C,GB_T_2260,urban non-private units,province,https://zc.51shebao.com/detail/836728,2025-2026
+360000,1,Jiangxi,江西,CN,Central,,56492,2024,,CN-C,GB_T_2260,urban private units,province,https://zc.51shebao.com/detail/836728,2025-2026
+370000,1,Shandong,山东,CN,Eastern,,108131,2024,,CN-E,GB_T_2260,urban non-private units,province,http://tjj.shandong.gov.cn/art/2025/7/3/art_6109_10318772.html,2025-2026
+370000,1,Shandong,山东,CN,Eastern,,61196,2024,,CN-E,GB_T_2260,urban private units,province,http://tjj.shandong.gov.cn/art/2025/7/3/art_6109_10318772.html,2025-2026
+430000,1,Hunan,湖南,CN,Central,,97170,2024,,CN-C,GB_T_2260,urban non-private units,province,https://tjj.hunan.gov.cn/hntj/tjfx/jmxx/2025sjjd/202507/t20250722_33746378.html,2025-2026
+430000,1,Hunan,湖南,CN,Central,,60537,2024,,CN-C,GB_T_2260,urban private units,province,http://tjj.hunan.gov.cn/hntj/tjfx/jmxx/2025sjjd/202507/t20250722_33746348.html,2025-2026
+440000,1,Guangdong,广东,CN,Eastern,,135395,2024,,CN-E,GB_T_2260,urban non-private units,province,https://zc.51shebao.com/detail/836680,2025-2026
+440000,1,Guangdong,广东,CN,Eastern,,80976,2024,,CN-E,GB_T_2260,urban private units,province,https://zc.51shebao.com/detail/836680,2025-2026
+450000,1,Guangxi,广西,CN,Western,,96547,2024,,CN-W,GB_T_2260,urban non-private units,province,http://m.lzgd.com.cn/inc/lzgd/views20165.aspx?id=136228,2025-2026
+450000,1,Guangxi,广西,CN,Western,,52456,2024,,CN-W,GB_T_2260,urban private units,province,http://m.lzgd.com.cn/inc/lzgd/views20165.aspx?id=136228,2025-2026
+460000,1,Hainan,海南,CN,Eastern,,117433,2024,,CN-E,GB_T_2260,urban non-private units,province,https://zc.51shebao.com/detail/837375,2025-2026
+460000,1,Hainan,海南,CN,Eastern,,65299,2024,,CN-E,GB_T_2260,urban private units,province,https://zc.51shebao.com/detail/837375,2025-2026
+500000,1,Chongqing,重庆,CN,Western,,117546,2024,,CN-W,GB_T_2260,urban non-private units,province,http://www.cq.xinhuanet.com/20250624/d21bb720d8a946c0b2143ed0c357f1fa/c.html,2025-2026
+500000,1,Chongqing,重庆,CN,Western,,65098,2024,,CN-W,GB_T_2260,urban private units,province,http://www.cq.xinhuanet.com/20250624/d21bb720d8a946c0b2143ed0c357f1fa/c.html,2025-2026
+510000,1,Sichuan,四川,CN,Western,,110177,2024,,CN-W,GB_T_2260,urban non-private units,province,https://zc.51shebao.com/detail/836654,2025-2026
+510000,1,Sichuan,四川,CN,Western,,63161,2024,,CN-W,GB_T_2260,urban private units,province,https://zc.51shebao.com/detail/836654,2025-2026
+530000,1,Yunnan,云南,CN,Western,,110206,2024,,CN-W,GB_T_2260,urban non-private units,province,http://stats.yn.gov.cn/Pages_143_7032.aspx,2025-2026
+530000,1,Yunnan,云南,CN,Western,,55317,2024,,CN-W,GB_T_2260,urban private units,province,http://stats.yn.gov.cn/Pages_143_7032.aspx,2025-2026
+610000,1,Shaanxi,陕西,CN,Western,,111921,2024,,CN-W,GB_T_2260,urban non-private units,province,https://www.shaanxi.gov.cn/sj/zxfb/202506/t20250606_3528962.html,2025-2026
+610000,1,Shaanxi,陕西,CN,Western,,58791,2024,,CN-W,GB_T_2260,urban private units,province,https://www.shaanxi.gov.cn/sj/zxfb/202506/t20250606_3528961.html,2025-2026
+620000,1,Gansu,甘肃,CN,Western,,101173,2024,,CN-W,GB_T_2260,urban non-private units,province,http://lz.bendibao.com/live/2023817/62529.shtm,2025-2026
+620000,1,Gansu,甘肃,CN,Western,,52499,2024,,CN-W,GB_T_2260,urban private units,province,https://www.sohu.com/a/907598889_121615575,2025-2026
+630000,1,Qinghai,青海,CN,Western,,122787,2024,,CN-W,GB_T_2260,urban non-private units,province,https://zc.51shebao.com/detail/837298,2025-2026
+630000,1,Qinghai,青海,CN,Western,,57042,2024,,CN-W,GB_T_2260,urban private units,province,https://zc.51shebao.com/detail/837299,2025-2026
+640000,1,Ningxia,宁夏,CN,Western,,120355,2024,,CN-W,GB_T_2260,urban non-private units,province,https://fzggw.nx.gov.cn/sjfb/yxfx/202507/t20250707_4953737.html,2025-2026
+640000,1,Ningxia,宁夏,CN,Western,,62509,2024,,CN-W,GB_T_2260,urban private units,province,https://fzggw.nx.gov.cn/sjfb/yxfx/202507/t20250707_4953737.html,2025-2026
+650000,1,Xinjiang,新疆,CN,Western,,116329,2024,,CN-W,GB_T_2260,urban non-private units,province,https://tjj.xinjiang.gov.cn/tjj/xxfb/202507/1ab3c30d770342b9b98307c2ded5a62f.shtml,2025-2026
+650000,1,Xinjiang,新疆,CN,Western,,63862,2024,,CN-W,GB_T_2260,urban private units,province,https://tjj.xinjiang.gov.cn/tjj/xxfb/202507/1ab3c30d770342b9b98307c2ded5a62f.shtml,2025-2026
+420000,1,Hubei,湖北,CN,Central,,109227,2023,,CN-C,GB_T_2260,urban non-private units,province,https://finance.sina.com.cn/stock/zqgd/2024-12-09/doc-incyxfif2172590.shtml,2024-12-09
+420000,1,Hubei,湖北,CN,Central,,60583,2023,,CN-C,GB_T_2260,urban private units,province,https://finance.sina.com.cn/stock/zqgd/2024-12-09/doc-incyxfif2172590.shtml,2024-12-09
+520000,1,Guizhou,贵州,CN,Western,,102010,2023,,CN-W,GB_T_2260,urban non-private units,province,https://stjj.guizhou.gov.cn/tjsj/tjfbyjd/202406/t20240624_86399874.html,2024-06-24
+520000,1,Guizhou,贵州,CN,Western,,54156,2023,,CN-W,GB_T_2260,urban private units,province,https://stjj.guizhou.gov.cn/tjsj/tjfbyjd/202406/t20240624_86399874.html,2024-06-24
+540000,1,Tibet,西藏,CN,Western,,,2024,,CN-W,GB_T_2260,,not_available,,

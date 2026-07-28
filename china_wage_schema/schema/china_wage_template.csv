@@ -1,0 +1,7 @@
+admin_code,admin_level,region_name_en,region_name_zh,country_iso,macro_region,occupation_category,avg_annual_wage_cny,year,population,parent_admin_code,classification_system,wage_measure,data_availability,source,last_updated
+CN-NAT,0,National,全国,CN,,Total,102452,2024,,,GB_T_2260_MACRO,enterprises above designated size,national,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-NAT,0,National,全国,CN,,Middle management and above,203014,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,national,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+CN-E,0,Eastern zone,东部地区,CN,Eastern,Total,112631,2024,,CN-NAT,GB_T_2260_MACRO,enterprises above designated size,macro_region,https://www.stats.gov.cn/english/PressRelease/202505/t20250520_1959885.html,2025-05-20
+110000,1,Beijing,北京市,CN,Eastern,Total,224608,2024,,CN-E,GB_T_2260,urban non-private units,province,https://www.163.com/dy/article/KDEUGMIQ0552DMW3.html,2025-11-03
+110100,2,Beijing (city proper),北京市,CN,Eastern,,,,,110000,GB_T_2260,,not_available,,
+110101,3,Dongcheng District,东城区,CN,Eastern,,,,,110100,GB_T_2260,,not_available,,

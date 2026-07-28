@@ -2757,15 +2757,26 @@ def _assign_user_tier(user, db):
                     """), {'code': user_profession}).fetchone()
                     if isco_row and isco_row[0]:
                         isco_grp = isco_row[0]
-                        # 1. Datos reales ILO ILOSTAT (fuente primaria, ~100 países)
-                        try:
-                            from ilo_ilostat_agent import get_ilo_income
-                            ilo = get_ilo_income(user_country_code, isco_grp, db)
-                            if ilo:
-                                profession_tier = profession_score_to_tier(ilo['score'])
-                                user.estimated_income_usd = ilo['annual_usd']
-                        except Exception:
-                            ilo = None
+                        # 0. China: datos NBS PPP-adjusted (fuente primaria para CN)
+                        if user_country_code == 'CN':
+                            try:
+                                from china_wages_agent import get_china_income
+                                china = get_china_income(getattr(user, 'county', None), isco_grp, db)
+                                if china:
+                                    profession_tier = profession_score_to_tier(china['score'])
+                                    user.estimated_income_usd = china['annual_usd']
+                            except Exception:
+                                china = None
+                        # 1. Datos reales ILO ILOSTAT (fuente primaria, ~65 países no-CN)
+                        if user_country_code != 'CN':
+                            try:
+                                from ilo_ilostat_agent import get_ilo_income
+                                ilo = get_ilo_income(user_country_code, isco_grp, db)
+                                if ilo:
+                                    profession_tier = profession_score_to_tier(ilo['score'])
+                                    user.estimated_income_usd = ilo['annual_usd']
+                            except Exception:
+                                ilo = None
                         if not profession_tier:
                             # 2. Fallback: occupation_unified ISCO rows (semillas LATAM)
                             row = db.execute(text("""
@@ -10602,6 +10613,50 @@ def admin_ilo_wages_lookup(secret: str, country: str, isco: int, db: Session = D
     from ilo_ilostat_agent import get_ilo_income
     result = get_ilo_income(country.upper(), isco, db)
     return result or {'found': False, 'country': country.upper(), 'isco_group': isco}
+
+
+# ── China wages (PPP-adjusted) ────────────────────────────────────────────────
+
+@app.post('/admin/import-china-wages')
+def admin_import_china_wages(secret: str, db: Session = Depends(get_db)):
+    """Importa datos salariales China: NBS oficial × provincia + 60 cargos específicos.
+    Usa tasa PPP (1 USD = 3.29 CNY) para estimated_income_usd comparable globalmente."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        local_db = SessionLocal()
+        try:
+            from china_wages_agent import run_china_wages_import
+            result_holder['result'] = run_china_wages_import(local_db)
+        finally:
+            local_db.close()
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=60)
+    if not result_holder:
+        return {'ok': True, 'message': 'Import China wages iniciado (ver logs)'}
+    return result_holder.get('result', {'ok': False})
+
+
+@app.get('/admin/china-wages/summary')
+def admin_china_wages_summary(secret: str, db: Session = Depends(get_db)):
+    """Resumen de datos en china_wages y china_wage_jobs."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from china_wages_agent import get_china_summary
+    return get_china_summary(db)
+
+
+@app.get('/admin/china-wages/lookup')
+def admin_china_wages_lookup(secret: str, city: str, isco: int, db: Session = Depends(get_db)):
+    """Busca salario PPP para usuario chino (ej: city=Shanghai&isco=2)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from china_wages_agent import get_china_income
+    result = get_china_income(city, isco, db)
+    return result or {'found': False, 'city': city, 'isco_group': isco}
 
 
 @app.post('/admin/nuts-pipeline/run')

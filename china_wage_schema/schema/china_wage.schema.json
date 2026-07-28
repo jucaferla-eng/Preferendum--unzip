@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "China Regional Wage Data (by occupation and administrative level)",
+  "type": "object",
+  "required": ["admin_code", "admin_level", "region_name_en", "country_iso", "year"],
+  "properties": {
+    "admin_code": {
+      "type": "string",
+      "description": "GB/T 2260 administrative division code. 2 digits = province, 4 digits = prefecture-level city, 6 digits = county/district. Macro-regions (Eastern/Central/Western/Northeastern) and the national total are NOT part of GB/T 2260 -- they are NBS statistical aggregates only, so they use the synthetic prefixes CN-NAT / CN-E / CN-C / CN-W / CN-NE.",
+      "pattern": "^(CN-NAT|CN-E|CN-C|CN-W|CN-NE|[0-9]{2}|[0-9]{4}|[0-9]{6})$"
+    },
+    "admin_level": {
+      "type": "integer",
+      "enum": [0, 1, 2, 3],
+      "description": "0 = national or macro-region (NBS aggregate, not a real administrative unit), 1 = province/municipality/autonomous region (31 units, GB/T 2260 2-digit), 2 = prefecture-level city (~333 units, GB/T 2260 4-digit), 3 = county/district (~2,800+ units, GB/T 2260 6-digit)."
+    },
+    "region_name_en": { "type": "string" },
+    "region_name_zh": { "type": "string" },
+    "country_iso": { "type": "string", "const": "CN" },
+    "macro_region": {
+      "type": ["string", "null"],
+      "enum": ["Eastern", "Central", "Western", "Northeastern", null],
+      "description": "NBS's own 4-way macro-region grouping used in its wage releases. Not a codified administrative level, but the finest geographic cut at which NBS publishes wage-by-occupation crosstabs."
+    },
+    "occupation_category": {
+      "type": ["string", "null"],
+      "enum": [
+        "Total",
+        "Middle management and above",
+        "Professional and technical personnel",
+        "Office staff and related personnel",
+        "Personnel engaged in social production services and life services",
+        "Personnel engaged in production and manufacturing",
+        null
+      ],
+      "description": "NBS's 'position' (岗位) categories -- the only occupation-level breakdown NBS publishes, and only at national and macro-region level, never below."
+    },
+    "avg_annual_wage_cny": { "type": ["number", "null"], "minimum": 0 },
+    "year": { "type": "integer", "minimum": 2000, "maximum": 2100 },
+    "population": { "type": ["integer", "null"], "minimum": 0 },
+    "parent_admin_code": { "type": ["string", "null"] },
+    "classification_system": {
+      "type": "string",
+      "enum": ["GB_T_2260", "GB_T_2260_MACRO"],
+      "description": "GB_T_2260 = real administrative code (province/prefecture/county). GB_T_2260_MACRO = NBS statistical aggregate (national/macro-region), not an official GB/T 2260 code."
+    },
+    "wage_measure": {
+      "type": ["string", "null"],
+      "enum": [
+        "urban non-private units",
+        "urban private units",
+        "enterprises above designated size",
+        null
+      ],
+      "description": "NBS publishes three parallel wage series covering different employer populations -- they are NOT comparable to each other and must not be averaged together."
+    },
+    "data_availability": {
+      "type": "string",
+      "enum": ["national", "macro_region", "province", "prefecture", "county_district", "not_available"],
+      "description": "Marks the finest level at which this row's figure is genuinely published. 'not_available' rows are placeholders documenting a real gap in public Chinese wage statistics -- not an error."
+    },
+    "source": { "type": ["string", "null"], "format": "uri" },
+    "last_updated": { "type": ["string", "null"], "format": "date" }
+  }
+}
