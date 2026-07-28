@@ -2757,26 +2757,37 @@ def _assign_user_tier(user, db):
                     """), {'code': user_profession}).fetchone()
                     if isco_row and isco_row[0]:
                         isco_grp = isco_row[0]
-                        row = db.execute(text("""
-                            SELECT profession_score, median_annual_usd FROM occupation_unified
-                            WHERE country_iso=:cc AND isco_group=:ig
-                              AND occupation_type='ISCO' AND profession_score IS NOT NULL
-                            LIMIT 1
-                        """), {'cc': user_country_code, 'ig': isco_grp}).fetchone()
-                        if row and row[0] is not None:
-                            profession_tier = profession_score_to_tier(float(row[0]))
-                            if row[1]: user.estimated_income_usd = float(row[1])
-                        else:
-                            # Fallback: promedio global ISCO
+                        # 1. Datos reales ILO ILOSTAT (fuente primaria, ~100 países)
+                        try:
+                            from ilo_ilostat_agent import get_ilo_income
+                            ilo = get_ilo_income(user_country_code, isco_grp, db)
+                            if ilo:
+                                profession_tier = profession_score_to_tier(ilo['score'])
+                                user.estimated_income_usd = ilo['annual_usd']
+                        except Exception:
+                            ilo = None
+                        if not profession_tier:
+                            # 2. Fallback: occupation_unified ISCO rows (semillas LATAM)
                             row = db.execute(text("""
-                                SELECT AVG(profession_score), AVG(median_annual_usd)
-                                FROM occupation_unified
-                                WHERE isco_group=:ig AND occupation_type='ISCO'
-                                  AND profession_score IS NOT NULL
-                            """), {'ig': isco_grp}).fetchone()
+                                SELECT profession_score, median_annual_usd FROM occupation_unified
+                                WHERE country_iso=:cc AND isco_group=:ig
+                                  AND occupation_type='ISCO' AND profession_score IS NOT NULL
+                                LIMIT 1
+                            """), {'cc': user_country_code, 'ig': isco_grp}).fetchone()
                             if row and row[0] is not None:
                                 profession_tier = profession_score_to_tier(float(row[0]))
                                 if row[1]: user.estimated_income_usd = float(row[1])
+                            else:
+                                # 3. Fallback global: promedio ISCO en occupation_unified
+                                row = db.execute(text("""
+                                    SELECT AVG(profession_score), AVG(median_annual_usd)
+                                    FROM occupation_unified
+                                    WHERE isco_group=:ig AND occupation_type='ISCO'
+                                      AND profession_score IS NOT NULL
+                                """), {'ig': isco_grp}).fetchone()
+                                if row and row[0] is not None:
+                                    profession_tier = profession_score_to_tier(float(row[0]))
+                                    if row[1]: user.estimated_income_usd = float(row[1])
             elif user_country_code == 'US':
                 # Legacy codes — USA: lookup por major_group
                 major_group = _US_PROFESSION_SOC.get(user_profession)
@@ -2794,15 +2805,25 @@ def _assign_user_tier(user, db):
                 # Legacy codes — no-USA: lookup por ISCO group
                 isco_grp = _OCC_TO_ISCO.get(user_profession)
                 if isco_grp:
-                    row = db.execute(text("""
-                        SELECT profession_score, median_annual_usd FROM occupation_unified
-                        WHERE country_iso=:cc AND isco_group=:ig
-                          AND occupation_type='ISCO' AND profession_score IS NOT NULL
-                        LIMIT 1
-                    """), {'cc': user_country_code, 'ig': isco_grp}).fetchone()
-                    if row and row[0] is not None:
-                        profession_tier = profession_score_to_tier(float(row[0]))
-                        if row[1]: user.estimated_income_usd = float(row[1])
+                    # 1. ILO primero
+                    try:
+                        from ilo_ilostat_agent import get_ilo_income
+                        ilo = get_ilo_income(user_country_code, isco_grp, db)
+                        if ilo:
+                            profession_tier = profession_score_to_tier(ilo['score'])
+                            user.estimated_income_usd = ilo['annual_usd']
+                    except Exception:
+                        ilo = None
+                    if not profession_tier:
+                        row = db.execute(text("""
+                            SELECT profession_score, median_annual_usd FROM occupation_unified
+                            WHERE country_iso=:cc AND isco_group=:ig
+                              AND occupation_type='ISCO' AND profession_score IS NOT NULL
+                            LIMIT 1
+                        """), {'cc': user_country_code, 'ig': isco_grp}).fetchone()
+                        if row and row[0] is not None:
+                            profession_tier = profession_score_to_tier(float(row[0]))
+                            if row[1]: user.estimated_income_usd = float(row[1])
         except Exception:
             pass
         if not profession_tier:
@@ -3366,12 +3387,19 @@ def debates_for_me(
             if d.target_age_max and user_age > d.target_age_max:
                 continue
 
-        # Filtro por ingreso estimado (solo si el debate tiene umbral Y el usuario tiene ingreso calculado)
+        # Filtro por ingreso estimado
         user_income = getattr(user, 'estimated_income_usd', None) if user else None
         if user_income is not None:
             if getattr(d, 'income_min_usd', None) and user_income < d.income_min_usd:
                 continue
             if getattr(d, 'income_max_usd', None) and user_income > d.income_max_usd:
+                continue
+
+        # Filtro por SE Tier
+        user_se = (getattr(user, 'se_tier', '') or '') if user else ''
+        d_tiers = (getattr(d, 'target_se_tiers', '') or '').strip()
+        if user_se and d_tiers and d_tiers not in ('A,B,C,D', 'all', ''):
+            if not _tier_matches(user_se, d_tiers):
                 continue
 
         try:
@@ -3395,13 +3423,34 @@ def get_featured_ads(user: User = Depends(get_optional_user), db: Session = Depe
         (AdCampaign.end_date == None) | (AdCampaign.end_date > now)
     ).order_by(AdCampaign.created_at.desc()).all()
 
-    user_se     = (getattr(user, 'se_tier', '') or '') if user else ''
-    user_income = (getattr(user, 'estimated_income_usd', None)) if user else None
+    user_se      = (getattr(user, 'se_tier', '') or '') if user else ''
+    user_income  = (getattr(user, 'estimated_income_usd', None)) if user else None
+    user_gender  = (getattr(user, 'gender', '') or '').lower() if user else ''
+    user_country = _country_code(getattr(user, 'country', '') or '') if user else ''
+    user_commune = (getattr(user, 'county', '') or '').strip().lower() if user else ''
+
+    user_age = None
+    if user and getattr(user, 'dob', ''):
+        try:
+            from datetime import date as _date
+            dob_str = (user.dob or '').strip()
+            for _fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d'):
+                try:
+                    _born = datetime.strptime(dob_str, _fmt).date()
+                    today = _date.today()
+                    user_age = today.year - _born.year - ((today.month, today.day) < (_born.month, _born.day))
+                    break
+                except ValueError:
+                    pass
+        except Exception:
+            pass
+
     campaigns = []
     for c in candidates:
+        # SE Tier
         if user_se and not _tier_matches(user_se, c.target_se_tiers or 'A,B,C,D'):
             continue
-        # Filtro por ingreso USD (target_income_min/max en campaigns ahora son USD)
+        # Ingreso USD
         if user_income is not None:
             inc_min = getattr(c, 'target_income_min', 0.0) or 0.0
             inc_max = getattr(c, 'target_income_max', 9999999.0) or 9999999.0
@@ -3409,6 +3458,27 @@ def get_featured_ads(user: User = Depends(get_optional_user), db: Session = Depe
                 continue
             if inc_max < 9999.0 and user_income > inc_max:
                 continue
+        # Género
+        tg = (getattr(c, 'target_gender', 'all') or 'all').lower()
+        if tg != 'all' and user_gender and user_gender != tg:
+            continue
+        # Edad
+        if user_age is not None:
+            age_min = getattr(c, 'target_age_min', 0) or 0
+            age_max = getattr(c, 'target_age_max', 99) or 99
+            if age_min > 0 and user_age < age_min:
+                continue
+            if age_max < 99 and user_age > age_max:
+                continue
+        # País
+        c_country = _country_code(getattr(c, 'target_country', '') or '')
+        if c_country and user_country and c_country != user_country:
+            continue
+        # Comuna
+        c_communes = [x.strip().lower() for x in (getattr(c, 'target_communes', '') or '').split(',') if x.strip()]
+        if c_communes and user_commune and user_commune not in c_communes:
+            continue
+
         campaigns.append(c)
         if len(campaigns) >= 2:
             break
@@ -10485,6 +10555,46 @@ def admin_occupation_lookup(secret: str, country: str, profession: str, db: Sess
         'profession_score': score,
         'found': score is not None,
     }
+
+
+@app.post('/admin/import-ilo-wages')
+def admin_import_ilo_wages(secret: str, db: Session = Depends(get_db)):
+    """Descarga y guarda en DB los salarios reales ILO ILOSTAT por ISCO group (~100 países).
+    Indicador: EAR_4MTH_SEX_OCU_CUR_NB_A — salario mensual por ocupación ISCO-08.
+    Tiempo estimado: 2-5 min (descarga ~50 MB + insert ~900 filas).
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        from ilo_ilostat_agent import run_ilo_import
+        result_holder['result'] = run_ilo_import(db)
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=360)
+    if not result_holder:
+        return {'ok': True, 'message': 'ILO import iniciado en background (ver logs Render)'}
+    return result_holder.get('result', {'ok': False})
+
+
+@app.get('/admin/ilo-wages/summary')
+def admin_ilo_wages_summary(secret: str, db: Session = Depends(get_db)):
+    """Resumen de datos ILO ILOSTAT en ilo_wages."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from ilo_ilostat_agent import get_ilo_summary
+    return get_ilo_summary(db)
+
+
+@app.get('/admin/ilo-wages/lookup')
+def admin_ilo_wages_lookup(secret: str, country: str, isco: int, db: Session = Depends(get_db)):
+    """Busca salario ILO para un país y grupo ISCO (ej: country=CL&isco=2)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from ilo_ilostat_agent import get_ilo_income
+    result = get_ilo_income(country.upper(), isco, db)
+    return result or {'found': False, 'country': country.upper(), 'isco_group': isco}
 
 
 @app.post('/admin/nuts-pipeline/run')
