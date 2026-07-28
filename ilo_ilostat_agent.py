@@ -250,7 +250,6 @@ def _parse_sdmx(xml_bytes: bytes) -> list[dict]:
 _DDL_STATEMENTS = [
     """
     CREATE TABLE IF NOT EXISTS ilo_wages (
-        id              SERIAL PRIMARY KEY,
         country_iso2    TEXT NOT NULL,
         country_name    TEXT,
         isco_group      INTEGER NOT NULL,
@@ -260,8 +259,8 @@ _DDL_STATEMENTS = [
         currency        TEXT,
         year            INTEGER,
         source          TEXT DEFAULT 'ILO ILOSTAT DF_EAR_EMTM_SEX_OCU_CUR_NB (SDMX)',
-        updated_at      TIMESTAMP DEFAULT NOW(),
-        UNIQUE (country_iso2, isco_group)
+        updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (country_iso2, isco_group)
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_ilo_wages_iso2 ON ilo_wages(country_iso2)",
@@ -301,14 +300,14 @@ def run_ilo_import(db) -> dict:
                     (country_iso2, country_name, isco_group, isco_label,
                      monthly_local, monthly_usd, currency, year, updated_at)
                 VALUES
-                    (:iso2, :name, :ig, :il, :ml, :mu, :cur, :yr, NOW())
+                    (:iso2, :name, :ig, :il, :ml, :mu, :cur, :yr, CURRENT_TIMESTAMP)
                 ON CONFLICT (country_iso2, isco_group) DO UPDATE SET
                     isco_label    = EXCLUDED.isco_label,
                     monthly_local = EXCLUDED.monthly_local,
                     monthly_usd   = EXCLUDED.monthly_usd,
                     currency      = EXCLUDED.currency,
                     year          = EXCLUDED.year,
-                    updated_at    = NOW()
+                    updated_at    = CURRENT_TIMESTAMP
             """), {
                 'iso2': r['country_iso2'], 'name': r['country_name'],
                 'ig':   r['isco_group'],   'il':   r['isco_label'],
