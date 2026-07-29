@@ -1041,6 +1041,7 @@ def format_debate(debate, has_voted=False, sponsor_info=None):
         'is_anonymous': bool(debate.is_anonymous),
         'has_voted': has_voted,
         'created_at': debate.created_at.isoformat(),
+        'target_se_tiers': debate.target_se_tiers or 'A,B,C,D',
         'is_sponsored': False,
         'sponsor_name': '',
         'sponsor_logo_url': '',
@@ -12048,6 +12049,17 @@ def pilot_live_dashboard(debate_id: int, db: Session = Depends(get_db)):
     }
 
 # ══════════════════════════════════════════════════════════════
+
+@app.post('/admin/verify-user')
+def admin_verify_user(user_id: int, secret: str, db: Session = Depends(get_db)):
+    """Admin: marca email_verified=True para un usuario (solo testing)."""
+    _check_admin(secret)
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, 'User not found')
+    user.email_verified = True
+    db.commit()
+    return {'ok': True, 'user_id': user_id, 'email': user.email, 'email_verified': True}
 
 @app.get('/sable', response_class=HTMLResponse)
 def sable_demo(db: Session = Depends(get_db)):
