@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "South Korea National Wage Data by Occupation (KSCO 7th revision major group, no region dimension)",
+  "type": "object",
+  "required": ["admin_code", "occupation_category", "wage_value", "country_iso", "year"],
+  "properties": {
+    "admin_code": {
+      "type": "string",
+      "const": "KR-NAT",
+      "description": "Always 'KR-NAT'. 고용형태별근로실태조사 (the source of this table) is a national-only survey with zero regional dimension -- confirmed via full-text scan (zero occurrences of '시도' or '지역' in the 2024 report) and corroborated verbatim by KOSTAT in KOSIS Q&A #24532 (https://kosis.kr/civilComplaint/qnaDetail.do?boardIdx=24532)."
+    },
+    "occupation_category": {
+      "type": "string",
+      "enum": [
+        "All occupations",
+        "Managers",
+        "Professionals and related workers",
+        "Clerks",
+        "Service workers",
+        "Sales workers",
+        "Skilled agricultural, forestry and fishery workers",
+        "Craft and related trades workers",
+        "Equipment, machine operating and assembling workers",
+        "Elementary workers"
+      ],
+      "description": "KSCO (Korean Standard Classification of Occupations) 7th-revision major-group (대분류) English label. 'Armed Forces' (군인, code A) is excluded -- the wage table in the source report contains exactly 9 civilian categories plus the 'All occupations' total, omitting Armed Forces entirely."
+    },
+    "occupation_code": {
+      "type": ["string", "null"],
+      "enum": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", null],
+      "description": "KSCO 7th-revision major-group digit. '0' is used here for the 'All occupations' total row (not an official KSCO code, a convention of this module). 1-9 are the official KSCO major-group digits. 'A' (Armed Forces) is defined by KSCO but never appears in this table because wage statistics exclude it."
+    },
+    "wage_value": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "description": "월 임금총액 (monthly total wage) in units given by 'currency' and 'wage_period'. Leave null + data_availability='not_available' rather than estimating."
+    },
+    "currency": {
+      "type": ["string", "null"],
+      "enum": ["KRW_thousand", null]
+    },
+    "wage_period": {
+      "type": ["string", "null"],
+      "enum": ["monthly", null]
+    },
+    "wage_measure": {
+      "type": ["string", "null"],
+      "enum": ["monthly_wage_total", null],
+      "description": "월 임금총액 -- monthly total wage for 상용근로자 in 5+-person establishments, June 2024 payroll reference period. This is the only wage_measure populated in this pass (the report also has hourly wage and regular/non-regular splits -- see README section 8, Extending this later)."
+    },
+    "year": { "type": "integer", "minimum": 2000, "maximum": 2100 },
+    "classification_system": {
+      "type": "string",
+      "enum": ["KSCO_7TH_MAJOR"],
+      "description": "Korean Standard Classification of Occupations, 7th revision (통계청 고시, 2017-07-03), major-group (대분류) level. This is the classification actually used in the 2024 wage report; KSCO 8th revision takes effect 2025-01-01 and is used by a different survey (지역별고용조사), not this one."
+    },
+    "data_availability": {
+      "type": "string",
+      "enum": ["national_only"],
+      "description": "The only value that appears in this table. 고용형태별근로실태조사 has no regional dimension at all, so no row in this table can ever have finer-than-national granularity -- this is a structural fact, not a data gap."
+    },
+    "source": { "type": ["string", "null"], "format": "uri" },
+    "last_updated": { "type": ["string", "null"], "format": "date" },
+    "country_iso": { "type": "string", "const": "KR" }
+  }
+}

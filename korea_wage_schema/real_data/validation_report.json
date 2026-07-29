@@ -1,0 +1,28 @@
+{
+  "summaries": [
+    {
+      "table": "kr_wage_by_region",
+      "total_rows": 90,
+      "clean_rows": 90,
+      "errors": 0,
+      "warnings": 0
+    },
+    {
+      "table": "kr_wage_by_occupation",
+      "total_rows": 10,
+      "clean_rows": 10,
+      "errors": 0,
+      "warnings": 0
+    }
+  ],
+  "findings": {
+    "real_data/kr_wage_by_region_real.csv": [],
+    "real_data/kr_wage_by_occupation_real.csv": []
+  },
+  "totals": {
+    "total_rows": 100,
+    "clean_rows": 100,
+    "errors": 0,
+    "warnings": 0
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Japan Regional Wage Data (by occupation and administrative level)",
+  "type": "object",
+  "required": ["admin_code", "admin_level", "region_name_en", "country_iso", "year"],
+  "properties": {
+    "admin_code": {
+      "type": "string",
+      "description": "JIS X 0401 2-digit prefecture code, zero-padded ('01'..'47'), or the synthetic national code 'JP-NAT'. Unlike China's macro-regions, every admin_level=1 code here IS a real, codified administrative unit -- Japan has no synthetic aggregate codes below national.",
+      "pattern": "^(JP-NAT|[0-9]{2})$"
+    },
+    "admin_level": {
+      "type": "integer",
+      "enum": [0, 1],
+      "description": "0 = national total (MHLW/e-Stat aggregate, code 'JP-NAT'). 1 = prefecture (47 units, JIS X 0401 2-digit code). No municipality-level wage data exists (see README section 7 / report Sec 4), so this schema does not define admin_level=2."
+    },
+    "region_name_en": { "type": "string" },
+    "region_name_ja": { "type": "string" },
+    "country_iso": { "type": "string", "const": "JP" },
+    "region_block": {
+      "type": ["string", "null"],
+      "enum": [
+        "Hokkaido", "Tohoku", "Kanto", "Hokuriku", "Tokai/Chubu",
+        "Kinki", "Chugoku", "Shikoku", "Kyushu", "Okinawa", null
+      ],
+      "description": "MIC's (\u7dcf\u52d9\u7701) \u985e\u578b\u2160 10-block grouping from the 'Guideline on Regional Presentation' (\u5730\u57df\u5225\u8868\u7ae0\u306b\u95a2\u3059\u308b\u30ac\u30a4\u30c9\u30e9\u30a4\u30f3'). This is explicitly NOT a single legally-unified regional standard -- it is MIC's own recommended typology among several competing ones (e-Stat's own \u793e\u4f1a\u30fb\u4eba\u53e3\u7d71\u8a08\u4f53\u7cfb typology, Cabinet Office's \u5730\u57df\u533a\u5206A/B/C, etc.). See https://www.soumu.go.jp/main_content/000872772.pdf."
+    },
+    "occupation_category": {
+      "type": ["string", "null"],
+      "description": "'Total' for aggregate rows; one of the 12 JSOC (\u65e5\u672c\u6a19\u6e96\u8077\u696d\u5206\u985e) Rev.5 major-group English labels when occupation_level='major'; a detailed occupation's English label when occupation_level='detailed'.",
+      "enum": [
+        "Total",
+        "Administrative and managerial workers",
+        "Professional and engineering workers",
+        "Clerical workers",
+        "Sales workers",
+        "Service workers",
+        "Security workers",
+        "Agriculture, forestry, and fishery workers",
+        "Manufacturing process workers",
+        "Transport and machine operation workers",
+        "Construction and mining workers",
+        "Carrying, cleaning, packaging, and related workers",
+        "Workers not classifiable by occupation",
+        "Physicians",
+        "Dentists",
+        "Pharmacists",
+        "Registered nurses",
+        "Nursery school teachers",
+        "Elementary and junior high school teachers",
+        "Systems consultants and designers",
+        "Software developers",
+        "Sales clerks",
+        "Care workers (medical and welfare facilities)",
+        "Cooks",
+        "Security guards",
+        "Taxi drivers",
+        "Heavy-duty truck drivers (commercial)",
+        "Carpenters",
+        "Building cleaners",
+        "Aircraft pilots",
+        null
+      ]
+    },
+    "occupation_code": {
+      "type": ["string", "null"],
+      "description": "JSOC major-group letter A-L when occupation_level='major'; blank/null for 'Total' or for detailed occupations (the detailed 職種（特掲） list is not letter-coded in the source tables, only ordered by row).",
+      "pattern": "^[A-L]?$"
+    },
+    "occupation_level": {
+      "type": "string",
+      "enum": ["major", "detailed", "total"],
+      "description": "'total' = the Total/all-occupations aggregate row (\u53c2\u8003\u88681). 'major' = one of the 12 JSOC major groups (\u8868\uff12). 'detailed' = one of the ~145 detailed occupations (\u8868\uff13)."
+    },
+    "wage_value": { "type": ["number", "null"], "minimum": 0 },
+    "wage_unit": {
+      "type": ["string", "null"],
+      "enum": ["thousand_yen_per_month", null],
+      "description": "All wage-structure-survey figures in this module are monthly, denominated in thousands of yen (\u5343\u5186), except annual_special_cash_earnings which is a yearly total but still expressed in \u5343\u5186 units (see wage_measure)."
+    },
+    "currency": { "type": ["string", "null"], "const": "JPY" },
+    "wage_measure": {
+      "type": ["string", "null"],
+      "enum": [
+        "contractual_cash_earnings",
+        "scheduled_cash_earnings",
+        "annual_special_cash_earnings",
+        null
+      ],
+      "description": "contractual_cash_earnings = \u304d\u307e\u3063\u3066\u652f\u7d66\u3059\u308b\u73fe\u91d1\u7d66\u4e0e\u984d (includes overtime). scheduled_cash_earnings = \u6240\u5b9a\u5185\u7d66\u4e0e\u984d (excludes overtime) -- this is the figure MHLW calls '\u8cc3\u91d1' in its headline commentary. annual_special_cash_earnings = \u5e74\u9593\u8cde\u4e0e\u305d\u306e\u4ed6\u7279\u5225\u7d66\u4e0e\u984d (bonuses, previous calendar year). These three series measure different things and must never be averaged together."
+    },
+    "year": { "type": "integer", "minimum": 2000, "maximum": 2100 },
+    "population": { "type": ["integer", "null"], "minimum": 0 },
+    "parent_admin_code": {
+      "type": ["string", "null"],
+      "description": "'JP-NAT' for prefecture rows; blank/null for the national row itself."
+    },
+    "classification_system": {
+      "type": ["string", "null"],
+      "enum": ["JIS_X_0401", "JSOC_MAJOR", "JSOC_DETAILED", null],
+      "description": "JIS_X_0401 tags the admin_code's coding standard (prefecture rows). JSOC_MAJOR / JSOC_DETAILED tag the occupation_code/occupation_category's coding standard, per Japan Standard Occupational Classification Rev.5. A single row may need only one of these populated depending on what it's keyed on; national Total rows may leave this blank."
+    },
+    "data_availability": {
+      "type": "string",
+      "enum": ["national", "prefecture", "not_available"],
+      "description": "Honesty flag marking the finest level at which this row's figure is genuinely published. Japan has no macro_region-only wage data (unlike China) and no municipality-level wage data at all (see README section 7) -- 'not_available' rows document that gap rather than guessing."
+    },
+    "source": { "type": ["string", "null"], "format": "uri" },
+    "last_updated": { "type": ["string", "null"], "format": "date" }
+  }
+}

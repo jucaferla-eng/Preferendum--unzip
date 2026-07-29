@@ -1,0 +1,11 @@
+admin_code,occupation_category,occupation_code,wage_value,currency,wage_period,wage_measure,year,classification_system,data_availability,source,last_updated,country_iso
+KR-NAT,All occupations,0,4371,KRW_thousand,monthly,monthly_wage_total,2024,KSCO_7TH_MAJOR,national_only,https://laborstat.moel.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_000000000054271&fileSn=0,2024-06-01,KR
+KR-NAT,Managers,1,12223,KRW_thousand,monthly,monthly_wage_total,2024,KSCO_7TH_MAJOR,national_only,https://laborstat.moel.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_000000000054271&fileSn=0,2024-06-01,KR
+KR-NAT,Professionals and related workers,2,4996,KRW_thousand,monthly,monthly_wage_total,2024,KSCO_7TH_MAJOR,national_only,https://laborstat.moel.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_000000000054271&fileSn=0,2024-06-01,KR
+KR-NAT,Clerks,3,4825,KRW_thousand,monthly,monthly_wage_total,2024,KSCO_7TH_MAJOR,national_only,https://laborstat.moel.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_000000000054271&fileSn=0,2024-06-01,KR
+KR-NAT,Service workers,4,2226,KRW_thousand,monthly,monthly_wage_total,2024,KSCO_7TH_MAJOR,national_only,https://laborstat.moel.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_000000000054271&fileSn=0,2024-06-01,KR
+KR-NAT,Sales workers,5,3956,KRW_thousand,monthly,monthly_wage_total,2024,KSCO_7TH_MAJOR,national_only,https://laborstat.moel.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_000000000054271&fileSn=0,2024-06-01,KR
+KR-NAT,"Skilled agricultural, forestry and fishery workers",6,3034,KRW_thousand,monthly,monthly_wage_total,2024,KSCO_7TH_MAJOR,national_only,https://laborstat.moel.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_000000000054271&fileSn=0,2024-06-01,KR
+KR-NAT,Craft and related trades workers,7,4011,KRW_thousand,monthly,monthly_wage_total,2024,KSCO_7TH_MAJOR,national_only,https://laborstat.moel.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_000000000054271&fileSn=0,2024-06-01,KR
+KR-NAT,"Equipment, machine operating and assembling workers",8,4119,KRW_thousand,monthly,monthly_wage_total,2024,KSCO_7TH_MAJOR,national_only,https://laborstat.moel.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_000000000054271&fileSn=0,2024-06-01,KR
+KR-NAT,Elementary workers,9,2593,KRW_thousand,monthly,monthly_wage_total,2024,KSCO_7TH_MAJOR,national_only,https://laborstat.moel.go.kr/cmm/fms/FileDown.do?atchFileId=FILE_000000000054271&fileSn=0,2024-06-01,KR

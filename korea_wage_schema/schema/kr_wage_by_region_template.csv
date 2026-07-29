@@ -1,0 +1,4 @@
+admin_code,admin_level,region_name_en,region_name_ko,country_iso,wage_value,currency,wage_period,wage_measure,year,population,parent_admin_code,classification_system,data_availability,source,last_updated
+KR-NAT,0,Whole country,전국,KR,4100,KRW_thousand,monthly,wage_total,2024,,,SGIS_SIDO,national,https://www.moel.go.kr/news/enews/report/enewsView.do?news_seq=17112,2024-08-01
+11,1,Seoul,서울특별시,KR,4599,KRW_thousand,monthly,wage_total,2024,,KR-NAT,SGIS_SIDO,sido,https://www.moel.go.kr/news/enews/report/enewsView.do?news_seq=17112,2024-08-01
+39,1,Jeju,제주특별자치도,KR,,KRW_thousand,monthly,wage_total,2024,,KR-NAT,SGIS_SIDO,not_available,,
