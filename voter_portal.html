@@ -364,8 +364,8 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         </select>
       </div>
       <div class="field" id="commune-field">
-        <label id="commune-label">Código Postal</label>
-        <input type="text" id="r-commune" placeholder="8320000" maxlength="12" autocomplete="postal-code" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:rgba(255,255,255,0.07);color:#fff;font-size:15px;">
+        <label id="commune-label">Comuna / Ciudad</label>
+        <input type="text" id="r-commune" placeholder="Ej: Vitacura, Manhattan, Palermo..." maxlength="60" autocomplete="address-level2" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:rgba(255,255,255,0.07);color:#fff;font-size:15px;">
       </div>
       <div class="field" style="position:relative;">
         <label>Ocupación <span style="font-size:11px;color:#e05252;font-weight:400;">*</span></label>
@@ -1300,28 +1300,28 @@ const CITIES_BY_COUNTRY = {
 };
 
 const POSTAL_CONFIG = {
-  CL: {label:'Código Postal',      ph:'8320000'},
-  US: {label:'ZIP Code',           ph:'10007'},
-  GB: {label:'Postcode',           ph:'SW1A 1AA'},
-  ES: {label:'Código Postal',      ph:'28001'},
-  DE: {label:'PLZ',                ph:'80331'},
-  FR: {label:'Code Postal',        ph:'75001'},
-  IT: {label:'CAP',                ph:'20121'},
-  AU: {label:'Postcode',           ph:'2000'},
-  CA: {label:'Postal Code',        ph:'M5V 3A8'},
-  BR: {label:'CEP',                ph:'01310-100'},
-  AR: {label:'Código Postal',      ph:'C1425'},
-  MX: {label:'Código Postal',      ph:'06600'},
-  CO: {label:'Código Postal',      ph:'110111'},
-  PE: {label:'Código Postal',      ph:'15001'},
-  IN: {label:'PIN Code',           ph:'400001'},
-  ZA: {label:'Postal Code',        ph:'8001'},
-  VE: {label:'Código Postal',      ph:'1010'},
-  UY: {label:'Código Postal',      ph:'11000'},
-  EC: {label:'Código Postal',      ph:'170101'},
-  BO: {label:'Código Postal',      ph:'0101'},
-  PY: {label:'Código Postal',      ph:'1209'},
-  NG: {label:'Postal Code',        ph:'100001'},
+  CL: {label:'Comuna',             ph:'Vitacura, Las Condes, Maipú...'},
+  US: {label:'Ciudad o Condado',   ph:'Manhattan, Beverly Hills, Miami...'},
+  GB: {label:'Postcode',           ph:'SW1A, EC1A, W1...'},
+  ES: {label:'Ciudad o Municipio', ph:'Madrid, Barcelona, Sevilla...'},
+  DE: {label:'Stadt / PLZ',        ph:'München, Berlin, 80331...'},
+  FR: {label:'Ville / Code Postal',ph:'Paris, Lyon, 75001...'},
+  IT: {label:'Città / CAP',        ph:'Milano, Roma, 20121...'},
+  AU: {label:'Suburb',             ph:'Sydney, Melbourne, Brisbane...'},
+  CA: {label:'City',               ph:'Toronto, Vancouver, Montreal...'},
+  BR: {label:'Bairro ou Cidade',   ph:'Copacabana, Moema, São Paulo...'},
+  AR: {label:'Barrio o Ciudad',    ph:'Palermo, Recoleta, Córdoba...'},
+  MX: {label:'Colonia o Ciudad',   ph:'Polanco, Condesa, Monterrey...'},
+  CO: {label:'Barrio o Ciudad',    ph:'El Poblado, Chapinero, Cali...'},
+  PE: {label:'Distrito o Ciudad',  ph:'Miraflores, San Isidro, Lima...'},
+  IN: {label:'City',               ph:'Mumbai, Delhi, Bangalore...'},
+  ZA: {label:'City',               ph:'Cape Town, Johannesburg...'},
+  VE: {label:'Ciudad',             ph:'Caracas, Maracaibo...'},
+  UY: {label:'Barrio o Ciudad',    ph:'Pocitos, Montevideo...'},
+  EC: {label:'Ciudad',             ph:'Quito, Guayaquil...'},
+  BO: {label:'Ciudad',             ph:'La Paz, Santa Cruz...'},
+  PY: {label:'Ciudad',             ph:'Asunción, Lambaré...'},
+  NG: {label:'City',               ph:'Lagos, Abuja, Kano...'},
 };
 
 function toggleCommuneField() {
