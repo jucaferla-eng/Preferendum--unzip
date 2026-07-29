@@ -4426,15 +4426,6 @@ def _cast_vote_inner(debate_id: int, data, user, db):
         except Exception:
             pass  # si dob tiene formato inválido, no bloqueamos
 
-    # Bloqueo SE Tier: usuario debe pertenecer al nivel de ingresos objetivo
-    tgt_tiers = (debate.target_se_tiers or 'A,B,C,D').strip()
-    if tgt_tiers not in ('A,B,C,D', 'ALL', ''):
-        user_tier = (user.se_tier or '').strip().upper()
-        if user_tier:  # solo bloqueamos si el usuario tiene tier asignado
-            allowed = {t.strip().upper() for t in tgt_tiers.split(',') if t.strip()}
-            if user_tier not in allowed:
-                raise HTTPException(403, 'Esta consulta está dirigida a un nivel de ingresos diferente al tuyo')
-
     # Bloqueo 0: verificación facial (solo para usuarios con selfie verificada)
     if user.selfie_verified:
         if not data.face_token:
