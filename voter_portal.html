@@ -351,21 +351,57 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
       </div>
       <div class="field"><label>País</label>
         <select id="r-country" onchange="toggleCommuneField()">
-          <option value="CL">Chile</option>
-          <option value="AR">Argentina</option>
-          <option value="PE">Perú</option>
-          <option value="MX">México</option>
-          <option value="CO">Colombia</option>
-          <option value="BR">Brasil</option>
-          <option value="US">Estados Unidos</option>
-          <option value="ES">España</option>
-          <option value="GB">Reino Unido</option>
-          <option value="OTHER">Otro</option>
+          <option value="">— Selecciona tu país —</option>
+          <optgroup label="América Latina">
+            <option value="CL">🇨🇱 Chile</option>
+            <option value="AR">🇦🇷 Argentina</option>
+            <option value="MX">🇲🇽 México</option>
+            <option value="CO">🇨🇴 Colombia</option>
+            <option value="BR">🇧🇷 Brasil</option>
+            <option value="PE">🇵🇪 Perú</option>
+            <option value="EC">🇪🇨 Ecuador</option>
+            <option value="VE">🇻🇪 Venezuela</option>
+            <option value="UY">🇺🇾 Uruguay</option>
+            <option value="BO">🇧🇴 Bolivia</option>
+            <option value="PY">🇵🇾 Paraguay</option>
+          </optgroup>
+          <optgroup label="Norteamérica">
+            <option value="US">🇺🇸 Estados Unidos</option>
+            <option value="CA">🇨🇦 Canadá</option>
+          </optgroup>
+          <optgroup label="Europa">
+            <option value="ES">🇪🇸 España</option>
+            <option value="GB">🇬🇧 Reino Unido</option>
+            <option value="FR">🇫🇷 Francia</option>
+            <option value="DE">🇩🇪 Alemania</option>
+            <option value="IT">🇮🇹 Italia</option>
+            <option value="PT">🇵🇹 Portugal</option>
+            <option value="NL">🇳🇱 Países Bajos</option>
+            <option value="CH">🇨🇭 Suiza</option>
+            <option value="SE">🇸🇪 Suecia</option>
+            <option value="NO">🇳🇴 Noruega</option>
+          </optgroup>
+          <optgroup label="Asia &amp; Oceanía">
+            <option value="CN">🇨🇳 China</option>
+            <option value="JP">🇯🇵 Japón</option>
+            <option value="IN">🇮🇳 India</option>
+            <option value="AU">🇦🇺 Australia</option>
+            <option value="SG">🇸🇬 Singapur</option>
+            <option value="AE">🇦🇪 Emiratos Árabes</option>
+          </optgroup>
+          <optgroup label="África">
+            <option value="ZA">🇿🇦 Sudáfrica</option>
+            <option value="NG">🇳🇬 Nigeria</option>
+            <option value="KE">🇰🇪 Kenia</option>
+          </optgroup>
         </select>
       </div>
-      <div class="field" id="commune-field">
+      <div class="field" id="commune-field" style="position:relative;">
         <label id="commune-label">Comuna / Ciudad</label>
-        <input type="text" id="r-commune" placeholder="Ej: Vitacura, Manhattan, Palermo..." maxlength="60" autocomplete="address-level2" style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:rgba(255,255,255,0.07);color:#fff;font-size:15px;">
+        <input type="text" id="r-commune" placeholder="Escribe tu barrio o ciudad..." maxlength="80" autocomplete="off"
+          style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:rgba(255,255,255,0.07);color:#fff;font-size:15px;"
+          oninput="communeSearch(this.value)" onfocus="communeSearch(this.value)" onblur="setTimeout(()=>document.getElementById('commune-suggestions').style.display='none',200)">
+        <div id="commune-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:#1e2535;border:1px solid rgba(255,255,255,0.15);border-radius:0 0 8px 8px;max-height:200px;overflow-y:auto;z-index:999;"></div>
       </div>
       <div class="field" style="position:relative;">
         <label>Ocupación <span style="font-size:11px;color:#e05252;font-weight:400;">*</span></label>
@@ -1324,15 +1360,52 @@ const POSTAL_CONFIG = {
   NG: {label:'City',               ph:'Lagos, Abuja, Kano...'},
 };
 
+let _communeSearchTimer = null;
+let _communeCountry = '';
+
+function communeSearch(val) {
+  const country = document.getElementById('r-country').value;
+  if (!country) return;
+  const box = document.getElementById('commune-suggestions');
+  if (!val || val.length < 2) { box.style.display = 'none'; return; }
+  clearTimeout(_communeSearchTimer);
+  _communeSearchTimer = setTimeout(async () => {
+    try {
+      const resp = await fetch(`/communes?country=${country}&search=${encodeURIComponent(val)}&limit=8`);
+      const data = await resp.json();
+      const rows = Array.isArray(data) ? data : (data.communes || []);
+      if (!rows.length) { box.style.display = 'none'; return; }
+      box.innerHTML = rows.map(r => {
+        const tier = r.se_tier ? ` <span style="opacity:.5;font-size:11px;">Nivel ${r.se_tier}</span>` : '';
+        return `<div onclick="selectCommune('${r.commune.replace(/'/g,"\\'")}') "
+          style="padding:9px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.07);color:#fff;font-size:14px;"
+          onmouseover="this.style.background='rgba(255,255,255,0.08)'"
+          onmouseout="this.style.background=''">${r.commune}${tier}</div>`;
+      }).join('');
+      box.style.display = 'block';
+    } catch(e) { box.style.display = 'none'; }
+  }, 250);
+}
+
+function selectCommune(name) {
+  const input = document.getElementById('r-commune');
+  if (input) input.value = name;
+  const box = document.getElementById('commune-suggestions');
+  if (box) box.style.display = 'none';
+}
+
 function toggleCommuneField() {
   const countryEl = document.getElementById('r-country');
   if (!countryEl) return;
   const country = countryEl.value;
-  const cfg   = POSTAL_CONFIG[country] || {label:'Código Postal', ph:''};
+  _communeCountry = country;
+  const cfg   = POSTAL_CONFIG[country] || {label:'Ciudad / Barrio', ph:'Escribe tu barrio o ciudad...'};
   const label = document.getElementById('commune-label');
   const input = document.getElementById('r-commune');
+  const box   = document.getElementById('commune-suggestions');
   if (label) label.textContent = cfg.label;
   if (input) { input.placeholder = cfg.ph; input.value = ''; }
+  if (box)   box.style.display = 'none';
 
   // Phone prefix badge
   const prefix = PHONE_PREFIX[country] || '+';

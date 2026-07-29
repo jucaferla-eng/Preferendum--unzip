@@ -10204,7 +10204,7 @@ def purge_stale_fallback_communes(secret: str, country: str, db: Session = Depen
 
 
 @app.get('/communes')
-def get_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
+def get_communes(country: str = None, se_tier: str = None, search: str = None, limit: int = 200, db: Session = Depends(get_db)):
     """Tabla de comunas con índice de ingreso y CPM. Usada por el motor de ads."""
     from market_data_agent import get_fallback_table
     q = db.query(CommuneMarketData)
@@ -10212,7 +10212,9 @@ def get_communes(country: str = None, se_tier: str = None, db: Session = Depends
         q = q.filter(CommuneMarketData.country == country)
     if se_tier:
         q = q.filter(CommuneMarketData.se_tier == se_tier)
-    rows = q.order_by(CommuneMarketData.income_index.desc()).all()
+    if search:
+        q = q.filter(CommuneMarketData.commune.ilike(f'%{search}%'))
+    rows = q.order_by(CommuneMarketData.income_index.desc()).limit(limit).all()
     if not rows:
         # Sin datos en BD — usar fallback
         data = get_fallback_table()
