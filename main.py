@@ -9605,14 +9605,15 @@ def admin_debug_vote(user_id: int, debate_id: int, secret: str, db: Session = De
     return {'user': {'id': user.id, 'email': user.email, 'name': user.name}, 'checks': checks}
 
 @app.get('/admin/user-token')
-def admin_get_user_token(user_id: int, secret: str, db: Session = Depends(get_db)):
-    """Admin: genera JWT para un user_id (solo testing)."""
+def admin_get_user_token(user_id: int, secret: str, role: str = '', db: Session = Depends(get_db)):
+    """Admin: genera JWT para un user_id (solo testing). role= para override."""
     _check_admin(secret)
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(404, 'User not found')
-    token = make_token(user.id, role=user.role or 'voter')
-    return {'token': token, 'user_id': user.id, 'email': user.email}
+    effective_role = role.strip() or user.role or 'voter'
+    token = make_token(user.id, role=effective_role)
+    return {'token': token, 'user_id': user.id, 'email': user.email, 'role': effective_role}
 
 @app.post('/admin/payments/manual-credit')
 def payments_admin_manual(
