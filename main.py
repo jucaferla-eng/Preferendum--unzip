@@ -11094,6 +11094,37 @@ def admin_tier_debug(secret: str, country: str, profession: str, db: Session = D
 
     return result
 
+@app.get('/admin/tier-assign-test')
+def admin_tier_assign_test(user_id: int, secret: str, db: Session = Depends(get_db)):
+    """Ejecuta _assign_user_tier_inner sobre un usuario real y devuelve traceback si falla."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import traceback as _tb
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, f'User {user_id} not found')
+    snapshot = {
+        'id': user.id,
+        'county': user.county,
+        'country': user.country,
+        'profession': user.profession,
+        'se_tier_before': user.se_tier,
+        'income_index_before': user.income_index,
+    }
+    error_msg = None
+    try:
+        _assign_user_tier_inner(user, db)
+        db.commit()
+        db.refresh(user)
+    except Exception as _e:
+        db.rollback()
+        error_msg = _tb.format_exc()
+    snapshot['se_tier_after'] = user.se_tier
+    snapshot['income_index_after'] = user.income_index
+    snapshot['estimated_income_usd'] = getattr(user, 'estimated_income_usd', None)
+    snapshot['error'] = error_msg
+    return snapshot
+
 @app.post('/admin/import-ilo-wages')
 def admin_import_ilo_wages(secret: str, db: Session = Depends(get_db)):
     """Descarga y guarda en DB los salarios reales ILO ILOSTAT por ISCO group (~100 países).
