@@ -4860,6 +4860,53 @@ def organizer_debate_results(debate_id: int, user: User = Depends(get_current_us
         },
     }
 
+class SponsorLinkInput(BaseModel):
+    name:                 str
+    logo_url:             str   = ''
+    discount_pct:         int   = 15
+    discount_code_prefix: str   = ''
+    discount_text:        str   = ''
+
+@app.post('/organizers/debates/{debate_id}/sponsor')
+def organizer_link_sponsor(
+    debate_id: int,
+    data: SponsorLinkInput,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user.role not in ('organizer', 'admin'):
+        raise HTTPException(403, 'Organizer role required')
+    debate = db.query(Debate).filter(Debate.id == debate_id, Debate.creator_id == user.id).first()
+    if not debate:
+        raise HTTPException(404, 'Debate no encontrado o no te pertenece')
+    already = db.query(SponsoredDebate).filter(SponsoredDebate.debate_id == debate_id).first()
+    if already:
+        raise HTTPException(400, 'Este debate ya tiene un sponsor vinculado')
+    prefix = (data.discount_code_prefix or data.name[:3]).upper()
+    sp = Sponsor(
+        name=data.name, logo_url=data.logo_url,
+        industry='', contact_email=user.email or '',
+        discount_code_prefix=prefix
+    )
+    db.add(sp)
+    db.flush()
+    sd = SponsoredDebate(
+        debate_id=debate_id, sponsor_id=sp.id,
+        discount_pct=data.discount_pct,
+        discount_text=data.discount_text,
+        is_active=True
+    )
+    db.add(sd)
+    db.commit()
+    return {
+        'ok': True,
+        'sponsor_id': sp.id,
+        'sponsor_name': sp.name,
+        'sponsored_debate_id': sd.id,
+        'discount_pct': sd.discount_pct,
+        'code_prefix': prefix,
+    }
+
 # ══════════════════════════════════════════════════════════════
 # ROUTES: MARKETER / ADVERTISER
 # ══════════════════════════════════════════════════════════════

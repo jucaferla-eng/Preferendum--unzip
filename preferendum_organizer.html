@@ -304,7 +304,45 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
           <input type="hidden" id="c-country" value="GLOBAL"/>
         </div>
       </div>
-      <button class="btn" onclick="createDebate()">Launch Consultation</button>
+      <!-- SPONSORED TOGGLE -->
+      <div class="branch-toggle-row" style="margin-top:20px;">
+        <div>
+          <div class="branch-toggle-label" style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:16px;">✈️</span> ¿Consulta Patrocinada?
+          </div>
+          <div class="branch-toggle-sub">Agrega un descuento para quienes voten — el sponsor financia la participación</div>
+        </div>
+        <div class="toggle-switch" id="sponsor-toggle" onclick="toggleSponsor()">
+          <div class="toggle-knob"></div>
+        </div>
+      </div>
+      <div id="sponsor-section" style="display:none;background:rgba(251,191,36,0.07);border:1px solid rgba(251,191,36,0.35);border-radius:14px;padding:18px;margin-top:10px;">
+        <div style="font-size:12px;color:#fbbf24;margin-bottom:14px;font-weight:600;">DATOS DEL SPONSOR</div>
+        <div class="field">
+          <label>Nombre del Sponsor *</label>
+          <input type="text" id="sp-name" placeholder="ej. Emirates, Latam, Porsche"/>
+        </div>
+        <div class="field">
+          <label>Logo URL (opcional)</label>
+          <input type="text" id="sp-logo" placeholder="https://... (URL de imagen del logo)"/>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="field" style="margin-bottom:0;">
+            <label>% Descuento</label>
+            <input type="number" id="sp-pct" value="15" min="1" max="90"/>
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>Prefijo código (3-5 letras)</label>
+            <input type="text" id="sp-prefix" placeholder="EMI" maxlength="5" style="text-transform:uppercase;"/>
+          </div>
+        </div>
+        <div class="field" style="margin-top:12px;margin-bottom:0;">
+          <label>Texto del descuento *</label>
+          <input type="text" id="sp-text" placeholder="ej. 15% de descuento en tu próximo vuelo a Dubai"/>
+        </div>
+      </div>
+
+      <button class="btn" onclick="createDebate()" style="margin-top:20px;">Launch Consultation</button>
     </div>
 
     <!-- MY DEBATES -->
@@ -582,6 +620,15 @@ async function uploadOptImage(fileInput) {
   }
 }
 
+let sponsorOn = false;
+function toggleSponsor() {
+  sponsorOn = !sponsorOn;
+  const toggle = document.getElementById('sponsor-toggle');
+  const section = document.getElementById('sponsor-section');
+  toggle.classList.toggle('on', sponsorOn);
+  section.style.display = sponsorOn ? 'block' : 'none';
+}
+
 async function createDebate() {
   const title   = document.getElementById('c-title').value.trim();
   const context = document.getElementById('c-context').value.trim();
@@ -599,6 +646,13 @@ async function createDebate() {
   if (!title)          { showAlert('create-alert','error','Title is required'); return; }
   if (options.length < 2) { showAlert('create-alert','error','At least 2 options required'); return; }
   if (!closes)         { showAlert('create-alert','error','Close date is required'); return; }
+
+  if (sponsorOn) {
+    const spName = document.getElementById('sp-name').value.trim();
+    const spText = document.getElementById('sp-text').value.trim();
+    if (!spName) { showAlert('create-alert','error','El nombre del sponsor es obligatorio'); return; }
+    if (!spText) { showAlert('create-alert','error','El texto del descuento es obligatorio'); return; }
+  }
 
   const btn = document.querySelector('#create-form .btn');
   btn.disabled = true;
@@ -636,7 +690,41 @@ async function createDebate() {
   btn.textContent = 'Launch Consultation';
 
   if (!r.ok) { showAlert('create-alert','error', d.detail || 'Error creating consultation'); return; }
-  showAlert('create-alert','success','✓ Consultation created and published!');
+
+  // Si es patrocinada, crear sponsor + link
+  if (sponsorOn) {
+    const spName   = document.getElementById('sp-name').value.trim();
+    const spLogo   = document.getElementById('sp-logo').value.trim();
+    const spPct    = parseInt(document.getElementById('sp-pct').value) || 15;
+    const spPrefix = document.getElementById('sp-prefix').value.trim().toUpperCase() || spName.slice(0,3).toUpperCase();
+    const spText   = document.getElementById('sp-text').value.trim();
+    const debateId = d.debate?.id || d.id;
+    try {
+      const sr = await fetch(`${API}/organizers/debates/${debateId}/sponsor`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','Authorization':'Bearer '+token},
+        body: JSON.stringify({ name: spName, logo_url: spLogo, discount_pct: spPct, discount_code_prefix: spPrefix, discount_text: spText })
+      });
+      const sd = await sr.json();
+      if (sr.ok) {
+        showAlert('create-alert','success',`✓ Consulta patrocinada por ${spName} publicada! Código: ${spPrefix}-XXXX-YY`);
+      } else {
+        showAlert('create-alert','success','✓ Consulta creada (sponsor no vinculado: ' + (sd.detail||'error') + ')');
+      }
+    } catch(e) {
+      showAlert('create-alert','success','✓ Consulta creada (sponsor no vinculado: error de red)');
+    }
+    document.getElementById('sp-name').value = '';
+    document.getElementById('sp-logo').value = '';
+    document.getElementById('sp-pct').value = '15';
+    document.getElementById('sp-prefix').value = '';
+    document.getElementById('sp-text').value = '';
+    sponsorOn = false;
+    document.getElementById('sponsor-toggle').classList.remove('on');
+    document.getElementById('sponsor-section').style.display = 'none';
+  } else {
+    showAlert('create-alert','success','✓ Consultation created and published!');
+  }
   hideSimilar();
   setCreatorType('citizen');
   document.getElementById('c-inst-name').value = '';
