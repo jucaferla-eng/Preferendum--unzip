@@ -2847,6 +2847,14 @@ def _calculate_hnw_score(user, db) -> float:
 
 def _assign_user_tier(user, db):
     """Asigna se_tier e income_index combinando comuna + profesión declarada."""
+    with db.no_autoflush:
+        _assign_user_tier_inner(user, db)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+def _assign_user_tier_inner(user, db):
     commune_tier = None
     if user.county:
         country_code = _country_code(user.country)
@@ -3185,8 +3193,6 @@ def _assign_user_tier(user, db):
             user.hnw_score = hnw
     except Exception:
         pass
-
-    db.commit()
 
 
 def _rekognition_client():
