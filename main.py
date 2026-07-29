@@ -10463,6 +10463,10 @@ def admin_reassign_tiers(
             pass
         if u.se_tier != before:
             updated.append({'id': u.id, 'before': before, 'new_tier': u.se_tier})
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
     return {
         'total_eligible': total,
         'batch_size': len(users),
@@ -11022,7 +11026,6 @@ def admin_tier_debug(secret: str, country: str, profession: str, db: Session = D
     prof = profession.lower()
 
     # 1. _OCC_TO_ISCO mapping
-    from main import _OCC_TO_ISCO
     isco_grp = _OCC_TO_ISCO.get(prof)
     result['isco_group'] = isco_grp
 
