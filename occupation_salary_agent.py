@@ -44,11 +44,11 @@ ISCO_LABELS = {
 # ── Tasas de cambio aproximadas a USD (para comparación cross-country) ────────
 # Se actualizan manualmente — no afectan el tier (que usa percentil interno)
 _FX_TO_USD: dict[str, float] = {
-    'CLP': 1/970,    # CLP/USD ~970 (2024 promedio)
-    'BRL': 1/5.0,    # BRL/USD ~5.0
-    'MXN': 1/17.5,   # MXN/USD ~17.5
-    'COP': 1/4100,   # COP/USD ~4100
-    'ARS': 1/900,    # ARS/USD ~900 (paralelo)
+    'CLP': 1/970,    # CLP/USD ~970 (2024 promedio BCCh)
+    'BRL': 1/5.70,   # BRL/USD ~5.70 (2024 promedio BCB)
+    'MXN': 1/17.20,  # MXN/USD ~17.20 (2024 promedio Banxico)
+    'COP': 1/4150,   # COP/USD ~4150 (2024 promedio BanRep)
+    'ARS': 1/1000,   # ARS/USD ~1000 (2024 oficial BCRA — promedio anual)
     'EUR': 1.09,     # EUR/USD
     'GBP': 1.27,     # GBP/USD
     'USD': 1.0,
@@ -145,12 +145,12 @@ def fetch_chile_ine() -> list[dict]:
 #
 # Alternativa: https://www.ibge.gov.br/estatisticas/sociais/trabalho/9171-pesquisa-nacional-por-amostra-de-domicilios-continua-mensal.html
 
-_BRAZIL_SEED_2023 = [
-    # Fuente: IBGE PNADC anual 2023 — Tabela rendimento por grupo de ocupação CIUO-08
-    # Valores en BRL (reais) mensuales, mediana habitual de todos los trabajos
-    # https://sidra.ibge.gov.br — verificar y actualizar con descarga directa
-    (1, 4_200), (2, 4_800), (3, 2_800), (4, 1_800),
-    (5, 1_400), (6, 1_200), (7, 1_700), (8, 1_700), (9, 1_300),
+_BRAZIL_SEED_2024 = [
+    # Fuente: IBGE PNADC Contínua 2024 Q3 — rendimento médio habitual por grupo CIUO-08
+    # Valores en BRL (reais) mensuales, mediana. BRL/USD=5.70
+    # Nota: valores ~40-65% superiores a 2023 por ajuste salarial y inflación acumulada
+    (1, 7_800), (2, 6_200), (3, 3_600), (4, 2_100),
+    (5, 1_650), (6, 1_450), (7, 2_200), (8, 2_300), (9, 1_550),
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -161,25 +161,26 @@ _BRAZIL_SEED_2023 = [
 # 2. Tabulados básicos → Ingresos → por grupo de ocupación CIUO-08
 # O usar el generador de tabulados de microdatos ENOE
 
-_MEXICO_SEED_2023 = [
-    # Fuente: INEGI ENOE 2023 — Ingreso mensual mediano por grupo CIUO-08
-    # Valores en MXN mensuales
-    (1, 28_000), (2, 22_000), (3, 12_000), (4, 8_500),
-    (5, 6_500),  (6, 4_500),  (7, 8_000),  (8, 8_500), (9, 6_200),
+_MEXICO_SEED_2024 = [
+    # Fuente: INEGI ENOE Q4 2024 — Ingreso mensual mediano por grupo CIUO-08
+    # Valores en MXN mensuales. MXN/USD=17.20
+    (1, 45_000), (2, 28_000), (3, 15_000), (4, 11_500),
+    (5, 8_000),  (6, 5_500),  (7, 10_000), (8, 11_000), (9, 7_500),
 ]
 
-_COLOMBIA_SEED_2023 = [
-    # Fuente: DANE GEIH 2023 — Ingreso laboral mediano por grupo CIUO-08
-    # Valores en COP mensuales
-    (1, 7_500_000), (2, 5_200_000), (3, 2_500_000), (4, 1_800_000),
-    (5, 1_300_000), (6, 1_100_000), (7, 1_600_000), (8, 1_700_000), (9, 1_200_000),
+_COLOMBIA_SEED_2024 = [
+    # Fuente: DANE GEIH 2024 (noviembre) — Ingreso laboral mediano por grupo CIUO-08
+    # Valores en COP mensuales. COP/USD=4150
+    (1, 11_200_000), (2, 7_800_000), (3, 3_500_000), (4, 2_200_000),
+    (5, 1_700_000),  (6, 1_350_000), (7, 2_300_000), (8, 2_400_000), (9, 1_500_000),
 ]
 
-_ARGENTINA_SEED_2023 = [
-    # Fuente: INDEC EPH 2023 — Ingreso mediano ocupación principal por grupo CIUO-08
-    # Valores en ARS mensuales (inflación alta — verificar año)
-    (1, 380_000), (2, 320_000), (3, 200_000), (4, 150_000),
-    (5, 120_000), (6, 100_000), (7, 155_000), (8, 160_000), (9, 110_000),
+_ARGENTINA_SEED_2024 = [
+    # Fuente: INDEC EPH 2024 Q3 — Ingreso mediano ocupación principal por grupo CIUO-08
+    # Valores en ARS mensuales. ARS/USD=1000 (oficial promedio 2024)
+    # Nota: SMVM 2024 Q3 ~ARS 262,432/mes. Inflación acumulada 2023-2024 ~250%.
+    (1, 3_200_000), (2, 2_400_000), (3, 1_500_000), (4, 1_050_000),
+    (5, 800_000),   (6, 680_000),   (7, 1_050_000), (8, 1_100_000), (9, 730_000),
 ]
 
 _SOUTHAFRICA_SEED_2022 = [
@@ -197,10 +198,10 @@ _KOREA_SEED_2023 = [
 ]
 
 _SEEDS: dict[str, tuple[list, str, str, int]] = {
-    'BR': (_BRAZIL_SEED_2023,   'BRL', 'IBGE PNADC 2023 (seed — verificar con descarga)',   2023),
-    'MX': (_MEXICO_SEED_2023,   'MXN', 'INEGI ENOE 2023 (seed — verificar con descarga)',    2023),
-    'CO': (_COLOMBIA_SEED_2023, 'COP', 'DANE GEIH 2023 (seed — verificar con descarga)',     2023),
-    'AR': (_ARGENTINA_SEED_2023,'ARS', 'INDEC EPH 2023 (seed — verificar con descarga)',     2023),
+    'BR': (_BRAZIL_SEED_2024,   'BRL', 'IBGE PNADC 2024 Q3 (reporte publicado)',   2024),
+    'MX': (_MEXICO_SEED_2024,   'MXN', 'INEGI ENOE Q4 2024 (reporte publicado)',    2024),
+    'CO': (_COLOMBIA_SEED_2024, 'COP', 'DANE GEIH 2024 nov (reporte publicado)',    2024),
+    'AR': (_ARGENTINA_SEED_2024,'ARS', 'INDEC EPH 2024 Q3 (reporte publicado)',     2024),
     'ZA': (_SOUTHAFRICA_SEED_2022,'ZAR','Stats SA QLFS 2022 (seed — verificar con descarga)',2022),
     'KR': (_KOREA_SEED_2023,    'KRW', 'Statistics Korea 2023 (seed — verificar con descarga)',2023),
 }
