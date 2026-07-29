@@ -3040,6 +3040,13 @@ def _assign_user_tier(user, db):
                 pass
         if not profession_tier:
             profession_tier = _PROFESSION_TIER.get(user_profession, None)
+        # El tier estático actúa como piso mínimo: un médico nunca puede ser Tier C
+        # aunque el score ILO/ISCO caiga en ese rango por distribución local
+        _static_floor = _PROFESSION_TIER.get(user_profession, None)
+        if _static_floor and profession_tier:
+            profession_tier = max(profession_tier, _static_floor, key=_tier_rank)
+        elif _static_floor:
+            profession_tier = _static_floor
 
     # Fallback de ingreso por commune cuando no hay dato de ocupación
     if not user.estimated_income_usd and _country_median_income and user.income_index and user.income_index > 0:
