@@ -3109,6 +3109,25 @@ def _assign_user_tier_inner(user, db):
         elif _static_floor:
             profession_tier = _static_floor
 
+    # Ingreso regional para JP/RU (datos oficiales por prefectura/sujeto federal)
+    if not user.estimated_income_usd:
+        if user_country_code == 'JP':
+            try:
+                from japan_wages_agent import get_japan_income
+                jp = get_japan_income(getattr(user, 'county', None), db)
+                if jp:
+                    user.estimated_income_usd = jp['annual_usd']
+            except Exception:
+                pass
+        elif user_country_code == 'RU':
+            try:
+                from russia_wages_agent import get_russia_income
+                ru = get_russia_income(getattr(user, 'county', None), db)
+                if ru:
+                    user.estimated_income_usd = ru['annual_usd']
+            except Exception:
+                pass
+
     # Fallback de ingreso por commune cuando no hay dato de ocupación
     if not user.estimated_income_usd and _country_median_income and user.income_index and user.income_index > 0:
         user.estimated_income_usd = round(_country_median_income * (user.income_index / 50.0), 0)
@@ -11264,6 +11283,92 @@ def admin_china_wages_lookup(secret: str, city: str, isco: int, db: Session = De
     from china_wages_agent import get_china_income
     result = get_china_income(city, isco, db)
     return result or {'found': False, 'city': city, 'isco_group': isco}
+
+
+@app.post('/admin/import-korea-wages')
+def admin_import_korea_wages(secret: str, db: Session = Depends(get_db)):
+    """Importa datos salariales Korea: MOEL 2024, grupos ISCO 1-9 (KSCO), KRW→USD."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        local_db = SessionLocal()
+        try:
+            from korea_wages_agent import run_korea_wages_import
+            result_holder['result'] = run_korea_wages_import(local_db)
+        finally:
+            local_db.close()
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=60)
+    if not result_holder:
+        return {'ok': True, 'message': 'Import Korea wages iniciado (ver logs)'}
+    return result_holder.get('result', {'ok': False})
+
+
+@app.post('/admin/import-japan-wages')
+def admin_import_japan_wages(secret: str, db: Session = Depends(get_db)):
+    """Importa datos salariales Japan: e-Stat MHLW 2024, 47 prefecturas, JPY→USD."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        local_db = SessionLocal()
+        try:
+            from japan_wages_agent import run_japan_wages_import
+            result_holder['result'] = run_japan_wages_import(local_db)
+        finally:
+            local_db.close()
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=60)
+    if not result_holder:
+        return {'ok': True, 'message': 'Import Japan wages iniciado (ver logs)'}
+    return result_holder.get('result', {'ok': False})
+
+
+@app.get('/admin/japan-wages/lookup')
+def admin_japan_wages_lookup(secret: str, prefecture: str, db: Session = Depends(get_db)):
+    """Busca salario para usuario japonés (ej: prefecture=Tokyo)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from japan_wages_agent import get_japan_income
+    result = get_japan_income(prefecture, db)
+    return result or {'found': False, 'prefecture': prefecture}
+
+
+@app.post('/admin/import-russia-wages')
+def admin_import_russia_wages(secret: str, db: Session = Depends(get_db)):
+    """Importa datos salariales Rusia: Rosstat 2024, 85+ sujetos federales, RUB→USD."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        local_db = SessionLocal()
+        try:
+            from russia_wages_agent import run_russia_wages_import
+            result_holder['result'] = run_russia_wages_import(local_db)
+        finally:
+            local_db.close()
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=60)
+    if not result_holder:
+        return {'ok': True, 'message': 'Import Russia wages iniciado (ver logs)'}
+    return result_holder.get('result', {'ok': False})
+
+
+@app.get('/admin/russia-wages/lookup')
+def admin_russia_wages_lookup(secret: str, region: str, db: Session = Depends(get_db)):
+    """Busca salario para usuario ruso (ej: region=Moscow)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from russia_wages_agent import get_russia_income
+    result = get_russia_income(region, db)
+    return result or {'found': False, 'region': region}
 
 
 @app.post('/admin/nuts-pipeline/run')
