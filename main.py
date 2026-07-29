@@ -3021,6 +3021,24 @@ def _assign_user_tier(user, db):
         except Exception:
             pass
         if not profession_tier:
+            # occupation_salary: datos reales INE ESI (CL) y seeds LATAM (BR/MX/CO/AR)
+            try:
+                from occupation_salary_agent import PROFESSION_TO_ISCO as _PROF_TO_ISCO
+                from usa_data_agent import profession_score_to_tier as _pts
+                _occ_isco = _PROF_TO_ISCO.get(user_profession)
+                if _occ_isco:
+                    _occ_row = db.execute(text("""
+                        SELECT profession_score, median_monthly_usd
+                        FROM occupation_salary
+                        WHERE country_iso=:c AND isco_group=:g
+                    """), {'c': user_country_code, 'g': _occ_isco}).fetchone()
+                    if _occ_row and _occ_row[0] is not None:
+                        profession_tier = _pts(float(_occ_row[0]))
+                        if _occ_row[1] and not user.estimated_income_usd:
+                            user.estimated_income_usd = round(float(_occ_row[1]) * 12, 0)
+            except Exception:
+                pass
+        if not profession_tier:
             profession_tier = _PROFESSION_TIER.get(user_profession, None)
 
     # Fallback de ingreso por commune cuando no hay dato de ocupación
