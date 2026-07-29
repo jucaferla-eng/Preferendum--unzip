@@ -11005,6 +11005,57 @@ def admin_occupation_lookup(secret: str, country: str, profession: str, db: Sess
         'found': score is not None,
     }
 
+@app.get('/admin/tier-debug')
+def admin_tier_debug(secret: str, country: str, profession: str, db: Session = Depends(get_db)):
+    """Muestra cada fuente de datos usada para asignar tier a un país+profesión."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    result = {'country': country.upper(), 'profession': profession.lower(), 'sources': {}}
+    cc = country.upper()
+    prof = profession.lower()
+
+    # 1. _OCC_TO_ISCO mapping
+    from main import _OCC_TO_ISCO
+    isco_grp = _OCC_TO_ISCO.get(prof)
+    result['isco_group'] = isco_grp
+
+    # 2. ILO data
+    try:
+        from ilo_ilostat_agent import get_ilo_income
+        ilo = get_ilo_income(cc, isco_grp, db) if isco_grp else None
+        result['sources']['ilo'] = ilo
+    except Exception as e:
+        result['sources']['ilo'] = {'error': str(e)}
+
+    # 3. occupation_salary directo
+    if isco_grp:
+        row = db.execute(text("""
+            SELECT profession_score, median_monthly_usd, median_monthly_local, currency, source, year
+            FROM occupation_salary WHERE country_iso=:c AND isco_group=:g
+        """), {'c': cc, 'g': isco_grp}).fetchone()
+        result['sources']['occupation_salary'] = dict(zip(
+            ['profession_score','median_monthly_usd','median_monthly_local','currency','source','year'],
+            row
+        )) if row else None
+
+    # 4. occupation_unified ISCO
+    if isco_grp:
+        row2 = db.execute(text("""
+            SELECT profession_score, median_annual_usd FROM occupation_unified
+            WHERE country_iso=:cc AND isco_group=:ig AND occupation_type='ISCO' AND profession_score IS NOT NULL LIMIT 1
+        """), {'cc': cc, 'ig': isco_grp}).fetchone()
+        result['sources']['occupation_unified'] = {'profession_score': row2[0], 'median_annual_usd': row2[1]} if row2 else None
+
+    # 5. static _PROFESSION_TIER fallback
+    result['sources']['static_tier'] = _PROFESSION_TIER.get(prof)
+
+    # 6. commune data for CL (Vitacura como ejemplo)
+    commune_ex = db.execute(text(
+        "SELECT se_tier, income_index FROM commune_market_data WHERE country=:cc AND commune ILIKE 'Vitacura' LIMIT 1"
+    ), {'cc': cc}).fetchone()
+    result['commune_example_vitacura'] = {'se_tier': commune_ex[0], 'income_index': commune_ex[1]} if commune_ex else None
+
+    return result
 
 @app.post('/admin/import-ilo-wages')
 def admin_import_ilo_wages(secret: str, db: Session = Depends(get_db)):
