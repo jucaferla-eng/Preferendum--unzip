@@ -10214,6 +10214,14 @@ def get_communes(country: str = None, se_tier: str = None, search: str = None, l
         q = q.filter(CommuneMarketData.se_tier == se_tier)
     if search:
         q = q.filter(CommuneMarketData.commune.ilike(f'%{search}%'))
+        # Excluir entradas que son solo códigos numéricos (prefijos zip como "100", "021")
+        q = q.filter(
+            ~CommuneMarketData.commune.op('~')(r'^[0-9]{2,6}$')
+        ).filter(
+            CommuneMarketData.commune != ''
+        ).filter(
+            func.length(CommuneMarketData.commune) > 3
+        )
     rows = q.order_by(CommuneMarketData.income_index.desc()).limit(limit).all()
     if not rows:
         # Sin datos en BD — usar fallback
@@ -12042,6 +12050,24 @@ def pilot_live_dashboard(debate_id: int, db: Session = Depends(get_db)):
     }
 
 # ══════════════════════════════════════════════════════════════
+
+@app.post('/admin/fix-commune-tiers')
+def admin_fix_commune_tiers(secret: str, db: Session = Depends(get_db)):
+    """Recalcula se_tier para todas las comunas con valor corrupto (más de 1 letra)."""
+    _check_admin(secret)
+    rows = db.query(CommuneMarketData).filter(
+        func.length(CommuneMarketData.se_tier) != 1
+    ).all()
+    fixed = 0
+    for r in rows:
+        idx = r.income_index or 0
+        if idx >= 80:   r.se_tier = 'A'
+        elif idx >= 50: r.se_tier = 'B'
+        elif idx >= 25: r.se_tier = 'C'
+        else:           r.se_tier = 'D'
+        fixed += 1
+    db.commit()
+    return {'ok': True, 'fixed': fixed}
 
 @app.post('/admin/verify-user')
 def admin_verify_user(user_id: int, secret: str, db: Session = Depends(get_db)):
