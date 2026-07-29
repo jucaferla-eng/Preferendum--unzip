@@ -10376,21 +10376,37 @@ if (!secret) {
 
 
 @app.post('/admin/reassign-tiers')
-def admin_reassign_tiers(secret: str, force: bool = False, db: Session = Depends(get_db)):
-    """Re-corre _assign_user_tier. force=true recalcula TODOS los usuarios."""
+def admin_reassign_tiers(
+    secret: str, force: bool = False,
+    batch: int = 50, offset: int = 0,
+    db: Session = Depends(get_db)
+):
+    """Re-corre _assign_user_tier en batches para evitar timeout.
+    Usa offset+batch para paginar: offset=0,50,100,..."""
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
-    if force:
-        users = db.query(User).all()
-    else:
-        users = db.query(User).filter((User.se_tier == None) | (User.se_tier == '')).all()
+    q = db.query(User)
+    if not force:
+        q = q.filter((User.se_tier == None) | (User.se_tier == ''))
+    total = q.count()
+    users = q.offset(offset).limit(batch).all()
     updated = []
     for u in users:
         before = u.se_tier
-        _assign_user_tier(u, db)
+        try:
+            _assign_user_tier(u, db)
+        except Exception:
+            pass
         if u.se_tier != before:
-            updated.append({'id': u.id, 'email': u.email, 'county': u.county, 'before': before, 'new_tier': u.se_tier})
-    return {'checked': len(users), 'updated': updated}
+            updated.append({'id': u.id, 'before': before, 'new_tier': u.se_tier})
+    return {
+        'total_eligible': total,
+        'batch_size': len(users),
+        'offset': offset,
+        'next_offset': offset + batch if offset + batch < total else None,
+        'updated_in_batch': len(updated),
+        'updated': updated,
+    }
 
 
 @app.get('/admin/debug-user')
