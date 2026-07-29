@@ -1849,19 +1849,30 @@ def voter_register(data: VoterRegisterInput, bg: BackgroundTasks, db: Session = 
         company_size=data.company_size or '',
         ref_source=data.ref_source or '',
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    _assign_user_tier(user, db)
+    try:
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    except Exception as _e:
+        db.rollback()
+        raise HTTPException(500, f'DB error al crear usuario: {str(_e)}')
+    try:
+        _assign_user_tier(user, db)
+    except Exception as _e:
+        print(f'[voter_register] _assign_user_tier non-fatal error: {_e}')
     code = gen_otp()
-    check_and_register_device(data.device_fp, user.id, db)
-    db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
-                   expires_at=datetime.utcnow() + timedelta(minutes=15)))
-    db.commit()
+    try:
+        check_and_register_device(data.device_fp, user.id, db)
+        db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
+                       expires_at=datetime.utcnow() + timedelta(minutes=15)))
+        db.commit()
+    except Exception as _e:
+        print(f'[voter_register] OTP/device error (non-fatal): {_e}')
     bg.add_task(send_email_otp, user.email, code, user.name)
     return {'token': make_token(user.id), 'user': {
         'id': user.id, 'name': user.name, 'email': user.email,
-        'email_verified': False, 'phone': data.phone
+        'email_verified': False, 'phone': data.phone,
+        'se_tier': user.se_tier or '',
     }}
 
 
