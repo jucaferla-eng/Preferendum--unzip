@@ -859,6 +859,10 @@ def get_current_user(
         user = db.query(User).filter(User.id == int(payload['sub'])).first()
         if not user:
             raise HTTPException(404, 'User not found')
+        # Rol del token tiene prioridad sobre el de la DB (permite override via admin/user-token)
+        token_role = payload.get('role', '')
+        if token_role:
+            user.role = token_role
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, 'Token expired')
