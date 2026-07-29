@@ -1811,6 +1811,16 @@ class VoterRegisterInput(BaseModel):
 @app.post('/voter/register')
 def voter_register(data: VoterRegisterInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
     """Register a voter — sends email OTP for verification."""
+    try:
+        return _voter_register_inner(data, bg, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f'[voter_register] UNCAUGHT: {traceback.format_exc()}')
+        raise HTTPException(500, f'Error interno: {str(e)}')
+
+def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
     if not data.national_id or not data.national_id.strip():
         raise HTTPException(400, 'El documento de identidad (RUT/DNI/CPF) es obligatorio')
     # Normalize and check national ID not already registered
