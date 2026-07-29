@@ -10507,23 +10507,31 @@ def admin_reassign_tiers(
     if not force:
         q = q.filter((User.se_tier == None) | (User.se_tier == ''))
     total = q.count()
-    users = q.offset(offset).limit(batch).all()
+    user_ids = [u.id for u in q.offset(offset).limit(batch).all()]
     updated = []
-    for u in users:
-        before = u.se_tier
+    for uid in user_ids:
+        # Sesión fresca por usuario — evita contaminación de TX entre iteraciones
+        local_db = SessionLocal()
         try:
-            _assign_user_tier(u, db)
+            u = local_db.query(User).filter(User.id == uid).first()
+            if not u:
+                continue
+            before = u.se_tier or ''
+            _assign_user_tier(u, local_db)
+            local_db.refresh(u)
+            after = u.se_tier or ''
+            if after != before:
+                updated.append({'id': uid, 'before': before, 'new_tier': after})
         except Exception:
-            pass
-        if u.se_tier != before:
-            updated.append({'id': u.id, 'before': before, 'new_tier': u.se_tier})
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
+            try:
+                local_db.rollback()
+            except Exception:
+                pass
+        finally:
+            local_db.close()
     return {
         'total_eligible': total,
-        'batch_size': len(users),
+        'batch_size': len(user_ids),
         'offset': offset,
         'next_offset': offset + batch if offset + batch < total else None,
         'updated_in_batch': len(updated),
