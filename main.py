@@ -2847,10 +2847,37 @@ def _calculate_hnw_score(user, db) -> float:
 
 def _assign_user_tier(user, db):
     """Asigna se_tier e income_index combinando comuna + profesión declarada."""
-    with db.no_autoflush:
-        _assign_user_tier_inner(user, db)
     try:
+        with db.no_autoflush:
+            _assign_user_tier_inner(user, db)
+    except Exception:
+        pass
+
+    # Capturar valores calculados (están en el objeto Python aunque la TX esté abortada)
+    _new_tier  = user.se_tier
+    _new_index = user.income_index
+    _new_est   = getattr(user, 'estimated_income_usd', None)
+    _new_hnw   = getattr(user, 'hnw_score', None)
+
+    if not _new_tier:
+        return
+
+    # Limpiar cualquier transacción PostgreSQL abortada antes del UPDATE final
+    try:
+        db.rollback()
+    except Exception:
+        pass
+
+    # UPDATE directo por SQL — no depende del ORM flush, funciona aunque la TX anterior haya fallado
+    try:
+        db.execute(text(
+            "UPDATE users SET se_tier=:t, income_index=:i, estimated_income_usd=:e WHERE id=:uid"
+        ), {'t': _new_tier, 'i': _new_index or 0, 'e': _new_est, 'uid': user.id})
         db.commit()
+        user.se_tier              = _new_tier
+        user.income_index         = _new_index
+        if hasattr(user, 'estimated_income_usd'):
+            user.estimated_income_usd = _new_est
     except Exception:
         db.rollback()
 
@@ -11113,8 +11140,7 @@ def admin_tier_assign_test(user_id: int, secret: str, db: Session = Depends(get_
     }
     error_msg = None
     try:
-        _assign_user_tier_inner(user, db)
-        db.commit()
+        _assign_user_tier(user, db)
         db.refresh(user)
     except Exception as _e:
         db.rollback()
