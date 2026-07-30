@@ -11339,14 +11339,14 @@ def admin_wages_ranking(secret: str, db: Session = Depends(get_db)):
 
     # 2. occupation_salary (CA, AU, KR, CN, CL, BR, MX, CO, AR, etc.)
     occ_rows = db.execute(text("""
-        SELECT country_iso, isco_group, median_monthly_usd
+        SELECT country_iso, isco_group, median_monthly_usd, median_monthly_ppp_usd
         FROM occupation_salary
         WHERE median_monthly_usd IS NOT NULL AND median_monthly_usd > 0
     """)).fetchall()
-    occ_map: dict[tuple, float] = {}
+    occ_map: dict[tuple, tuple] = {}
     for r in occ_rows:
         key = (r[0], r[1])
-        occ_map[key] = float(r[2])
+        occ_map[key] = (float(r[2]), float(r[3]) if r[3] else None)
 
     # 3. USA desde occupation_unified (mediana por ISCO group)
     us_rows = db.execute(text("""
@@ -11358,34 +11358,61 @@ def admin_wages_ranking(secret: str, db: Session = Depends(get_db)):
     """)).fetchall()
     us_map: dict[int, float] = {r[0]: round(float(r[1]), 2) for r in us_rows if r[1]}
 
-    # Combinar: occupation_salary > ILO (datos país-específicos tienen prioridad)
-    combined: dict[tuple, float] = {}
+    # Combinar: occupation_salary > ILO. combined = {(cc,isco): (nominal, ppp)}
+    combined: dict[tuple, tuple] = {}
     for key, val in ilo_map.items():
-        combined[key] = val
-    for key, val in occ_map.items():
-        combined[key] = val
+        combined[key] = (val, None)
+    for key, val_tuple in occ_map.items():
+        combined[key] = val_tuple
     for isco, val in us_map.items():
-        combined[('US', isco)] = val
+        existing_ppp = combined.get(('US', isco), (val, None))[1]
+        combined[('US', isco)] = (val, existing_ppp)
 
-    # Construir ranking por ISCO con nominal + PPP
+    # Construir ranking por ISCO con nominal + PPP real (ILOSTAT) o estimado (World Bank PLI)
     result = {}
     for isco_grp, label in ISCO_LABELS.items():
         entries = []
-        for (cc, ig), val in combined.items():
+        for (cc, ig), (nominal, ppp_real) in combined.items():
             if ig != isco_grp:
                 continue
             pli = PLI.get(cc)
-            ppp = round(val / pli, 0) if pli else None
+            ppp = round(ppp_real, 0) if ppp_real else (round(nominal / pli, 0) if pli else None)
+            ppp_source = 'ILOSTAT' if ppp_real else ('World Bank PLI' if pli else None)
             entries.append({
-                'country':       cc,
-                'monthly_usd':   round(val, 0),
+                'country':         cc,
+                'monthly_usd':     round(nominal, 0),
                 'monthly_ppp_usd': ppp,
-                'pli':           pli,
+                'ppp_source':      ppp_source,
+                'pli':             pli,
             })
         entries.sort(key=lambda x: x['monthly_usd'], reverse=True)
         result[f'ISCO_{isco_grp}_{label}'] = entries
 
     return result
+
+
+@app.post('/admin/import-ppp-ilo')
+def admin_import_ppp_ilo(secret: str, db: Session = Depends(get_db)):
+    """Importa curva salarial PPP ILOSTAT 10 países (BGD,BRA,CHN,COL,FRA,GBR,MEX,NOR,RUS,USA).
+    Actualiza median_monthly_ppp_usd en occupation_salary con valores PPP reales (dólares internacionales).
+    Crea occupation_salary_ceo con nivel CEO/Alta Dirección (ISCO 0)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        local_db = SessionLocal()
+        try:
+            from ppp_ilo_agent import run_ppp_ilo_import
+            result_holder['result'] = run_ppp_ilo_import(local_db)
+        finally:
+            local_db.close()
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=60)
+    if not result_holder:
+        return {'ok': True, 'message': 'Import PPP ILO iniciado (ver logs)'}
+    return result_holder.get('result', {'ok': False})
 
 
 @app.post('/admin/apply-ppp')
