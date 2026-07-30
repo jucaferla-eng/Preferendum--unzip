@@ -3141,6 +3141,22 @@ def _assign_user_tier_inner(user, db):
                     user.estimated_income_usd = ru_occ['annual_usd']
             except Exception:
                 pass
+        elif user_country_code in ('NO', 'SE', 'DK'):
+            try:
+                from scandinavia_wages_agent import get_scandinavia_occupation_income
+                from usa_data_agent import profession_score_to_tier as _pts
+                sc_occ = get_scandinavia_occupation_income(user_country_code, user_profession, db)
+                if sc_occ:
+                    # Score basado en ratio vs ISCO 1 del mismo país
+                    sc_isco1 = db.execute(text(
+                        "SELECT median_monthly_usd FROM occupation_salary WHERE country_iso=:cc AND isco_group=1"
+                    ), {'cc': user_country_code}).fetchone()
+                    if sc_isco1 and sc_isco1[0]:
+                        sc_score = min(100, round(sc_occ['monthly_usd'] / float(sc_isco1[0]) * 100, 1))
+                        profession_tier = _pts(sc_score)
+                    user.estimated_income_usd = sc_occ['annual_usd']
+            except Exception:
+                pass
 
     # Ingreso regional para JP/RU (datos oficiales por prefectura/sujeto federal)
     if not user.estimated_income_usd:
@@ -11387,6 +11403,28 @@ def admin_china_wages_lookup(secret: str, city: str, isco: int, db: Session = De
     from china_wages_agent import get_china_income
     result = get_china_income(city, isco, db)
     return result or {'found': False, 'city': city, 'isco_group': isco}
+
+
+@app.post('/admin/import-scandinavia-wages')
+def admin_import_scandinavia_wages(secret: str, db: Session = Depends(get_db)):
+    """Importa salarios NO/SE/DK: 10 ocupaciones × 3 países, 2026. Fuente: SSB/SCB/DST."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        local_db = SessionLocal()
+        try:
+            from scandinavia_wages_agent import run_scandinavia_wages_import
+            result_holder['result'] = run_scandinavia_wages_import(local_db)
+        finally:
+            local_db.close()
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=60)
+    if not result_holder:
+        return {'ok': True, 'message': 'Import Scandinavia wages iniciado'}
+    return result_holder.get('result', {'ok': False})
 
 
 @app.post('/admin/import-australia-wages')
