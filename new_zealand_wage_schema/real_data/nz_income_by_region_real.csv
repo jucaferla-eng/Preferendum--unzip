@@ -1,0 +1,18 @@
+admin_code,admin_level,region_name_en,country_iso,income_value,income_type,currency,income_period,year,classification_system,data_availability,source,last_updated
+NZ-NAT,0,New Zealand,NZ,41500,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,national,https://www.stats.govt.nz/assets/2023-Census/Aotearoa-New-Zealand-Village-of-100-people/English-copy-of-Aotearoa-New-Zealand-as-a-village-of-100-people.pdf,2023-01-01
+01,1,Northland,NZ,33100,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/northland-region,2023-01-01
+02,1,Auckland,NZ,44700,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/auckland-region,2023-01-01
+03,1,Waikato,NZ,40300,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/waikato-region,2023-01-01
+04,1,Bay of Plenty,NZ,39000,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/bay-of-plenty-region,2023-01-01
+05,1,Gisborne,NZ,35800,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/gisborne-region,2023-01-01
+06,1,Hawke's Bay,NZ,39300,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/hawkes-bay-region,2023-01-01
+07,1,Taranaki,NZ,38400,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/taranaki-region,2023-01-01
+08,1,Manawatū-Whanganui,NZ,36400,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/manawatu-whanganui-region,2023-01-01
+09,1,Wellington,NZ,48700,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/wellington-region,2023-01-01
+12,1,West Coast,NZ,32700,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/west-coast-region,2023-01-01
+13,1,Canterbury,NZ,41400,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/canterbury-region,2023-01-01
+14,1,Otago,NZ,39100,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/otago-region,2023-01-01
+15,1,Southland,NZ,41100,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/southland-region,2023-01-01
+16,1,Tasman,NZ,35900,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/tasman-region,2023-01-01
+17,1,Nelson,NZ,38800,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/nelson-region,2023-01-01
+18,1,Marlborough,NZ,39400,median_personal_income_census,NZD,annual,2023,SSGA23_REGIONAL_COUNCIL,regional_council,https://tools.summaries.stats.govt.nz/places/RC/marlborough-region,2023-01-01

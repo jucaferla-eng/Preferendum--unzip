@@ -1,0 +1,17 @@
+admin_code,occupation_category,occupation_code,wage_value,currency,wage_period,wage_measure,year,classification_system,data_availability,source,last_updated,country_iso
+NZ-NAT,Managers,1,1726,NZD,weekly,median_weekly_earnings,2025,ANZSCO_MAJOR,national_only,https://figure.nz/chart/MSIRisSBOv6iKHAP-oW6jSl418a6rsXXh,2025-08-27,NZ
+NZ-NAT,Professionals,2,1784,NZD,weekly,median_weekly_earnings,2025,ANZSCO_MAJOR,national_only,https://figure.nz/chart/MSIRisSBOv6iKHAP-oW6jSl418a6rsXXh,2025-08-27,NZ
+NZ-NAT,Technicians and Trades Workers,3,1330,NZD,weekly,median_weekly_earnings,2025,ANZSCO_MAJOR,national_only,https://figure.nz/chart/MSIRisSBOv6iKHAP-oW6jSl418a6rsXXh,2025-08-27,NZ
+NZ-NAT,Community and Personal Service Workers,4,1002,NZD,weekly,median_weekly_earnings,2025,ANZSCO_MAJOR,national_only,https://figure.nz/chart/MSIRisSBOv6iKHAP-oW6jSl418a6rsXXh,2025-08-27,NZ
+NZ-NAT,Clerical and Administrative Workers,5,1296,NZD,weekly,median_weekly_earnings,2025,ANZSCO_MAJOR,national_only,https://figure.nz/chart/MSIRisSBOv6iKHAP-oW6jSl418a6rsXXh,2025-08-27,NZ
+NZ-NAT,Sales Workers,6,950,NZD,weekly,median_weekly_earnings,2025,ANZSCO_MAJOR,national_only,https://figure.nz/chart/MSIRisSBOv6iKHAP-oW6jSl418a6rsXXh,2025-08-27,NZ
+NZ-NAT,Machinery Operators and Drivers,7,1299,NZD,weekly,median_weekly_earnings,2025,ANZSCO_MAJOR,national_only,https://figure.nz/chart/MSIRisSBOv6iKHAP-oW6jSl418a6rsXXh,2025-08-27,NZ
+NZ-NAT,Labourers,8,1040,NZD,weekly,median_weekly_earnings,2025,ANZSCO_MAJOR,national_only,https://figure.nz/chart/MSIRisSBOv6iKHAP-oW6jSl418a6rsXXh,2025-08-27,NZ
+NZ-NAT,Other / Residual,,1200,NZD,weekly,median_weekly_earnings,2025,ANZSCO_MAJOR,national_only,https://figure.nz/chart/MSIRisSBOv6iKHAP-oW6jSl418a6rsXXh,2025-08-27,NZ
+NZ-NAT,Total,,1380,NZD,weekly,median_weekly_earnings_all_jobs,2025,ANZSCO_MAJOR,national_only,https://www.stats.govt.nz/information-releases/labour-market-statistics-income-june-2025-quarter/,2025-08-27,NZ
+NZ-NAT,Total,,1500,NZD,weekly,median_weekly_earnings_all_jobs_men,2025,ANZSCO_MAJOR,national_only,https://www.stats.govt.nz/information-releases/labour-market-statistics-income-june-2025-quarter/,2025-08-27,NZ
+NZ-NAT,Total,,1247,NZD,weekly,median_weekly_earnings_all_jobs_women,2025,ANZSCO_MAJOR,national_only,https://www.stats.govt.nz/information-releases/labour-market-statistics-income-june-2025-quarter/,2025-08-27,NZ
+NZ-NAT,Total,,35.00,NZD,hourly,median_hourly_earnings,2025,ANZSCO_MAJOR,national_only,https://www.stats.govt.nz/information-releases/labour-market-statistics-income-june-2025-quarter/,2025-08-27,NZ
+NZ-NAT,Total,,36.53,NZD,hourly,median_hourly_earnings_fulltime,2025,ANZSCO_MAJOR,national_only,https://www.stats.govt.nz/information-releases/labour-market-statistics-income-june-2025-quarter/,2025-08-27,NZ
+NZ-NAT,Total,,27.50,NZD,hourly,median_hourly_earnings_parttime,2025,ANZSCO_MAJOR,national_only,https://www.stats.govt.nz/information-releases/labour-market-statistics-income-june-2025-quarter/,2025-08-27,NZ
+NZ-NAT,Total,,959,NZD,weekly,median_weekly_income_all_sources,2025,ANZSCO_MAJOR,national_only,https://www.stats.govt.nz/information-releases/labour-market-statistics-income-june-2025-quarter/,2025-08-27,NZ

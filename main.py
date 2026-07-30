@@ -3157,8 +3157,18 @@ def _assign_user_tier_inner(user, db):
                     user.estimated_income_usd = sc_occ['annual_usd']
             except Exception:
                 pass
+        elif user_country_code == 'SG':
+            try:
+                from singapore_wages_agent import get_singapore_occupation_income
+                from usa_data_agent import profession_score_to_tier as _pts
+                sg_occ = get_singapore_occupation_income(user_profession, db)
+                if sg_occ and sg_occ.get('score') is not None:
+                    profession_tier = _pts(sg_occ['score'])
+                    user.estimated_income_usd = sg_occ['annual_usd']
+            except Exception:
+                pass
 
-    # Ingreso regional para JP/RU (datos oficiales por prefectura/sujeto federal)
+    # Ingreso regional para JP/RU/NZ (datos oficiales por prefectura/sujeto federal/región)
     if not user.estimated_income_usd:
         if user_country_code == 'JP':
             try:
@@ -3174,6 +3184,14 @@ def _assign_user_tier_inner(user, db):
                 ru = get_russia_income(getattr(user, 'county', None), db)
                 if ru:
                     user.estimated_income_usd = ru['annual_usd']
+            except Exception:
+                pass
+        elif user_country_code == 'NZ':
+            try:
+                from new_zealand_wages_agent import get_new_zealand_income
+                nz = get_new_zealand_income(getattr(user, 'county', None), db)
+                if nz:
+                    user.estimated_income_usd = nz['annual_usd']
             except Exception:
                 pass
 
@@ -11555,6 +11573,50 @@ def admin_russia_wages_lookup(secret: str, region: str, db: Session = Depends(ge
     from russia_wages_agent import get_russia_income
     result = get_russia_income(region, db)
     return result or {'found': False, 'region': region}
+
+
+@app.post('/admin/import-singapore-wages')
+def admin_import_singapore_wages(secret: str, db: Session = Depends(get_db)):
+    """Importa datos salariales Singapore: MOM 2025, ~530 ocupaciones SSOC, SGD→USD."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        local_db = SessionLocal()
+        try:
+            from singapore_wages_agent import run_singapore_wages_import
+            result_holder['result'] = run_singapore_wages_import(local_db)
+        finally:
+            local_db.close()
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=60)
+    if not result_holder:
+        return {'ok': True, 'message': 'Import Singapore wages iniciado (ver logs)'}
+    return result_holder.get('result', {'ok': False})
+
+
+@app.post('/admin/import-new-zealand-wages')
+def admin_import_new_zealand_wages(secret: str, db: Session = Depends(get_db)):
+    """Importa datos salariales Nueva Zelanda: Stats NZ 2025 (8 grupos ANZSCO) + 16 regiones, NZD→USD."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        local_db = SessionLocal()
+        try:
+            from new_zealand_wages_agent import run_new_zealand_wages_import
+            result_holder['result'] = run_new_zealand_wages_import(local_db)
+        finally:
+            local_db.close()
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=60)
+    if not result_holder:
+        return {'ok': True, 'message': 'Import New Zealand wages iniciado (ver logs)'}
+    return result_holder.get('result', {'ok': False})
 
 
 @app.post('/admin/nuts-pipeline/run')
