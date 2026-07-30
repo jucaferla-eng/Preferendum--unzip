@@ -11288,22 +11288,18 @@ def admin_wages_ranking(secret: str, db: Session = Depends(get_db)):
         7: 'Craft trades', 8: 'Machine operators', 9: 'Elementary',
     }
 
-    # 1. ILO data (moneda local → USD via tasa de cambio almacenada)
+    # 1. ILO data
     ilo_rows = db.execute(text("""
-        SELECT country_iso, isco_group, monthly_usd, year
+        SELECT country_iso2, isco_group, monthly_usd
         FROM ilo_wages
         WHERE monthly_usd IS NOT NULL AND monthly_usd > 0
-        ORDER BY country_iso, isco_group, year DESC
     """)).fetchall()
 
-    # Dedup ILO: última año por país × ISCO
     ilo_map: dict[tuple, float] = {}
-    ilo_year: dict[tuple, int] = {}
     for r in ilo_rows:
         key = (r[0], r[1])
         if key not in ilo_map:
             ilo_map[key] = float(r[2])
-            ilo_year[key] = r[3]
 
     # 2. occupation_salary (CA, AU, KR, CN, CL, BR, MX, CO, AR, etc.)
     occ_rows = db.execute(text("""
