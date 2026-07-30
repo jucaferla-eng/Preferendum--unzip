@@ -11312,9 +11312,11 @@ def admin_ilo_wages_lookup(secret: str, country: str, isco: int, db: Session = D
 def admin_wages_ranking(secret: str, db: Session = Depends(get_db)):
     """Ranking de salarios por grupo ISCO para todos los países disponibles.
     Combina ILO (65 países) + occupation_salary (CA,AU,KR,CN,CL,etc.) + occupation_unified (US).
-    Retorna top países por ISCO group, ordenados de mayor a menor monthly_usd."""
+    Retorna top países por ISCO group con monthly_usd (nominal) y monthly_ppp_usd (PPP-ajustado)."""
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
+
+    from ppp_agent import PLI
 
     ISCO_LABELS = {
         1: 'Managers', 2: 'Professionals', 3: 'Technicians',
@@ -11337,7 +11339,7 @@ def admin_wages_ranking(secret: str, db: Session = Depends(get_db)):
 
     # 2. occupation_salary (CA, AU, KR, CN, CL, BR, MX, CO, AR, etc.)
     occ_rows = db.execute(text("""
-        SELECT country_iso, isco_group, median_monthly_usd, year
+        SELECT country_iso, isco_group, median_monthly_usd
         FROM occupation_salary
         WHERE median_monthly_usd IS NOT NULL AND median_monthly_usd > 0
     """)).fetchall()
@@ -11361,22 +11363,53 @@ def admin_wages_ranking(secret: str, db: Session = Depends(get_db)):
     for key, val in ilo_map.items():
         combined[key] = val
     for key, val in occ_map.items():
-        combined[key] = val  # sobreescribe ILO si existe
+        combined[key] = val
     for isco, val in us_map.items():
         combined[('US', isco)] = val
 
-    # Construir ranking por ISCO
+    # Construir ranking por ISCO con nominal + PPP
     result = {}
     for isco_grp, label in ISCO_LABELS.items():
-        entries = [
-            {'country': cc, 'monthly_usd': round(val, 0)}
-            for (cc, ig), val in combined.items()
-            if ig == isco_grp
-        ]
+        entries = []
+        for (cc, ig), val in combined.items():
+            if ig != isco_grp:
+                continue
+            pli = PLI.get(cc)
+            ppp = round(val / pli, 0) if pli else None
+            entries.append({
+                'country':       cc,
+                'monthly_usd':   round(val, 0),
+                'monthly_ppp_usd': ppp,
+                'pli':           pli,
+            })
         entries.sort(key=lambda x: x['monthly_usd'], reverse=True)
         result[f'ISCO_{isco_grp}_{label}'] = entries
 
     return result
+
+
+@app.post('/admin/apply-ppp')
+def admin_apply_ppp(secret: str, db: Session = Depends(get_db)):
+    """Aplica factores PPP (World Bank ICP 2022) a occupation_salary e ilo_wages.
+    Agrega columnas median_monthly_ppp_usd y ppp_price_level_index.
+    PPP_USD = Nominal_USD / PLI (donde PLI = precio relativo vs USA=1.0)."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        local_db = SessionLocal()
+        try:
+            from ppp_agent import run_ppp_import
+            result_holder['result'] = run_ppp_import(local_db)
+        finally:
+            local_db.close()
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=60)
+    if not result_holder:
+        return {'ok': True, 'message': 'Apply PPP iniciado (ver logs)'}
+    return result_holder.get('result', {'ok': False})
 
 
 # ── China wages (PPP-adjusted) ────────────────────────────────────────────────
