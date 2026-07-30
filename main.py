@@ -3109,6 +3109,39 @@ def _assign_user_tier_inner(user, db):
         elif _static_floor:
             profession_tier = _static_floor
 
+    # Ingreso por ocupación específica para JP/KR/RU (datos oficiales detallados)
+    if user_profession and not profession_tier:
+        if user_country_code == 'JP':
+            try:
+                from japan_wages_agent import get_japan_occupation_income
+                from usa_data_agent import profession_score_to_tier as _pts
+                jp_occ = get_japan_occupation_income(user_profession, db)
+                if jp_occ and jp_occ.get('score') is not None:
+                    profession_tier = _pts(jp_occ['score'])
+                    user.estimated_income_usd = jp_occ['annual_usd']
+            except Exception:
+                pass
+        elif user_country_code == 'KR':
+            try:
+                from korea_wages_agent import get_korea_occupation_income
+                from usa_data_agent import profession_score_to_tier as _pts
+                kr_occ = get_korea_occupation_income(user_profession, db)
+                if kr_occ and kr_occ.get('score') is not None:
+                    profession_tier = _pts(kr_occ['score'])
+                    user.estimated_income_usd = kr_occ['annual_usd']
+            except Exception:
+                pass
+        elif user_country_code == 'RU':
+            try:
+                from russia_wages_agent import get_russia_occupation_income
+                from usa_data_agent import profession_score_to_tier as _pts
+                ru_occ = get_russia_occupation_income(user_profession, db)
+                if ru_occ and ru_occ.get('score') is not None:
+                    profession_tier = _pts(ru_occ['score'])
+                    user.estimated_income_usd = ru_occ['annual_usd']
+            except Exception:
+                pass
+
     # Ingreso regional para JP/RU (datos oficiales por prefectura/sujeto federal)
     if not user.estimated_income_usd:
         if user_country_code == 'JP':
