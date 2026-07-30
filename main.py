@@ -11274,6 +11274,81 @@ def admin_ilo_wages_lookup(secret: str, country: str, isco: int, db: Session = D
     return result or {'found': False, 'country': country.upper(), 'isco_group': isco}
 
 
+@app.get('/admin/wages/ranking')
+def admin_wages_ranking(secret: str, db: Session = Depends(get_db)):
+    """Ranking de salarios por grupo ISCO para todos los países disponibles.
+    Combina ILO (65 países) + occupation_salary (CA,AU,KR,CN,CL,etc.) + occupation_unified (US).
+    Retorna top países por ISCO group, ordenados de mayor a menor monthly_usd."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+
+    ISCO_LABELS = {
+        1: 'Managers', 2: 'Professionals', 3: 'Technicians',
+        4: 'Clerical', 5: 'Service & Sales', 6: 'Agricultural',
+        7: 'Craft trades', 8: 'Machine operators', 9: 'Elementary',
+    }
+
+    # 1. ILO data (moneda local → USD via tasa de cambio almacenada)
+    ilo_rows = db.execute(text("""
+        SELECT country_iso, isco_group, monthly_usd, year
+        FROM ilo_wages
+        WHERE monthly_usd IS NOT NULL AND monthly_usd > 0
+        ORDER BY country_iso, isco_group, year DESC
+    """)).fetchall()
+
+    # Dedup ILO: última año por país × ISCO
+    ilo_map: dict[tuple, float] = {}
+    ilo_year: dict[tuple, int] = {}
+    for r in ilo_rows:
+        key = (r[0], r[1])
+        if key not in ilo_map:
+            ilo_map[key] = float(r[2])
+            ilo_year[key] = r[3]
+
+    # 2. occupation_salary (CA, AU, KR, CN, CL, BR, MX, CO, AR, etc.)
+    occ_rows = db.execute(text("""
+        SELECT country_iso, isco_group, median_monthly_usd, year
+        FROM occupation_salary
+        WHERE median_monthly_usd IS NOT NULL AND median_monthly_usd > 0
+    """)).fetchall()
+    occ_map: dict[tuple, float] = {}
+    for r in occ_rows:
+        key = (r[0], r[1])
+        occ_map[key] = float(r[2])
+
+    # 3. USA desde occupation_unified (mediana por ISCO group)
+    us_rows = db.execute(text("""
+        SELECT isco_group, AVG(median_annual_usd/12.0)
+        FROM occupation_unified
+        WHERE country_iso='US' AND isco_group IS NOT NULL
+          AND median_annual_usd IS NOT NULL AND median_annual_usd > 0
+        GROUP BY isco_group
+    """)).fetchall()
+    us_map: dict[int, float] = {r[0]: round(float(r[1]), 2) for r in us_rows if r[1]}
+
+    # Combinar: occupation_salary > ILO (datos país-específicos tienen prioridad)
+    combined: dict[tuple, float] = {}
+    for key, val in ilo_map.items():
+        combined[key] = val
+    for key, val in occ_map.items():
+        combined[key] = val  # sobreescribe ILO si existe
+    for isco, val in us_map.items():
+        combined[('US', isco)] = val
+
+    # Construir ranking por ISCO
+    result = {}
+    for isco_grp, label in ISCO_LABELS.items():
+        entries = [
+            {'country': cc, 'monthly_usd': round(val, 0)}
+            for (cc, ig), val in combined.items()
+            if ig == isco_grp
+        ]
+        entries.sort(key=lambda x: x['monthly_usd'], reverse=True)
+        result[f'ISCO_{isco_grp}_{label}'] = entries
+
+    return result
+
+
 # ── China wages (PPP-adjusted) ────────────────────────────────────────────────
 
 @app.post('/admin/import-china-wages')
