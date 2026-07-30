@@ -11285,6 +11285,28 @@ def admin_china_wages_lookup(secret: str, city: str, isco: int, db: Session = De
     return result or {'found': False, 'city': city, 'isco_group': isco}
 
 
+@app.post('/admin/import-australia-wages')
+def admin_import_australia_wages(secret: str, db: Session = Depends(get_db)):
+    """Importa datos salariales Australia: ABS May 2025, ANZSCO→ISCO 1-9, AUD→USD."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    import threading
+    result_holder = {}
+    def _run():
+        local_db = SessionLocal()
+        try:
+            from australia_wages_agent import run_australia_wages_import
+            result_holder['result'] = run_australia_wages_import(local_db)
+        finally:
+            local_db.close()
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=60)
+    if not result_holder:
+        return {'ok': True, 'message': 'Import Australia wages iniciado'}
+    return result_holder.get('result', {'ok': False})
+
+
 @app.post('/admin/import-canada-wages')
 def admin_import_canada_wages(secret: str, db: Session = Depends(get_db)):
     """Importa datos salariales Canadá: Statistics Canada 2024, NOC→ISCO 1-9, CAD→USD."""
