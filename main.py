@@ -385,6 +385,7 @@ class AdCampaign(Base):
     target_age_min      = Column(Integer, default=13)
     target_age_max      = Column(Integer, default=99)
     target_age_ranges   = Column(String, default='')        # legacy
+    target_age_weights  = Column(String, default='')        # JSON: {"18-24":30,"25-34":70}
     target_categories   = Column(String, default='')
     excluded_categories = Column(String, default='')
     blocked_competitors = Column(String, default='')
@@ -684,6 +685,7 @@ def _migrate():
             ('link_url',            "TEXT DEFAULT ''"),
             ('target_debate_ids',   "TEXT DEFAULT ''"),
             ('target_age_ranges',   "TEXT DEFAULT ''"),
+            ('target_age_weights',  "TEXT DEFAULT ''"),
             ('target_categories',   "TEXT DEFAULT ''"),
             ('excluded_categories', "TEXT DEFAULT ''"),
             ('blocked_competitors', "TEXT DEFAULT ''"),
@@ -1324,6 +1326,7 @@ class CampaignCreate(BaseModel):
     target_age_min:      int = 13
     target_age_max:      int = 99
     target_age_ranges:   str = ''
+    target_age_weights:  str = ''   # JSON {"18-24":30,"25-34":70}
     target_categories:   str = ''
     excluded_categories: str = ''
     blocked_competitors: str = ''
@@ -5113,6 +5116,7 @@ def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
         target_age_min      = data.target_age_min,
         target_age_max      = data.target_age_max,
         target_age_ranges   = data.target_age_ranges,
+        target_age_weights  = getattr(data, 'target_age_weights', '') or '',
         target_categories   = data.target_categories,
         excluded_categories = data.excluded_categories,
         blocked_competitors = data.blocked_competitors,
@@ -5156,6 +5160,7 @@ def update_campaign(campaign_id: int, data: CampaignCreate, db: Session = Depend
     campaign.target_communes     = data.target_communes
     campaign.target_gender       = data.target_gender
     campaign.target_age_ranges   = data.target_age_ranges
+    campaign.target_age_weights  = getattr(data, 'target_age_weights', '') or ''
     campaign.target_se_tiers     = data.target_se_tiers
     campaign.excluded_categories = data.excluded_categories
     campaign.blocked_competitors = data.blocked_competitors
@@ -8669,6 +8674,7 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         target_age_min      = data.target_age_min,
         target_age_max      = data.target_age_max,
         target_age_ranges   = data.target_age_ranges,
+        target_age_weights  = getattr(data, 'target_age_weights', '') or '',
         target_categories   = data.target_categories,
         excluded_categories = data.excluded_categories,
         blocked_competitors = data.blocked_competitors,
