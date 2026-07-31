@@ -50,6 +50,16 @@ PLI: dict[str, float] = {
     'RU': 0.52,
     'AM': 0.47,
     'MN': 0.44,
+    # ── Medio Oriente / Gulf / Israel ─────────────────────
+    'IL': 1.07,   # Israel — similar a Europa Occidental
+    'AE': 0.85,   # Emiratos Árabes Unidos
+    'QA': 0.58,   # Qatar
+    'SA': 0.65,   # Arabia Saudita
+    'BH': 0.61,   # Baréin
+    'KW': 0.62,   # Kuwait
+    # ── Asia Central ───────────────────────────────────────
+    'MY': 0.52,   # Malasia
+    'KZ': 0.45,   # Kazajistán
     # ── Medio Oriente / Norte de África ───────────────────
     'TR': 0.48,
     'EG': 0.30,

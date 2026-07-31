@@ -11415,6 +11415,11 @@ def wages_curve(countries: str = 'CL', db: Session = Depends(get_db)):
         'KZ': {1:2000,2:1400,3:900, 4:700, 5:550, 6:480, 7:620, 8:600, 9:430 },
         'IQ': {1:1200,2:800, 3:550, 4:450, 5:380, 6:320, 7:420, 8:400, 9:300 },
         'IR': {1:700, 2:500, 3:350, 4:280, 5:240, 6:210, 7:270, 8:260, 9:200 },
+        # Calculados desde gulf_asia_wages_agent (PPP = nominal/PLI)
+        'CH': {1:11991,2:8222,3:5618,4:4454,5:3837,6:3289,7:4659,8:5002,9:3563},
+        'HK': {1:12375,2:7973,3:4675,4:3162,5:2338,6:2064,7:3162,8:3574,9:1995},
+        'TW': {1:8882, 2:5842,3:3505,4:2244,5:1777,6:1543,7:2337,8:2571,9:1402},
+        'SG': {1:9000, 2:6800,3:4200,4:2900,5:2100,6:1800,7:2800,8:3000,9:1700},
     }
     cc_list = [c.strip().upper() for c in countries.split(',') if c.strip()][:20]
 
@@ -11516,6 +11521,16 @@ def admin_import_ppp_ilo(secret: str, db: Session = Depends(get_db)):
     if not result_holder:
         return {'ok': True, 'message': 'Import PPP ILO iniciado (ver logs)'}
     return result_holder.get('result', {'ok': False})
+
+
+@app.post('/admin/import-gulf-asia')
+def admin_import_gulf_asia(secret: str, db: Session = Depends(get_db)):
+    """Importa salarios ISCO 1-9 para IL, AE, QA, SA, MY, KZ, CH, HK, TW.
+    Fuentes: CBS/MOE-UAE/PSA-Qatar/GASTAT/DOSM/BNS/SFSO/C&SD/DGBAS 2022-2023."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from gulf_asia_wages_agent import run_gulf_asia_import
+    return run_gulf_asia_import(db)
 
 
 @app.post('/admin/apply-ppp')
