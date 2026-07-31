@@ -141,18 +141,18 @@ def run_ppp_import(db) -> dict:
         db.execute(text("ALTER TABLE ilo_wages ADD COLUMN IF NOT EXISTS ppp_price_level_index REAL"))
         db.commit()
         ilo_rows = db.execute(text(
-            "SELECT id, country_iso2, monthly_usd FROM ilo_wages WHERE monthly_usd > 0"
+            "SELECT country_iso2, isco_group, monthly_usd FROM ilo_wages WHERE monthly_usd > 0"
         )).fetchall()
         ilo_updated = 0
-        for row_id, cc, nominal in ilo_rows:
+        for cc, isco_grp, nominal in ilo_rows:
             pli = PLI.get(cc)
             if not pli or not nominal:
                 continue
             ppp_usd = round(float(nominal) / pli, 2)
             db.execute(text("""
                 UPDATE ilo_wages SET monthly_ppp_usd = :ppp, ppp_price_level_index = :pli
-                WHERE id = :id
-            """), {'ppp': ppp_usd, 'pli': pli, 'id': row_id})
+                WHERE country_iso2 = :cc AND isco_group = :isco
+            """), {'ppp': ppp_usd, 'pli': pli, 'cc': cc, 'isco': isco_grp})
             ilo_updated += 1
         db.commit()
     except Exception as e:
