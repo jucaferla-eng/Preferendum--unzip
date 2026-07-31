@@ -1237,40 +1237,56 @@ async function loadCommunes() {
   selectedCommunes = [];
   const chips = document.getElementById('commune-chips');
 
-  // Global o multi-país — la segmentación por comuni no aplica
-  if (country === 'ALL' || country.includes(',')) {
-    chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">Campaña multi-país — se mostrará según nivel de ingreso y perfil en cada país seleccionado.</span>';
+  if (country === 'ALL') {
+    chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">Campaña global — se mostrará según nivel de ingreso en cada país.</span>';
     return;
   }
 
   chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">Loading…</span>';
 
-  // Determine which tiers to show — exact match only (no acumulación)
   const tiersToShow = (tier === 'ALL' || !tier) ? ['A','B','C','D'] : tier.split(',');
+  const ccList = country.split(',').filter(Boolean);
 
   try {
-    // Load all communes for country, then filter by tier
-    const r = await fetch(`${API}/marketer/communes?country=${country}`);
-    const d = await r.json();
-    const all = d.communes || [];
+    // Fetch communes for all selected countries in parallel
+    const results = await Promise.all(
+      ccList.map(cc => fetch(`${API}/marketer/communes?country=${cc}`).then(r => r.json()))
+    );
+
+    // Merge all communes, filter by tier
+    const all = results.flatMap(d => d.communes || []);
     const filtered = all.filter(c => tiersToShow.includes(c.se_tier));
 
     if (!filtered.length) {
-      chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">No communes found for this country/tier.</span>';
+      chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">No se encontraron comunas para estos países/tier.</span>';
       return;
     }
 
-    // Auto-select all filtered communes and render chips
+    // Group by country if multi-country
     selectedCommunes = filtered.map(c => c.commune);
-    chips.innerHTML = filtered.map(c => `
-      <div class="commune-chip selected" data-code="${c.commune}" onclick="toggleCommune(this,'${c.commune}')">
-        ${c.name || c.commune} <span style="font-size:10px;opacity:0.7;">${c.se_tier} · ${c.cpm_usd?.toFixed(2)||'?'}$/CPM</span>
-      </div>`).join('');
 
-    // Update budget preview with tier-aware CPM
+    if (ccList.length > 1) {
+      // Render grouped by country with a label
+      const byCountry = {};
+      filtered.forEach(c => { (byCountry[c.country] = byCountry[c.country] || []).push(c); });
+      chips.innerHTML = Object.entries(byCountry).map(([cc, list]) => `
+        <div style="width:100%;margin-top:10px;margin-bottom:4px;">
+          <span style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:.08em;text-transform:uppercase;">${_WAGE_CC_NAMES[cc] || cc}</span>
+        </div>
+        ${list.map(c => `
+          <div class="commune-chip selected" data-code="${c.commune}" onclick="toggleCommune(this,'${c.commune}')">
+            ${c.name || c.commune} <span style="font-size:10px;opacity:0.7;">${c.se_tier} · ${c.cpm_usd?.toFixed(2)||'?'}$/CPM</span>
+          </div>`).join('')}
+      `).join('');
+    } else {
+      chips.innerHTML = filtered.map(c => `
+        <div class="commune-chip selected" data-code="${c.commune}" onclick="toggleCommune(this,'${c.commune}')">
+          ${c.name || c.commune} <span style="font-size:10px;opacity:0.7;">${c.se_tier} · ${c.cpm_usd?.toFixed(2)||'?'}$/CPM</span>
+        </div>`).join('');
+    }
+
     updateBudgetPreview();
   } catch(e) {
-    // Fallback to static list if API fails
     const communes = COMMUNES[country] || [];
     selectedCommunes = communes;
     chips.innerHTML = communes.map(c => `
