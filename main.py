@@ -11391,6 +11391,45 @@ def admin_wages_ranking(secret: str, db: Session = Depends(get_db)):
     return result
 
 
+@app.get('/wages/curve')
+def wages_curve(countries: str = 'CL', db: Session = Depends(get_db)):
+    """Curva salarial ISCO 1-9 por país. Público — para el marketer portal."""
+    ISCO_LABELS = {
+        1: 'Managers', 2: 'Professionals', 3: 'Technicians',
+        4: 'Clerical', 5: 'Service & Sales', 6: 'Agricultural',
+        7: 'Craft trades', 8: 'Machine operators', 9: 'Elementary',
+    }
+    cc_list = [c.strip().upper() for c in countries.split(',') if c.strip()][:8]
+
+    result = {}
+    for cc in cc_list:
+        rows = db.execute(text("""
+            SELECT isco_group, median_monthly_usd
+            FROM occupation_salary
+            WHERE country_iso = :cc AND isco_group BETWEEN 1 AND 9
+              AND median_monthly_usd > 0
+            ORDER BY isco_group
+        """), {'cc': cc}).fetchall()
+
+        if not rows:
+            rows = db.execute(text("""
+                SELECT isco_group, monthly_usd
+                FROM ilo_wages
+                WHERE country_iso2 = :cc AND isco_group BETWEEN 1 AND 9
+                  AND monthly_usd > 0
+                ORDER BY isco_group
+            """), {'cc': cc}).fetchall()
+
+        if rows:
+            result[cc] = {str(r[0]): round(float(r[1]), 0) for r in rows if r[1]}
+
+    return {
+        'countries': result,
+        'isco_labels': ISCO_LABELS,
+        'currency': 'USD/month nominal',
+    }
+
+
 @app.post('/admin/import-ppp-ilo')
 def admin_import_ppp_ilo(secret: str, db: Session = Depends(get_db)):
     """Importa curva salarial PPP ILOSTAT 10 países (BGD,BRA,CHN,COL,FRA,GBR,MEX,NOR,RUS,USA).
