@@ -585,35 +585,20 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
               <!-- ── EDAD OBJETIVO ── -->
               <div class="field form-full">
                 <label>Edad objetivo</label>
+                <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">Agrega los tramos de edad a los que quieres llegar y asigna qué % del presupuesto va a cada uno.</div>
 
-                <!-- Tramos rápidos -->
-                <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin:8px 0 6px 0;">Tramos predefinidos (selección múltiple)</div>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;" id="age-bracket-chips">
-                  <div class="chip" data-bracket="18-24" onclick="toggleAgeBracket(this)">18-24</div>
-                  <div class="chip" data-bracket="25-34" onclick="toggleAgeBracket(this)">25-34</div>
-                  <div class="chip" data-bracket="35-44" onclick="toggleAgeBracket(this)">35-44</div>
-                  <div class="chip" data-bracket="45-54" onclick="toggleAgeBracket(this)">45-54</div>
-                  <div class="chip" data-bracket="55-64" onclick="toggleAgeBracket(this)">55-64</div>
-                  <div class="chip" data-bracket="65-99" onclick="toggleAgeBracket(this)">65+</div>
-                </div>
+                <!-- Lista de tramos personalizados -->
+                <div id="age-segments-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;"></div>
 
-                <!-- Rango personalizado -->
-                <div style="margin-top:12px;display:flex;gap:10px;align-items:center;">
-                  <span style="font-size:12px;color:var(--muted);">Rango personalizado:</span>
-                  <input type="number" id="nc-age-min" value="18" min="13" max="99" style="width:72px;" oninput="onAgeRangeChange()"/>
-                  <span style="color:var(--muted);">–</span>
-                  <input type="number" id="nc-age-max" value="99" min="13" max="99" style="width:72px;" oninput="onAgeRangeChange()"/>
-                  <span style="font-size:11px;color:var(--muted);">años</span>
-                </div>
+                <!-- Botón agregar -->
+                <button type="button" onclick="addAgeSegment()" style="background:transparent;border:1px dashed var(--border);color:var(--gold);padding:7px 18px;border-radius:8px;cursor:pointer;font-size:12px;letter-spacing:.04em;">+ Agregar tramo</button>
 
-                <!-- Distribución de peso -->
-                <div id="age-weights-section" style="display:none;margin-top:16px;">
-                  <div style="font-size:10px;color:var(--gold);letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;">Distribución de presupuesto por tramo</div>
-                  <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Asigna qué % del presupuesto llega a cada grupo. La suma debe ser 100%.</div>
-                  <div id="age-weights-rows" style="display:flex;flex-direction:column;gap:10px;"></div>
-                  <div id="age-weights-total" style="margin-top:12px;font-size:12px;font-weight:700;text-align:right;"></div>
-                </div>
+                <!-- Total -->
+                <div id="age-weights-total" style="margin-top:10px;font-size:12px;font-weight:700;text-align:right;min-height:18px;"></div>
 
+                <!-- Campos ocultos para el submit -->
+                <input type="hidden" id="nc-age-min" value="13"/>
+                <input type="hidden" id="nc-age-max" value="99"/>
                 <input type="hidden" id="nc-age-weights" value=""/>
               </div>
               <div class="field form-full">
@@ -1171,23 +1156,7 @@ async function editCampaign(id) {
   document.getElementById('nc-video-url').value    = c.video_url || '';
   document.getElementById('nc-excluded').value     = c.excluded_categories || '';
   document.getElementById('nc-competitors').value  = c.blocked_competitors || '';
-  document.getElementById('nc-age-min').value      = c.target_age_min || 13;
-  document.getElementById('nc-age-max').value      = c.target_age_max || 99;
-  // Restaurar pesos de edad
-  _ageBrackets.clear();
-  document.querySelectorAll('#age-bracket-chips .chip').forEach(c2 => c2.classList.remove('selected'));
-  if (c.target_age_weights) {
-    try {
-      const w = JSON.parse(c.target_age_weights);
-      document.getElementById('nc-age-weights').value = c.target_age_weights;
-      Object.keys(w).forEach(b => {
-        _ageBrackets.add(b);
-        const el = document.querySelector(`#age-bracket-chips [data-bracket="${b}"]`);
-        if (el) el.classList.add('selected');
-      });
-    } catch {}
-  }
-  _renderWeightRows();
+  _loadAgeFromCampaign(c.target_age_min || 13, c.target_age_max || 99, c.target_age_weights || '');
   const pcv = c.min_per_capita_usd || 0;
   document.getElementById('nc-percapita').value         = pcv;
   document.getElementById('nc-percapita-slider').value  = pcv;
@@ -1895,149 +1864,99 @@ function _renderWageCurveFromCache() {
     (missing.length ? ` Sin datos para: ${missing.join(', ')}.` : '');
 }
 
-// ── EDAD OBJETIVO — chips + distribución de peso ─────────────────────────────
+// ── EDAD OBJETIVO — tramos personalizados con peso ───────────────────────────
 
-// Tramos activos: Set de strings "18-24", "25-34", etc.
-let _ageBrackets = new Set();
+let _ageSegments = [];   // [{min, max, pct}]
+let _segIdCounter = 0;
 
-// Etiquetas legibles
-const _BRACKET_LABELS = {
-  '18-24': '18–24 años',
-  '25-34': '25–34 años',
-  '35-44': '35–44 años',
-  '45-54': '45–54 años',
-  '55-64': '55–64 años',
-  '65-99': '65+ años',
-};
-
-function toggleAgeBracket(el) {
-  const b = el.dataset.bracket;
-  if (_ageBrackets.has(b)) {
-    _ageBrackets.delete(b);
-    el.classList.remove('selected');
-  } else {
-    _ageBrackets.add(b);
-    el.classList.add('selected');
-  }
-  _syncAgeRangeFromBrackets();
-  _renderWeightRows();
+function addAgeSegment(min, max, pct) {
+  const id = ++_segIdCounter;
+  _ageSegments.push({ id, min: min||18, max: max||99, pct: pct||0 });
+  _renderAgeSegments();
+  _recalcEqualWeights();
 }
 
-// Cuando el usuario usa rango personalizado, des-selecciona chips
-function onAgeRangeChange() {
-  _ageBrackets.clear();
-  document.querySelectorAll('#age-bracket-chips .chip').forEach(c => c.classList.remove('selected'));
-  _renderWeightRows();
+function removeAgeSegment(id) {
+  _ageSegments = _ageSegments.filter(s => s.id !== id);
+  _renderAgeSegments();
+  _recalcEqualWeights();
 }
 
-// Si hay chips seleccionados, ajusta min/max a la unión de los tramos
-function _syncAgeRangeFromBrackets() {
-  if (!_ageBrackets.size) return;
-  const mins = [..._ageBrackets].map(b => parseInt(b.split('-')[0]));
-  const maxs = [..._ageBrackets].map(b => parseInt(b.split('-')[1]));
-  document.getElementById('nc-age-min').value = Math.min(...mins);
-  document.getElementById('nc-age-max').value = Math.max(...maxs);
+// Reparte % iguales al agregar/eliminar un tramo
+function _recalcEqualWeights() {
+  if (!_ageSegments.length) return;
+  const eq = Math.floor(100 / _ageSegments.length);
+  _ageSegments.forEach((s, i) => {
+    s.pct = (i === 0) ? 100 - eq * (_ageSegments.length - 1) : eq;
+  });
+  _renderAgeSegments();
 }
 
-// Construye las filas de peso dinámicamente
-function _renderWeightRows() {
-  const section = document.getElementById('age-weights-section');
-  const container = document.getElementById('age-weights-rows');
+function _renderAgeSegments() {
+  const list = document.getElementById('age-segments-list');
+  list.innerHTML = '';
 
-  // Determinar qué tramos mostrar
-  let brackets;
-  if (_ageBrackets.size > 1) {
-    // Usar los chips seleccionados (orden cronológico)
-    const order = ['18-24','25-34','35-44','45-54','55-64','65-99'];
-    brackets = order.filter(b => _ageBrackets.has(b));
-  } else if (_ageBrackets.size === 1) {
-    // Un solo chip: no tiene sentido el peso
-    section.style.display = 'none';
-    _saveAgeWeights({});
-    return;
-  } else {
-    // Rango personalizado: construir tramos automáticos
-    const min = parseInt(document.getElementById('nc-age-min').value) || 18;
-    const max = parseInt(document.getElementById('nc-age-max').value) || 99;
-    if (max - min < 10) {
-      section.style.display = 'none';
-      _saveAgeWeights({});
-      return;
-    }
-    brackets = _buildCustomBrackets(min, max);
-  }
-
-  if (brackets.length < 2) {
-    section.style.display = 'none';
-    _saveAgeWeights({});
-    return;
-  }
-
-  section.style.display = 'block';
-
-  // Recuperar pesos existentes o distribuir igualmente
-  const existing = _readAgeWeights();
-  const equalShare = Math.floor(100 / brackets.length);
-  let remainder = 100 - equalShare * brackets.length;
-
-  container.innerHTML = '';
-  brackets.forEach((b, i) => {
-    const label = _BRACKET_LABELS[b] || b.replace('-', '–') + ' años';
-    const initVal = existing[b] ?? (i === 0 ? equalShare + remainder : equalShare);
+  _ageSegments.forEach(seg => {
     const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:10px;';
+    row.style.cssText = 'display:flex;align-items:center;gap:8px;background:var(--ink3);border:1px solid var(--border);border-radius:10px;padding:10px 14px;';
     row.innerHTML = `
-      <span style="font-size:12px;color:var(--muted);width:90px;flex-shrink:0;">${label}</span>
-      <input type="range" data-bracket="${b}" min="0" max="100" value="${initVal}"
-        style="flex:1;accent-color:var(--gold);"
-        oninput="onWeightSlider(this)"/>
-      <input type="number" data-bracket="${b}" min="0" max="100" value="${initVal}"
-        style="width:58px;text-align:center;"
-        oninput="onWeightNumber(this)"/>
+      <span style="font-size:12px;color:var(--muted);flex-shrink:0;">De</span>
+      <input type="number" value="${seg.min}" min="13" max="99"
+        style="width:60px;text-align:center;"
+        oninput="onSegField(${seg.id},'min',this.value)"/>
+      <span style="font-size:12px;color:var(--muted);">a</span>
+      <input type="number" value="${seg.max}" min="13" max="99"
+        style="width:60px;text-align:center;"
+        oninput="onSegField(${seg.id},'max',this.value)"/>
+      <span style="font-size:12px;color:var(--muted);flex-shrink:0;">años</span>
+      <input type="range" min="0" max="100" value="${seg.pct}"
+        style="flex:1;accent-color:var(--gold);min-width:60px;"
+        oninput="onSegField(${seg.id},'pct',this.value)"/>
+      <input type="number" value="${seg.pct}" min="0" max="100"
+        style="width:54px;text-align:center;"
+        oninput="onSegField(${seg.id},'pct',this.value)"/>
       <span style="font-size:12px;color:var(--muted);">%</span>
+      <button type="button" onclick="removeAgeSegment(${seg.id})"
+        style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px;line-height:1;">✕</button>
     `;
-    container.appendChild(row);
+    list.appendChild(row);
   });
 
-  _updateWeightTotal();
+  _updateAgeTotal();
 }
 
-// Tramos automáticos para rango personalizado
-function _buildCustomBrackets(min, max) {
-  const all = ['18-24','25-34','35-44','45-54','55-64','65-99'];
-  return all.filter(b => {
-    const bMin = parseInt(b.split('-')[0]);
-    const bMax = parseInt(b.split('-')[1]);
-    return bMin < max && bMax > min;
+function onSegField(id, field, value) {
+  const seg = _ageSegments.find(s => s.id === id);
+  if (!seg) return;
+  seg[field] = field === 'pct' ? parseInt(value)||0 : parseInt(value)||13;
+  // Sincronizar slider ↔ number del mismo segmento
+  _syncSegRow(id);
+  _updateAgeTotal();
+}
+
+function _syncSegRow(id) {
+  const seg = _ageSegments.find(s => s.id === id);
+  if (!seg) return;
+  const rows = document.querySelectorAll('#age-segments-list > div');
+  rows.forEach((row, i) => {
+    if (_ageSegments[i]?.id !== id) return;
+    const inputs = row.querySelectorAll('input');
+    // inputs: [min, max, range-pct, number-pct]
+    if (inputs[2]) inputs[2].value = seg.pct;
+    if (inputs[3]) inputs[3].value = seg.pct;
   });
 }
 
-function onWeightSlider(el) {
-  const b = el.dataset.bracket;
-  // Sincronizar number input
-  const numEl = document.querySelector(`#age-weights-rows input[type=number][data-bracket="${b}"]`);
-  if (numEl) numEl.value = el.value;
-  _updateWeightTotal();
-}
-
-function onWeightNumber(el) {
-  const b = el.dataset.bracket;
-  const rangeEl = document.querySelector(`#age-weights-rows input[type=range][data-bracket="${b}"]`);
-  if (rangeEl) rangeEl.value = el.value;
-  _updateWeightTotal();
-}
-
-function _updateWeightTotal() {
-  const inputs = document.querySelectorAll('#age-weights-rows input[type=number]');
-  let total = 0;
-  const weights = {};
-  inputs.forEach(inp => {
-    const v = parseInt(inp.value) || 0;
-    total += v;
-    weights[inp.dataset.bracket] = v;
-  });
-
+function _updateAgeTotal() {
+  const total = _ageSegments.reduce((s, x) => s + (x.pct||0), 0);
   const totalEl = document.getElementById('age-weights-total');
+
+  if (!_ageSegments.length) {
+    totalEl.innerHTML = '';
+    _commitAgeFields();
+    return;
+  }
+
   if (total === 100) {
     totalEl.innerHTML = `<span style="color:#22a862;">✓ Total: 100%</span>`;
   } else if (total < 100) {
@@ -2046,18 +1965,47 @@ function _updateWeightTotal() {
     totalEl.innerHTML = `<span style="color:#e05252;">Total: ${total}% — sobran ${total-100}%</span>`;
   }
 
-  _saveAgeWeights(total === 100 ? weights : {});
+  _commitAgeFields();
 }
 
-function _saveAgeWeights(obj) {
-  document.getElementById('nc-age-weights').value = Object.keys(obj).length ? JSON.stringify(obj) : '';
+function _commitAgeFields() {
+  // nc-age-min/max = unión de todos los tramos
+  if (_ageSegments.length) {
+    const mins = _ageSegments.map(s => s.min);
+    const maxs = _ageSegments.map(s => s.max);
+    document.getElementById('nc-age-min').value = Math.min(...mins);
+    document.getElementById('nc-age-max').value = Math.max(...maxs);
+  } else {
+    document.getElementById('nc-age-min').value = 13;
+    document.getElementById('nc-age-max').value = 99;
+  }
+
+  // nc-age-weights = JSON solo si suma 100
+  const total = _ageSegments.reduce((s, x) => s + (x.pct||0), 0);
+  if (_ageSegments.length && total === 100) {
+    const weights = {};
+    _ageSegments.forEach(s => { weights[`${s.min}-${s.max}`] = s.pct; });
+    document.getElementById('nc-age-weights').value = JSON.stringify(weights);
+  } else {
+    document.getElementById('nc-age-weights').value = '';
+  }
 }
 
-function _readAgeWeights() {
+function _loadAgeFromCampaign(ageMin, ageMax, weightsJson) {
+  _ageSegments = [];
+  _segIdCounter = 0;
   try {
-    const v = document.getElementById('nc-age-weights').value;
-    return v ? JSON.parse(v) : {};
-  } catch { return {}; }
+    if (weightsJson) {
+      const w = JSON.parse(weightsJson);
+      Object.entries(w).forEach(([range, pct]) => {
+        const [mn, mx] = range.split('-').map(Number);
+        _ageSegments.push({ id: ++_segIdCounter, min: mn, max: mx, pct });
+      });
+    } else if (ageMin !== 13 || ageMax !== 99) {
+      _ageSegments.push({ id: ++_segIdCounter, min: ageMin, max: ageMax, pct: 100 });
+    }
+  } catch {}
+  _renderAgeSegments();
 }
 </script>
 </body>
