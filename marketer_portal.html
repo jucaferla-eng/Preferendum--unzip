@@ -1658,7 +1658,7 @@ const CURVE_COLORS = [
   '#c49a2a','#2952c4','#22a862','#e05252','#8b5cf6',
   '#06b6d4','#f97316','#ec4899',
 ];
-const COUNTRY_NAMES = {
+const _WAGE_CC_NAMES = {
   CL:'Chile',PE:'Perú',AR:'Argentina',MX:'México',CO:'Colombia',BR:'Brasil',
   US:'USA',CA:'Canadá',GB:'Reino Unido',DE:'Alemania',FR:'Francia',ES:'España',
   IT:'Italia',PT:'Portugal',AU:'Australia',NZ:'NZ',JP:'Japón',KR:'Corea',
@@ -1669,7 +1669,7 @@ const COUNTRY_NAMES = {
   TH:'Tailandia',MY:'Malasia',KZ:'Kazajistán',UY:'Uruguay',
   EC:'Ecuador',BO:'Bolivia',PY:'Paraguay',VE:'Venezuela',
 };
-const ISCO_LABELS = ['Mgr','Prof','Tec','Admin','Servicios','Agricult','Artesano','Operador','Básico'];
+const _WAGE_ISCO_LABELS = ['Mgr','Prof','Tec','Admin','Servicios','Agricult','Artesano','Operador','Básico'];
 
 let _wageCurveChart = null;
 let _wageCurveCache = {};
@@ -1715,7 +1715,7 @@ async function updateWageCurve() {
     const wages = countries_data[cc];
     const pts = [1,2,3,4,5,6,7,8,9].map(g => wages[String(g)] ?? null);
     return {
-      label: COUNTRY_NAMES[cc] || cc,
+      label: _WAGE_CC_NAMES[cc] || cc,
       data: pts,
       borderColor: CURVE_COLORS[i % CURVE_COLORS.length],
       backgroundColor: CURVE_COLORS[i % CURVE_COLORS.length] + '22',
@@ -1733,7 +1733,7 @@ async function updateWageCurve() {
 
   _wageCurveChart = new Chart(ctx, {
     type: 'line',
-    data: { labels: ISCO_LABELS, datasets },
+    data: { labels: _WAGE_ISCO_LABELS, datasets },
     options: {
       responsive: true,
       interaction: { mode: 'index', intersect: false },
