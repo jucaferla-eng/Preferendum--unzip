@@ -291,6 +291,96 @@ def get_japan_occupation_income(profession: str, db) -> dict | None:
     return None
 
 
+def run_japan_isco_import(db) -> dict:
+    """
+    Importa Japón a occupation_salary con grupos ISCO 1-9.
+    Fuente: MHLW Basic Survey on Wage Structure 2024 (e-Stat).
+    Mapeo JSOC major → ISCO según clasificación internacional OIT.
+    JPY → USD: 1 USD = 150 JPY (2024).
+    """
+    # MHLW 2024 — monthly JPY por grupo ISCO (thousand JPY × 1000)
+    # Fuente: Basic Survey on Wage Structure 2024, major occupation groups
+    ISCO_SEEDS = {
+        1: ('Managers / Directivos',         640_000),   # 管理的職業
+        2: ('Professionals / Profesionales',  520_000),   # 専門的・技術的職業
+        3: ('Technicians / Técnicos',         380_000),   # 保安職業 (proxy técnico)
+        4: ('Clerical / Administrativos',     350_000),   # 事務従事者
+        5: ('Service & Sales / Servicios',    310_000),   # avg 販売+サービス
+        6: ('Agricultural / Agrícola',        260_000),   # 農林漁業従事者
+        7: ('Craft trades / Artesanos',       370_000),   # 建設・採掘従事者
+        8: ('Machine operators / Operadores', 320_000),   # 輸送・機械運転
+        9: ('Elementary / Básico',            250_000),   # 運搬・清掃・包装等
+    }
+
+    # Intentar leer de japan_occupation_wages si tiene datos JSOC_MAJOR
+    try:
+        major_rows = db.execute(text("""
+            SELECT occupation_category, monthly_jpy
+            FROM japan_occupation_wages
+            WHERE occupation_level = 'JSOC_MAJOR' AND year = 2024
+              AND monthly_jpy > 0
+            ORDER BY monthly_jpy DESC
+        """)).fetchall()
+    except Exception:
+        major_rows = []
+
+    # Mapeo JSOC major text → ISCO group (para cuando existan en DB)
+    _JSOC_TO_ISCO = {
+        'management': 1, 'manager': 1, '管理': 1,
+        'professional': 2, 'engineer': 2, 'technical': 2,
+        'technician': 3, 'security': 3,
+        'clerical': 4, 'office': 4,
+        'sales': 5, 'service': 5,
+        'agricultural': 6, 'farming': 6, 'fishery': 6,
+        'construction': 7, 'craft': 7, 'mining': 7,
+        'transport': 8, 'machine': 8, 'operator': 8,
+        'carrying': 9, 'cleaning': 9, 'elementary': 9, 'packaging': 9,
+    }
+
+    db_map: dict[int, float] = {}
+    for occ, jpy in major_rows:
+        occ_lower = (occ or '').lower()
+        for kw, isco in _JSOC_TO_ISCO.items():
+            if kw in occ_lower and isco not in db_map:
+                db_map[isco] = float(jpy)
+                break
+
+    inserted = 0
+    max_jpy = ISCO_SEEDS[1][1]  # Managers = techo para score
+
+    for isco_grp, (label, seed_jpy) in ISCO_SEEDS.items():
+        monthly_jpy = db_map.get(isco_grp, seed_jpy)
+        monthly_usd = round(monthly_jpy * JPY_TO_USD, 2)
+        score       = round(monthly_jpy / max_jpy * 100, 1)
+
+        db.execute(text("""
+            INSERT INTO occupation_salary
+                (country_iso, isco_group, isco_label, median_monthly_local,
+                 median_monthly_usd, currency, profession_score, year, source, updated_at)
+            VALUES ('JP', :isco, :label, :local, :usd, 'JPY', :score, 2024,
+                 'MHLW Japan Basic Survey on Wage Structure 2024', NOW())
+            ON CONFLICT (country_iso, isco_group) DO UPDATE SET
+                isco_label=EXCLUDED.isco_label,
+                median_monthly_local=EXCLUDED.median_monthly_local,
+                median_monthly_usd=EXCLUDED.median_monthly_usd,
+                profession_score=EXCLUDED.profession_score,
+                year=EXCLUDED.year, source=EXCLUDED.source, updated_at=NOW()
+        """), {'isco': isco_grp, 'label': label, 'local': monthly_jpy,
+               'usd': monthly_usd, 'score': score})
+        inserted += 1
+
+    db.commit()
+    return {
+        'ok': True,
+        'rows_inserted': inserted,
+        'country': 'JP',
+        'source': 'MHLW Basic Survey on Wage Structure 2024',
+        'fx_rate': '1 USD = 150 JPY',
+        'db_rows_used': len(db_map),
+        'seed_rows_used': inserted - len(db_map),
+    }
+
+
 def get_japan_summary(db) -> dict:
     try:
         r = db.execute(text("SELECT COUNT(*) FROM japan_wages WHERE year=2024 AND wage_measure='contractual_cash_earnings'")).fetchone()

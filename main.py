@@ -11696,6 +11696,15 @@ def admin_import_japan_wages(secret: str, db: Session = Depends(get_db)):
     return result_holder.get('result', {'ok': False})
 
 
+@app.post('/admin/import-japan-isco')
+def admin_import_japan_isco(secret: str, db: Session = Depends(get_db)):
+    """Importa Japón a occupation_salary con grupos ISCO 1-9 (MHLW 2024). Necesario para el ranking y gráfico."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from japan_wages_agent import run_japan_isco_import
+    return run_japan_isco_import(db)
+
+
 @app.get('/admin/japan-wages/lookup')
 def admin_japan_wages_lookup(secret: str, prefecture: str, db: Session = Depends(get_db)):
     """Busca salario para usuario japonés (ej: prefecture=Tokyo)."""
