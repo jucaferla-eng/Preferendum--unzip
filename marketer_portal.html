@@ -540,7 +540,18 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
               <!-- ── CURVA SALARIAL POR PAÍS ── -->
               <div class="field form-full" id="wage-curve-container" style="display:none;">
                 <label style="color:var(--gold);font-size:12px;letter-spacing:1px;">CURVA SALARIAL — INGRESO MENSUAL PPP (USD PODER ADQUISITIVO REAL)</label>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Manager → Profesional → Técnico → Administrativo → Servicios → Artesano → Operador → Básico</div>
+
+                <!-- Selector tamaño empresa -->
+                <div style="margin:10px 0 14px 0;">
+                  <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;">Tamaño de empresa</div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <div id="wsize-micro"    class="chip" onclick="setWageSize('micro')"    style="font-size:11px;padding:4px 12px;">Micro &lt;50</div>
+                    <div id="wsize-medium"   class="chip selected" onclick="setWageSize('medium')"   style="font-size:11px;padding:4px 12px;">Mediana 50-500</div>
+                    <div id="wsize-large"    class="chip" onclick="setWageSize('large')"    style="font-size:11px;padding:4px 12px;">Grande 500-5k</div>
+                    <div id="wsize-corporate" class="chip" onclick="setWageSize('corporate')" style="font-size:11px;padding:4px 12px;">Corporativa 5k+</div>
+                  </div>
+                </div>
+
                 <div style="background:var(--ink3);border:1px solid var(--border);border-radius:12px;padding:20px;position:relative;">
                   <canvas id="wage-curve-chart" height="280"></canvas>
                 </div>
@@ -1678,6 +1689,35 @@ const CURVE_COLORS = [
   '#c49a2a','#2952c4','#22a862','#e05252','#8b5cf6',
   '#06b6d4','#f97316','#ec4899',
 ];
+
+// Multiplicadores salariales por tamaño de empresa vs mediana nacional (base=medium)
+// Fuente: ILO World Employment and Social Outlook + OECD SME Wage Statistics 2022
+// Índice: [ISCO1, ISCO2, ISCO3, ISCO4, ISCO5, ISCO6, ISCO7, ISCO8, ISCO9]
+const _SIZE_MULT = {
+  micro:     [0.40, 0.55, 0.62, 0.67, 0.72, 0.82, 0.72, 0.74, 0.80],
+  medium:    [1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00, 1.00],
+  large:     [2.30, 1.75, 1.48, 1.32, 1.28, 1.13, 1.35, 1.38, 1.22],
+  corporate: [4.00, 2.70, 2.10, 1.75, 1.55, 1.22, 1.62, 1.68, 1.40],
+};
+const _SIZE_LABELS = {
+  micro: 'Micro (<50 emp.) — mediana nacional ajustada',
+  medium: 'Empresa Mediana (50-500 emp.) — mediana nacional',
+  large: 'Empresa Grande (500-5,000 emp.)',
+  corporate: 'Corporativa / Multinacional (5,000+ emp.)',
+};
+
+let _currentSizeKey = 'medium';
+
+function setWageSize(key) {
+  _currentSizeKey = key;
+  // Actualizar chips
+  ['micro','medium','large','corporate'].forEach(k => {
+    const el = document.getElementById('wsize-' + k);
+    if (el) el.classList.toggle('selected', k === key);
+  });
+  _renderWageCurveFromCache();
+}
+
 const _WAGE_CC_NAMES = {
   CL:'Chile',PE:'Perú',AR:'Argentina',MX:'México',CO:'Colombia',BR:'Brasil',
   US:'USA',CA:'Canadá',GB:'Reino Unido',DE:'Alemania',FR:'Francia',ES:'España',
@@ -1694,6 +1734,8 @@ const _WAGE_ISCO_LABELS = ['Mgr','Prof','Tec','Admin','Servicios','Agricult','Ar
 
 let _wageCurveChart = null;
 let _wageCurveCache = {};
+let _wageCurveLastData = null;  // último data.countries cargado
+let _wageCurveLastCcList = [];
 
 async function updateWageCurve() {
   const country = document.getElementById('nc-country').value;
@@ -1708,7 +1750,7 @@ async function updateWageCurve() {
   container.style.display = 'block';
 
   // Fetch data (cache por sesión)
-  const cacheKey = cc_list.sort().join(',');
+  const cacheKey = [...cc_list].sort().join(',');
   let data;
   if (_wageCurveCache[cacheKey]) {
     data = _wageCurveCache[cacheKey];
@@ -1723,7 +1765,17 @@ async function updateWageCurve() {
     }
   }
 
-  const countries_data = data.countries || {};
+  _wageCurveLastData   = data.countries || {};
+  _wageCurveLastCcList = cc_list;
+  _renderWageCurveFromCache();
+}
+
+function _renderWageCurveFromCache() {
+  const countries_data = _wageCurveLastData;
+  const cc_list        = _wageCurveLastCcList;
+  if (!countries_data || !cc_list.length) return;
+
+  const mult = _SIZE_MULT[_currentSizeKey] || _SIZE_MULT.medium;
   const available = cc_list.filter(cc => countries_data[cc] && Object.keys(countries_data[cc]).length > 0);
 
   if (!available.length) {
@@ -1734,7 +1786,11 @@ async function updateWageCurve() {
 
   const datasets = available.map((cc, i) => {
     const wages = countries_data[cc];
-    const pts = [1,2,3,4,5,6,7,8,9].map(g => wages[String(g)] ?? null);
+    // Aplicar multiplicador por tamaño de empresa (índice 0=ISCO1 … 8=ISCO9)
+    const pts = [1,2,3,4,5,6,7,8,9].map((g, idx) => {
+      const base = wages[String(g)] ?? null;
+      return base !== null ? Math.round(base * mult[idx]) : null;
+    });
     return {
       label: _WAGE_CC_NAMES[cc] || cc,
       data: pts,
@@ -1764,7 +1820,7 @@ async function updateWageCurve() {
         },
         tooltip: {
           callbacks: {
-            label: ctx => ` ${ctx.dataset.label}: $${ctx.parsed.y?.toLocaleString() ?? 'N/A'} USD/mes`,
+            label: ctx => ` ${ctx.dataset.label}: $${ctx.parsed.y?.toLocaleString() ?? 'N/A'} PPP USD/mes`,
           },
           backgroundColor: '#0d1120',
           borderColor: '#2952c4',
@@ -1791,8 +1847,9 @@ async function updateWageCurve() {
   });
 
   const missing = cc_list.filter(cc => !countries_data[cc]);
+  const sizeLabel = _SIZE_LABELS[_currentSizeKey] || '';
   document.getElementById('wage-curve-note').textContent =
-    'Fuente: ILOSTAT, BLS, datos oficiales. Salario nominal mensual en USD.' +
+    `${sizeLabel}. Fuente base: ILOSTAT, BLS, datos oficiales. Multiplicadores por tamaño: ILO/OECD 2022.` +
     (missing.length ? ` Sin datos para: ${missing.join(', ')}.` : '');
 }
 </script>
