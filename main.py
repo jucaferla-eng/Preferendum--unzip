@@ -11393,7 +11393,8 @@ def admin_wages_ranking(secret: str, db: Session = Depends(get_db)):
 
 @app.get('/wages/curve')
 def wages_curve(countries: str = 'CL', db: Session = Depends(get_db)):
-    """Curva salarial ISCO 1-9 por país. Público — para el marketer portal."""
+    """Curva salarial ISCO 1-9 por país. Público — para el marketer portal.
+    Combina occupation_salary + ilo_wages + occupation_unified (US) — misma lógica que el ranking."""
     ISCO_LABELS = {
         1: 'Managers', 2: 'Professionals', 3: 'Technicians',
         4: 'Clerical', 5: 'Service & Sales', 6: 'Agricultural',
@@ -11401,27 +11402,53 @@ def wages_curve(countries: str = 'CL', db: Session = Depends(get_db)):
     }
     cc_list = [c.strip().upper() for c in countries.split(',') if c.strip()][:8]
 
+    # Pre-cargar ilo_wages completo para los países solicitados (más eficiente que N queries)
+    ilo_all = db.execute(text("""
+        SELECT country_iso2, isco_group, monthly_usd
+        FROM ilo_wages
+        WHERE country_iso2 = ANY(:ccs) AND monthly_usd > 0
+    """), {'ccs': cc_list}).fetchall()
+    ilo_map: dict[tuple, float] = {}
+    for r in ilo_all:
+        key = (r[0], int(r[1])) if r[1] is not None else None
+        if key and 1 <= key[1] <= 9:
+            ilo_map[key] = float(r[2])
+
+    # occupation_salary para los países solicitados
+    occ_all = db.execute(text("""
+        SELECT country_iso, isco_group, median_monthly_usd
+        FROM occupation_salary
+        WHERE country_iso = ANY(:ccs) AND isco_group BETWEEN 1 AND 9
+          AND median_monthly_usd > 0
+    """), {'ccs': cc_list}).fetchall()
+    occ_map: dict[tuple, float] = {(r[0], int(r[1])): float(r[2]) for r in occ_all if r[2]}
+
+    # occupation_unified para USA
+    us_map: dict[int, float] = {}
+    if 'US' in cc_list:
+        us_rows = db.execute(text("""
+            SELECT isco_group, AVG(median_annual_usd/12.0)
+            FROM occupation_unified
+            WHERE country_iso='US' AND isco_group BETWEEN 1 AND 9
+              AND median_annual_usd > 0
+            GROUP BY isco_group
+        """)).fetchall()
+        us_map = {int(r[0]): round(float(r[1]), 0) for r in us_rows if r[1]}
+
     result = {}
     for cc in cc_list:
-        rows = db.execute(text("""
-            SELECT isco_group, median_monthly_usd
-            FROM occupation_salary
-            WHERE country_iso = :cc AND isco_group BETWEEN 1 AND 9
-              AND median_monthly_usd > 0
-            ORDER BY isco_group
-        """), {'cc': cc}).fetchall()
-
-        if not rows:
-            rows = db.execute(text("""
-                SELECT isco_group, monthly_usd
-                FROM ilo_wages
-                WHERE country_iso2 = :cc AND isco_group BETWEEN 1 AND 9
-                  AND monthly_usd > 0
-                ORDER BY isco_group
-            """), {'cc': cc}).fetchall()
-
-        if rows:
-            result[cc] = {str(r[0]): round(float(r[1]), 0) for r in rows if r[1]}
+        curve = {}
+        for g in range(1, 10):
+            key = (cc, g)
+            # Prioridad: occupation_salary > ilo_wages > occupation_unified (solo US)
+            if key in occ_map:
+                curve[str(g)] = round(occ_map[key], 0)
+            elif key in ilo_map:
+                curve[str(g)] = round(ilo_map[key], 0)
+            elif cc == 'US' and g in us_map:
+                curve[str(g)] = us_map[g]
+        if curve:
+            result[cc] = curve
 
     return {
         'countries': result,
