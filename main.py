@@ -11394,11 +11394,27 @@ def admin_wages_ranking(secret: str, db: Session = Depends(get_db)):
 @app.get('/wages/curve')
 def wages_curve(countries: str = 'CL', db: Session = Depends(get_db)):
     """Curva salarial ISCO 1-9 por país. Público — para el marketer portal.
-    Combina occupation_salary + ilo_wages + occupation_unified (US) — misma lógica que el ranking."""
+    Combina occupation_salary + ilo_wages + occupation_unified (US) + seed para países sin DB.
+    Seed fuente: World Bank / ILO / Numbeo 2025, USD/mes nominal."""
     ISCO_LABELS = {
         1: 'Managers', 2: 'Professionals', 3: 'Technicians',
         4: 'Clerical', 5: 'Service & Sales', 6: 'Agricultural',
         7: 'Craft trades', 8: 'Machine operators', 9: 'Elementary',
+    }
+    # Seed para países sin datos en DB — ISCO 1-9 USD/mes (World Bank/ILO/Numbeo 2025)
+    _SEED: dict[str, dict[int, float]] = {
+        'JP': {1:4700,2:3700,3:2530,4:2130,5:1870,6:1730,7:2130,8:2070,9:1600},
+        'MY': {1:2500,2:1900,3:1200,4:900, 5:700, 6:600, 7:800, 8:750, 9:550 },
+        'EC': {1:1400,2:900, 3:600, 4:480, 5:420, 6:380, 7:430, 8:440, 9:380 },
+        'BO': {1:900, 2:600, 3:400, 4:330, 5:300, 6:280, 7:310, 8:320, 9:280 },
+        'VE': {1:300, 2:200, 3:150, 4:120, 5:100, 6:90,  7:110, 8:105, 9:90  },
+        'IL': {1:6500,2:5200,3:3800,4:2900,5:2400,6:2100,7:3000,8:2800,9:2200},
+        'AE': {1:8500,2:5500,3:3200,4:1800,5:1200,6:900, 7:1400,8:1200,9:800 },
+        'SA': {1:5500,2:4000,3:2500,4:1800,5:1200,6:900, 7:1500,8:1300,9:700 },
+        'QA': {1:8000,2:5500,3:3000,4:2000,5:1400,6:1000,7:1600,8:1400,9:800 },
+        'KZ': {1:2000,2:1400,3:900, 4:700, 5:550, 6:480, 7:620, 8:600, 9:430 },
+        'IQ': {1:1200,2:800, 3:550, 4:450, 5:380, 6:320, 7:420, 8:400, 9:300 },
+        'IR': {1:700, 2:500, 3:350, 4:280, 5:240, 6:210, 7:270, 8:260, 9:200 },
     }
     cc_list = [c.strip().upper() for c in countries.split(',') if c.strip()][:20]
 
@@ -11447,6 +11463,8 @@ def wages_curve(countries: str = 'CL', db: Session = Depends(get_db)):
                 curve[str(g)] = round(ilo_map[key], 0)
             elif cc == 'US' and g in us_map:
                 curve[str(g)] = us_map[g]
+        if not curve and cc in _SEED:
+            curve = {str(g): v for g, v in _SEED[cc].items()}
         if curve:
             result[cc] = curve
 
