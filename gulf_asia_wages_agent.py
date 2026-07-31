@@ -209,12 +209,12 @@ def run_gulf_asia_import(db) -> dict:
                      median_monthly_local, median_monthly_usd,
                      median_monthly_ppp_usd, ppp_price_level_index,
                      currency, profession_score, year,
-                     source, source_url, ppp_source, updated_at)
+                     source, ppp_source, updated_at)
                 VALUES
                     (:cc, :isco, :label,
                      :lcu, :nominal, :ppp, :pli,
                      'PPP_INTL', 0, 2023,
-                     :src, :url, 'World Bank ICP 2022', NOW())
+                     :src, 'World Bank ICP 2022', NOW())
                 ON CONFLICT (country_iso, isco_group) DO UPDATE SET
                     isco_label             = EXCLUDED.isco_label,
                     median_monthly_local   = EXCLUDED.median_monthly_local,
@@ -223,13 +223,12 @@ def run_gulf_asia_import(db) -> dict:
                     ppp_price_level_index  = EXCLUDED.ppp_price_level_index,
                     year                   = EXCLUDED.year,
                     source                 = EXCLUDED.source,
-                    source_url             = EXCLUDED.source_url,
                     ppp_source             = EXCLUDED.ppp_source,
                     updated_at             = NOW()
             """), {
                 'cc': cc, 'isco': isco_grp, 'label': label,
                 'lcu': lcu, 'nominal': nominal_usd, 'ppp': ppp_usd, 'pli': pli,
-                'src': src, 'url': url,
+                'src': src,
             })
             results_by_country[cc].append({'isco': isco_grp, 'nominal_usd': nominal_usd, 'ppp_usd': ppp_usd})
             inserted += 1
