@@ -535,12 +535,12 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
 
               <!-- ── CURVA SALARIAL POR PAÍS ── -->
               <div class="field form-full" id="wage-curve-container" style="display:none;">
-                <label style="color:var(--gold);font-size:12px;letter-spacing:1px;">CURVA SALARIAL — INGRESO MENSUAL POR NIVEL DE OCUPACIÓN (USD)</label>
+                <label style="color:var(--gold);font-size:12px;letter-spacing:1px;">CURVA SALARIAL — INGRESO MENSUAL PPP (USD PODER ADQUISITIVO REAL)</label>
                 <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Manager → Profesional → Técnico → Administrativo → Servicios → Artesano → Operador → Básico</div>
                 <div style="background:var(--ink3);border:1px solid var(--border);border-radius:12px;padding:20px;position:relative;">
                   <canvas id="wage-curve-chart" height="280"></canvas>
                 </div>
-                <div id="wage-curve-note" style="margin-top:8px;font-size:11px;color:var(--muted);">Fuente: ILOSTAT, BLS, datos oficiales de cada país. Salario nominal mensual en USD.</div>
+                <div id="wage-curve-note" style="margin-top:8px;font-size:11px;color:var(--muted);">Fuente: ILOSTAT, BLS, World Bank PPP 2022. Valores en dólares internacionales (PPP) — poder adquisitivo real.</div>
               </div>
 
               <div class="field">
@@ -1763,7 +1763,7 @@ async function updateWageCurve() {
             callback: v => '$' + v.toLocaleString(),
           },
           grid: { color: 'rgba(255,255,255,0.06)' },
-          title: { display: true, text: 'USD / mes', color: '#7a8099', font: { size: 11 } },
+          title: { display: true, text: 'PPP USD / mes', color: '#7a8099', font: { size: 11 } },
         },
       },
     },

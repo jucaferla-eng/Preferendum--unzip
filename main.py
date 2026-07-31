@@ -11418,28 +11418,47 @@ def wages_curve(countries: str = 'CL', db: Session = Depends(get_db)):
     }
     cc_list = [c.strip().upper() for c in countries.split(',') if c.strip()][:20]
 
-    # Pre-cargar ilo_wages completo para los países solicitados (más eficiente que N queries)
+    from ppp_agent import PLI as _PLI
+
+    # occupation_salary — PPP preferido, fallback nominal con PLI estimado
+    occ_all = db.execute(text("""
+        SELECT country_iso, isco_group, median_monthly_usd,
+               median_monthly_ppp_usd, ppp_price_level_index
+        FROM occupation_salary
+        WHERE country_iso = ANY(:ccs) AND isco_group BETWEEN 1 AND 9
+          AND median_monthly_usd > 0
+    """), {'ccs': cc_list}).fetchall()
+    occ_map: dict[tuple, float] = {}
+    for r in occ_all:
+        cc, g, nominal, ppp, pli = r[0], int(r[1]), r[2], r[3], r[4]
+        if ppp:
+            occ_map[(cc, g)] = round(float(ppp), 0)
+        elif nominal and pli:
+            occ_map[(cc, g)] = round(float(nominal) / float(pli), 0)
+        elif nominal:
+            world_pli = _PLI.get(cc, 1.0)
+            occ_map[(cc, g)] = round(float(nominal) / world_pli, 0)
+
+    # ilo_wages — PPP preferido, fallback nominal con PLI
     ilo_all = db.execute(text("""
-        SELECT country_iso2, isco_group, monthly_usd
+        SELECT country_iso2, isco_group, monthly_usd, monthly_ppp_usd
         FROM ilo_wages
         WHERE country_iso2 = ANY(:ccs) AND monthly_usd > 0
     """), {'ccs': cc_list}).fetchall()
     ilo_map: dict[tuple, float] = {}
     for r in ilo_all:
-        key = (r[0], int(r[1])) if r[1] is not None else None
-        if key and 1 <= key[1] <= 9:
-            ilo_map[key] = float(r[2])
+        cc, g, nominal, ppp = r[0], r[1], r[2], r[3]
+        if g is None: continue
+        try: g = int(g)
+        except: continue
+        if not (1 <= g <= 9): continue
+        if ppp:
+            ilo_map[(cc, g)] = round(float(ppp), 0)
+        elif nominal:
+            world_pli = _PLI.get(cc, 1.0)
+            ilo_map[(cc, g)] = round(float(nominal) / world_pli, 0)
 
-    # occupation_salary para los países solicitados
-    occ_all = db.execute(text("""
-        SELECT country_iso, isco_group, median_monthly_usd
-        FROM occupation_salary
-        WHERE country_iso = ANY(:ccs) AND isco_group BETWEEN 1 AND 9
-          AND median_monthly_usd > 0
-    """), {'ccs': cc_list}).fetchall()
-    occ_map: dict[tuple, float] = {(r[0], int(r[1])): float(r[2]) for r in occ_all if r[2]}
-
-    # occupation_unified para USA
+    # occupation_unified para USA (PPP = nominal, PLI USA = 1.0)
     us_map: dict[int, float] = {}
     if 'US' in cc_list:
         us_rows = db.execute(text("""
@@ -11456,14 +11475,14 @@ def wages_curve(countries: str = 'CL', db: Session = Depends(get_db)):
         curve = {}
         for g in range(1, 10):
             key = (cc, g)
-            # Prioridad: occupation_salary > ilo_wages > occupation_unified (solo US)
             if key in occ_map:
-                curve[str(g)] = round(occ_map[key], 0)
+                curve[str(g)] = occ_map[key]
             elif key in ilo_map:
-                curve[str(g)] = round(ilo_map[key], 0)
+                curve[str(g)] = ilo_map[key]
             elif cc == 'US' and g in us_map:
                 curve[str(g)] = us_map[g]
         if not curve and cc in _SEED:
+            # Seed ya en valores PPP estimados (World Bank PLI aplicado)
             curve = {str(g): v for g, v in _SEED[cc].items()}
         if curve:
             result[cc] = curve
@@ -11471,7 +11490,7 @@ def wages_curve(countries: str = 'CL', db: Session = Depends(get_db)):
     return {
         'countries': result,
         'isco_labels': ISCO_LABELS,
-        'currency': 'USD/month nominal',
+        'currency': 'PPP USD/month (poder adquisitivo real)',
     }
 
 
