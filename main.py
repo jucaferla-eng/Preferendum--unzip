@@ -11400,7 +11400,7 @@ def wages_curve(countries: str = 'CL', db: Session = Depends(get_db)):
         4: 'Clerical', 5: 'Service & Sales', 6: 'Agricultural',
         7: 'Craft trades', 8: 'Machine operators', 9: 'Elementary',
     }
-    cc_list = [c.strip().upper() for c in countries.split(',') if c.strip()][:8]
+    cc_list = [c.strip().upper() for c in countries.split(',') if c.strip()][:20]
 
     # Pre-cargar ilo_wages completo para los países solicitados (más eficiente que N queries)
     ilo_all = db.execute(text("""
