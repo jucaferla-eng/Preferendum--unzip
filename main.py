@@ -3363,21 +3363,27 @@ def _assign_user_tier_inner(user, db):
             _occ_ppp = float(user.estimated_income_usd) / 12.0 / _pli
 
         # Índice comunal desde nuestra commune_market_data (price_m2_avg)
+        # Chile guarda precios en UF → convertir a USD antes de calcular índice
+        _UF_USD = 40.5
+        _is_uf_country = (user_country_code == 'CL')
+
         if commune_data and getattr(commune_data, 'price_m2_avg', None) and commune_data.price_m2_avg > 0:
             try:
+                _m2_factor = _UF_USD if _is_uf_country else 1.0
                 try:
                     _med_r = db.execute(text("""
-                        SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_m2_avg)
+                        SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_m2_avg * :fx)
                         FROM commune_market_data WHERE country=:cc AND price_m2_avg > 0
-                    """), {'cc': user_country_code}).fetchone()
+                    """), {'cc': user_country_code, 'fx': _m2_factor}).fetchone()
                 except Exception:
                     _med_r = db.execute(text("""
-                        SELECT AVG(price_m2_avg) FROM commune_market_data
+                        SELECT AVG(price_m2_avg * :fx) FROM commune_market_data
                         WHERE country=:cc AND price_m2_avg > 0
-                    """), {'cc': user_country_code}).fetchone()
+                    """), {'cc': user_country_code, 'fx': _m2_factor}).fetchone()
                 _nat_m2 = float(_med_r[0]) if _med_r and _med_r[0] else None
                 if _nat_m2 and _nat_m2 > 0:
-                    _comm_index = (float(commune_data.price_m2_avg) / _nat_m2) * 100.0
+                    _commune_price_usd = float(commune_data.price_m2_avg) * _m2_factor
+                    _comm_index = (_commune_price_usd / _nat_m2) * 100.0
             except Exception:
                 pass
 
@@ -11732,26 +11738,29 @@ def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
 
     _BETA_BASE = 0.35
 
-    # Pre-calcular mediana de price_m2_avg por país (una sola query por país)
-    nat_medians: dict[str, float] = {}
+    # Pre-calcular mediana de price_m2_avg por país en USD (una sola query por país)
+    # Chile guarda precios en UF → multiplicar por 40.5 para comparar en USD
+    _UF_USD = 40.5
+    nat_medians: dict[str, float] = {}   # siempre en USD/m²
     try:
         cc_rows = db.execute(text("""
             SELECT DISTINCT country FROM commune_market_data WHERE price_m2_avg > 0
         """)).fetchall()
         for (cc_,) in cc_rows:
+            _fx = _UF_USD if cc_ == 'CL' else 1.0
             try:
                 try:
                     r = db.execute(text("""
-                        SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_m2_avg)
+                        SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_m2_avg * :fx)
                         FROM commune_market_data WHERE country=:cc AND price_m2_avg > 0
-                    """), {'cc': cc_}).fetchone()
+                    """), {'cc': cc_, 'fx': _fx}).fetchone()
                 except Exception:
                     r = db.execute(text("""
-                        SELECT AVG(price_m2_avg) FROM commune_market_data
+                        SELECT AVG(price_m2_avg * :fx) FROM commune_market_data
                         WHERE country=:cc AND price_m2_avg > 0
-                    """), {'cc': cc_}).fetchone()
+                    """), {'cc': cc_, 'fx': _fx}).fetchone()
                 if r and r[0]:
-                    nat_medians[cc_] = float(r[0])
+                    nat_medians[cc_] = round(float(r[0]), 2)
             except Exception:
                 pass
     except Exception:
@@ -11787,7 +11796,8 @@ def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
                     LIMIT 1
                 """), {'cc': cc, 'cm': commune.strip(), 'cm2': f'%{commune.strip()}%'}).fetchone()
                 if cmd and cmd[0] and float(cmd[0]) > 0 and cc in nat_medians:
-                    _comm_index = (float(cmd[0]) / nat_medians[cc]) * 100.0
+                    _price_usd = float(cmd[0]) * (_UF_USD if cc == 'CL' else 1.0)
+                    _comm_index = (_price_usd / nat_medians[cc]) * 100.0
 
             # β efectivo por edad
             _user_age = None
