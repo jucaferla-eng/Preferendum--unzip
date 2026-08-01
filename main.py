@@ -3341,42 +3341,71 @@ def _assign_user_tier_inner(user, db):
             # Sin dato de commune: usar directamente la mediana del país
             user.estimated_income_usd = round(_country_median_income, 0)
 
-    # ── Score compuesto de ingreso: ocupación + residencial + empresa ────────────
-    # Señal 1 (ocupacional): estimated_income_usd (anual) → mensual PPP
-    # Señal 2 (residencial): commune.estimated_income_ppp (mensual PPP desde m²)
-    # Señal 3 (empresa):    multiplicador SIZE_MULT sobre señal ocupacional
-    # Resultado: estimated_income_ppp en users (mensual PPP USD)
+    # ── Score compuesto de ingreso: fórmula β-comunal ────────────────────────
+    # Modelo: y_u = y_ocup × (I_comuna/100)^β_eff
+    # I_comuna = price_m2_avg_comuna / mediana_nacional × 100  (fuente: commune_market_data)
+    # β_eff ajustado por edad para evitar sesgo hijos-viviendo-con-padres:
+    #   < 33 años → β_eff = 0.0   (sin ajuste: solo señal ocupacional)
+    #   33-39 años → β_eff = β_base / 2
+    #   ≥ 40 años → β_eff = β_base
+    _BETA_BASE = 0.35   # punto medio entre 0.30-0.40 (JC 2026-08-01)
+
     try:
         from ppp_agent import PLI as _PLI_MAP
-        from rental_price_agent import estimate_income_from_rent_m2 as _rent2inc
+        from datetime import date as _date_cls
 
-        _pli       = _PLI_MAP.get(user_country_code, 0.60)
-        _occ_ppp   = None
-        _res_ppp   = None
+        _pli         = _PLI_MAP.get(user_country_code, 0.60)
+        _occ_ppp     = None
+        _comm_index  = 100.0   # fallback = mediana nacional
 
         # Señal ocupacional → mensual PPP
         if user.estimated_income_usd and user.estimated_income_usd > 0:
             _occ_ppp = float(user.estimated_income_usd) / 12.0 / _pli
 
-        # Señal residencial → mensual PPP desde commune_market_data
-        if commune_data:
-            _res_raw = getattr(commune_data, 'estimated_income_ppp', None)
-            if _res_raw and float(_res_raw) > 0:
-                _res_ppp = float(_res_raw)
-            elif getattr(commune_data, 'price_m2_avg', None) and commune_data.price_m2_avg > 0:
-                _is_uf = (user_country_code == 'CL')
-                _res_ppp = _rent2inc(commune_data.price_m2_avg, user_country_code, is_uf=_is_uf)
+        # Índice comunal desde nuestra commune_market_data (price_m2_avg)
+        if commune_data and getattr(commune_data, 'price_m2_avg', None) and commune_data.price_m2_avg > 0:
+            try:
+                try:
+                    _med_r = db.execute(text("""
+                        SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_m2_avg)
+                        FROM commune_market_data WHERE country_iso=:cc AND price_m2_avg > 0
+                    """), {'cc': user_country_code}).fetchone()
+                except Exception:
+                    _med_r = db.execute(text("""
+                        SELECT AVG(price_m2_avg) FROM commune_market_data
+                        WHERE country_iso=:cc AND price_m2_avg > 0
+                    """), {'cc': user_country_code}).fetchone()
+                _nat_m2 = float(_med_r[0]) if _med_r and _med_r[0] else None
+                if _nat_m2 and _nat_m2 > 0:
+                    _comm_index = (float(commune_data.price_m2_avg) / _nat_m2) * 100.0
+            except Exception:
+                pass
 
-        # Combinar señales con pesos adaptativos
-        _signals = []
+        # β efectivo según edad (dob = 'YYYY-MM-DD')
+        _user_age = None
+        _dob_str  = getattr(user, 'dob', None)
+        if _dob_str:
+            try:
+                _birth    = datetime.strptime(_dob_str[:10], '%Y-%m-%d').date()
+                _user_age = (_date_cls.today() - _birth).days // 365
+            except Exception:
+                pass
+
+        if _user_age is None:
+            _beta_eff = _BETA_BASE            # sin dato edad: β completo
+        elif _user_age < 33:
+            _beta_eff = 0.0                   # solo ocupación — posible hijo en casa
+        elif _user_age < 40:
+            _beta_eff = _BETA_BASE / 2.0      # ajuste suave
+        else:
+            _beta_eff = _BETA_BASE            # β completo
+
+        # Aplicar fórmula
         if _occ_ppp and _occ_ppp > 0:
-            _signals.append((_occ_ppp, 0.55))
-        if _res_ppp and _res_ppp > 0:
-            _signals.append((_res_ppp, 0.45))
-
-        if _signals:
-            _tw        = sum(w for _, w in _signals)
-            _composite = sum(v * w for v, w in _signals) / _tw
+            if _beta_eff > 0 and _comm_index > 0:
+                _composite = _occ_ppp * ((_comm_index / 100.0) ** _beta_eff)
+            else:
+                _composite = _occ_ppp         # β=0 → solo ocupación
             if hasattr(user, 'estimated_income_ppp'):
                 user.estimated_income_ppp = round(_composite, 1)
     except Exception:
@@ -11690,18 +11719,46 @@ def admin_import_ppp_ilo(secret: str, db: Session = Depends(get_db)):
 def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
                                       limit: int = 5000):
     """
-    Recalcula estimated_income_ppp (score compuesto) para todos los usuarios.
-    Combina señal ocupacional (estimated_income_usd) + señal residencial (commune m²).
-    Útil para aplicar el modelo a usuarios registrados antes de esta feature.
+    Recalcula estimated_income_ppp (fórmula β-comunal) para todos los usuarios.
+    Modelo: y_u = y_ocup × (I_comuna/100)^β_eff
+    I_comuna = price_m2_comuna / mediana_nacional × 100 (commune_market_data)
+    β_eff ajustado por edad: <33→0, 33-39→β/2, ≥40→β (β_base=0.35)
     """
     if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
         raise HTTPException(403, 'Forbidden')
 
     from ppp_agent import PLI as _PLI_MAP
-    from rental_price_agent import estimate_income_from_rent_m2 as _rent2inc
+    from datetime import date as _date_cls
+
+    _BETA_BASE = 0.35
+
+    # Pre-calcular mediana de price_m2_avg por país (una sola query por país)
+    nat_medians: dict[str, float] = {}
+    try:
+        cc_rows = db.execute(text("""
+            SELECT DISTINCT country_iso FROM commune_market_data WHERE price_m2_avg > 0
+        """)).fetchall()
+        for (cc_,) in cc_rows:
+            try:
+                try:
+                    r = db.execute(text("""
+                        SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_m2_avg)
+                        FROM commune_market_data WHERE country_iso=:cc AND price_m2_avg > 0
+                    """), {'cc': cc_}).fetchone()
+                except Exception:
+                    r = db.execute(text("""
+                        SELECT AVG(price_m2_avg) FROM commune_market_data
+                        WHERE country_iso=:cc AND price_m2_avg > 0
+                    """), {'cc': cc_}).fetchone()
+                if r and r[0]:
+                    nat_medians[cc_] = float(r[0])
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     users_q = db.execute(text("""
-        SELECT id, country, county, estimated_income_usd
+        SELECT id, country, county, estimated_income_usd, dob
         FROM users
         WHERE se_tier IS NOT NULL AND se_tier != ''
         ORDER BY id
@@ -11710,39 +11767,50 @@ def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
 
     updated = skipped = 0
 
-    for uid, country, commune, est_usd in users_q:
+    for uid, country, commune, est_usd, dob_str in users_q:
         try:
-            cc   = _country_code(country) if country else ''
-            pli  = _PLI_MAP.get(cc, 0.60)
+            cc  = _country_code(country) if country else ''
+            pli = _PLI_MAP.get(cc, 0.60)
 
             _occ_ppp = float(est_usd) / 12.0 / pli if est_usd and float(est_usd) > 0 else None
-
-            _res_ppp = None
-            if commune and cc:
-                cmd = db.execute(text("""
-                    SELECT estimated_income_ppp, price_m2_avg
-                    FROM commune_market_data
-                    WHERE country = :cc
-                      AND (commune ILIKE :cm OR commune ILIKE :cm2)
-                    LIMIT 1
-                """), {'cc': cc, 'cm': commune.strip(), 'cm2': f'%{commune.strip()}%'}).fetchone()
-
-                if cmd:
-                    if cmd[0] and float(cmd[0]) > 0:
-                        _res_ppp = float(cmd[0])
-                    elif cmd[1] and float(cmd[1]) > 0:
-                        _res_ppp = _rent2inc(float(cmd[1]), cc, is_uf=(cc == 'CL'))
-
-            signals = []
-            if _occ_ppp and _occ_ppp > 0: signals.append((_occ_ppp, 0.55))
-            if _res_ppp and _res_ppp > 0:  signals.append((_res_ppp, 0.45))
-
-            if not signals:
+            if not _occ_ppp:
                 skipped += 1
                 continue
 
-            tw        = sum(w for _, w in signals)
-            composite = sum(v * w for v, w in signals) / tw
+            # Índice comunal
+            _comm_index = 100.0
+            if commune and cc:
+                cmd = db.execute(text("""
+                    SELECT price_m2_avg FROM commune_market_data
+                    WHERE country_iso=:cc
+                      AND (LOWER(commune) = LOWER(:cm) OR commune ILIKE :cm2)
+                    LIMIT 1
+                """), {'cc': cc, 'cm': commune.strip(), 'cm2': f'%{commune.strip()}%'}).fetchone()
+                if cmd and cmd[0] and float(cmd[0]) > 0 and cc in nat_medians:
+                    _comm_index = (float(cmd[0]) / nat_medians[cc]) * 100.0
+
+            # β efectivo por edad
+            _user_age = None
+            if dob_str:
+                try:
+                    _birth    = datetime.strptime(str(dob_str)[:10], '%Y-%m-%d').date()
+                    _user_age = (_date_cls.today() - _birth).days // 365
+                except Exception:
+                    pass
+
+            if _user_age is None:
+                _beta_eff = _BETA_BASE
+            elif _user_age < 33:
+                _beta_eff = 0.0
+            elif _user_age < 40:
+                _beta_eff = _BETA_BASE / 2.0
+            else:
+                _beta_eff = _BETA_BASE
+
+            if _beta_eff > 0 and _comm_index > 0:
+                composite = _occ_ppp * ((_comm_index / 100.0) ** _beta_eff)
+            else:
+                composite = _occ_ppp
 
             db.execute(text(
                 "UPDATE users SET estimated_income_ppp=:ppp WHERE id=:uid"
@@ -11758,11 +11826,12 @@ def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
 
     db.commit()
     return {
-        'updated': updated,
-        'skipped': skipped,
-        'total':   len(users_q),
-        'model':   'occupation(0.55) + residential(0.45) PPP composite',
-        'status':  'ok',
+        'updated':    updated,
+        'skipped':    skipped,
+        'total':      len(users_q),
+        'model':      'beta-comunal: y_u = y_ocup × (I_comuna/100)^β_eff  (β_base=0.35)',
+        'nat_medians': {k: round(v, 2) for k, v in nat_medians.items()},
+        'status':     'ok',
     }
 
 
