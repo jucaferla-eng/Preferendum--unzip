@@ -286,26 +286,139 @@ _HNWI: dict[str, int] = {
     'KZ':    18_000, 'UA':    22_000, 'HR':    12_000, 'SK':    18_000,
 }
 
-# Salarios REALES ILOSTAT por país para los 10 países del modelo Perplexity.
-# Fuente: curva_salarial_ppp_10paises.csv — descargado de ILOSTAT 2024/2025.
-# Estos son salarios MEDIOS de TODOS los empleados por grupo ISCO, no CEOs.
-# Se usan como base para ISCO 2-9; ISCO 1 usa _CEO_PPP (dato directo por empresa).
-# Validado: E2 BMW/Mercedes MAE=0.7pp vs Perplexity con estos datos.
-_WAGES_ILOSTAT: dict[str, dict[int, float]] = {
-    'US': {1:10_342,2:8_638,3:6_509,4:4_487,5:3_699,6:3_565,7:5_382,8:4_736,9:3_623},
-    'CN': {1:4_799, 2:3_500,3:3_000,4:2_203,5:1_834,6:1_600,7:1_800,8:1_857,9:1_200},
-    'GB': {1:4_384, 2:3_709,3:3_035,4:2_185,5:1_871,6:2_061,7:2_849,8:2_618,9:1_441},
-    'UK': {1:4_384, 2:3_709,3:3_035,4:2_185,5:1_871,6:2_061,7:2_849,8:2_618,9:1_441},
-    'FR': {1:5_151, 2:4_064,3:3_023,4:2_521,5:2_212,6:2_069,7:2_777,8:2_681,9:1_819},
-    'RU': {1:6_131, 2:3_548,3:2_953,4:2_235,5:2_050,6:2_389,7:3_380,8:3_373,9:1_793},
-    'BR': {1:3_099, 2:2_538,3:1_678,4:1_070,5:892,  6:768,  7:1_024,8:1_088,9:629},
-    'NO': {1:9_175, 2:6_431,3:6_533,4:4_646,5:3_505,6:3_431,7:5_090,8:5_115,9:3_453},
-    'MX': {1:1_961, 2:1_533,3:1_215,4:1_031,5:784,  6:673,  7:979,  8:989,  9:624},
-    'CO': {1:2_118, 2:2_317,3:1_509,4:1_128,5:923,  6:816,  7:951,  8:1_011,9:757},
-    'BD': {1:1_142, 2:699,  3:683,  4:687,  5:438,  6:392,  7:443,  8:470,  9:323},
+# ── Curvas de 3 tiers por país × ISCO (three_tier_wage_curve_data.csv) ────────
+# Fuente: Perplexity 2026-07-31. Datos directos por (país, ISCO, tamaño empresa).
+# small = empresa pequeña | mid = promedio nacional | large = empresa grande
+# ISCO 0 = CEO/directivo máximo (Gallagher, Levu, Docco, Page Executive, SSB...)
+# Reemplaza los multiplicadores genéricos _SIZE_MULT_BY_ISCO — da valores exactos.
+# Validado: E2 BMW/Mercedes MAE=0.7pp vs Perplexity con CN=470M urbanos.
+_THREE_TIER: dict[str, dict[int, dict[str, float]]] = {
+    'US': {
+        0: {'small':  17_202, 'medium':  250_500, 'large': 1_541_667},
+        1: {'small':   8_202, 'medium':   10_342, 'large':    13_041},
+        2: {'small':   6_851, 'medium':    8_638, 'large':    10_892},
+        3: {'small':   5_162, 'medium':    6_509, 'large':     8_208},
+        4: {'small':   3_558, 'medium':    4_487, 'large':     5_658},
+        5: {'small':   2_933, 'medium':    3_699, 'large':     4_664},
+        6: {'small':   2_827, 'medium':    3_565, 'large':     4_496},
+        7: {'small':   4_268, 'medium':    5_382, 'large':     6_786},
+        8: {'small':   3_756, 'medium':    4_736, 'large':     5_972},
+        9: {'small':   2_874, 'medium':    3_623, 'large':     4_569},
+    },
+    'CN': {
+        0: {'small':   1_508, 'medium':    3_392, 'large':    31_663},
+        1: {'small':   4_193, 'medium':    4_799, 'large':     5_493},
+        2: {'small':   3_058, 'medium':    3_500, 'large':     4_005},
+        3: {'small':   2_245, 'medium':    2_570, 'large':     2_942},
+        4: {'small':   1_925, 'medium':    2_203, 'large':     2_521},
+        5: {'small':   1_602, 'medium':    1_834, 'large':     2_099},
+        6: {'small':   1_510, 'medium':    1_728, 'large':     1_978},
+        7: {'small':   1_571, 'medium':    1_798, 'large':     2_058},
+        8: {'small':   1_622, 'medium':    1_857, 'large':     2_125},
+        9: {'small':   1_010, 'medium':    1_156, 'large':     1_323},
+    },
+    'GB': {
+        'UK': True,  # alias handled below
+        0: {'small':  12_540, 'medium':   56_467, 'large':   740_289},
+        1: {'small':   3_848, 'medium':    4_384, 'large':     4_995},
+        2: {'small':   3_405, 'medium':    3_709, 'large':     4_039},
+        3: {'small':   2_636, 'medium':    3_035, 'large':     3_495},
+        4: {'small':   2_109, 'medium':    2_185, 'large':     2_263},
+        5: {'small':   1_568, 'medium':    1_871, 'large':     2_233},
+        6: {'small':   1_907, 'medium':    2_061, 'large':     2_228},
+        7: {'small':   2_448, 'medium':    2_849, 'large':     3_316},
+        8: {'small':   2_497, 'medium':    2_618, 'large':     2_745},
+        9: {'small':   1_145, 'medium':    1_441, 'large':     1_813},
+    },
+    'FR': {
+        0: {'small':  10_397, 'medium':   18_960, 'large':   366_974},
+        1: {'small':   4_940, 'medium':    5_151, 'large':     5_370},
+        2: {'small':   4_006, 'medium':    4_064, 'large':     4_122},
+        3: {'small':   3_002, 'medium':    3_023, 'large':     3_044},
+        4: {'small':   2_633, 'medium':    2_521, 'large':     2_414},
+        5: {'small':   2_105, 'medium':    2_212, 'large':     2_324},
+        6: {'small':   1_969, 'medium':    2_069, 'large':     2_174},
+        7: {'small':   2_662, 'medium':    2_777, 'large':     2_898},
+        8: {'small':   2_551, 'medium':    2_681, 'large':     2_817},
+        9: {'small':   1_731, 'medium':    1_819, 'large':     1_911},
+    },
+    'RU': {
+        0: {'small':   7_881, 'medium':   39_610, 'large':    87_835},
+        1: {'small':   5_074, 'medium':    6_131, 'large':     7_408},
+        2: {'small':   2_936, 'medium':    3_548, 'large':     4_287},
+        3: {'small':   2_444, 'medium':    2_953, 'large':     3_568},
+        4: {'small':   1_849, 'medium':    2_235, 'large':     2_700},
+        5: {'small':   1_697, 'medium':    2_050, 'large':     2_477},
+        6: {'small':   1_977, 'medium':    2_389, 'large':     2_886},
+        7: {'small':   2_797, 'medium':    3_380, 'large':     4_084},
+        8: {'small':   2_791, 'medium':    3_373, 'large':     4_075},
+        9: {'small':   1_484, 'medium':    1_793, 'large':     2_167},
+    },
+    'BR': {
+        0: {'small':   8_759, 'medium':   21_138, 'large':   106_700},
+        1: {'small':   2_574, 'medium':    3_099, 'large':     3_732},
+        2: {'small':   2_108, 'medium':    2_538, 'large':     3_056},
+        3: {'small':   1_394, 'medium':    1_678, 'large':     2_021},
+        4: {'small':     889, 'medium':    1_070, 'large':     1_289},
+        5: {'small':     741, 'medium':      892, 'large':     1_074},
+        6: {'small':     638, 'medium':      768, 'large':       924},
+        7: {'small':     850, 'medium':    1_024, 'large':     1_233},
+        8: {'small':     904, 'medium':    1_088, 'large':     1_310},
+        9: {'small':     523, 'medium':      629, 'large':       758},
+    },
+    'NO': {
+        0: {'small':   7_293, 'medium':   11_394, 'large':    22_787},
+        1: {'small':   8_941, 'medium':    9_175, 'large':     9_415},
+        2: {'small':   6_588, 'medium':    6_431, 'large':     6_279},
+        3: {'small':   6_410, 'medium':    6_533, 'large':     6_660},
+        4: {'small':   4_547, 'medium':    4_646, 'large':     4_747},
+        5: {'small':   3_207, 'medium':    3_505, 'large':     3_830},
+        6: {'small':   3_278, 'medium':    3_431, 'large':     3_592},
+        7: {'small':   4_895, 'medium':    5_090, 'large':     5_292},
+        8: {'small':   4_886, 'medium':    5_115, 'large':     5_355},
+        9: {'small':   3_301, 'medium':    3_453, 'large':     3_612},
+    },
+    'MX': {
+        0: {'small':  27_228, 'medium':   36_304, 'large':    47_900},
+        1: {'small':   1_193, 'medium':    1_961, 'large':     3_222},
+        2: {'small':     933, 'medium':    1_533, 'large':     2_519},
+        3: {'small':     740, 'medium':    1_215, 'large':     1_997},
+        4: {'small':     627, 'medium':    1_031, 'large':     1_694},
+        5: {'small':     477, 'medium':      784, 'large':     1_288},
+        6: {'small':     410, 'medium':      673, 'large':     1_106},
+        7: {'small':     596, 'medium':      979, 'large':     1_609},
+        8: {'small':     602, 'medium':      989, 'large':     1_625},
+        9: {'small':     380, 'medium':      624, 'large':     1_025},
+    },
+    'CO': {
+        0: {'small':  22_516, 'medium':   49_684, 'large':    81_377},
+        1: {'small':   1_917, 'medium':    2_118, 'large':     2_339},
+        2: {'small':   2_098, 'medium':    2_317, 'large':     2_559},
+        3: {'small':   1_366, 'medium':    1_509, 'large':     1_667},
+        4: {'small':   1_021, 'medium':    1_128, 'large':     1_246},
+        5: {'small':     836, 'medium':      923, 'large':     1_020},
+        6: {'small':     738, 'medium':      816, 'large':       901},
+        7: {'small':     861, 'medium':      951, 'large':     1_051},
+        8: {'small':     915, 'medium':    1_011, 'large':     1_117},
+        9: {'small':     685, 'medium':      757, 'large':       836},
+    },
+    'BD': {
+        0: {'small':  11_729, 'medium':   21_754, 'large':    58_048},
+        1: {'small':   1_034, 'medium':    1_142, 'large':     1_262},
+        2: {'small':     633, 'medium':      699, 'large':       772},
+        3: {'small':     618, 'medium':      683, 'large':       754},
+        4: {'small':     622, 'medium':      687, 'large':       759},
+        5: {'small':     397, 'medium':      438, 'large':       484},
+        6: {'small':     355, 'medium':      392, 'large':       433},
+        7: {'small':     401, 'medium':      443, 'large':       490},
+        8: {'small':     425, 'medium':      470, 'large':       519},
+        9: {'small':     292, 'medium':      323, 'large':       356},
+    },
 }
+# Alias GB → UK
+_THREE_TIER['UK'] = {k: v for k, v in _THREE_TIER['GB'].items() if k != 'UK'}
 
-# Fallback PPP mediana mundial si país no está en occupation_salary ni en _WAGES_ILOSTAT
+# Fallback PPP mediana mundial si país no está en _THREE_TIER ni en occupation_salary
 _FALLBACK_PPP: dict[int, float] = {
     1: 4_200, 2: 2_800, 3: 1_900,
     4: 1_300, 5: 1_100, 6: 950,
@@ -344,9 +457,11 @@ def _get_country_wages(db, country_iso: str) -> dict[int, float]:
     except Exception:
         pass
 
-    # Prioridad 2: datos ILOSTAT reales del CSV (10 países validados)
-    if country_iso in _WAGES_ILOSTAT:
-        return dict(_WAGES_ILOSTAT[country_iso])
+    # Prioridad 2: _THREE_TIER — curva nacional media de los 10 países Perplexity
+    if country_iso in _THREE_TIER:
+        return {isco: float(tiers.get('medium', 1_000))
+                for isco, tiers in _THREE_TIER[country_iso].items()
+                if isinstance(isco, int) and isco >= 1}
 
     try:
         # Prioridad 3: tabla ilo_wages en BD
@@ -367,19 +482,48 @@ def _mu_for_isco_bucket(country_iso: str, isco: int, bucket: str,
     """
     Media log-normal para un segmento (país, ISCO, tamaño empresa).
     Buckets: 'small' | 'medium' | 'large' | 'multinational'
-    ISCO 1 multinational: usa _CEO_PPP_MULTINATIONAL (Falabella, CEMEX, Vale…)
-    ISCO 1 large/medium/small: usa _CEO_PPP por país.
-    ISCO 2-9: escala mediana nacional con _SIZE_MULT_BY_ISCO.
+
+    Prioridad de fuentes (ISCO 0/1 CEO y ISCO 2-9):
+      1. _THREE_TIER[country][isco][bucket] — datos reales 3-curvas Perplexity
+         (Eurostat SES, Gallagher, Levu, SSB, Rosstat, Docco, Page Executive)
+      2. _CEO_PPP / _CEO_PPP_MULTINATIONAL — para CEO y multinacional
+      3. national_wages × _SIZE_MULT_BY_ISCO — fallback genérico
     """
-    if isco == 1:
-        if bucket == 'multinational':
+    # Bucket 'multinational' siempre usa CEO_PPP_MULTINATIONAL para ISCO 0/1
+    if bucket == 'multinational':
+        if isco <= 1:
             mn = _CEO_PPP_MULTINATIONAL.get(country_iso)
             if mn:
                 return float(mn)
-            # Fallback: 3× large company del mismo país
-            ceo = _CEO_PPP.get(country_iso, {})
-            return float(ceo.get('large', _FALLBACK_PPP[1])) * 3.0
+            # Fallback: 3× large del mismo país
+            tier = _THREE_TIER.get(country_iso, {}).get(0, {})
+            return float(tier.get('large', _FALLBACK_PPP[1])) * 3.0
+        # ISCO 2-9 multinacional: escala sobre el valor large del _THREE_TIER
+        tier = _THREE_TIER.get(country_iso, {}).get(isco, {})
+        large_val = tier.get('large')
+        if large_val:
+            mult = _SIZE_MULT_BY_ISCO.get(('multinational', isco), 1.5)
+            med_val = tier.get('medium', large_val)
+            return float(large_val) * (mult / _SIZE_MULT_BY_ISCO.get(('large', isco), 2.5))
+        # Si no hay _THREE_TIER para este país
+        nat = national_wages.get(isco, _FALLBACK_PPP.get(isco, 1_000))
+        return nat * _SIZE_MULT_BY_ISCO.get(('multinational', isco), 1.5)
 
+    # ISCO 0 (CEO data) — mapeo directo del tier del CSV
+    if isco == 0:
+        tier = _THREE_TIER.get(country_iso, {}).get(0, {})
+        if tier:
+            return float(tier.get(bucket, tier.get('medium', _FALLBACK_PPP[1])))
+        ceo = _CEO_PPP.get(country_iso, {})
+        return float(ceo.get(bucket, ceo.get('medium', _FALLBACK_PPP[1])))
+
+    # ISCO 1-9: buscar en _THREE_TIER primero
+    tier = _THREE_TIER.get(country_iso, {}).get(isco, {})
+    if tier:
+        return float(tier.get(bucket, tier.get('medium', _FALLBACK_PPP.get(isco, 1_000))))
+
+    # Fallback: para países fuera de los 10, usa _CEO_PPP (ISCO 1) o national_wages
+    if isco == 1:
         ceo = _CEO_PPP.get(country_iso, {})
         if ceo:
             return float(ceo.get(bucket, ceo.get('medium', 4_200)))
@@ -387,7 +531,6 @@ def _mu_for_isco_bucket(country_iso: str, isco: int, bucket: str,
         ratio = {'large': 5.5, 'medium': 1.0, 'small': 0.15}.get(bucket, 1.0)
         return nat * ratio
 
-    # ISCO 2-9
     nat  = national_wages.get(isco, _FALLBACK_PPP.get(isco, 1_000))
     mult = _SIZE_MULT_BY_ISCO.get((bucket, isco), 1.0)
     return nat * mult
