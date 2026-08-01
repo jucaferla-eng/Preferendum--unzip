@@ -9063,6 +9063,97 @@ def marketer_optimize_budget_strategic(db: Session = Depends(get_db),
     return result
 
 
+@app.post('/admin/car-sales-import')
+def car_sales_import(db: Session = Depends(get_db)):
+    """Importa datos de ventas de autos por marca × país (seed 2024-2026)."""
+    from car_sales_agent import run_car_sales_import
+    return run_car_sales_import(db)
+
+
+@app.get('/marketer/car-brands')
+def car_brands_list(db: Session = Depends(get_db)):
+    """Lista todas las marcas de autos disponibles en BD."""
+    from car_sales_agent import list_brands
+    brands = list_brands(db)
+    return {'brands': brands, 'count': len(brands)}
+
+
+@app.post('/marketer/optimize-budget-brand')
+def marketer_optimize_budget_brand(db: Session = Depends(get_db),
+    brand:             str   = '',      # 'toyota' | 'byd' | 'bmw' ...
+    compete_countries: str   = '',      # 'FR,ES,IT'
+    grow_countries:    str   = '',      # vacío = auto-derivar
+    product_price_usd: float = 0,
+    purchase_type:     str   = 'auto',
+    budget_usd:        float = 100_000,
+    defend_pct:        float = 60,
+    compete_pct:       float = 25,
+    grow_pct:          float = 15,
+    grow_top_n:        int   = 15,
+    age_weights_json:  str   = '',
+    se_tiers:          str   = '',
+    company_sizes:     str   = '',
+):
+    """
+    Motor estratégico usando ventas reales de la marca desde BD.
+    Igual que /optimize-budget-strategic pero solo necesita el nombre de la marca.
+
+    Ejemplo: brand=toyota, product_price_usd=28000, purchase_type=auto, budget_usd=5000000
+    """
+    from car_sales_agent import get_brand_sales, normalize_brand
+    from budget_optimizer import optimize_budget_strategic
+
+    if not brand:
+        raise HTTPException(400, 'Proporciona el nombre de la marca (brand)')
+
+    brand_norm = normalize_brand(brand)
+    brand_sales = get_brand_sales(db, brand_norm)
+
+    if not brand_sales:
+        raise HTTPException(404, (
+            f"No se encontraron ventas para '{brand_norm}'. "
+            f"Corre POST /admin/car-sales-import primero, "
+            f"o usa /optimize-budget-strategic con brand_sales_json manual."
+        ))
+
+    compete_list = [c.strip().upper() for c in compete_countries.split(',') if c.strip()] if compete_countries else []
+    grow_list    = [c.strip().upper() for c in grow_countries.split(',')    if c.strip()] if grow_countries    else []
+    size_list    = [s.strip().lower() for s in company_sizes.split(',')     if s.strip()] if company_sizes     else []
+    tier_list    = [t.strip().upper() for t in se_tiers.split(',')         if t.strip()] if se_tiers          else []
+
+    age_segments = []
+    if age_weights_json:
+        try:
+            aw = json.loads(age_weights_json)
+            for range_str, pct in aw.items():
+                if '-' in range_str:
+                    parts = range_str.split('-')
+                    age_segments.append({'min': int(parts[0]), 'max': int(parts[1]),
+                                         'pct': float(pct), 'label': f"{parts[0]}-{parts[1]} años"})
+        except Exception:
+            pass
+
+    result = optimize_budget_strategic(
+        db=db,
+        brand_sales_by_country=brand_sales,
+        product_price_usd=product_price_usd,
+        purchase_type=purchase_type,
+        budget_usd=budget_usd,
+        defend_pct=defend_pct / 100,
+        compete_pct=compete_pct / 100,
+        grow_pct=grow_pct / 100,
+        compete_countries=compete_list,
+        grow_countries=grow_list,
+        age_segments=age_segments,
+        se_tiers=tier_list,
+        company_sizes=size_list,
+        grow_top_n=grow_top_n,
+    )
+    result['brand'] = brand_norm
+    result['brand_sales_source'] = 'car_brand_sales BD — Car Sales Statistics 2024-2026'
+    return result
+
+
 @app.get('/admin/db-info')
 def db_info():
     db_url = DATABASE_URL
