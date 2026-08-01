@@ -852,3 +852,192 @@ def optimize_budget(
             f"= ${min_income_ppp:,.0f} PPP/mes"
         )
     return result
+
+
+# ── Motor estratégico 3 buckets ──────────────────────────────────────────────
+def optimize_budget_strategic(
+    db,
+    brand_sales_by_country: dict[str, float],  # {iso2: unidades_año_anterior}
+    product_price_usd: float,
+    purchase_type: str = 'auto',
+    budget_usd: float = 100_000,
+    defend_pct: float = 0.60,    # fracción del budget para Defender
+    compete_pct: float = 0.25,   # fracción para Competir
+    grow_pct: float = 0.15,      # fracción para Crecer
+    compete_countries: list[str] = [],
+    grow_countries: list[str] = [],
+    age_segments: list[dict] = [],
+    se_tiers: list[str] = [],
+    company_sizes: list[str] = [],
+    grow_top_n: int = 15,        # máximo de mercados nuevos a mostrar
+) -> dict:
+    """
+    Motor estratégico de 3 buckets:
+
+    DEFENDER  — mercados donde la marca ya vende.
+                Asignación proporcional al volumen de ventas del año anterior.
+                Objetivo: mantener y crecer market share donde ya somos fuertes.
+
+    COMPETIR  — mercados donde existe la categoría pero con fuerte competencia.
+                Asignación por audiencia calificada (modelo ingreso).
+                Objetivo: ganar terreno a rivales.
+
+    CRECER    — mercados nuevos sin presencia de marca.
+                Asignación por audiencia calificada (modelo ingreso).
+                Objetivo: captar primera demanda en países con poder adquisitivo.
+    """
+    # Normalizar split para que sume 1.0
+    total_split = defend_pct + compete_pct + grow_pct
+    if total_split <= 0:
+        defend_pct, compete_pct, grow_pct = 0.60, 0.25, 0.15
+        total_split = 1.0
+    defend_pct  /= total_split
+    compete_pct /= total_split
+    grow_pct    /= total_split
+
+    # Derivar umbral e archetype desde precio
+    threshold_ppp, archetype = derive_threshold_and_archetype(
+        product_price_usd, purchase_type
+    )
+    cfg_label = _PURCHASE_CONFIGS.get(purchase_type, {}).get('label', purchase_type)
+    divisor   = _PURCHASE_CONFIGS.get(purchase_type, {}).get('divisor')
+
+    size_buckets = company_sizes if company_sizes else ['small', 'medium', 'large', 'multinational']
+    isco_groups  = ARCHETYPES.get(archetype, ARCHETYPES['premium'])
+
+    # Clasificar países
+    defend_countries = sorted(
+        [cc for cc, s in brand_sales_by_country.items() if s > 0],
+        key=lambda x: -brand_sales_by_country[x]
+    )
+    covered = set(defend_countries) | set(compete_countries)
+
+    # Grow: user-specified o auto-derivado (todos los países ILO no cubiertos)
+    if not grow_countries:
+        grow_countries = [cc for cc in _ILO_LABOR_FORCE if cc not in covered]
+
+    budget_defend  = budget_usd * defend_pct
+    budget_compete = budget_usd * compete_pct
+    budget_grow    = budget_usd * grow_pct
+
+    segments_out: list[dict] = []
+
+    # ── BUCKET 1: DEFENDER ───────────────────────────────────────────────────
+    total_sales = sum(brand_sales_by_country.get(cc, 0) for cc in defend_countries)
+    if total_sales > 0:
+        for cc in defend_countries:
+            sales = brand_sales_by_country.get(cc, 0)
+            share = sales / total_sales
+            segments_out.append({
+                'country':      cc,
+                'bucket':       'defend',
+                'bucket_label': 'Defender',
+                'sales_units':  int(sales),
+                'qualified':    int(sales),
+                'pct':          round(share * defend_pct * 100, 2),
+                'budget_usd':   round(budget_defend * share, 2),
+                'rationale':    f"Ventas año anterior: {int(sales):,} unidades",
+            })
+
+    # ── BUCKET 2: COMPETIR ───────────────────────────────────────────────────
+    if compete_countries and budget_compete > 0:
+        compete_q: dict[str, float] = {}
+        for cc in compete_countries:
+            wages = _get_country_wages(db, cc)
+            lf    = _ILO_LABOR_FORCE.get(cc, 100_000)
+            compete_q[cc] = _expected_qualified(
+                user_count=lf, country_iso=cc, national_wages=wages,
+                size_buckets=size_buckets, min_income_ppp=threshold_ppp,
+                isco_groups=isco_groups,
+            )
+        total_cq = sum(compete_q.values()) or 1.0
+        for cc in compete_countries:
+            share = compete_q[cc] / total_cq
+            segments_out.append({
+                'country':      cc,
+                'bucket':       'compete',
+                'bucket_label': 'Competir',
+                'qualified':    round(compete_q[cc]),
+                'pct':          round(share * compete_pct * 100, 2),
+                'budget_usd':   round(budget_compete * share, 2),
+                'rationale':    f"Audiencia calificada: {int(compete_q[cc]):,}",
+            })
+
+    # ── BUCKET 3: CRECER ─────────────────────────────────────────────────────
+    if grow_countries and budget_grow > 0:
+        grow_q: dict[str, float] = {}
+        for cc in grow_countries:
+            wages = _get_country_wages(db, cc)
+            lf    = _ILO_LABOR_FORCE.get(cc, 100_000)
+            grow_q[cc] = _expected_qualified(
+                user_count=lf, country_iso=cc, national_wages=wages,
+                size_buckets=size_buckets, min_income_ppp=threshold_ppp,
+                isco_groups=isco_groups,
+            )
+        # Top N por audiencia calificada
+        top_grow = sorted(grow_q.items(), key=lambda x: -x[1])[:grow_top_n]
+        total_gq  = sum(v for _, v in top_grow) or 1.0
+        for cc, q in top_grow:
+            if q <= 0:
+                continue
+            share = q / total_gq
+            segments_out.append({
+                'country':      cc,
+                'bucket':       'grow',
+                'bucket_label': 'Crecer',
+                'qualified':    round(q),
+                'pct':          round(share * grow_pct * 100, 2),
+                'budget_usd':   round(budget_grow * share, 2),
+                'rationale':    f"Audiencia calificada: {int(q):,}",
+            })
+
+    # Ordenar por budget descendente
+    segments_out.sort(key=lambda x: -x['budget_usd'])
+
+    # Corrección de redondeo
+    total_pct = sum(s['pct'] for s in segments_out)
+    if segments_out and abs(100.0 - total_pct) > 0.05:
+        segments_out[0]['pct'] = round(segments_out[0]['pct'] + (100.0 - total_pct), 2)
+
+    return {
+        'segments': segments_out,
+        'budget_usd': budget_usd,
+        'strategy': {
+            'defend': {
+                'countries': defend_countries,
+                'pct_budget': round(defend_pct * 100, 1),
+                'budget_usd': round(budget_defend, 2),
+                'logic': 'Proporcional a ventas año anterior',
+            },
+            'compete': {
+                'countries': compete_countries,
+                'pct_budget': round(compete_pct * 100, 1),
+                'budget_usd': round(budget_compete, 2),
+                'logic': 'Proporcional a audiencia calificada (modelo ingreso)',
+            },
+            'grow': {
+                'countries': [s['country'] for s in segments_out if s['bucket'] == 'grow'],
+                'pct_budget': round(grow_pct * 100, 1),
+                'budget_usd': round(budget_grow, 2),
+                'logic': f'Top {grow_top_n} mercados nuevos por audiencia calificada',
+            },
+        },
+        'product_price_usd': product_price_usd,
+        'purchase_type': purchase_type,
+        'purchase_type_label': cfg_label,
+        'archetype': archetype,
+        'threshold_ppp': round(threshold_ppp, 0),
+        'threshold_derivation': (
+            f"${product_price_usd:,.0f} / {divisor} = ${threshold_ppp:,.0f} PPP/mes"
+            if divisor else f"Modelo patrimonio HNWI (no threshold)"
+        ),
+        'total_qualified_compete_grow': round(
+            sum(s['qualified'] for s in segments_out if s['bucket'] in ('compete','grow'))
+        ),
+        'model_version': 'v4-strategic — THREE_TIER 2026-08-01',
+        'note': (
+            f"3-bucket: {defend_pct*100:.0f}% Defender / "
+            f"{compete_pct*100:.0f}% Competir / {grow_pct*100:.0f}% Crecer. "
+            f"Umbral ingreso: ${threshold_ppp:,.0f} PPP/mes ({cfg_label})."
+        ),
+    }

@@ -8987,6 +8987,82 @@ def marketer_optimize_budget(db: Session = Depends(get_db),
     )
     return result
 
+
+@app.post('/marketer/optimize-budget-strategic')
+def marketer_optimize_budget_strategic(db: Session = Depends(get_db),
+    brand_sales_json:  str   = '',      # '{"US":150000,"DE":80000}' unidades año anterior
+    compete_countries: str   = '',      # 'FR,ES,IT' — mercados disputados
+    grow_countries:    str   = '',      # 'CN,BR' — vacío = auto-derivar top mercados
+    product_price_usd: float = 0,       # precio producto USD
+    purchase_type:     str   = 'auto',  # 'auto'|'luxury'|'appliance'|'cash_premium'|'fmcg'
+    budget_usd:        float = 100_000,
+    defend_pct:        float = 60,      # % del budget para Defender (se normaliza con compete+grow)
+    compete_pct:       float = 25,      # % para Competir
+    grow_pct:          float = 15,      # % para Crecer
+    grow_top_n:        int   = 15,      # máx mercados nuevos a mostrar
+    age_weights_json:  str   = '',
+    se_tiers:          str   = '',
+    company_sizes:     str   = '',
+):
+    """
+    Motor estratégico 3 buckets:
+      DEFENDER  — proporcional a ventas reales del año anterior.
+      COMPETIR  — audiencia calificada (ingreso) en mercados disputados.
+      CRECER    — top N mercados nuevos por audiencia calificada.
+
+    brand_sales_json: JSON con unidades vendidas por país ISO2.
+    Ejemplo: {"US":150000,"DE":80000,"GB":45000}
+    """
+    from budget_optimizer import optimize_budget_strategic
+
+    # Parsear ventas por país
+    brand_sales: dict[str, float] = {}
+    if brand_sales_json:
+        try:
+            raw = json.loads(brand_sales_json)
+            brand_sales = {k.upper().strip(): float(v) for k, v in raw.items()}
+        except Exception:
+            raise HTTPException(400, 'brand_sales_json debe ser JSON válido: {"US":150000,"DE":80000}')
+
+    if not brand_sales:
+        raise HTTPException(400, 'Proporciona brand_sales_json con ventas del año anterior por país')
+
+    compete_list = [c.strip().upper() for c in compete_countries.split(',') if c.strip()] if compete_countries else []
+    grow_list    = [c.strip().upper() for c in grow_countries.split(',')    if c.strip()] if grow_countries    else []
+    size_list    = [s.strip().lower() for s in company_sizes.split(',')     if s.strip()] if company_sizes     else []
+    tier_list    = [t.strip().upper() for t in se_tiers.split(',')         if t.strip()] if se_tiers          else []
+
+    age_segments = []
+    if age_weights_json:
+        try:
+            aw = json.loads(age_weights_json)
+            for range_str, pct in aw.items():
+                if '-' in range_str:
+                    parts = range_str.split('-')
+                    age_segments.append({'min': int(parts[0]), 'max': int(parts[1]),
+                                         'pct': float(pct), 'label': f"{parts[0]}-{parts[1]} años"})
+        except Exception:
+            pass
+
+    result = optimize_budget_strategic(
+        db=db,
+        brand_sales_by_country=brand_sales,
+        product_price_usd=product_price_usd,
+        purchase_type=purchase_type,
+        budget_usd=budget_usd,
+        defend_pct=defend_pct / 100,
+        compete_pct=compete_pct / 100,
+        grow_pct=grow_pct / 100,
+        compete_countries=compete_list,
+        grow_countries=grow_list,
+        age_segments=age_segments,
+        se_tiers=tier_list,
+        company_sizes=size_list,
+        grow_top_n=grow_top_n,
+    )
+    return result
+
+
 @app.get('/admin/db-info')
 def db_info():
     db_url = DATABASE_URL
