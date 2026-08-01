@@ -11845,6 +11845,17 @@ def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
     }
 
 
+@app.post('/admin/import-perplexity-benchmarks')
+def admin_import_perplexity_benchmarks(secret: str, db: Session = Depends(get_db)):
+    """Importa benchmarks Perplexity 2026-07-31: CEO PPP (Tabla 1), % presupuesto
+    9 marcas × 10 países (Tablas 2-3) y participación Visa (Tabla 4).
+    Crea tablas: perplexity_budget_benchmarks, perplexity_ceo_ppp, perplexity_visa_share."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    from perplexity_budget_agent import run_perplexity_import
+    return run_perplexity_import(db)
+
+
 @app.post('/admin/import-gulf-asia')
 def admin_import_gulf_asia(secret: str, db: Session = Depends(get_db)):
     """Importa salarios ISCO 1-9 para IL, AE, QA, SA, MY, KZ, CH, HK, TW.
