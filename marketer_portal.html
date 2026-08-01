@@ -541,21 +541,26 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
               <div class="field form-full" id="wage-curve-container" style="display:none;">
                 <label style="color:var(--gold);font-size:12px;letter-spacing:1px;">CURVA SALARIAL — INGRESO MENSUAL PPP (USD PODER ADQUISITIVO REAL)</label>
 
-                <!-- Selector tamaño empresa -->
-                <div style="margin:10px 0 14px 0;">
-                  <div style="font-size:10px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;">Tamaño de empresa</div>
-                  <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                    <div id="wsize-micro"    class="chip" onclick="setWageSize('micro')"    style="font-size:11px;padding:4px 12px;">Micro &lt;50</div>
-                    <div id="wsize-medium"   class="chip selected" onclick="setWageSize('medium')"   style="font-size:11px;padding:4px 12px;">Mediana 50-500</div>
-                    <div id="wsize-large"    class="chip" onclick="setWageSize('large')"    style="font-size:11px;padding:4px 12px;">Grande 500-5k</div>
-                    <div id="wsize-corporate" class="chip" onclick="setWageSize('corporate')" style="font-size:11px;padding:4px 12px;">Corporativa 5k+</div>
+                <!-- Leyenda de tamaños -->
+                <div style="display:flex;gap:18px;margin:8px 0 14px 0;flex-wrap:wrap;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div style="width:28px;height:2px;background:#c49a2a;border-radius:2px;"></div>
+                    <span style="font-size:11px;color:var(--muted);">Empresa grande (500+ emp.)</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div style="width:28px;height:2px;background:#c49a2a88;border-radius:2px;"></div>
+                    <span style="font-size:11px;color:var(--muted);">Promedio nacional</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <div style="width:28px;height:1px;background:#c49a2a55;border-radius:2px;border-top:2px dashed #c49a2a55;"></div>
+                    <span style="font-size:11px;color:var(--muted);">Empresa pequeña (&lt;50 emp.)</span>
                   </div>
                 </div>
 
                 <div style="background:var(--ink3);border:1px solid var(--border);border-radius:12px;padding:20px;position:relative;">
-                  <canvas id="wage-curve-chart" height="280"></canvas>
+                  <canvas id="wage-curve-chart" height="300"></canvas>
                 </div>
-                <div id="wage-curve-note" style="margin-top:8px;font-size:11px;color:var(--muted);">Fuente: ILOSTAT, BLS, World Bank PPP 2022. Valores en dólares internacionales (PPP) — poder adquisitivo real.</div>
+                <div id="wage-curve-note" style="margin-top:8px;font-size:11px;color:var(--muted);">Fuente: ILOSTAT, BLS, World Bank PPP 2022 + multiplicadores ILO/OECD por tamaño de empresa. PPP USD/mes.</div>
               </div>
 
               <div class="field">
@@ -1741,7 +1746,7 @@ const _WAGE_CC_NAMES = {
   EC:'Ecuador',BO:'Bolivia',PY:'Paraguay',VE:'Venezuela',
   CH:'Suiza',HK:'Hong Kong',TW:'Taiwan',
 };
-const _WAGE_ISCO_LABELS = ['Mgr','Prof','Tec','Admin','Servicios','Agricult','Artesano','Operador','Básico'];
+const _WAGE_ISCO_LABELS = ['1-Mgr','2-Prof','3-Tec','4-Admin','5-Serv','6-Agric','7-Artes','8-Oper','9-Básico'];
 
 let _wageCurveChart = null;
 let _wageCurveCache = {};
@@ -1786,34 +1791,47 @@ function _renderWageCurveFromCache() {
   const cc_list        = _wageCurveLastCcList;
   if (!countries_data || !cc_list.length) return;
 
-  const mult = _SIZE_MULT[_currentSizeKey] || _SIZE_MULT.medium;
   const available = cc_list.filter(cc => countries_data[cc] && Object.keys(countries_data[cc]).length > 0);
-
   if (!available.length) {
     document.getElementById('wage-curve-note').textContent = 'Sin datos salariales disponibles para este país.';
     if (_wageCurveChart) { _wageCurveChart.destroy(); _wageCurveChart = null; }
     return;
   }
 
-  const datasets = available.map((cc, i) => {
-    const wages = countries_data[cc];
-    // Aplicar multiplicador por tamaño de empresa (índice 0=ISCO1 … 8=ISCO9)
-    const pts = [1,2,3,4,5,6,7,8,9].map((g, idx) => {
-      const base = wages[String(g)] ?? null;
-      return base !== null ? Math.round(base * mult[idx]) : null;
+  // 3 líneas por país: grande (sólida gruesa), promedio (sólida media), pequeña (punteada fina)
+  const _TIERS = [
+    { key: 'large',  label: 'Grande',          width: 2.5, dash: [],    opacity: 'ff', pointR: 4 },
+    { key: 'medium', label: 'Prom. nac.',       width: 1.8, dash: [],    opacity: '99', pointR: 2 },
+    { key: 'micro',  label: 'Pequeña',          width: 1.2, dash: [5,4], opacity: '55', pointR: 0 },
+  ];
+
+  const datasets = [];
+  available.forEach((cc, i) => {
+    const wages   = countries_data[cc];
+    const color   = CURVE_COLORS[i % CURVE_COLORS.length];
+    const ccName  = _WAGE_CC_NAMES[cc] || cc;
+    const multi   = available.length > 1;
+
+    _TIERS.forEach(tier => {
+      const mult = _SIZE_MULT[tier.key];
+      const pts  = [1,2,3,4,5,6,7,8,9].map((g, idx) => {
+        const base = wages[String(g)] ?? null;
+        return base !== null ? Math.round(base * mult[idx]) : null;
+      });
+      datasets.push({
+        label:           multi ? `${ccName} — ${tier.label}` : tier.label,
+        data:            pts,
+        borderColor:     color + tier.opacity,
+        backgroundColor: color + '10',
+        borderWidth:     tier.width,
+        borderDash:      tier.dash,
+        pointRadius:     tier.pointR,
+        pointHoverRadius: tier.pointR + 3,
+        tension:         0.35,
+        fill:            false,
+        spanGaps:        true,
+      });
     });
-    return {
-      label: _WAGE_CC_NAMES[cc] || cc,
-      data: pts,
-      borderColor: CURVE_COLORS[i % CURVE_COLORS.length],
-      backgroundColor: CURVE_COLORS[i % CURVE_COLORS.length] + '22',
-      borderWidth: 2.5,
-      pointRadius: 5,
-      pointHoverRadius: 7,
-      tension: 0.3,
-      fill: false,
-      spanGaps: true,
-    };
   });
 
   const ctx = document.getElementById('wage-curve-chart').getContext('2d');
@@ -1827,40 +1845,41 @@ function _renderWageCurveFromCache() {
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: {
-          labels: { color: '#f5f3ee', font: { family: 'Manrope', size: 12 }, padding: 16 }
+          labels: {
+            color: '#f5f3ee', font: { family: 'Manrope', size: 11 }, padding: 12,
+            filter: item => !item.text.includes('Pequeña') && !item.text.includes('Prom'),
+          }
         },
         tooltip: {
           callbacks: {
             label: ctx => ` ${ctx.dataset.label}: $${ctx.parsed.y?.toLocaleString() ?? 'N/A'} PPP USD/mes`,
           },
-          backgroundColor: '#0d1120',
-          borderColor: '#2952c4',
-          borderWidth: 1,
-          titleColor: '#f5f3ee',
-          bodyColor: '#b0b8d0',
+          backgroundColor: '#0d1120', borderColor: '#2952c4', borderWidth: 1,
+          titleColor: '#f5f3ee', bodyColor: '#b0b8d0',
         },
       },
       scales: {
         x: {
           ticks: { color: '#b0b8d0', font: { size: 11 } },
-          grid: { color: 'rgba(255,255,255,0.06)' },
+          grid:  { color: 'rgba(255,255,255,0.06)' },
+          title: { display: true, text: '0=CEO  1=Managers … 9=Elementary', color: '#7a8099', font: { size: 10 } },
         },
         y: {
+          type: 'logarithmic',
           ticks: {
             color: '#b0b8d0', font: { size: 11 },
-            callback: v => '$' + v.toLocaleString(),
+            callback: v => v >= 1000 ? '$' + (v/1000).toFixed(0) + 'K' : '$' + v,
           },
-          grid: { color: 'rgba(255,255,255,0.06)' },
-          title: { display: true, text: 'PPP USD / mes', color: '#7a8099', font: { size: 11 } },
+          grid:  { color: 'rgba(255,255,255,0.06)' },
+          title: { display: true, text: 'PPP USD / mes (escala log)', color: '#7a8099', font: { size: 10 } },
         },
       },
     },
   });
 
   const missing = cc_list.filter(cc => !countries_data[cc]);
-  const sizeLabel = _SIZE_LABELS[_currentSizeKey] || '';
   document.getElementById('wage-curve-note').textContent =
-    `${sizeLabel}. Fuente base: ILOSTAT, BLS, datos oficiales. Multiplicadores por tamaño: ILO/OECD 2022.` +
+    'Fuente: ILOSTAT, BLS, datos oficiales + multiplicadores ILO/OECD por tamaño. Escala logarítmica.' +
     (missing.length ? ` Sin datos para: ${missing.join(', ')}.` : '');
 }
 
