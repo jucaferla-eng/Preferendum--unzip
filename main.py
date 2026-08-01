@@ -3368,12 +3368,12 @@ def _assign_user_tier_inner(user, db):
                 try:
                     _med_r = db.execute(text("""
                         SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_m2_avg)
-                        FROM commune_market_data WHERE country_iso=:cc AND price_m2_avg > 0
+                        FROM commune_market_data WHERE country=:cc AND price_m2_avg > 0
                     """), {'cc': user_country_code}).fetchone()
                 except Exception:
                     _med_r = db.execute(text("""
                         SELECT AVG(price_m2_avg) FROM commune_market_data
-                        WHERE country_iso=:cc AND price_m2_avg > 0
+                        WHERE country=:cc AND price_m2_avg > 0
                     """), {'cc': user_country_code}).fetchone()
                 _nat_m2 = float(_med_r[0]) if _med_r and _med_r[0] else None
                 if _nat_m2 and _nat_m2 > 0:
@@ -11736,19 +11736,19 @@ def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
     nat_medians: dict[str, float] = {}
     try:
         cc_rows = db.execute(text("""
-            SELECT DISTINCT country_iso FROM commune_market_data WHERE price_m2_avg > 0
+            SELECT DISTINCT country FROM commune_market_data WHERE price_m2_avg > 0
         """)).fetchall()
         for (cc_,) in cc_rows:
             try:
                 try:
                     r = db.execute(text("""
                         SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_m2_avg)
-                        FROM commune_market_data WHERE country_iso=:cc AND price_m2_avg > 0
+                        FROM commune_market_data WHERE country=:cc AND price_m2_avg > 0
                     """), {'cc': cc_}).fetchone()
                 except Exception:
                     r = db.execute(text("""
                         SELECT AVG(price_m2_avg) FROM commune_market_data
-                        WHERE country_iso=:cc AND price_m2_avg > 0
+                        WHERE country=:cc AND price_m2_avg > 0
                     """), {'cc': cc_}).fetchone()
                 if r and r[0]:
                     nat_medians[cc_] = float(r[0])
@@ -11782,7 +11782,7 @@ def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
             if commune and cc:
                 cmd = db.execute(text("""
                     SELECT price_m2_avg FROM commune_market_data
-                    WHERE country_iso=:cc
+                    WHERE country=:cc
                       AND (LOWER(commune) = LOWER(:cm) OR commune ILIKE :cm2)
                     LIMIT 1
                 """), {'cc': cc, 'cm': commune.strip(), 'cm2': f'%{commune.strip()}%'}).fetchone()
