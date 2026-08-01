@@ -71,11 +71,16 @@ _CEO_PPP: dict[str, dict[str, float]] = {
     'RU': {'small':   7_881, 'medium':   39_610, 'large':    87_835},
     'CO': {'small':  22_516, 'medium':   49_684, 'large':    81_377},
     'BD': {'small':  11_729, 'medium':   21_754, 'large':    58_048},
-    'MX': {'small':  27_228, 'medium':   36_304, 'large':    47_900},
+    # MX: Levu Executives reporta $47,900 para empresa grande, pero ese dato
+    # mezcla PEMEX (tope gubernamental) con América Móvil, CEMEX, FEMSA, Bimbo
+    # (pay a precio Wall Street). Large corregido hacia privado puro. 130M hab.
+    'MX': {'small':  27_228, 'medium':   36_304, 'large':   120_000},
     'CN': {'small':   1_508, 'medium':    3_392, 'large':    31_663},
     'NO': {'small':   7_293, 'medium':   11_394, 'large':    22_787},
     # Estimados para países sin dato directo — ratio promedio de los 10 anteriores
-    'CL': {'small':  18_000, 'medium':   35_000, 'large':    80_000},
+    # CL: Codelco, BHP, Anglo American, Antofagasta — ejecutivos pagados en USD
+    # internacionales. Precio del cobre lo fija Londres; salario ejecutivo ídem.
+    'CL': {'small':  18_000, 'medium':   35_000, 'large':   110_000},
     'AR': {'small':  12_000, 'medium':   22_000, 'large':    55_000},
     'PE': {'small':  14_000, 'medium':   28_000, 'large':    62_000},
     'EC': {'small':  10_000, 'medium':   19_000, 'large':    44_000},
