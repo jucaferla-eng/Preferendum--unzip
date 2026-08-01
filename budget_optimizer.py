@@ -107,9 +107,53 @@ _CEO_PPP: dict[str, dict[str, float]] = {
     'TR': {'small':   4_000, 'medium':   10_000, 'large':    45_000},
 }
 
+# ── CEO PPP bucket "multinational" — empresas globales con sede en países
+# "pequeños" pero que operan en múltiples mercados y pagan a precio Nasdaq.
+# Solo aplica a países con presencia exportadora real. Representa ~3-5% del
+# ISCO 1 local pero con pay muy superior al bucket "large" doméstico.
+# Ejemplos: Falabella/Cencosud/LATAM (CL), América Móvil/CEMEX/FEMSA (MX),
+# Vale/Petrobras/Itaú (BR), Ecopetrol/Grupo Aval (CO), Equinor/Telenor (NO).
+_CEO_PPP_MULTINATIONAL: dict[str, float] = {
+    # LatAm — retailers, mineras, telcos, energía con cotización internacional
+    'CL':  400_000,   # Falabella, Cencosud, LATAM Airlines (NYSE: LTM), SQM, Antofagasta, Colbún
+    'MX':  500_000,   # América Móvil, CEMEX, FEMSA, Grupo Bimbo — Nasdaq-listed
+    'BR':  350_000,   # Vale, Petrobras, Itaú, BTG Pactual, Embraer
+    'CO':  180_000,   # Ecopetrol, Grupo Aval, Bancolombia — NYSE-listed
+    'PE':  150_000,   # Southern Copper, Credicorp, Hochschild — NYSE
+    'AR':  130_000,   # MercadoLibre (Nasdaq), YPF, Globant — aunque economía volátil
+    'EC':   80_000,   # Menor base multinacional; Banco Pichincha, Corporación Favorita
+    # Europa pequeña con multinationales
+    'NO':  250_000,   # Equinor (ex-Statoil), Telenor, Aker — pagan a precio global
+    'CH':  700_000,   # Nestlé, Novartis, Roche, UBS, ABB — algunos de los más altos
+    'NL':  450_000,   # Shell, Unilever, ASML, ING, Philips
+    'SE':  300_000,   # Ericsson, Volvo, H&M, Spotify, Ikea
+    'IL':  350_000,   # Check Point, Mobileye, NICE, Amdocs — Nasdaq
+    'SG':  600_000,   # DBS, Grab, Sea Ltd, ST Engineering — APAC hub
+    'HK':  500_000,   # HSBC, AIA, CK Hutchison — multinacional Asia-Pacífico
+    'AE':  400_000,   # Emirates, DP World, ADNOC, Mubadala — sovereign-linked
+    'QA':  350_000,   # QatarEnergy, Qatar Airways — sovereign wealth
+    'SA':  300_000,   # Aramco — mayor empresa del mundo por market cap
+    # Asia emergente con multinationales
+    'KR':  350_000,   # Samsung, Hyundai, LG, SK, POSCO — chaebols globales
+    'TW':  300_000,   # TSMC, Foxconn, MediaTek — cadena global semiconductores
+    'IN':  200_000,   # Infosys, TCS, Reliance, HCL — TI global + conglomerados
+    'CN':  250_000,   # Alibaba, Tencent, Huawei, CATL — tech y manufactura global
+    'JP':  400_000,   # Toyota, Sony, SoftBank, Mitsubishi — multinationales históricas
+    'MY':  180_000,   # Petronas, CIMB, Axiata, Top Glove
+    'TH':  150_000,   # PTT, Bangkok Bank, Charoen Pokphand Group
+    # Africa/resto
+    'ZA':  200_000,   # Anglo American, Naspers/Prosus, Standard Bank
+    'NG':   80_000,   # Dangote Group, MTN Nigeria — Nigeria Stock Exchange
+}
+
 # ── Sigmas log-normal por (bucket_empresa, isco_group) ───────────────────────
 # Fuente: modelo JC (2026-08-01). σ ≈ 0.8 para managers empresa grande.
+# 'multinational': σ alto (0.85) porque dispersión entre CEO de Falabella vs
+# gerente de planta en Cencosud es máxima dentro del mismo bucket.
 _SIGMA: dict[tuple[str, int], float] = {
+    ('multinational', 1): 0.85, ('multinational', 2): 0.70, ('multinational', 3): 0.60,
+    ('multinational', 4): 0.50, ('multinational', 5): 0.45, ('multinational', 6): 0.40,
+    ('multinational', 7): 0.48, ('multinational', 8): 0.48, ('multinational', 9): 0.32,
     ('large', 1): 0.80, ('large', 2): 0.65, ('large', 3): 0.55,
     ('large', 4): 0.45, ('large', 5): 0.40, ('large', 6): 0.35,
     ('large', 7): 0.42, ('large', 8): 0.42, ('large', 9): 0.28,
@@ -121,9 +165,13 @@ _SIGMA: dict[tuple[str, int], float] = {
     ('small', 7): 0.19, ('small', 8): 0.19, ('small', 9): 0.13,
 }
 
-# Multiplicadores SIZE_MULT para ISCO 2-9 (ISCO 1 usa _CEO_PPP directamente)
+# Multiplicadores SIZE_MULT para ISCO 2-9 (ISCO 1 usa _CEO_PPP/_CEO_PPP_MULTINATIONAL)
 # Derived from Eurostat SES + ILO enterprise-size wage differentials
 _SIZE_MULT_BY_ISCO: dict[tuple[str, int], float] = {
+    # Multinational — salarios internacionales para todos los ISCO
+    ('multinational', 2): 4.0, ('multinational', 3): 2.8, ('multinational', 4): 2.0,
+    ('multinational', 5): 1.8, ('multinational', 6): 1.4, ('multinational', 7): 2.2,
+    ('multinational', 8): 2.0, ('multinational', 9): 1.5,
     # Large vs medium
     ('large', 2): 2.5,  ('large', 3): 1.8,  ('large', 4): 1.4,
     ('large', 5): 1.3,  ('large', 6): 1.15, ('large', 7): 1.5,
@@ -136,6 +184,16 @@ _SIZE_MULT_BY_ISCO: dict[tuple[str, int], float] = {
     ('small', 2): 0.55, ('small', 3): 0.70, ('small', 4): 0.78,
     ('small', 5): 0.80, ('small', 6): 0.85, ('small', 7): 0.75,
     ('small', 8): 0.78, ('small', 9): 0.82,
+}
+
+# Distribución real de trabajadores por tamaño de empresa (ILO Enterprise Survey 2023)
+# multinational es ~4% del empleo total pero con salarios Nasdaq — no debe recibir
+# peso 25% cuando se promedia con small/medium/large.
+_BUCKET_WEIGHTS: dict[str, float] = {
+    'small':         0.55,
+    'medium':        0.30,
+    'large':         0.11,
+    'multinational': 0.04,
 }
 
 # Fallback PPP mediana mundial si país no está en occupation_salary (ILOSTAT 2023)
@@ -190,20 +248,29 @@ def _mu_for_isco_bucket(country_iso: str, isco: int, bucket: str,
                          national_wages: dict[int, float]) -> float:
     """
     Media log-normal para un segmento (país, ISCO, tamaño empresa).
-    ISCO 1: usa datos CEO reales de _CEO_PPP (más precisos que mediana nacional).
-    ISCO 2-9: escala la mediana nacional con _SIZE_MULT_BY_ISCO.
+    Buckets: 'small' | 'medium' | 'large' | 'multinational'
+    ISCO 1 multinational: usa _CEO_PPP_MULTINATIONAL (Falabella, CEMEX, Vale…)
+    ISCO 1 large/medium/small: usa _CEO_PPP por país.
+    ISCO 2-9: escala mediana nacional con _SIZE_MULT_BY_ISCO.
     """
     if isco == 1:
+        if bucket == 'multinational':
+            mn = _CEO_PPP_MULTINATIONAL.get(country_iso)
+            if mn:
+                return float(mn)
+            # Fallback: 3× large company del mismo país
+            ceo = _CEO_PPP.get(country_iso, {})
+            return float(ceo.get('large', _FALLBACK_PPP[1])) * 3.0
+
         ceo = _CEO_PPP.get(country_iso, {})
         if ceo:
             return float(ceo.get(bucket, ceo.get('medium', 4_200)))
-        # Si no hay dato CEO, escalar mediana nacional con ratio approx.
-        nat = national_wages.get(1, _FALLBACK_PPP[1])
+        nat   = national_wages.get(1, _FALLBACK_PPP[1])
         ratio = {'large': 5.5, 'medium': 1.0, 'small': 0.15}.get(bucket, 1.0)
         return nat * ratio
 
     # ISCO 2-9
-    nat = national_wages.get(isco, _FALLBACK_PPP.get(isco, 1_000))
+    nat  = national_wages.get(isco, _FALLBACK_PPP.get(isco, 1_000))
     mult = _SIZE_MULT_BY_ISCO.get((bucket, isco), 1.0)
     return nat * mult
 
@@ -235,14 +302,18 @@ def _expected_qualified(
     total_prob = 0.0
 
     for isco, w in isco_weights.items():
-        # Promedio entre buckets de empresa seleccionados
-        bucket_probs = []
+        # Promedio ponderado entre buckets por distribución real de empleo
+        # (multinational = 4%, no 25% — evita sobre-representar CEOs de Nasdaq)
+        bucket_wsum = 0.0
+        prob_wsum   = 0.0
         for bucket in size_buckets:
-            mu = _mu_for_isco_bucket(country_iso, isco, bucket, national_wages)
+            mu    = _mu_for_isco_bucket(country_iso, isco, bucket, national_wages)
             sigma = _SIGMA.get((bucket, isco), 0.30)
-            bucket_probs.append(p_income_above(mu, sigma, min_income_ppp))
+            bw    = _BUCKET_WEIGHTS.get(bucket, 0.25)
+            prob_wsum   += bw * p_income_above(mu, sigma, min_income_ppp)
+            bucket_wsum += bw
 
-        avg_prob = sum(bucket_probs) / len(bucket_probs) if bucket_probs else 0.0
+        avg_prob = prob_wsum / bucket_wsum if bucket_wsum > 0 else 0.0
         total_prob += w * avg_prob
 
     return user_count * total_prob
@@ -265,7 +336,9 @@ def optimize_budget(
     if not countries:
         return {'error': 'No hay países seleccionados'}
 
-    size_buckets = company_sizes if company_sizes else ['small', 'medium', 'large']
+    # 'multinational' siempre incluido cuando no hay filtro — representa 3-5% de
+    # la fuerza laboral en países con multinationales pero con pay muy superior.
+    size_buckets = company_sizes if company_sizes else ['small', 'medium', 'large', 'multinational']
     isco_groups  = ARCHETYPES.get(archetype, ARCHETYPES['universal'])
 
     if not age_segments:
