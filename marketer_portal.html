@@ -587,6 +587,18 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
                 </div>
                 <input type="hidden" id="nc-gender" value="all"/>
               </div>
+              <!-- ── TAMAÑO DE EMPRESA ── -->
+              <div class="field form-full">
+                <label>Tamaño de empresa <span style="color:var(--muted);font-weight:400;">— ¿a qué tipo de empresa pertenece tu audiencia?</span></label>
+                <div class="chip-row" id="mc-size-chips" style="margin-top:6px;flex-wrap:wrap;gap:8px;">
+                  <div class="chip selected" data-value="ALL" onclick="toggleMcSize(this)">Todas</div>
+                  <div class="chip" data-value="small" onclick="toggleMcSize(this)">Pequeña &lt;50</div>
+                  <div class="chip" data-value="medium" onclick="toggleMcSize(this)">Mediana 50-500</div>
+                  <div class="chip" data-value="large" onclick="toggleMcSize(this)">Grande 500+</div>
+                </div>
+                <input type="hidden" id="nc-company-sizes" value="ALL"/>
+              </div>
+
               <!-- ── EDAD OBJETIVO ── -->
               <div class="field form-full">
                 <label>Edad objetivo</label>
@@ -620,6 +632,37 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
                 <div class="budget-display" id="budget-display">$50 USD</div>
                 <div class="budget-impr" id="budget-impr">~8,000 impressions (mid-tier communes)</div>
               </div>
+
+              <!-- ── MOTOR DE OPTIMIZACIÓN ── -->
+              <div class="field form-full" id="optimizer-section">
+                <button type="button" id="btn-optimize" onclick="calcularDistribucion()"
+                  style="width:100%;padding:14px;background:linear-gradient(135deg,var(--gold),var(--gold2));color:#000;font-weight:700;font-size:14px;letter-spacing:.06em;border:none;border-radius:12px;cursor:pointer;transition:opacity .2s;">
+                  Calcular distribución óptima del presupuesto
+                </button>
+                <div style="font-size:11px;color:var(--muted);margin-top:6px;text-align:center;">
+                  Nuestro modelo analiza densidad de audiencia × probabilidad de ingreso por segmento
+                </div>
+                <!-- Panel de resultados -->
+                <div id="opt-panel" style="display:none;margin-top:16px;background:var(--ink3);border:1px solid var(--border);border-radius:14px;padding:20px;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <div style="font-weight:700;font-size:14px;color:var(--gold);">Distribución óptima recomendada</div>
+                    <div id="opt-total-qualified" style="font-size:12px;color:var(--muted);"></div>
+                  </div>
+                  <div id="opt-segments" style="display:flex;flex-direction:column;gap:10px;"></div>
+                  <div id="opt-note" style="margin-top:14px;font-size:11px;color:var(--muted);line-height:1.5;border-top:1px solid var(--border);padding-top:12px;"></div>
+                  <div style="margin-top:14px;display:flex;gap:10px;">
+                    <button type="button" onclick="aplicarDistribucion()"
+                      style="flex:1;padding:10px;background:var(--gold);color:#000;font-weight:700;border:none;border-radius:8px;cursor:pointer;font-size:13px;">
+                      Usar esta distribución
+                    </button>
+                    <button type="button" onclick="document.getElementById('opt-panel').style.display='none'"
+                      style="padding:10px 18px;background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;cursor:pointer;font-size:12px;">
+                      Cerrar
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div class="field">
                 <label>Start Date</label>
                 <input type="date" id="nc-start"/>
@@ -1376,7 +1419,11 @@ async function createCampaign() {
     target_age_min:     parseInt(ageMin) || 13,
     target_age_max:     parseInt(ageMax) || 99,
     target_age_ranges:  `${ageMin}-${ageMax}`,
-    target_age_weights: document.getElementById('nc-age-weights').value || '',
+    target_age_weights:   document.getElementById('nc-age-weights').value || '',
+    target_company_sizes: (() => {
+      const v = document.getElementById('nc-company-sizes')?.value || 'ALL';
+      return v === 'ALL' ? '' : v;
+    })(),
     target_se_tiers:  seTiers,
     min_per_capita_usd: perCapita,
     target_categories:   document.getElementById('nc-categories')?.value || '',
@@ -2025,6 +2072,200 @@ function _loadAgeFromCampaign(ageMin, ageMax, weightsJson) {
     }
   } catch {}
   _renderAgeSegments();
+}
+
+// ── COMPANY SIZE CHIPS ───────────────────────────────────────────────────────
+function toggleMcSize(el) {
+  const isAll = el.dataset.value === 'ALL';
+  const group = document.getElementById('mc-size-chips');
+  if (isAll) {
+    group.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+  } else {
+    group.querySelector('[data-value="ALL"]').classList.remove('selected');
+    el.classList.toggle('selected');
+    const any = [...group.querySelectorAll('.chip:not([data-value="ALL"])')].some(c => c.classList.contains('selected'));
+    if (!any) group.querySelector('[data-value="ALL"]').classList.add('selected');
+  }
+  const selected = [...group.querySelectorAll('.chip.selected')].map(c => c.dataset.value);
+  document.getElementById('nc-company-sizes').value = selected.includes('ALL') ? 'ALL' : selected.join(',');
+}
+
+// ── MOTOR DE OPTIMIZACIÓN ────────────────────────────────────────────────────
+let _optSegments = [];   // últimos segmentos calculados
+
+async function calcularDistribucion() {
+  const btn = document.getElementById('btn-optimize');
+  btn.textContent = 'Calculando...';
+  btn.disabled = true;
+
+  try {
+    const country   = document.getElementById('nc-country').value || 'ALL';
+    const ageW      = document.getElementById('nc-age-weights').value || '';
+    const tier      = document.getElementById('nc-tier').value || 'ALL';
+    const sizes     = document.getElementById('nc-company-sizes').value || 'ALL';
+    const minIncome = parseFloat(document.getElementById('nc-percapita').value) || 0;
+    const budget    = parseFloat(document.getElementById('nc-budget').value) || 50;
+
+    // Convertir ingreso per cápita anual → mensual
+    const minMonthly = minIncome / 12;
+
+    // Armar lista de países (si ALL, usar los seleccionados en chips)
+    let countryStr = country;
+    if (country === 'ALL') {
+      // Tomar los chips seleccionados, sin ALL
+      const chips = [...document.querySelectorAll('#mc-country-chips .chip.selected')]
+        .map(c => c.dataset.value).filter(v => v !== 'ALL');
+      countryStr = chips.length ? chips.join(',') : 'CL,MX,CO,BR,AR';  // fallback LatAm
+    }
+
+    // Tiers
+    const tierStr = (tier === 'ALL') ? '' : tier;
+
+    // Company sizes
+    const sizeStr = (sizes === 'ALL') ? '' : sizes;
+
+    const params = new URLSearchParams({
+      countries:        countryStr,
+      age_weights_json: ageW,
+      se_tiers:         tierStr,
+      company_sizes:    sizeStr,
+      min_income_usd:   minMonthly,
+      budget_usd:       budget,
+    });
+
+    const r = await fetch(`${API}/marketer/optimize-budget?${params}`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + (token || '') }
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      showAlert('newcamp-alert', 'error', data.detail || 'Error calculando distribución');
+      return;
+    }
+    _renderOptimizationPanel(data);
+  } catch(e) {
+    showAlert('newcamp-alert', 'error', 'Error de conexión: ' + e.message);
+  } finally {
+    btn.textContent = 'Calcular distribución óptima del presupuesto';
+    btn.disabled = false;
+  }
+}
+
+function _renderOptimizationPanel(data) {
+  const panel = document.getElementById('opt-panel');
+  const segsEl = document.getElementById('opt-segments');
+  const totalEl = document.getElementById('opt-total-qualified');
+  const noteEl = document.getElementById('opt-note');
+
+  _optSegments = data.segments || [];
+
+  // Encabezado
+  const tq = data.total_qualified ? parseInt(data.total_qualified).toLocaleString() : '—';
+  totalEl.textContent = `Audiencia calificada estimada: ${tq} usuarios`;
+
+  // Segmentos
+  segsEl.innerHTML = '';
+  const maxPct = Math.max(..._optSegments.map(s => s.pct || 0), 1);
+
+  _optSegments.forEach((seg, idx) => {
+    const pct = seg.pct || 0;
+    const budgetSeg = seg.budget_usd || 0;
+    const barW = Math.round(pct / maxPct * 100);
+    const qualif = seg.users_real ? `${parseInt(seg.users_real).toLocaleString()} usuarios reales` : 'sin usuarios aún';
+
+    segsEl.innerHTML += `
+      <div style="background:var(--ink4,#1a1a2e);border:1px solid var(--border);border-radius:10px;padding:12px 14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="font-size:13px;font-weight:600;">${seg.label}</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <input type="number" id="opt-pct-${idx}" value="${pct}" min="0" max="100" step="0.5"
+              style="width:60px;background:var(--ink3);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 6px;font-size:13px;text-align:right;"
+              oninput="_recalcOptPct(${idx}, this.value)"/>
+            <span style="font-size:12px;color:var(--muted);">%</span>
+            <span style="font-size:12px;color:var(--gold);font-family:'DM Mono',monospace;">$${budgetSeg.toFixed(0)} USD</span>
+          </div>
+        </div>
+        <div style="height:6px;background:var(--ink3);border-radius:3px;overflow:hidden;">
+          <div id="opt-bar-${idx}" style="height:100%;width:${barW}%;background:linear-gradient(90deg,var(--gold),var(--gold2));border-radius:3px;transition:width .3s;"></div>
+        </div>
+        <div style="margin-top:5px;font-size:11px;color:var(--muted);">${qualif} · ${(seg.qualified||0).toFixed(0)} calificados estimados</div>
+      </div>`;
+  });
+
+  noteEl.textContent = data.note || '';
+  panel.style.display = 'block';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function _recalcOptPct(idx, val) {
+  if (!_optSegments[idx]) return;
+  _optSegments[idx].pct = parseFloat(val) || 0;
+  const budget = parseFloat(document.getElementById('nc-budget').value) || 50;
+  // Actualizar presupuesto
+  const budgetNew = (budget * _optSegments[idx].pct / 100);
+  _optSegments[idx].budget_usd = budgetNew;
+
+  // Refrescar el display del segmento sin rerenderizar todo
+  const row = document.getElementById(`opt-pct-${idx}`)?.closest('div[style*="border-radius:10px"]');
+  if (row) {
+    const budgetSpan = row.querySelector('span[style*="DM Mono"]');
+    if (budgetSpan) budgetSpan.textContent = `$${budgetNew.toFixed(0)} USD`;
+  }
+
+  // Actualizar barra
+  const total = _optSegments.reduce((s,x) => s + (x.pct||0), 0);
+  const maxP = Math.max(..._optSegments.map(s => s.pct||0), 1);
+  _optSegments.forEach((s, i) => {
+    const bar = document.getElementById(`opt-bar-${i}`);
+    if (bar) bar.style.width = Math.round((s.pct||0) / maxP * 100) + '%';
+  });
+
+  // Mostrar total %
+  const totalEl = document.getElementById('opt-total-qualified');
+  const existing = totalEl.textContent.replace(/\s*\|.*$/, '');
+  const color = Math.abs(total - 100) < 0.5 ? '#22a862' : '#f97316';
+  totalEl.innerHTML = `${existing} &nbsp;<span style="color:${color};font-weight:700;">| Total: ${total.toFixed(1)}%</span>`;
+}
+
+function aplicarDistribucion() {
+  if (!_optSegments.length) return;
+
+  // Si hay segmentos por edad (todos del mismo país), actualizar age segments
+  const countries = [...new Set(_optSegments.map(s => s.country))];
+
+  if (countries.length === 1) {
+    // Un solo país — podemos aplicar los pesos de edad directamente
+    _ageSegments = [];
+    _segIdCounter = 0;
+    let totalPct = _optSegments.reduce((s, x) => s + (x.pct || 0), 0);
+    if (totalPct <= 0) totalPct = 100;
+
+    _optSegments.forEach(seg => {
+      const pctNorm = Math.round(seg.pct / totalPct * 100);
+      _ageSegments.push({
+        id: ++_segIdCounter,
+        min: seg.age_min,
+        max: seg.age_max,
+        pct: pctNorm,
+      });
+    });
+
+    // Ajustar primer elemento para que sume 100
+    const sumPct = _ageSegments.reduce((s, x) => s + x.pct, 0);
+    if (_ageSegments.length && sumPct !== 100) {
+      _ageSegments[0].pct += (100 - sumPct);
+    }
+
+    _renderAgeSegments();
+    showAlert('newcamp-alert', 'success', '✓ Distribución aplicada a los tramos de edad');
+  } else {
+    // Multi-país — mostrar resumen como info
+    const lines = _optSegments.map(s => `${s.label}: ${s.pct}% ($${(s.budget_usd||0).toFixed(0)} USD)`);
+    showAlert('newcamp-alert', 'success', `✓ Distribución óptima:\n${lines.join(' | ')}`);
+  }
+
+  document.getElementById('opt-panel').style.display = 'none';
 }
 </script>
 </body>

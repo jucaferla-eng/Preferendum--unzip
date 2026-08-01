@@ -8828,6 +8828,68 @@ def get_campaign_metrics(campaign_id: int, db: Session = Depends(get_db)):
         'daily_trend':   daily_trend,
     }
 
+@app.post('/marketer/optimize-budget')
+def marketer_optimize_budget(db: Session = Depends(get_db),
+    countries:        str = '',   # 'CL,MX,CO'
+    age_weights_json: str = '',   # JSON {"18-35":50,"36-55":50}
+    se_tiers:         str = '',   # 'A,B,C'
+    company_sizes:    str = '',   # 'small,medium,large'
+    min_income_usd:   float = 0,  # umbral ingreso nominal USD/mes
+    budget_usd:       float = 1000,
+):
+    """
+    Motor de optimización de presupuesto.
+    Dado los parámetros de campaña, retorna la distribución óptima del
+    presupuesto entre segmentos (país × edad × tamaño empresa), proporcional
+    a la audiencia calificada esperada usando modelo log-normal JC 2026-08-01.
+    """
+    from budget_optimizer import optimize_budget
+    from ppp_agent import PLI
+
+    # Parsear países
+    country_list = [c.strip().upper() for c in countries.split(',') if c.strip()]
+    if not country_list:
+        raise HTTPException(400, 'Selecciona al menos un país')
+
+    # Parsear age_weights JSON → lista de segmentos
+    age_segments = []
+    if age_weights_json:
+        try:
+            aw = json.loads(age_weights_json)
+            for range_str, pct in aw.items():
+                if '-' in range_str:
+                    parts = range_str.split('-')
+                    age_segments.append({
+                        'min':   int(parts[0]),
+                        'max':   int(parts[1]),
+                        'pct':   float(pct),
+                        'label': f"{parts[0]}-{parts[1]} años",
+                    })
+        except Exception:
+            pass
+
+    # Parsear se_tiers y company_sizes
+    tier_list = [t.strip().upper() for t in se_tiers.split(',') if t.strip()] if se_tiers else []
+    size_list = [s.strip().lower() for s in company_sizes.split(',') if s.strip()] if company_sizes else []
+
+    # Convertir ingreso mínimo nominal → PPP promedio entre países seleccionados
+    min_income_ppp = 0.0
+    if min_income_usd > 0 and country_list:
+        plis = [PLI.get(cc, 0.7) for cc in country_list]
+        avg_pli = sum(plis) / len(plis)
+        min_income_ppp = min_income_usd / avg_pli
+
+    result = optimize_budget(
+        db=db,
+        countries=country_list,
+        age_segments=age_segments,
+        se_tiers=tier_list,
+        company_sizes=size_list,
+        min_income_ppp=min_income_ppp,
+        budget_usd=budget_usd,
+    )
+    return result
+
 @app.get('/admin/db-info')
 def db_info():
     db_url = DATABASE_URL
