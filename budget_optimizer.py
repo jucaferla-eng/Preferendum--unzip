@@ -425,6 +425,47 @@ _FALLBACK_PPP: dict[int, float] = {
     7: 1_300, 8: 1_400, 9: 780,
 }
 
+# ── Configuración de tipos de compra → umbral de ingreso ─────────────────────
+# Regla financiamiento auto (industria): cuota = precio/60 meses ≤ 15% ingreso
+#   → ingreso_mínimo = (precio/60) / 0.15 = precio / 9
+# Los precios de bienes transables son ~equivalentes en PPP (precio BMW $45K
+# en USA ≈ $45K PPP globalmente), por lo que se usa precio nominal directamente.
+_PURCHASE_CONFIGS: dict[str, dict] = {
+    'auto':         {'divisor': 9.0,  'archetype': 'premium',
+                     'label': 'Auto financiado (60m, cuota ≤ 15% ingreso)'},
+    'luxury':       {'divisor': None, 'archetype': 'ultra_premium',
+                     'label': 'Lujo/patrimonio (HNWI > $1M net worth)'},
+    'appliance':    {'divisor': 3.6,  'archetype': 'mid_premium',
+                     'label': 'Electrodoméstico financiado (24m, cuota ≤ 15%)'},
+    'cash_premium': {'divisor': 3.0,  'archetype': 'premium',
+                     'label': 'Premium al contado (≤ 3 meses de ingreso)'},
+    'fmcg':         {'divisor': None, 'archetype': 'universal',
+                     'label': 'Masivo / FMCG (sin umbral de ingreso)'},
+}
+
+
+def derive_threshold_and_archetype(
+    product_price_usd: float,
+    purchase_type: str,
+    explicit_archetype: str = '',
+) -> tuple[float, str]:
+    """
+    Dado el precio del producto y el tipo de compra, retorna:
+      (threshold_ppp_usd_mes, archetype)
+
+    El threshold es el ingreso mensual mínimo en PPP USD para que alguien
+    pueda comprar el producto.  Los precios de bienes transables son ~PPP
+    equivalentes, así que se usa el precio nominal directamente.
+
+    Si explicit_archetype está dado, se respeta (no se sobreescribe).
+    """
+    cfg = _PURCHASE_CONFIGS.get(purchase_type, _PURCHASE_CONFIGS['auto'])
+    archetype = explicit_archetype if explicit_archetype else cfg['archetype']
+    divisor = cfg['divisor']
+    if divisor is None or product_price_usd <= 0:
+        return (0.0, archetype)
+    return (round(product_price_usd / divisor, 2), archetype)
+
 
 def _normal_cdf(x: float) -> float:
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
@@ -589,6 +630,8 @@ def optimize_budget(
     min_income_ppp: float,          # umbral PPP USD/mes (0 = sin restricción)
     budget_usd: float,
     archetype: str = 'universal',   # del dict ARCHETYPES
+    product_price_usd: float = 0.0, # precio del producto en USD nominales
+    purchase_type: str = '',        # 'auto'|'luxury'|'appliance'|'cash_premium'|'fmcg'
 ) -> dict:
     """
     Calcula la distribución óptima del presupuesto entre segmentos.
@@ -596,6 +639,24 @@ def optimize_budget(
     """
     if not countries:
         return {'error': 'No hay países seleccionados'}
+
+    # ── Derivar umbral e ingreso desde precio del producto ────────────────────
+    # Si se proporciona product_price_usd + purchase_type, el threshold se
+    # calcula automáticamente y el archetype se infiere (salvo que ya venga
+    # explícito en el parámetro archetype).
+    price_derived_threshold = 0.0
+    price_derived_label = ''
+    if product_price_usd > 0 and purchase_type:
+        explicit_arch = archetype if archetype != 'universal' else ''
+        price_derived_threshold, archetype = derive_threshold_and_archetype(
+            product_price_usd, purchase_type, explicit_arch
+        )
+        cfg = _PURCHASE_CONFIGS.get(purchase_type, {})
+        price_derived_label = cfg.get('label', purchase_type)
+        # El threshold derivado toma precedencia solo si min_income_ppp no fue
+        # fijado explícitamente (min_income_ppp == 0).
+        if min_income_ppp == 0.0:
+            min_income_ppp = price_derived_threshold
 
     # 'multinational' siempre incluido cuando no hay filtro — representa 3-5% de
     # la fuerza laboral en países con multinationales pero con pay muy superior.
@@ -764,19 +825,30 @@ def optimize_budget(
         'universal':     'Universal (todos los segmentos)',
     }
 
-    return {
+    result = {
         'segments':        segments,
         'total_qualified': round(total_q, 0),
         'budget_usd':      budget_usd,
         'archetype':       archetype,
         'archetype_label': archetype_labels.get(archetype, archetype),
         'isco_groups':     isco_groups,
+        'min_income_ppp':  round(min_income_ppp, 0),
         'optimization':    'proportional_to_expected_qualified_audience',
-        'model_version':   'v2 — Perplexity 2026-07-31 + JC sigma 2026-08-01',
+        'model_version':   'v4 — THREE_TIER 2026-08-01 + price-derived threshold',
         'note': (
             f"Audiencia calificada: {int(total_q):,} (fuerza laboral ILO × P(ingreso ≥ umbral)). "
             f"Archetype: {archetype_labels.get(archetype, archetype)}. "
+            f"Umbral ingreso PPP: ${min_income_ppp:,.0f}/mes. "
             f"Pesos ISCO: empleo real (ILO KILM 2023). "
-            f"ISCO 1: CEO PPP por tamaño empresa (Perplexity Tabla 1 + multinational JC 2026)."
+            f"ISCO 1: CEO PPP × tamaño empresa (Perplexity Tabla 1 + multinational JC)."
         ),
     }
+    if product_price_usd > 0 and purchase_type:
+        result['product_price_usd']    = product_price_usd
+        result['purchase_type']        = purchase_type
+        result['purchase_type_label']  = price_derived_label
+        result['threshold_derivation'] = (
+            f"${product_price_usd:,.0f} / {_PURCHASE_CONFIGS.get(purchase_type, {}).get('divisor', '?')} "
+            f"= ${min_income_ppp:,.0f} PPP/mes"
+        )
+    return result

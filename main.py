@@ -8921,13 +8921,15 @@ def get_campaign_metrics(campaign_id: int, db: Session = Depends(get_db)):
 
 @app.post('/marketer/optimize-budget')
 def marketer_optimize_budget(db: Session = Depends(get_db),
-    countries:        str = '',        # 'CL,MX,CO'
-    age_weights_json: str = '',        # JSON {"18-35":50,"36-55":50}
-    se_tiers:         str = '',        # 'A,B,C'
-    company_sizes:    str = '',        # 'small,medium,large'
-    min_income_usd:   float = 0,       # umbral ingreso nominal USD/mes
-    budget_usd:       float = 1000,
-    archetype:        str = 'universal',  # ultra_premium|premium|mid_premium|mass_market|universal
+    countries:           str = '',        # 'CL,MX,CO'
+    age_weights_json:    str = '',        # JSON {"18-35":50,"36-55":50}
+    se_tiers:            str = '',        # 'A,B,C'
+    company_sizes:       str = '',        # 'small,medium,large'
+    min_income_usd:      float = 0,       # umbral ingreso nominal USD/mes (manual)
+    budget_usd:          float = 1000,
+    archetype:           str = 'universal',  # ultra_premium|premium|mid_premium|mass_market|universal
+    product_price_usd:   float = 0,       # precio del producto en USD — deriva threshold automático
+    purchase_type:       str = '',        # 'auto'|'luxury'|'appliance'|'cash_premium'|'fmcg'
 ):
     """
     Motor de optimización de presupuesto.
@@ -8980,6 +8982,8 @@ def marketer_optimize_budget(db: Session = Depends(get_db),
         min_income_ppp=min_income_ppp,
         budget_usd=budget_usd,
         archetype=archetype,
+        product_price_usd=product_price_usd,
+        purchase_type=purchase_type,
     )
     return result
 
