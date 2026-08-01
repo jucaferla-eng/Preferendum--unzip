@@ -1,63 +1,144 @@
 from __future__ import annotations
 """
-budget_optimizer.py — Motor de Optimización de Presupuesto
-===========================================================
-Dado los parámetros de una campaña (países, edad, tamaño empresa, ingreso mínimo),
-calcula la distribución óptima del presupuesto entre segmentos.
+budget_optimizer.py — Motor de Optimización de Presupuesto v2
+==============================================================
+Dado los parámetros de una campaña, calcula la distribución óptima del
+presupuesto entre segmentos (país × edad × tamaño empresa).
 
-Modelo estadístico (JC Fernandez Lazo, 2026-08-01):
+Modelo estadístico:
   Cada cargo (ISCO) × tamaño empresa sigue distribución log-normal.
-  La media es el salario PPP del sistema (occupation_salary/ilo_wages).
-  El sigma varía: grande en cargos altos de empresas grandes,
-  pequeño en cargos bajos de empresas pequeñas.
+  Pesos por ISCO: proporcionales al empleo real (ILO KILM 2023) — no uniforme.
+  Archetypes de producto definen qué ISCOs son audiencia objetivo.
+  Para ISCO 1: datos CEO PPP reales por tamaño de empresa (Perplexity 2026,
+  Tabla 1 — Eurostat SES + agencias nacionales de estadística).
 
-Salida: {segmento: pct_optimo} proporcional a audiencia_calificada_esperada.
+Fórmula: qualified[segmento] = users × Σ_isco(w_isco × P(ingreso ≥ umbral))
+Budget óptimo ∝ qualified[segmento] / sum(qualified[todos])
+
+Fuentes:
+  Sigmas log-normal:   JC Fernandez Lazo, 2026-08-01
+  Pesos ISCO:          ILO KILM 2023
+  Archetypes:          Perplexity/JC Budget Model, 2026-07-31
+  CEO PPP por tamaño:  Perplexity Tabla 1 (Eurostat SES + institutos nacionales)
 """
 
 import math
 from sqlalchemy import text
 
+# ── Pesos de empleo por ISCO (ILO KILM 2023, promedio global) ────────────────
+# ISCO 5, 9 tienen 4x más trabajadores que ISCO 1 — afecta el cálculo de
+# audiencia masiva. Para productos premium, este peso se normaliza dentro
+# del archetype seleccionado.
+_ISCO_EMPLOYMENT_WEIGHTS: dict[int, float] = {
+    1: 0.04,   # Managers / Directivos
+    2: 0.16,   # Professionals / Profesionales
+    3: 0.10,   # Technicians / Técnicos
+    4: 0.08,   # Clerical / Administrativos
+    5: 0.18,   # Service & Sales / Servicios
+    6: 0.11,   # Agriculture / Agrícola
+    7: 0.11,   # Craft / Artesanos
+    8: 0.07,   # Machine operators / Operadores
+    9: 0.15,   # Elementary / Básico
+}
+
+# ── Archetypes: qué grupos ISCO integran la audiencia objetivo ────────────────
+# Fuente: Perplexity Advertising Budget Model 2026-07-31 (adaptado a ISCO 1-9)
+# ultra_premium → Porsche/Rolex equiv. (riqueza > $1M), solo ISCO 1 grandes
+# premium       → BMW/Mercedes equiv. (ISCO 1-5, upper-middle)
+# mid_premium   → Adidas equiv. (pure middle, excluye extremos)
+# mass_market   → VW/Hyundai equiv. (middle and below)
+# universal     → Coca-Cola (todos los segmentos)
+ARCHETYPES: dict[str, list[int]] = {
+    'ultra_premium': [1],
+    'premium':       [1, 2, 3, 4, 5],
+    'mid_premium':   [1, 2, 3, 4, 5, 7, 8],
+    'mass_market':   [4, 5, 6, 7, 8, 9],
+    'universal':     [1, 2, 3, 4, 5, 6, 7, 8, 9],
+}
+
+# ── CEO/ejecutivo PPP USD/mes por país × tamaño empresa (Tabla 1 Perplexity) ─
+# Fuentes: Eurostat Structure of Earnings Survey, Gallagher CEO Comp 2024-2025,
+# Page Executive, Docco/Levu/Caixin, Ambisjon.no, Rosstat 57-T, DGBAS, SSB.
+# ISCO 1 nacional subestima a ejecutivos de grandes empresas por orden de
+# magnitud (ej: México $1,523/mes promedio vs $47,900 empresa grande).
+# Estos valores reemplazan el cálculo median × SIZE_MULT para ISCO 1.
+_CEO_PPP: dict[str, dict[str, float]] = {
+    'US': {'small':  17_202, 'medium':  250_500, 'large': 1_541_667},
+    'GB': {'small':  12_540, 'medium':   56_467, 'large':   740_289},
+    'UK': {'small':  12_540, 'medium':   56_467, 'large':   740_289},  # alias
+    'FR': {'small':  10_397, 'medium':   18_960, 'large':   366_974},
+    'BR': {'small':   8_759, 'medium':   21_138, 'large':   106_700},
+    'RU': {'small':   7_881, 'medium':   39_610, 'large':    87_835},
+    'CO': {'small':  22_516, 'medium':   49_684, 'large':    81_377},
+    'BD': {'small':  11_729, 'medium':   21_754, 'large':    58_048},
+    'MX': {'small':  27_228, 'medium':   36_304, 'large':    47_900},
+    'CN': {'small':   1_508, 'medium':    3_392, 'large':    31_663},
+    'NO': {'small':   7_293, 'medium':   11_394, 'large':    22_787},
+    # Estimados para países sin dato directo — ratio promedio de los 10 anteriores
+    'CL': {'small':  18_000, 'medium':   35_000, 'large':    80_000},
+    'AR': {'small':  12_000, 'medium':   22_000, 'large':    55_000},
+    'PE': {'small':  14_000, 'medium':   28_000, 'large':    62_000},
+    'EC': {'small':  10_000, 'medium':   19_000, 'large':    44_000},
+    'DE': {'small':  12_000, 'medium':   60_000, 'large':   380_000},
+    'ES': {'small':   9_500, 'medium':   18_000, 'large':   180_000},
+    'IT': {'small':   8_500, 'medium':   16_000, 'large':   150_000},
+    'CA': {'small':  15_000, 'medium':  180_000, 'large': 1_100_000},
+    'AU': {'small':  14_000, 'medium':  140_000, 'large':   900_000},
+    'JP': {'small':  10_000, 'medium':   40_000, 'large':   250_000},
+    'KR': {'small':   9_000, 'medium':   35_000, 'large':   180_000},
+    'IN': {'small':   4_000, 'medium':   12_000, 'large':    80_000},
+    'SG': {'small':  18_000, 'medium':   80_000, 'large':   500_000},
+    'HK': {'small':  14_000, 'medium':   60_000, 'large':   350_000},
+    'TW': {'small':   8_000, 'medium':   25_000, 'large':   140_000},
+    'CH': {'small':  20_000, 'medium':   80_000, 'large':   600_000},
+    'IL': {'small':  16_000, 'medium':   55_000, 'large':   280_000},
+    'AE': {'small':  18_000, 'medium':   65_000, 'large':   320_000},
+    'SA': {'small':  15_000, 'medium':   45_000, 'large':   220_000},
+    'QA': {'small':  18_000, 'medium':   60_000, 'large':   300_000},
+    'ZA': {'small':   7_000, 'medium':   18_000, 'large':    80_000},
+    'NG': {'small':   3_000, 'medium':    8_000, 'large':    35_000},
+    'MY': {'small':   6_000, 'medium':   18_000, 'large':    85_000},
+    'KZ': {'small':   3_500, 'medium':    9_000, 'large':    40_000},
+    'TR': {'small':   4_000, 'medium':   10_000, 'large':    45_000},
+}
+
 # ── Sigmas log-normal por (bucket_empresa, isco_group) ───────────────────────
-# Fuente: modelo JC (dibujos 2026-08-01). σ ≈ 0.8 para managers empresa grande.
-# Empresa grande → wider; empresa pequeña → compressed.
+# Fuente: modelo JC (2026-08-01). σ ≈ 0.8 para managers empresa grande.
 _SIGMA: dict[tuple[str, int], float] = {
-    # Empresa grande (500+ empleados)
     ('large', 1): 0.80, ('large', 2): 0.65, ('large', 3): 0.55,
     ('large', 4): 0.45, ('large', 5): 0.40, ('large', 6): 0.35,
     ('large', 7): 0.42, ('large', 8): 0.42, ('large', 9): 0.28,
-    # Empresa mediana (50-500)
     ('medium', 1): 0.52, ('medium', 2): 0.42, ('medium', 3): 0.36,
     ('medium', 4): 0.30, ('medium', 5): 0.27, ('medium', 6): 0.24,
     ('medium', 7): 0.28, ('medium', 8): 0.28, ('medium', 9): 0.20,
-    # Empresa pequeña (<50)
     ('small', 1): 0.32, ('small', 2): 0.26, ('small', 3): 0.22,
     ('small', 4): 0.19, ('small', 5): 0.17, ('small', 6): 0.15,
     ('small', 7): 0.19, ('small', 8): 0.19, ('small', 9): 0.13,
 }
 
-# Mapeo company_size DB → bucket
-_SIZE_BUCKET = {
-    '1-10': 'small', '11-50': 'small',
-    '51-250': 'medium',
-    '251-1000': 'large', '+1000': 'large',
+# Multiplicadores SIZE_MULT para ISCO 2-9 (ISCO 1 usa _CEO_PPP directamente)
+# Derived from Eurostat SES + ILO enterprise-size wage differentials
+_SIZE_MULT_BY_ISCO: dict[tuple[str, int], float] = {
+    # Large vs medium
+    ('large', 2): 2.5,  ('large', 3): 1.8,  ('large', 4): 1.4,
+    ('large', 5): 1.3,  ('large', 6): 1.15, ('large', 7): 1.5,
+    ('large', 8): 1.45, ('large', 9): 1.2,
+    # Medium = 1.0 baseline
+    ('medium', 2): 1.0, ('medium', 3): 1.0, ('medium', 4): 1.0,
+    ('medium', 5): 1.0, ('medium', 6): 1.0, ('medium', 7): 1.0,
+    ('medium', 8): 1.0, ('medium', 9): 1.0,
+    # Small vs medium
+    ('small', 2): 0.55, ('small', 3): 0.70, ('small', 4): 0.78,
+    ('small', 5): 0.80, ('small', 6): 0.85, ('small', 7): 0.75,
+    ('small', 8): 0.78, ('small', 9): 0.82,
 }
 
-# Salarios mediana PPP (fallback si no hay dato en DB) ISCO 1-9 por bucket
-# Base: promedios mundiales ILOSTAT 2023
-_FALLBACK_PPP: dict[tuple[str, int], float] = {
-    ('large', 1): 8000, ('large', 2): 5500, ('large', 3): 3800,
-    ('large', 4): 2800, ('large', 5): 2400, ('large', 6): 2000,
-    ('large', 7): 2800, ('large', 8): 3000, ('large', 9): 1800,
-    ('medium', 1): 3500, ('medium', 2): 2500, ('medium', 3): 1800,
-    ('medium', 4): 1300, ('medium', 5): 1100, ('medium', 6): 950,
-    ('medium', 7): 1300, ('medium', 8): 1400, ('medium', 9): 850,
-    ('small', 1): 1600, ('small', 2): 1200, ('small', 3): 900,
-    ('small', 4): 700,  ('small', 5): 600,  ('small', 6): 520,
-    ('small', 7): 680,  ('small', 8): 720,  ('small', 9): 480,
+# Fallback PPP mediana mundial si país no está en occupation_salary (ILOSTAT 2023)
+_FALLBACK_PPP: dict[int, float] = {
+    1: 4_200, 2: 2_800, 3: 1_900,
+    4: 1_300, 5: 1_100, 6: 950,
+    7: 1_300, 8: 1_400, 9: 780,
 }
-
-# Multiplicadores SIZE_MULT para pasar de mediana nacional a bucket
-_SIZE_MULT = {'small': 0.45, 'medium': 1.00, 'large': 2.30}
 
 
 def _normal_cdf(x: float) -> float:
@@ -66,83 +147,111 @@ def _normal_cdf(x: float) -> float:
 
 def p_income_above(mu_ppp: float, sigma: float, threshold: float) -> float:
     """P(ingreso ≥ threshold) con distribución log-normal(mu, sigma)."""
-    if mu_ppp <= 0 or threshold <= 0:
+    if threshold <= 0:
+        return 1.0
+    if mu_ppp <= 0 or sigma <= 0:
         return 1.0 if mu_ppp >= threshold else 0.0
-    if sigma <= 0:
-        return 1.0 if mu_ppp >= threshold else 0.0
-    mu_log  = math.log(mu_ppp)
-    thr_log = math.log(threshold)
-    z = (thr_log - mu_log) / sigma
+    z = (math.log(threshold) - math.log(mu_ppp)) / sigma
     return 1.0 - _normal_cdf(z)
 
 
 def _get_country_wages(db, country_iso: str) -> dict[int, float]:
     """Retorna mediana PPP USD/mes por ISCO 1-9 para un país."""
-    rows = db.execute(text("""
-        SELECT isco_group,
-               COALESCE(median_monthly_ppp_usd, median_monthly_usd) as ppp
-        FROM occupation_salary
-        WHERE country_iso = :cc AND isco_group BETWEEN 1 AND 9
-          AND COALESCE(median_monthly_ppp_usd, median_monthly_usd) > 0
-    """), {'cc': country_iso}).fetchall()
-    if rows:
-        return {int(r[0]): float(r[1]) for r in rows}
+    try:
+        rows = db.execute(text("""
+            SELECT isco_group,
+                   COALESCE(median_monthly_ppp_usd, median_monthly_usd) as ppp
+            FROM occupation_salary
+            WHERE country_iso = :cc AND isco_group BETWEEN 1 AND 9
+              AND COALESCE(median_monthly_ppp_usd, median_monthly_usd) > 0
+        """), {'cc': country_iso}).fetchall()
+        if rows:
+            return {int(r[0]): float(r[1]) for r in rows}
 
-    # Fallback ilo_wages
-    rows = db.execute(text("""
-        SELECT isco_group,
-               COALESCE(monthly_ppp_usd, monthly_usd) as ppp
-        FROM ilo_wages
-        WHERE country_iso2 = :cc AND monthly_usd > 0
-    """), {'cc': country_iso}).fetchall()
-    return {int(r[0]): float(r[1]) for r in rows if r[1]}
+        # Fallback → ilo_wages
+        rows = db.execute(text("""
+            SELECT isco_group, COALESCE(monthly_ppp_usd, monthly_usd) as ppp
+            FROM ilo_wages
+            WHERE country_iso2 = :cc AND monthly_usd > 0
+        """), {'cc': country_iso}).fetchall()
+        if rows:
+            return {int(r[0]): float(r[1]) for r in rows if r[1]}
+    except Exception:
+        pass
+    return {}
+
+
+def _mu_for_isco_bucket(country_iso: str, isco: int, bucket: str,
+                         national_wages: dict[int, float]) -> float:
+    """
+    Media log-normal para un segmento (país, ISCO, tamaño empresa).
+    ISCO 1: usa datos CEO reales de _CEO_PPP (más precisos que mediana nacional).
+    ISCO 2-9: escala la mediana nacional con _SIZE_MULT_BY_ISCO.
+    """
+    if isco == 1:
+        ceo = _CEO_PPP.get(country_iso, {})
+        if ceo:
+            return float(ceo.get(bucket, ceo.get('medium', 4_200)))
+        # Si no hay dato CEO, escalar mediana nacional con ratio approx.
+        nat = national_wages.get(1, _FALLBACK_PPP[1])
+        ratio = {'large': 5.5, 'medium': 1.0, 'small': 0.15}.get(bucket, 1.0)
+        return nat * ratio
+
+    # ISCO 2-9
+    nat = national_wages.get(isco, _FALLBACK_PPP.get(isco, 1_000))
+    mult = _SIZE_MULT_BY_ISCO.get((bucket, isco), 1.0)
+    return nat * mult
+
+
+def _normalized_isco_weights(isco_groups: list[int]) -> dict[int, float]:
+    """Pesos de empleo normalizados al subconjunto ISCO del archetype."""
+    raw = {i: _ISCO_EMPLOYMENT_WEIGHTS.get(i, 0.1) for i in isco_groups}
+    total = sum(raw.values())
+    if total <= 0:
+        return {i: 1.0 / len(isco_groups) for i in isco_groups}
+    return {i: w / total for i, w in raw.items()}
 
 
 def _expected_qualified(
     user_count: int,
-    country_wages: dict[int, float],
-    size_buckets: list[str],        # buckets de empresa a considerar
-    min_income_ppp: float,          # umbral mínimo PPP USD/mes
-    se_tiers_filter: set[str],      # tiers permitidos (vacío = todos)
-    isco_weights: dict[int, float], # distribución de cargos (1-9 → weight)
+    country_iso: str,
+    national_wages: dict[int, float],
+    size_buckets: list[str],
+    min_income_ppp: float,
+    isco_groups: list[int],          # del archetype
 ) -> float:
-    """Audiencia calificada esperada = Σ weight_isco × P(income ≥ min) × user_count."""
+    """Audiencia calificada esperada = users × Σ_isco(w_isco × P(ingreso ≥ min))."""
     if user_count == 0:
         return 0.0
     if min_income_ppp <= 0:
         return float(user_count)
 
+    isco_weights = _normalized_isco_weights(isco_groups)
     total_prob = 0.0
-    total_weight = 0.0
 
-    for isco in range(1, 10):
-        w = isco_weights.get(isco, 1.0 / 9)
-        mu_national = country_wages.get(isco, 0)
-
+    for isco, w in isco_weights.items():
         # Promedio entre buckets de empresa seleccionados
         bucket_probs = []
         for bucket in size_buckets:
-            mult = _SIZE_MULT.get(bucket, 1.0)
-            mu_bucket = mu_national * mult if mu_national > 0 else _FALLBACK_PPP.get((bucket, isco), 1000)
-            sigma = _SIGMA.get((bucket, isco), 0.35)
-            bucket_probs.append(p_income_above(mu_bucket, sigma, min_income_ppp))
+            mu = _mu_for_isco_bucket(country_iso, isco, bucket, national_wages)
+            sigma = _SIGMA.get((bucket, isco), 0.30)
+            bucket_probs.append(p_income_above(mu, sigma, min_income_ppp))
 
         avg_prob = sum(bucket_probs) / len(bucket_probs) if bucket_probs else 0.0
-        total_prob   += w * avg_prob
-        total_weight += w
+        total_prob += w * avg_prob
 
-    avg_p = total_prob / total_weight if total_weight else 0.0
-    return user_count * avg_p
+    return user_count * total_prob
 
 
 def optimize_budget(
     db,
     countries: list[str],
-    age_segments: list[dict],       # [{"min":18,"max":35,"pct":50}, ...]  (de nc-age-weights)
-    se_tiers: list[str],            # ['A','B','C','D']
-    company_sizes: list[str],       # ['small','medium','large'] o vacío
+    age_segments: list[dict],       # [{"min":18,"max":35,"pct":50}, ...]
+    se_tiers: list[str],            # ['A','B','C','D'] — vacío = todos
+    company_sizes: list[str],       # ['small','medium','large'] — vacío = todos
     min_income_ppp: float,          # umbral PPP USD/mes (0 = sin restricción)
     budget_usd: float,
+    archetype: str = 'universal',   # del dict ARCHETYPES
 ) -> dict:
     """
     Calcula la distribución óptima del presupuesto entre segmentos.
@@ -152,53 +261,49 @@ def optimize_budget(
         return {'error': 'No hay países seleccionados'}
 
     size_buckets = company_sizes if company_sizes else ['small', 'medium', 'large']
+    isco_groups  = ARCHETYPES.get(archetype, ARCHETYPES['universal'])
 
-    # Distribución de cargos ISCO uniforme si no hay info específica
-    isco_weights = {i: 1.0/9 for i in range(1, 10)}
-
-    # ── Conteo real de usuarios por segmento en DB ────────────────────────────
-    # Segmento = país × age_range
-    segments = []
-
-    # Si no hay age_segments definidos, usar un único bloque global
     if not age_segments:
-        age_segments = [{'min': 13, 'max': 99, 'pct': 100, 'label': 'Todas las edades'}]
+        age_segments = [{'min': 13, 'max': 99, 'label': 'Todas las edades'}]
 
-    tiers_set = set(se_tiers) if se_tiers else {'A','B','C','D','E'}
+    tiers_set = set(se_tiers) if se_tiers else {'A', 'B', 'C', 'D', 'E'}
+
+    segments = []
 
     for cc in countries:
         wages = _get_country_wages(db, cc)
 
         for seg in age_segments:
-            age_min = seg.get('min', 13)
-            age_max = seg.get('max', 99)
+            age_min   = seg.get('min', 13)
+            age_max   = seg.get('max', 99)
             label_age = seg.get('label') or f"{age_min}-{age_max} años"
 
-            # Contar usuarios reales
+            # Conteo real de usuarios en DB
             try:
-                tier_filter = "AND se_tier = ANY(:tiers)" if tiers_set != {'A','B','C','D','E'} else ""
-                q = f"""
+                use_tier_filter = tiers_set not in ({'A','B','C','D','E'}, set())
+                q_str = """
                     SELECT COUNT(*) FROM users
                     WHERE country = :cc
                       AND age BETWEEN :amin AND :amax
                       AND se_tier IS NOT NULL
-                      {tier_filter}
                 """
                 params: dict = {'cc': cc, 'amin': age_min, 'amax': age_max}
-                if tiers_set != {'A','B','C','D','E'}:
+                if use_tier_filter:
+                    q_str += " AND se_tier = ANY(:tiers)"
                     params['tiers'] = list(tiers_set)
-                row = db.execute(text(q), params).fetchone()
+                row = db.execute(text(q_str), params).fetchone()
                 user_count = int(row[0]) if row else 0
             except Exception:
                 user_count = 0
 
+            # Audiencia calificada estimada (min 1 para no anular países emergentes)
             qualified = _expected_qualified(
-                user_count=max(user_count, 1),  # mínimo 1 para no perder países con pocos usuarios
-                country_wages=wages,
+                user_count=max(user_count, 1),
+                country_iso=cc,
+                national_wages=wages,
                 size_buckets=size_buckets,
                 min_income_ppp=min_income_ppp,
-                se_tiers_filter=tiers_set,
-                isco_weights=isco_weights,
+                isco_groups=isco_groups,
             )
 
             segments.append({
@@ -214,37 +319,50 @@ def optimize_budget(
 
     # ── Asignación proporcional ───────────────────────────────────────────────
     total_q = sum(s['qualified'] for s in segments)
+
     if total_q <= 0:
-        # Sin datos suficientes: distribución uniforme
         eq = round(100.0 / len(segments), 1) if segments else 0
         for s in segments:
             s['pct']        = eq
             s['budget_usd'] = round(budget_usd * eq / 100, 2)
         return {
-            'segments': segments,
-            'total_qualified': 0,
-            'note': 'Sin datos de usuarios suficientes — distribución uniforme',
+            'segments': segments, 'total_qualified': 0, 'budget_usd': budget_usd,
+            'note': 'Sin usuarios suficientes — distribución uniforme.',
             'optimization': 'uniform_fallback',
+            'archetype': archetype,
         }
 
     for s in segments:
         s['pct']        = round(s['qualified'] / total_q * 100, 1)
         s['budget_usd'] = round(budget_usd * s['pct'] / 100, 2)
 
-    # Ajustar redondeo para que sume exacto 100%
+    # Corrección de redondeo para que sume 100%
     diff = round(100.0 - sum(s['pct'] for s in segments), 1)
     if segments and diff != 0:
-        segments[0]['pct'] = round(segments[0]['pct'] + diff, 1)
+        segments[0]['pct']        = round(segments[0]['pct'] + diff, 1)
         segments[0]['budget_usd'] = round(budget_usd * segments[0]['pct'] / 100, 2)
+
+    archetype_labels = {
+        'ultra_premium': 'Ultra-premium (ISCO 1 — directivos)',
+        'premium':       'Premium (ISCO 1-5 — profesionales y ejecutivos)',
+        'mid_premium':   'Medio-premium (ISCO 1-5,7,8 — clase media profesional)',
+        'mass_market':   'Masivo (ISCO 4-9 — clase media y trabajadores)',
+        'universal':     'Universal (todos los segmentos)',
+    }
 
     return {
         'segments':        segments,
         'total_qualified': round(total_q, 0),
         'budget_usd':      budget_usd,
+        'archetype':       archetype,
+        'archetype_label': archetype_labels.get(archetype, archetype),
+        'isco_groups':     isco_groups,
         'optimization':    'proportional_to_expected_qualified_audience',
-        'model':           'log-normal sigma JC 2026-08-01',
-        'note':            (
+        'model_version':   'v2 — Perplexity 2026-07-31 + JC sigma 2026-08-01',
+        'note': (
             f"Audiencia calificada total estimada: {int(total_q):,} usuarios. "
-            f"Presupuesto óptimo según densidad de audiencia × P(ingreso ≥ umbral)."
+            f"Archetype: {archetype_labels.get(archetype, archetype)}. "
+            f"Pesos ISCO: empleo real (ILO KILM 2023). "
+            f"ISCO 1: salario ejecutivo por tamaño empresa (Perplexity Tabla 1, 2026)."
         ),
     }

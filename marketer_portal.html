@@ -635,6 +635,18 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
 
               <!-- ── MOTOR DE OPTIMIZACIÓN ── -->
               <div class="field form-full" id="optimizer-section">
+                <!-- Selector de arquetipo (tipo de producto) -->
+                <label style="margin-bottom:8px;display:block;">Tipo de producto <span style="color:var(--muted);font-weight:400;">— define qué segmento ISCO es audiencia objetivo</span></label>
+                <div class="chip-row" id="mc-archetype-chips" style="flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+                  <div class="chip" data-value="ultra_premium" onclick="toggleMcArchetype(this)" title="Porsche/Rolex — solo directivos de grandes empresas">Ultra-premium</div>
+                  <div class="chip" data-value="premium" onclick="toggleMcArchetype(this)" title="BMW/Mercedes — profesionales y ejecutivos">Premium</div>
+                  <div class="chip selected" data-value="mid_premium" onclick="toggleMcArchetype(this)" title="Adidas — clase media profesional, sin extremos">Medio-premium</div>
+                  <div class="chip" data-value="mass_market" onclick="toggleMcArchetype(this)" title="VW/Hyundai — clase media y trabajadores">Masivo</div>
+                  <div class="chip" data-value="universal" onclick="toggleMcArchetype(this)" title="Coca-Cola — todos los segmentos">Universal</div>
+                </div>
+                <div id="archetype-desc" style="font-size:11px;color:var(--muted);margin-bottom:12px;min-height:16px;">ISCO 1-5, 7, 8 — clase media profesional (sin extremos)</div>
+                <input type="hidden" id="nc-archetype" value="mid_premium"/>
+
                 <button type="button" id="btn-optimize" onclick="calcularDistribucion()"
                   style="width:100%;padding:14px;background:linear-gradient(135deg,var(--gold),var(--gold2));color:#000;font-weight:700;font-size:14px;letter-spacing:.06em;border:none;border-radius:12px;cursor:pointer;transition:opacity .2s;">
                   Calcular distribución óptima del presupuesto
@@ -2074,6 +2086,23 @@ function _loadAgeFromCampaign(ageMin, ageMax, weightsJson) {
   _renderAgeSegments();
 }
 
+// ── ARCHETYPE CHIPS ──────────────────────────────────────────────────────────
+const _ARCHETYPE_DESC = {
+  'ultra_premium': 'ISCO 1 — directivos de grandes empresas (Porsche/Rolex equiv.)',
+  'premium':       'ISCO 1-5 — ejecutivos y profesionales (BMW/Mercedes equiv.)',
+  'mid_premium':   'ISCO 1-5, 7, 8 — clase media profesional, sin extremos (Adidas equiv.)',
+  'mass_market':   'ISCO 4-9 — clase media y trabajadores (VW/Hyundai equiv.)',
+  'universal':     'ISCO 1-9 — todos los segmentos sin restricción (Coca-Cola equiv.)',
+};
+
+function toggleMcArchetype(el) {
+  document.querySelectorAll('#mc-archetype-chips .chip').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  const val = el.dataset.value;
+  document.getElementById('nc-archetype').value = val;
+  document.getElementById('archetype-desc').textContent = _ARCHETYPE_DESC[val] || '';
+}
+
 // ── COMPANY SIZE CHIPS ───────────────────────────────────────────────────────
 function toggleMcSize(el) {
   const isAll = el.dataset.value === 'ALL';
@@ -2125,6 +2154,8 @@ async function calcularDistribucion() {
     // Company sizes
     const sizeStr = (sizes === 'ALL') ? '' : sizes;
 
+    const archetype = document.getElementById('nc-archetype')?.value || 'universal';
+
     const params = new URLSearchParams({
       countries:        countryStr,
       age_weights_json: ageW,
@@ -2132,6 +2163,7 @@ async function calcularDistribucion() {
       company_sizes:    sizeStr,
       min_income_usd:   minMonthly,
       budget_usd:       budget,
+      archetype:        archetype,
     });
 
     const r = await fetch(`${API}/marketer/optimize-budget?${params}`, {
@@ -2162,7 +2194,8 @@ function _renderOptimizationPanel(data) {
 
   // Encabezado
   const tq = data.total_qualified ? parseInt(data.total_qualified).toLocaleString() : '—';
-  totalEl.textContent = `Audiencia calificada estimada: ${tq} usuarios`;
+  const arcLabel = data.archetype_label ? ` · ${data.archetype_label}` : '';
+  totalEl.innerHTML = `Audiencia calificada estimada: <strong>${tq} usuarios</strong><br><span style="font-size:10px;color:var(--muted);">${arcLabel}</span>`;
 
   // Segmentos
   segsEl.innerHTML = '';
