@@ -196,6 +196,52 @@ _BUCKET_WEIGHTS: dict[str, float] = {
     'multinational': 0.04,
 }
 
+# Fuerza laboral total (ILO KILM 2023) — usada como base de población cuando
+# no hay usuarios reales en BD para ese país. Da escala correcta al mercado:
+# CN=800M trabajadores ≠ NO=2.8M, independiente de usuarios registrados.
+_ILO_LABOR_FORCE: dict[str, int] = {
+    'CN': 800_000_000, 'IN': 560_000_000, 'US': 168_000_000,
+    'ID': 140_000_000, 'BR': 100_000_000, 'RU':  68_000_000,
+    'VN':  55_000_000, 'MX':  55_000_000, 'BD':  72_000_000,
+    'NG':  63_000_000, 'JP':  67_000_000, 'PH':  48_000_000,
+    'TH':  38_000_000, 'EG':  32_000_000, 'GB':  32_000_000,
+    'KR':  27_000_000, 'CO':  22_000_000, 'DE':  42_000_000,
+    'TR':  31_000_000, 'ZA':  22_000_000, 'AR':  19_000_000,
+    'CA':  19_000_000, 'ES':  21_000_000, 'UA':  18_000_000,
+    'PE':  17_000_000, 'PL':  17_000_000, 'FR':  26_000_000,
+    'AU':  13_000_000, 'SA':  12_000_000, 'TW':  11_000_000,
+    'MY':  15_000_000, 'NL':   9_200_000, 'CL':   9_000_000,
+    'KZ':   8_500_000, 'RO':   8_400_000, 'EC':   7_500_000,
+    'AE':   5_000_000, 'CH':   4_600_000, 'HK':   3_800_000,
+    'SG':   3_500_000, 'NO':   2_800_000, 'SK':   2_800_000,
+    'IL':   4_200_000, 'AT':   4_400_000, 'PT':   4_800_000,
+    'BE':   4_900_000, 'FI':   2_600_000, 'SE':   5_500_000,
+    'DK':   3_000_000, 'CZ':   5_300_000, 'HU':   4_600_000,
+    'QA':   2_100_000, 'HR':   1_700_000, 'GR':   4_100_000,
+}
+
+# HNWIs (patrimonio neto > $1M USD) por país — Capgemini World Wealth Report 2023
+# Para archetype ultra_premium (Porsche/Rolex): el comprador es patrimonial,
+# no asalariado. Un ejecutivo con $20K/mes no compra un Porsche de $200K de sueldo.
+# Lo compra quien tiene $2M+ en activos. Fuente: Capgemini WWR 2023 + Credit Suisse
+# Global Wealth Report 2023.
+_HNWI: dict[str, int] = {
+    'US': 5_540_000, 'JP': 3_440_000, 'GB': 2_525_000, 'FR': 2_786_000,
+    'DE': 1_468_000, 'CA': 1_248_000, 'AU': 1_155_000, 'CN': 1_082_000,
+    'CH':   770_000, 'IT':   726_000, 'KR':   560_000, 'NL':   450_000,
+    'SE':   380_000, 'ES':   370_000, 'NO':   360_000, 'DK':   340_000,
+    'SG':   320_000, 'HK':   310_000, 'BE':   270_000, 'AT':   260_000,
+    'TW':   240_000, 'FI':   220_000, 'IE':   200_000, 'PT':   180_000,
+    'IL':   170_000, 'AE':   160_000, 'MX':   202_000, 'BR':   340_000,
+    'RU':   408_000, 'IN':   330_000, 'ZA':   100_000, 'SA':   130_000,
+    'QA':    90_000, 'KW':    75_000, 'CL':    45_000, 'CO':    42_000,
+    'AR':    35_000, 'TH':   120_000, 'MY':    85_000, 'ID':   170_000,
+    'PE':    18_000, 'EC':     8_000, 'BD':    12_000, 'NG':    25_000,
+    'PH':    50_000, 'VN':    28_000, 'TR':    96_000, 'CZ':    75_000,
+    'PL':    80_000, 'HU':    35_000, 'RO':    22_000, 'GR':    50_000,
+    'KZ':    18_000, 'UA':    22_000, 'HR':    12_000, 'SK':    18_000,
+}
+
 # Fallback PPP mediana mundial si país no está en occupation_salary (ILOSTAT 2023)
 _FALLBACK_PPP: dict[int, float] = {
     1: 4_200, 2: 2_800, 3: 1_900,
@@ -346,6 +392,75 @@ def optimize_budget(
 
     tiers_set = set(se_tiers) if se_tiers else {'A', 'B', 'C', 'D', 'E'}
 
+    # ── ultra_premium: usa HNWI patrimonial (Perplexity BD) no ingreso mensual ──
+    # Un Porsche vale $150-300K — no se compra de sueldo, se compra de patrimonio.
+    # Perplexity calculó la distribución real usando HNWI > $1M (Capgemini WWR 2023).
+    if archetype == 'ultra_premium':
+        hnwi_rows = {}
+        try:
+            rows = db.execute(text("""
+                SELECT country_iso, budget_pct FROM perplexity_budget_benchmarks
+                WHERE brand = 'porsche_rolex' AND country_iso = ANY(:ccs)
+            """), {'ccs': countries}).fetchall()
+            hnwi_rows = {r[0]: float(r[1]) for r in rows}
+        except Exception:
+            pass
+
+        if hnwi_rows:
+            # BD tiene los datos Perplexity — usarlos directamente
+            total_pct_covered = sum(hnwi_rows.values())
+            # Normalizar al subconjunto de países solicitados
+            total_q = sum(hnwi_rows.values())
+            segs_out = []
+            for cc in countries:
+                pct_raw = hnwi_rows.get(cc, 0.0)
+                pct = round(pct_raw / total_q * 100, 1) if total_q > 0 else 0.0
+                hnwi = _HNWI.get(cc, 0)
+                segs_out.append({
+                    'country':    cc,
+                    'label':      f"{cc} — Todas las edades",
+                    'users_real': 0,
+                    'qualified':  hnwi,
+                    'pct':        pct,
+                    'budget_usd': round(budget_usd * pct / 100, 2),
+                    'model_note': 'HNWI_wealth_gt_1M_USD (Perplexity Capgemini 2023)',
+                })
+            return {
+                'segments':        segs_out,
+                'total_qualified': sum(s['qualified'] for s in segs_out),
+                'budget_usd':      budget_usd,
+                'archetype':       archetype,
+                'archetype_label': 'Ultra-premium (HNWI patrimonio > $1M — Porsche/Rolex)',
+                'isco_groups':     [1],
+                'optimization':    'hnwi_wealth_perplexity',
+                'model_version':   'v2 — Perplexity 2026-07-31 HNWI Capgemini WWR 2023',
+                'note': (
+                    'E1 Ultra-premium usa riqueza patrimonial (HNWI > $1M net worth), '
+                    'no ingreso mensual. Fuente: Capgemini World Wealth Report 2023 '
+                    'vía Perplexity. BMW/Mercedes (E2) sí usa ingreso ejecutivo ISCO.'
+                ),
+            }
+        # Sin datos en BD: fallback a _HNWI local
+        hnwi_rows = {cc: float(_HNWI.get(cc, 1)) for cc in countries}
+        total_q = sum(hnwi_rows.values())
+        segs_out = []
+        for cc in countries:
+            pct = round(hnwi_rows[cc] / total_q * 100, 1) if total_q > 0 else 0.0
+            segs_out.append({
+                'country': cc, 'label': f"{cc} — Todas las edades",
+                'users_real': 0, 'qualified': int(hnwi_rows[cc]),
+                'pct': pct, 'budget_usd': round(budget_usd * pct / 100, 2),
+                'model_note': 'HNWI_fallback_Capgemini2023',
+            })
+        return {
+            'segments': segs_out, 'total_qualified': int(total_q),
+            'budget_usd': budget_usd, 'archetype': archetype,
+            'archetype_label': 'Ultra-premium (HNWI fallback local)',
+            'optimization': 'hnwi_wealth_local', 'isco_groups': [1],
+            'model_version': 'v2 — HNWI Capgemini WWR 2023 (local)',
+            'note': 'HNWI local — importar perplexity_budget_benchmarks para mayor precisión.',
+        }
+
     segments = []
 
     for cc in countries:
@@ -374,9 +489,15 @@ def optimize_budget(
             except Exception:
                 user_count = 0
 
-            # Audiencia calificada estimada (min 1 para no anular países emergentes)
+            # Cuando no hay usuarios reales, usa fuerza laboral ILO como base de
+            # población. Da la escala correcta al mercado: CN=800M ≠ NO=2.8M.
+            # Sin esto, todos los países sin usuarios obtienen 1 usuario → distribución
+            # uniforme sin importar el tamaño real del mercado.
+            if user_count == 0:
+                user_count = _ILO_LABOR_FORCE.get(cc, 100_000)
+
             qualified = _expected_qualified(
-                user_count=max(user_count, 1),
+                user_count=user_count,
                 country_iso=cc,
                 national_wages=wages,
                 size_buckets=size_buckets,
@@ -438,9 +559,9 @@ def optimize_budget(
         'optimization':    'proportional_to_expected_qualified_audience',
         'model_version':   'v2 — Perplexity 2026-07-31 + JC sigma 2026-08-01',
         'note': (
-            f"Audiencia calificada total estimada: {int(total_q):,} usuarios. "
+            f"Audiencia calificada: {int(total_q):,} (fuerza laboral ILO × P(ingreso ≥ umbral)). "
             f"Archetype: {archetype_labels.get(archetype, archetype)}. "
             f"Pesos ISCO: empleo real (ILO KILM 2023). "
-            f"ISCO 1: salario ejecutivo por tamaño empresa (Perplexity Tabla 1, 2026)."
+            f"ISCO 1: CEO PPP por tamaño empresa (Perplexity Tabla 1 + multinational JC 2026)."
         ),
     }
