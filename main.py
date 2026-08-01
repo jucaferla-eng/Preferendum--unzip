@@ -384,8 +384,9 @@ class AdCampaign(Base):
     target_gender       = Column(String, default='all')     # 'F' / 'M' / 'all'
     target_age_min      = Column(Integer, default=13)
     target_age_max      = Column(Integer, default=99)
-    target_age_ranges   = Column(String, default='')        # legacy
-    target_age_weights  = Column(String, default='')        # JSON: {"18-24":30,"25-34":70}
+    target_age_ranges    = Column(String, default='')        # legacy
+    target_age_weights   = Column(String, default='')        # JSON: {"18-24":30,"25-34":70}
+    target_company_sizes = Column(String, default='')        # 'small,medium,large' o '' = todos
     target_categories   = Column(String, default='')
     excluded_categories = Column(String, default='')
     blocked_competitors = Column(String, default='')
@@ -402,6 +403,22 @@ class AdCampaign(Base):
     min_per_capita_usd  = Column(Float, default=0.0)   # filtro GNI per cápita mínimo del país
     target_hnw_only     = Column(Boolean, default=False) # True = solo usuarios verified_hnw
     min_hnw_score       = Column(Float, default=0.0)     # hnw_score mínimo (0 = sin límite)
+
+class ModelDefinition(Base):
+    """Modelos de optimización/matching versionados — guardados por JC y el equipo."""
+    __tablename__ = 'model_definitions'
+    id          = Column(Integer, primary_key=True)
+    name        = Column(String, nullable=False)
+    version     = Column(String, default='1.0')
+    model_type  = Column(String, default='matching')  # 'matching' | 'optimization' | 'budget'
+    description = Column(String, default='')
+    config_json = Column(String, default='{}')        # parámetros clave en JSON
+    source_code = Column(String, default='')          # código Python del modelo
+    author      = Column(String, default='')
+    is_active   = Column(Boolean, default=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+    updated_at  = Column(DateTime, default=datetime.utcnow)
+
 
 class AdImpressionLog(Base):
     __tablename__ = 'ad_impression_logs'
@@ -685,7 +702,8 @@ def _migrate():
             ('link_url',            "TEXT DEFAULT ''"),
             ('target_debate_ids',   "TEXT DEFAULT ''"),
             ('target_age_ranges',   "TEXT DEFAULT ''"),
-            ('target_age_weights',  "TEXT DEFAULT ''"),
+            ('target_age_weights',    "TEXT DEFAULT ''"),
+            ('target_company_sizes',  "TEXT DEFAULT ''"),  # 'small,medium,large' o '' = todos
             ('target_categories',   "TEXT DEFAULT ''"),
             ('excluded_categories', "TEXT DEFAULT ''"),
             ('blocked_competitors', "TEXT DEFAULT ''"),
@@ -1326,8 +1344,9 @@ class CampaignCreate(BaseModel):
     target_age_min:      int = 13
     target_age_max:      int = 99
     target_age_ranges:   str = ''
-    target_age_weights:  str = ''   # JSON {"18-24":30,"25-34":70}
-    target_categories:   str = ''
+    target_age_weights:   str = ''   # JSON {"18-24":30,"25-34":70}
+    target_company_sizes: str = ''   # 'small,medium,large' o '' = todos
+    target_categories:    str = ''
     excluded_categories: str = ''
     blocked_competitors: str = ''
     start_date:          str
@@ -4113,6 +4132,21 @@ def _match_campaigns(user, debate, db) -> list:
             if not _tier_matches(user.se_tier, c.target_se_tiers or 'A,B,C,D'):
                 continue
 
+        # ── COMPANY SIZE FILTER (modelo JC 2026-08-01) ──
+        # Mapeo: '1-10','11-50' → small | '51-250' → medium | '251-1000','+1000' → large
+        tgt_sizes = getattr(c, 'target_company_sizes', '') or ''
+        if tgt_sizes and user:
+            _SIZE_BUCKET = {
+                '1-10': 'small', '11-50': 'small',
+                '51-250': 'medium',
+                '251-1000': 'large', '+1000': 'large',
+            }
+            user_cs = getattr(user, 'company_size', '') or ''
+            user_bucket = _SIZE_BUCKET.get(user_cs, '')
+            allowed = {s.strip().lower() for s in tgt_sizes.split(',') if s.strip()}
+            if user_bucket and allowed and user_bucket not in allowed:
+                continue
+
         # ── HNW FILTER — Porsche, LVMH, Rolex, etc. ──
         # target_hnw_only=True → solo usuarios con verified_hnw=True
         # min_hnw_score > 0   → solo usuarios con hnw_score >= umbral
@@ -5115,12 +5149,13 @@ def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
         target_gender       = data.target_gender,
         target_age_min      = data.target_age_min,
         target_age_max      = data.target_age_max,
-        target_age_ranges   = data.target_age_ranges,
-        target_age_weights  = getattr(data, 'target_age_weights', '') or '',
-        target_categories   = data.target_categories,
-        excluded_categories = data.excluded_categories,
-        blocked_competitors = data.blocked_competitors,
-        logo_url            = data.logo_url,
+        target_age_ranges    = data.target_age_ranges,
+        target_age_weights   = getattr(data, 'target_age_weights', '') or '',
+        target_company_sizes = getattr(data, 'target_company_sizes', '') or '',
+        target_categories    = data.target_categories,
+        excluded_categories  = data.excluded_categories,
+        blocked_competitors  = data.blocked_competitors,
+        logo_url             = data.logo_url,
         ad_copy             = data.ad_copy,
         ad_image_url        = data.ad_image_url,
         video_url           = data.video_url,
@@ -5159,9 +5194,10 @@ def update_campaign(campaign_id: int, data: CampaignCreate, db: Session = Depend
     campaign.target_country      = data.target_country
     campaign.target_communes     = data.target_communes
     campaign.target_gender       = data.target_gender
-    campaign.target_age_ranges   = data.target_age_ranges
-    campaign.target_age_weights  = getattr(data, 'target_age_weights', '') or ''
-    campaign.target_se_tiers     = data.target_se_tiers
+    campaign.target_age_ranges    = data.target_age_ranges
+    campaign.target_age_weights   = getattr(data, 'target_age_weights', '') or ''
+    campaign.target_company_sizes = getattr(data, 'target_company_sizes', '') or ''
+    campaign.target_se_tiers      = data.target_se_tiers
     campaign.excluded_categories = data.excluded_categories
     campaign.blocked_competitors = data.blocked_competitors
     campaign.ad_copy             = data.ad_copy
@@ -8673,12 +8709,13 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         target_gender       = data.target_gender,
         target_age_min      = data.target_age_min,
         target_age_max      = data.target_age_max,
-        target_age_ranges   = data.target_age_ranges,
-        target_age_weights  = getattr(data, 'target_age_weights', '') or '',
-        target_categories   = data.target_categories,
-        excluded_categories = data.excluded_categories,
-        blocked_competitors = data.blocked_competitors,
-        start_date          = datetime.fromisoformat(data.start_date),
+        target_age_ranges    = data.target_age_ranges,
+        target_age_weights   = getattr(data, 'target_age_weights', '') or '',
+        target_company_sizes = getattr(data, 'target_company_sizes', '') or '',
+        target_categories    = data.target_categories,
+        excluded_categories  = data.excluded_categories,
+        blocked_competitors  = data.blocked_competitors,
+        start_date           = datetime.fromisoformat(data.start_date),
         end_date            = datetime.fromisoformat(data.end_date),
         is_active           = True,
         logo_url            = data.logo_url or '',
@@ -11537,6 +11574,52 @@ def admin_import_gulf_asia(secret: str, db: Session = Depends(get_db)):
         raise HTTPException(403, 'Forbidden')
     from gulf_asia_wages_agent import run_gulf_asia_import
     return run_gulf_asia_import(db)
+
+
+@app.post('/admin/model-definitions')
+def save_model_definition(secret: str, db: Session = Depends(get_db),
+                           name: str = '', version: str = '1.0',
+                           model_type: str = 'matching', description: str = '',
+                           config_json: str = '{}', source_code: str = '', author: str = ''):
+    """Guarda o actualiza un modelo de optimización/matching en la BD."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    existing = db.execute(text(
+        "SELECT id FROM model_definitions WHERE name=:n AND version=:v"
+    ), {'n': name, 'v': version}).fetchone()
+    if existing:
+        db.execute(text("""
+            UPDATE model_definitions SET description=:desc, config_json=:cfg,
+              source_code=:src, author=:auth, is_active=TRUE, updated_at=NOW()
+            WHERE id=:id
+        """), {'desc': description, 'cfg': config_json, 'src': source_code,
+               'auth': author, 'id': existing[0]})
+        db.commit()
+        return {'status': 'updated', 'id': existing[0], 'name': name, 'version': version}
+    db.execute(text("""
+        INSERT INTO model_definitions (name, version, model_type, description, config_json, source_code, author)
+        VALUES (:n, :v, :mt, :desc, :cfg, :src, :auth)
+    """), {'n': name, 'v': version, 'mt': model_type, 'desc': description,
+           'cfg': config_json, 'src': source_code, 'auth': author})
+    db.commit()
+    return {'status': 'created', 'name': name, 'version': version}
+
+
+@app.get('/admin/model-definitions')
+def list_model_definitions(secret: str, db: Session = Depends(get_db)):
+    """Lista todos los modelos guardados."""
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+    rows = db.execute(text(
+        "SELECT id, name, version, model_type, description, author, is_active, created_at, updated_at "
+        "FROM model_definitions ORDER BY updated_at DESC"
+    )).fetchall()
+    return {'models': [
+        {'id': r[0], 'name': r[1], 'version': r[2], 'type': r[3],
+         'description': r[4], 'author': r[5], 'is_active': r[6],
+         'created_at': str(r[7]), 'updated_at': str(r[8])}
+        for r in rows
+    ]}
 
 
 @app.post('/admin/apply-ppp')
