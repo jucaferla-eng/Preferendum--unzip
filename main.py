@@ -95,7 +95,8 @@ class User(Base):
     county          = Column(String, default='')   # comuna declarada — nunca dirección exacta
     se_tier              = Column(String, default='')   # A/B/C/D — combinación de comuna + profesión
     income_index         = Column(Float, default=0.0)   # índice de ingreso de su comuna
-    estimated_income_usd = Column(Float, default=None)  # ingreso anual estimado en USD (ocupación + ubicación)
+    estimated_income_usd = Column(Float, default=None)  # ingreso anual estimado en USD (señal ocupacional)
+    estimated_income_ppp = Column(Float, default=None)  # ingreso mensual PPP — composite (ocupación+residencial+empresa)
     profession           = Column(String, default='')   # profesión declarada al registrarse
     cargo           = Column(String, default='')   # cargo/posición jerárquica
     company_size    = Column(String, default='')   # tamaño de empresa: 1-10, 11-50, etc.
@@ -590,18 +591,19 @@ class ConsultationModerationLog(Base):
 class CommuneMarketData(Base):
     """Precio de arriendo por m² por comuna — actualizado mensualmente por el agente."""
     __tablename__ = 'commune_market_data'
-    id           = Column(Integer, primary_key=True)
-    country      = Column(String, index=True)
-    commune      = Column(String, index=True)
-    price_m2_avg = Column(Float, default=0.0)
-    income_index = Column(Float, default=100.0)  # mediana global = 100
-    income_pct   = Column(Float, default=50.0)   # percentil dentro del grupo de ingreso
-    cpm_usd      = Column(Float, default=6.0)
-    se_tier      = Column(String, default='C')   # A / B / C / D
-    portal       = Column(String)
-    sample_count = Column(Integer, default=0)
-    scraped_at   = Column(DateTime)
-    updated_at   = Column(DateTime, default=datetime.utcnow)
+    id                   = Column(Integer, primary_key=True)
+    country              = Column(String, index=True)
+    commune              = Column(String, index=True)
+    price_m2_avg         = Column(Float, default=0.0)
+    income_index         = Column(Float, default=100.0)  # mediana global = 100
+    income_pct           = Column(Float, default=50.0)   # percentil dentro del grupo de ingreso
+    cpm_usd              = Column(Float, default=6.0)
+    se_tier              = Column(String, default='C')   # A / B / C / D
+    estimated_income_ppp = Column(Float, default=None)   # ingreso individual mensual PPP (del precio m²)
+    portal               = Column(String)
+    sample_count         = Column(Integer, default=0)
+    scraped_at           = Column(DateTime)
+    updated_at           = Column(DateTime, default=datetime.utcnow)
 
 Base.metadata.create_all(bind=engine)
 
@@ -755,14 +757,15 @@ def _migrate():
                 conn.commit()
             except Exception:
                 pass
-        # commune_market_data — nuevas columnas metodología v2 (2026-07-26)
+        # commune_market_data — columnas metodología v2 + income estimator
         existing_cmd_cols = {c['name'] for c in inspector.get_columns('commune_market_data')} if inspector.has_table('commune_market_data') else set()
         for col, defn in [
-            ('rent_index',  'FLOAT DEFAULT 100.0'),
-            ('rent_pct',    'FLOAT DEFAULT 50.0'),
-            ('geo_score',   'FLOAT DEFAULT 50.0'),
-            ('source_name', "TEXT DEFAULT ''"),
-            ('income_pct',  'FLOAT DEFAULT 50.0'),
+            ('rent_index',          'FLOAT DEFAULT 100.0'),
+            ('rent_pct',            'FLOAT DEFAULT 50.0'),
+            ('geo_score',           'FLOAT DEFAULT 50.0'),
+            ('source_name',         "TEXT DEFAULT ''"),
+            ('income_pct',          'FLOAT DEFAULT 50.0'),
+            ('estimated_income_ppp', 'FLOAT DEFAULT NULL'),  # ingreso individual mensual PPP estimado desde m²
         ]:
             if col not in existing_cmd_cols:
                 try:
@@ -770,6 +773,14 @@ def _migrate():
                     conn.commit()
                 except Exception:
                     pass
+        # users — columna composite income
+        existing_user_cols = {c['name'] for c in inspector.get_columns('users')} if inspector.has_table('users') else set()
+        if 'estimated_income_ppp' not in existing_user_cols:
+            try:
+                conn.execute(text('ALTER TABLE users ADD COLUMN estimated_income_ppp FLOAT DEFAULT NULL'))
+                conn.commit()
+            except Exception:
+                pass
 _migrate()
 
 # ══════════════════════════════════════════════════════════════
@@ -2884,6 +2895,7 @@ def _assign_user_tier(user, db):
     _new_tier  = user.se_tier
     _new_index = user.income_index
     _new_est   = getattr(user, 'estimated_income_usd', None)
+    _new_ppp   = getattr(user, 'estimated_income_ppp',  None)
     _new_hnw   = getattr(user, 'hnw_score', None)
 
     if not _new_tier:
@@ -2898,13 +2910,16 @@ def _assign_user_tier(user, db):
     # UPDATE directo por SQL — no depende del ORM flush, funciona aunque la TX anterior haya fallado
     try:
         db.execute(text(
-            "UPDATE users SET se_tier=:t, income_index=:i, estimated_income_usd=:e WHERE id=:uid"
-        ), {'t': _new_tier, 'i': _new_index or 0, 'e': _new_est, 'uid': user.id})
+            "UPDATE users SET se_tier=:t, income_index=:i, estimated_income_usd=:e,"
+            " estimated_income_ppp=:ppp WHERE id=:uid"
+        ), {'t': _new_tier, 'i': _new_index or 0, 'e': _new_est, 'ppp': _new_ppp, 'uid': user.id})
         db.commit()
         user.se_tier              = _new_tier
         user.income_index         = _new_index
         if hasattr(user, 'estimated_income_usd'):
             user.estimated_income_usd = _new_est
+        if hasattr(user, 'estimated_income_ppp'):
+            user.estimated_income_ppp = _new_ppp
     except Exception:
         db.rollback()
 
@@ -3325,6 +3340,47 @@ def _assign_user_tier_inner(user, db):
         else:
             # Sin dato de commune: usar directamente la mediana del país
             user.estimated_income_usd = round(_country_median_income, 0)
+
+    # ── Score compuesto de ingreso: ocupación + residencial + empresa ────────────
+    # Señal 1 (ocupacional): estimated_income_usd (anual) → mensual PPP
+    # Señal 2 (residencial): commune.estimated_income_ppp (mensual PPP desde m²)
+    # Señal 3 (empresa):    multiplicador SIZE_MULT sobre señal ocupacional
+    # Resultado: estimated_income_ppp en users (mensual PPP USD)
+    try:
+        from ppp_agent import PLI as _PLI_MAP
+        from rental_price_agent import estimate_income_from_rent_m2 as _rent2inc
+
+        _pli       = _PLI_MAP.get(user_country_code, 0.60)
+        _occ_ppp   = None
+        _res_ppp   = None
+
+        # Señal ocupacional → mensual PPP
+        if user.estimated_income_usd and user.estimated_income_usd > 0:
+            _occ_ppp = float(user.estimated_income_usd) / 12.0 / _pli
+
+        # Señal residencial → mensual PPP desde commune_market_data
+        if commune_data:
+            _res_raw = getattr(commune_data, 'estimated_income_ppp', None)
+            if _res_raw and float(_res_raw) > 0:
+                _res_ppp = float(_res_raw)
+            elif getattr(commune_data, 'price_m2_avg', None) and commune_data.price_m2_avg > 0:
+                _is_uf = (user_country_code == 'CL')
+                _res_ppp = _rent2inc(commune_data.price_m2_avg, user_country_code, is_uf=_is_uf)
+
+        # Combinar señales con pesos adaptativos
+        _signals = []
+        if _occ_ppp and _occ_ppp > 0:
+            _signals.append((_occ_ppp, 0.55))
+        if _res_ppp and _res_ppp > 0:
+            _signals.append((_res_ppp, 0.45))
+
+        if _signals:
+            _tw        = sum(w for _, w in _signals)
+            _composite = sum(v * w for v, w in _signals) / _tw
+            if hasattr(user, 'estimated_income_ppp'):
+                user.estimated_income_ppp = round(_composite, 1)
+    except Exception:
+        pass
 
     # ── HNW Score ─────────────────────────────────────────────────────────────
     try:
@@ -11628,6 +11684,86 @@ def admin_import_ppp_ilo(secret: str, db: Session = Depends(get_db)):
     if not result_holder:
         return {'ok': True, 'message': 'Import PPP ILO iniciado (ver logs)'}
     return result_holder.get('result', {'ok': False})
+
+
+@app.post('/admin/recompute-composite-income')
+def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
+                                      limit: int = 5000):
+    """
+    Recalcula estimated_income_ppp (score compuesto) para todos los usuarios.
+    Combina señal ocupacional (estimated_income_usd) + señal residencial (commune m²).
+    Útil para aplicar el modelo a usuarios registrados antes de esta feature.
+    """
+    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+        raise HTTPException(403, 'Forbidden')
+
+    from ppp_agent import PLI as _PLI_MAP
+    from rental_price_agent import estimate_income_from_rent_m2 as _rent2inc
+
+    users_q = db.execute(text("""
+        SELECT id, country, county, estimated_income_usd
+        FROM users
+        WHERE se_tier IS NOT NULL AND se_tier != ''
+        ORDER BY id
+        LIMIT :lim
+    """), {'lim': limit}).fetchall()
+
+    updated = skipped = 0
+
+    for uid, country, commune, est_usd in users_q:
+        try:
+            cc   = _country_code(country) if country else ''
+            pli  = _PLI_MAP.get(cc, 0.60)
+
+            _occ_ppp = float(est_usd) / 12.0 / pli if est_usd and float(est_usd) > 0 else None
+
+            _res_ppp = None
+            if commune and cc:
+                cmd = db.execute(text("""
+                    SELECT estimated_income_ppp, price_m2_avg
+                    FROM commune_market_data
+                    WHERE country = :cc
+                      AND (commune ILIKE :cm OR commune ILIKE :cm2)
+                    LIMIT 1
+                """), {'cc': cc, 'cm': commune.strip(), 'cm2': f'%{commune.strip()}%'}).fetchone()
+
+                if cmd:
+                    if cmd[0] and float(cmd[0]) > 0:
+                        _res_ppp = float(cmd[0])
+                    elif cmd[1] and float(cmd[1]) > 0:
+                        _res_ppp = _rent2inc(float(cmd[1]), cc, is_uf=(cc == 'CL'))
+
+            signals = []
+            if _occ_ppp and _occ_ppp > 0: signals.append((_occ_ppp, 0.55))
+            if _res_ppp and _res_ppp > 0:  signals.append((_res_ppp, 0.45))
+
+            if not signals:
+                skipped += 1
+                continue
+
+            tw        = sum(w for _, w in signals)
+            composite = sum(v * w for v, w in signals) / tw
+
+            db.execute(text(
+                "UPDATE users SET estimated_income_ppp=:ppp WHERE id=:uid"
+            ), {'ppp': round(composite, 1), 'uid': uid})
+            updated += 1
+
+            if updated % 200 == 0:
+                db.commit()
+
+        except Exception:
+            skipped += 1
+            continue
+
+    db.commit()
+    return {
+        'updated': updated,
+        'skipped': skipped,
+        'total':   len(users_q),
+        'model':   'occupation(0.55) + residential(0.45) PPP composite',
+        'status':  'ok',
+    }
 
 
 @app.post('/admin/import-gulf-asia')

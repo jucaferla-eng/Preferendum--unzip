@@ -770,3 +770,109 @@ def run_full_agent(db=None) -> dict:
         'total_cities': total_cities,
         'results':     results,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ESTIMADOR DE INGRESO DESDE PRECIO m²
+# Convierte precio arriendo m²/mes → ingreso individual PPP estimado.
+#
+# Metodología:
+#   1. Tamaño promedio del apartamento por grupo de ingreso de país
+#   2. Renta mensual = precio_m2 × tamaño_promedio
+#   3. Ingreso familiar = renta / 0.30  (regla del 30%, aceptada por BIS/OCDE)
+#   4. Ingreso individual = ingreso_familiar / 1.50  (1.5 perceptores por hogar)
+#   5. PPP = ingreso_individual_USD / PLI(país)
+#
+# Validación: para Vitacura CL (0.39 UF/m²) → ~$4,100 PPP/mes → razonable
+#             para Manhattan US ($80/m²) → ~$8,500 PPP/mes → razonable
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Tamaño promedio del departamento por grupo de ingreso de país (m²)
+_AVG_APT_M2: dict[str, float] = {
+    'H1':  82.0,   # US, AU, CH, CA, JP, KR — apartamentos más grandes
+    'H2':  76.0,   # FR, DE, ES, IT, TW, PL
+    'M1':  65.0,   # CL, MX, BR, CO, AR, TR, CN, RU
+    'M2L': 55.0,   # IN, NG, PH, VN, PK, BD
+}
+
+# 1 UF (Chile) ≈ USD 40.50 (promedio 2026; no se usa en tiempo real)
+_UF_TO_USD: float = 40.5
+
+# PLI por país (copia local para no importar ppp_agent en todo momento)
+_PLI_LOCAL: dict[str, float] = {
+    'US': 1.00, 'CH': 1.62, 'NO': 1.40, 'DK': 1.17, 'IE': 1.11,
+    'LU': 1.14, 'SE': 1.06, 'FI': 1.05, 'GB': 0.97, 'DE': 0.97,
+    'FR': 0.98, 'NL': 1.04, 'BE': 1.01, 'AT': 0.99, 'AU': 0.90,
+    'CA': 0.88, 'NZ': 0.87, 'IT': 0.87, 'ES': 0.81, 'SG': 0.85,
+    'HK': 0.93, 'JP': 0.78, 'KR': 0.72, 'TW': 0.69, 'IL': 1.07,
+    'AE': 0.85, 'QA': 0.58, 'SA': 0.65, 'PT': 0.75, 'GR': 0.78,
+    'CZ': 0.66, 'PL': 0.57, 'HU': 0.60, 'RO': 0.56, 'TR': 0.48,
+    'RU': 0.52, 'CN': 0.56, 'IN': 0.29, 'BR': 0.47, 'MX': 0.46,
+    'AR': 0.36, 'CL': 0.56, 'CO': 0.44, 'PE': 0.48, 'UY': 0.74,
+    'EC': 0.43, 'BO': 0.40, 'PY': 0.38, 'DO': 0.46, 'GT': 0.43,
+    'ZA': 0.45, 'NG': 0.38, 'KE': 0.40, 'EG': 0.30, 'MA': 0.40,
+    'MY': 0.52, 'TH': 0.52, 'ID': 0.44, 'PH': 0.44, 'VN': 0.40,
+    'KZ': 0.45, 'BD': 0.33, 'PK': 0.28,
+}
+
+
+def estimate_income_from_rent_m2(price_m2: float, country: str,
+                                  is_uf: bool = False) -> float:
+    """
+    Convierte precio arriendo m²/mes → ingreso individual mensual PPP USD.
+
+    price_m2: UF/m²/mes si is_uf=True (Chile), USD/m²/mes si is_uf=False
+    Retorna: ingreso individual mensual en PPP USD (o 0 si no calculable).
+    """
+    if not price_m2 or price_m2 <= 0:
+        return 0.0
+
+    # Convertir a USD si es en UF (Chile)
+    price_m2_usd = price_m2 * _UF_TO_USD if is_uf else float(price_m2)
+
+    # Tamaño promedio del apartamento
+    group = get_effective_group(country)
+    apt_m2 = _AVG_APT_M2.get(group, 65.0)
+
+    # Renta mensual total del apartamento
+    monthly_rent_usd = price_m2_usd * apt_m2
+
+    # Ingreso familiar (regla 30%) → ingreso individual (1.5 perceptores)
+    individual_income_usd = monthly_rent_usd / 0.30 / 1.50
+
+    # Ajuste PPP
+    pli = _PLI_LOCAL.get(country, 0.60)
+    income_ppp = individual_income_usd / pli
+
+    return round(income_ppp, 1)
+
+
+def get_commune_income_estimate(db, country: str, commune: str) -> float | None:
+    """
+    Retorna el ingreso individual mensual PPP estimado para una comuna/ciudad.
+    Primero intenta leer de commune_market_data.estimated_income_ppp;
+    si no existe, calcula en tiempo real desde price_m2_avg.
+    """
+    try:
+        from sqlalchemy import text as _t
+        row = db.execute(_t("""
+            SELECT estimated_income_ppp, price_m2_avg, country
+            FROM commune_market_data
+            WHERE country = :cc
+              AND (commune ILIKE :cm OR commune ILIKE :cm2)
+            LIMIT 1
+        """), {'cc': country, 'cm': commune, 'cm2': f'%{commune}%'}).fetchone()
+
+        if not row:
+            return None
+
+        # Si ya tenemos el campo calculado, usarlo directamente
+        if row[0] and float(row[0]) > 0:
+            return float(row[0])
+
+        # Calcular en tiempo real desde price_m2_avg
+        is_uf = (row[2] == 'CL')
+        return estimate_income_from_rent_m2(float(row[1] or 0), country, is_uf=is_uf)
+
+    except Exception:
+        return None
