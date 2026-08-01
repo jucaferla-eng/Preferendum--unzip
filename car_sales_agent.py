@@ -20,19 +20,52 @@ Tabla: car_brand_sales
 
 from sqlalchemy import text
 
-# ── Mercado global 2025 (JC Fernandez, agosto 2026) ──────────────────────────
-# Total: 96 millones de autos vendidos a nivel mundial
-# Fuente: OICA 2025 provisional / Focus2Move / JC
+# ── Ventas globales por marca 2025 — Top 25 ──────────────────────────────────
+# Fuente: Car Industry Analysis 2025 (OEMs + estimaciones)
+# Compartido por JC Fernandez, agosto 2026
+# Nota: estas son MARCAS individuales, no grupos corporativos.
+# Toyota Group (Toyota+Daihatsu+Lexus+Hino) ≈ 10.8% × 96M = ~10.4M
+# VW Group (VW+Audi+Skoda+Seat+Porsche) ≈ 8.9% × 96M = ~8.5M
+# Hyundai Group (Hyundai+Kia) = 3.89M + 3.14M = 7.03M ≈ 7.4%
+GLOBAL_BRAND_UNITS_2025: dict[str, dict] = {
+    'toyota':      {'rank': 1,  'units': 9_654_600, 'yoy_pct':  +4,  'chinese': False},
+    'volkswagen':  {'rank': 2,  'units': 5_124_300, 'yoy_pct':  -2,  'chinese': False},
+    'ford':        {'rank': 3,  'units': 4_235_000, 'yoy_pct':  -2,  'chinese': False},
+    'byd':         {'rank': 4,  'units': 4_205_900, 'yoy_pct':  +3,  'chinese': True},
+    'hyundai':     {'rank': 5,  'units': 3_887_200, 'yoy_pct':  -1,  'chinese': False},
+    'honda':       {'rank': 6,  'units': 3_312_000, 'yoy_pct': -10,  'chinese': False},
+    'suzuki':      {'rank': 7,  'units': 3_295_000, 'yoy_pct':  +1,  'chinese': False},
+    'nissan':      {'rank': 8,  'units': 3_141_200, 'yoy_pct':  -4,  'chinese': False},
+    'kia':         {'rank': 9,  'units': 3_135_800, 'yoy_pct':  +2,  'chinese': False},
+    'chevrolet':   {'rank': 10, 'units': 2_825_000, 'yoy_pct':  -5,  'chinese': False},
+    'geely':       {'rank': 11, 'units': 2_450_000, 'yoy_pct': +47,  'chinese': True},
+    'bmw':         {'rank': 12, 'units': 2_169_800, 'yoy_pct':  -1,  'chinese': False},
+    'mercedes-benz':{'rank':13, 'units': 2_159_900, 'yoy_pct': -10,  'chinese': False},
+    'tesla':       {'rank': 14, 'units': 1_636_200, 'yoy_pct':  -9,  'chinese': False},
+    'renault':     {'rank': 15, 'units': 1_628_000, 'yoy_pct':  +3,  'chinese': False},
+    'audi':        {'rank': 16, 'units': 1_623_600, 'yoy_pct':  -3,  'chinese': False},
+    'wuling':      {'rank': 17, 'units': 1_587_100, 'yoy_pct': +20,  'chinese': True},
+    'changan':     {'rank': 18, 'units': 1_586_100, 'yoy_pct': +15,  'chinese': True},
+    'chery':       {'rank': 19, 'units': 1_321_000, 'yoy_pct':  +3,  'chinese': True},
+    'mazda':       {'rank': 20, 'units': 1_256_300, 'yoy_pct':  -2,  'chinese': False},
+    'fiat':        {'rank': 21, 'units': 1_226_000, 'yoy_pct':  -2,  'chinese': False},
+    'peugeot':     {'rank': 22, 'units': 1_085_000, 'yoy_pct':   0,  'chinese': False},
+    'skoda':       {'rank': 23, 'units': 1_043_900, 'yoy_pct': +13,  'chinese': False},
+    'tata':        {'rank': 24, 'units':   968_600, 'yoy_pct':  +8,  'chinese': False},
+    'jeep':        {'rank': 25, 'units':   955_000, 'yoy_pct':   0,  'chinese': False},
+}
+# Total top-25: ~67.5M de 96M globales = 70% del mercado
 GLOBAL_MARKET_2025 = {
-    'total_units':    96_000_000,
-    'year':           2025,
-    'top_groups': {
-        'toyota':          {'share_pct': 10.8, 'units': 10_368_000},
-        'volkswagen_group':{'share_pct':  8.9, 'units':  8_544_000},  # VW+Audi+Skoda+Seat+Porsche
-        'hyundai_group':   {'share_pct':  7.4, 'units':  7_104_000},  # Hyundai+Kia+Genesis
-        'byd':             {'share_pct':  5.4, 'units':  5_184_000},  # solo BYD Group
-    },
-    'note': 'Toyota ~10.4M en 50+ países. VW Group incluye marcas premium. Hyundai Group = Hyundai+Kia.',
+    'total_units': 96_000_000,
+    'year':        2025,
+    'source':      'Car Industry Analysis 2025 (OEMs + estimaciones) — JC Aug 2026',
+    'chinese_brands_top25': ['byd', 'geely', 'wuling', 'changan', 'chery'],
+    'chinese_units_top25':  4_205_900 + 2_450_000 + 1_587_100 + 1_586_100 + 1_321_000,
+    'note': (
+        'Marcas chinas top-25: 11.15M unidades = 11.6% del mercado global. '
+        'Geely +47%, Wuling +20%, Changan +15% — todas creciendo. '
+        'Honda -10%, Mercedes -10%, Tesla -9%, Nissan -4% — todas cayendo.'
+    ),
 }
 
 # ── Tamaño total de mercado por país (unidades nuevas, año referencia) ────────
@@ -543,11 +576,19 @@ def _create_table(db) -> None:
             units_sold       INT,
             market_share_pct REAL,
             total_market     INT,
+            yoy_pct          REAL,   -- variación año anterior %
             source           TEXT,
             updated_at       TIMESTAMP DEFAULT NOW(),
             UNIQUE (brand, country_iso, year)
         )
     """))
+    # Agregar columna yoy_pct si ya existe la tabla sin ella
+    try:
+        db.execute(text(
+            'ALTER TABLE car_brand_sales ADD COLUMN IF NOT EXISTS yoy_pct REAL'
+        ))
+    except Exception:
+        pass
     db.commit()
 
 
@@ -583,20 +624,49 @@ def run_car_sales_import(db) -> dict:
             })
             inserted += 1
 
+    # ── Ranking global 2025 (country_iso='GLOBAL') ──────────────────────────
+    global_total = GLOBAL_MARKET_2025['total_units']
+    for brand, meta in GLOBAL_BRAND_UNITS_2025.items():
+        global_share = round(meta['units'] / global_total * 100, 3)
+        db.execute(text("""
+            INSERT INTO car_brand_sales
+                (brand, country_iso, year, units_sold, market_share_pct,
+                 total_market, yoy_pct, source, updated_at)
+            VALUES (:brand, 'GLOBAL', :year, :units, :share, :total, :yoy, :src, NOW())
+            ON CONFLICT (brand, country_iso, year) DO UPDATE SET
+                units_sold       = EXCLUDED.units_sold,
+                market_share_pct = EXCLUDED.market_share_pct,
+                total_market     = EXCLUDED.total_market,
+                yoy_pct          = EXCLUDED.yoy_pct,
+                source           = EXCLUDED.source,
+                updated_at       = NOW()
+        """), {
+            'brand': brand,
+            'year':  2025,
+            'units': meta['units'],
+            'share': global_share,
+            'total': global_total,
+            'yoy':   meta.get('yoy_pct'),
+            'src':   _SOURCE,
+        })
+        inserted += 1
+
     db.commit()
 
-    # Resumen de marcas y países cubiertos
     brands_covered = sorted({b for brands in _MARKET_SHARE.values() for b, _ in brands})
     return {
         'status':          'ok',
         'inserted_updated': inserted,
-        'countries':       list(_MARKET_SHARE.keys()),
+        'countries':       list(_MARKET_SHARE.keys()) + ['GLOBAL'],
         'brands':          brands_covered,
+        'global_brands':   list(GLOBAL_BRAND_UNITS_2025.keys()),
+        'chinese_brands':  GLOBAL_MARKET_2025['chinese_brands_top25'],
         'table':           'car_brand_sales',
         'source':          _SOURCE,
         'note': (
-            'Top 10 marcas por país para 10 mercados clave (2024-2026). '
-            'Unidades estimadas = market_share_pct × total_market_nacional.'
+            'Top 10 marcas por país (35 mercados, 2024-2026) + '
+            'ranking global Top 25 2025 (country_iso=GLOBAL, Car Industry Analysis). '
+            'Chinese brands Top 25: 11.15M units = 11.6% del mercado global.'
         ),
     }
 
