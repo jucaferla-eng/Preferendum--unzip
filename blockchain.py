@@ -163,6 +163,11 @@ class PreferendumBlockchain:
 
     def _init(self):
         """Try to connect to Polygon. Fall back to mock if not configured."""
+        # Re-read env vars here in case they weren't available at __init__ time
+        self.contract_address = (os.getenv('CONTRACT_ADDRESS') or self.contract_address or '').strip()
+        self.wallet_address   = (os.getenv('WALLET_ADDRESS')   or self.wallet_address   or '').strip()
+        self.private_key      = (os.getenv('WALLET_PRIVATE_KEY') or self._read_secret('WALLET_PRIVATE_KEY') or self.private_key or '').strip()
+        self.rpc_url          = (os.getenv('POLYGON_RPC_URL') or self.rpc_url or 'https://1rpc.io/matic').strip()
         print(f'[Blockchain] _init: contract={bool(self.contract_address)} wallet={bool(self.wallet_address)} pk={bool(self.private_key)} pk_len={len(self.private_key)} rpc={self.rpc_url}')
         if not all([self.contract_address, self.wallet_address, self.private_key]):
             print('[Blockchain] Running in MOCK mode — set CONTRACT_ADDRESS, WALLET_ADDRESS, WALLET_PRIVATE_KEY to go live')
