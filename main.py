@@ -11474,6 +11474,49 @@ def admin_run_rental_global(secret: str, db: Session = Depends(get_db)):
     return result_holder.get('result', {'ok': False})
 
 
+@app.get('/marketer/advertising-model')
+def marketer_advertising_model():
+    """
+    Modelo de ingresos publicitarios de Preferendum como Media.
+    CPM por tier × país + proyecciones en 4 escenarios de crecimiento.
+    """
+    from advertising_revenue_agent import preferendum_growth_model
+    return preferendum_growth_model()
+
+
+@app.get('/marketer/advertising-cpm')
+def marketer_advertising_cpm(country: str = 'CL', tier: str = 'B'):
+    """CPM efectivo para país + tier específicos."""
+    from advertising_revenue_agent import get_effective_cpm, compute_blended_cpm, _TIER_DIST_DEFAULT
+    return {
+        'country':         country,
+        'tier':            tier,
+        'cpm_usd':         get_effective_cpm(country, tier),
+        'blended_cpm_usd': compute_blended_cpm(country),
+        'note':            'Audiencia 100% verificada (biometría) + SE tier clasificada.',
+    }
+
+
+@app.get('/marketer/advertising-revenue')
+def marketer_advertising_revenue(country: str = 'CL', users: int = 1_000_000):
+    """
+    Calcula ingresos publicitarios para un país y número de usuarios.
+    Ejemplo: /marketer/advertising-revenue?country=BR&users=85000000
+    """
+    from advertising_revenue_agent import revenue_model
+    return revenue_model(users, country)
+
+
+@app.get('/marketer/advertising-govt-scenario')
+def marketer_advertising_govt(country: str = 'CL'):
+    """
+    Impacto de una consulta gubernamental en ingresos publicitarios.
+    Países disponibles: CL, CO, MX, AR, BR, ES, IN
+    """
+    from advertising_revenue_agent import govt_consultation_impact
+    return govt_consultation_impact(country.upper())
+
+
 @app.post('/admin/import-usa-bea')
 def admin_import_usa_bea(secret: str, db: Session = Depends(get_db)):
     """Importa 3,115 condados USA desde BEA CAINC1 2024 a commune_market_data."""
