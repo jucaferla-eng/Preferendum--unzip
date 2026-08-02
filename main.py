@@ -9428,6 +9428,15 @@ def blockchain_debug(secret: str):
     result = {}
     _blockchain._ensure_init()
     result['live'] = _blockchain.live
+    # Diagnóstico de env vars (valores mascarados)
+    ca = os.getenv('CONTRACT_ADDRESS', '')
+    wa = os.getenv('WALLET_ADDRESS', '')
+    pk = os.getenv('WALLET_PRIVATE_KEY', '')
+    result['env_CONTRACT_ADDRESS'] = f'{ca[:6]}...{ca[-4:]}' if len(ca) > 10 else (repr(ca) if ca else 'NOT SET')
+    result['env_WALLET_ADDRESS']   = f'{wa[:6]}...{wa[-4:]}' if len(wa) > 10 else (repr(wa) if wa else 'NOT SET')
+    result['env_WALLET_PRIVATE_KEY'] = f'len={len(pk)}' if pk else 'NOT SET'
+    result['blockchain_contract_address'] = _blockchain.contract_address or 'empty'
+    result['blockchain_wallet_address']   = _blockchain.wallet_address or 'empty'
     if not _blockchain.live:
         result['error'] = 'Not in live mode — check CONTRACT_ADDRESS, WALLET_ADDRESS, WALLET_PRIVATE_KEY env vars'
         return result
