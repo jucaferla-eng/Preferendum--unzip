@@ -9435,6 +9435,10 @@ def blockchain_debug(secret: str):
     result['env_CONTRACT_ADDRESS'] = f'{ca[:6]}...{ca[-4:]}' if len(ca) > 10 else (repr(ca) if ca else 'NOT SET')
     result['env_WALLET_ADDRESS']   = f'{wa[:6]}...{wa[-4:]}' if len(wa) > 10 else (repr(wa) if wa else 'NOT SET')
     result['env_WALLET_PRIVATE_KEY'] = f'len={len(pk)}' if pk else 'NOT SET'
+    pwa = os.getenv('PREFERENDUM_WALLET_ADDRESS', '')
+    pwk = os.getenv('PREFERENDUM_WALLET_KEY', '')
+    result['env_PREFERENDUM_WALLET_ADDRESS'] = f'{pwa[:6]}...{pwa[-4:]}' if len(pwa) > 10 else (repr(pwa) if pwa else 'EMPTY')
+    result['env_PREFERENDUM_WALLET_KEY']     = f'len={len(pwk)}' if pwk else 'EMPTY'
     result['blockchain_contract_address'] = _blockchain.contract_address or 'empty'
     result['blockchain_wallet_address']   = _blockchain.wallet_address or 'empty'
     # Chequear secret files de Render
