@@ -9437,6 +9437,20 @@ def blockchain_debug(secret: str):
     result['env_WALLET_PRIVATE_KEY'] = f'len={len(pk)}' if pk else 'NOT SET'
     result['blockchain_contract_address'] = _blockchain.contract_address or 'empty'
     result['blockchain_wallet_address']   = _blockchain.wallet_address or 'empty'
+    # Chequear secret files de Render
+    import glob
+    secrets_found = glob.glob('/etc/secrets/*')
+    result['secret_files'] = [os.path.basename(f) for f in secrets_found]
+    for sname in ['WALLET_PRIVATE_KEY', 'CONTRACT_ADDRESS', 'WALLET_ADDRESS']:
+        spath = f'/etc/secrets/{sname}'
+        try:
+            with open(spath) as f:
+                v = f.read().strip()
+            result[f'secret_{sname}'] = f'len={len(v)}' if v else 'empty'
+        except Exception:
+            result[f'secret_{sname}'] = 'not found'
+    # Todas las env vars disponibles (keys solamente)
+    result['all_env_keys'] = sorted(k for k in os.environ.keys())
     if not _blockchain.live:
         result['error'] = 'Not in live mode — check CONTRACT_ADDRESS, WALLET_ADDRESS, WALLET_PRIVATE_KEY env vars'
         return result
