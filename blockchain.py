@@ -164,8 +164,10 @@ class PreferendumBlockchain:
     def _init(self):
         """Try to connect to Polygon. Fall back to mock if not configured."""
         # Re-read env vars — also check PREFERENDUM_ prefixed names used in Render
-        self.contract_address = (os.getenv('CONTRACT_ADDRESS') or os.getenv('PREFERENDUM_CONTRACT_ADDRESS') or self.contract_address or '').strip()
-        self.wallet_address   = (os.getenv('WALLET_ADDRESS') or os.getenv('PREFERENDUM_WALLET_ADDRESS') or self.wallet_address or '').strip()
+        _DEFAULT_CONTRACT = '0xB7fCD1aD46eC0a3ABfaddf95961e435C991dfd36'
+        _DEFAULT_WALLET   = '0x668108Ecfd50993Cf3bCcbeE0ADaedF5Fa306d51'
+        self.contract_address = (os.getenv('CONTRACT_ADDRESS') or os.getenv('PREFERENDUM_CONTRACT_ADDRESS') or self.contract_address or _DEFAULT_CONTRACT).strip()
+        self.wallet_address   = (os.getenv('WALLET_ADDRESS') or os.getenv('PREFERENDUM_WALLET_ADDRESS') or self.wallet_address or _DEFAULT_WALLET).strip()
         self.private_key      = (os.getenv('WALLET_PRIVATE_KEY') or os.getenv('PREFERENDUM_WALLET_KEY') or self._read_secret('WALLET_PRIVATE_KEY') or self.private_key or '').strip()
         self.rpc_url          = (os.getenv('POLYGON_RPC_URL') or self.rpc_url or 'https://1rpc.io/matic').strip()
         print(f'[Blockchain] _init: contract={bool(self.contract_address)} wallet={bool(self.wallet_address)} pk={bool(self.private_key)} pk_len={len(self.private_key)} rpc={self.rpc_url}')
