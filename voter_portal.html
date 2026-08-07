@@ -643,6 +643,7 @@ const API = '';
 let token = localStorage.getItem('pref_voter_token') || '';
 let userCountry = localStorage.getItem('pref_voter_country') || 'CL';
 let userSelfieVerified = localStorage.getItem('pref_selfie_verified') === 'true';
+let userReferralCode = localStorage.getItem('pref_referral_code') || '';
 
 // ── Occupation search ─────────────────────────────────────────────────────────
 let _occData = null;
@@ -990,6 +991,10 @@ async function validateAndShowApp() {
       if (d.selfie_verified !== undefined) {
         userSelfieVerified = !!d.selfie_verified;
         localStorage.setItem('pref_selfie_verified', userSelfieVerified ? 'true' : 'false');
+      }
+      if (d.referral_code) {
+        userReferralCode = d.referral_code;
+        localStorage.setItem('pref_referral_code', userReferralCode);
       }
       showApp();
     } else { token=''; localStorage.removeItem('pref_voter_token'); }
@@ -1486,7 +1491,8 @@ async function doRegister() {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({name, email, password: pass, country,
         phone, national_id: rut, dob, gender, commune, profession, cargo: '', company_size, device_fp: deviceFpReg,
-        ref_source: sessionStorage.getItem('pref_ref_source') || ''})
+        ref_source: sessionStorage.getItem('pref_ref_source') || '',
+        ref_code: sessionStorage.getItem('pref_referred_by') || ''})
     });
     const d = await r.json();
     btn.disabled = false; btn.textContent = 'Create Account →';
@@ -1494,9 +1500,11 @@ async function doRegister() {
     token = d.token;
     userName = name;
     userCountry = country;
+    userReferralCode = d.user?.referral_code || '';
     localStorage.setItem('pref_voter_token', token);
     localStorage.setItem('pref_voter_name', userName);
     localStorage.setItem('pref_voter_country', userCountry);
+    if (userReferralCode) localStorage.setItem('pref_referral_code', userReferralCode);
     // Update phone hint in wizard step 2
     if (phone) document.getElementById('phone-otp-sub').textContent = `We will send an SMS to ${phone}`;
     document.getElementById('email-otp-sub').textContent = `We sent a 6-digit code to ${email}`;
@@ -2455,7 +2463,72 @@ function _wrapTextCapped(ctx, text, x, y, maxW, lineH, maxLines) {
   return y;
 }
 
-async function _generatePoster(title, subtitle, instName, results, total) {
+// ── Foto opcional para el cartel — solo local, nunca se sube al servidor ──
+let _shareStream = null;
+let _shareResolve = null;
+
+function _buildSharePhotoModal() {
+  const el = document.createElement('div');
+  el.id = 'share-photo-modal';
+  el.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;align-items:center;justify-content:center;';
+  el.innerHTML = `
+    <div style="background:#1a1a2e;border-radius:16px;padding:28px 24px;width:340px;max-width:95vw;text-align:center;color:#fff;">
+      <h3 style="margin:0 0 8px;font-size:18px;">Agrega tu foto al cartel</h3>
+      <p style="margin:0 0 16px;font-size:13px;color:#aaa;">Solo para tu imagen al compartir — no se guarda en Preferendum</p>
+      <video id="share-photo-video" autoplay playsinline muted style="width:100%;border-radius:10px;background:#000;"></video>
+      <canvas id="share-photo-canvas" style="display:none;"></canvas>
+      <p id="share-photo-err" style="color:#ff6b6b;font-size:12px;min-height:18px;margin:8px 0 0;"></p>
+      <div style="display:flex;gap:10px;margin-top:16px;">
+        <button onclick="_skipSharePhoto()" style="flex:1;padding:10px;border-radius:8px;border:1px solid #555;background:transparent;color:#aaa;cursor:pointer;">Omitir</button>
+        <button id="share-photo-btn" onclick="_captureSharePhoto()" style="flex:2;padding:10px;border-radius:8px;border:none;background:#4f46e5;color:#fff;font-weight:600;cursor:pointer;">📸 Tomar foto</button>
+      </div>
+    </div>`;
+  document.body.appendChild(el);
+  return el;
+}
+
+async function promptShareSelfie() {
+  return new Promise(async (resolve) => {
+    _shareResolve = resolve;
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) { resolve(null); return; }
+    let modal = document.getElementById('share-photo-modal');
+    if (!modal) modal = _buildSharePhotoModal();
+    modal.style.display = 'flex';
+    document.getElementById('share-photo-err').textContent = '';
+    try {
+      _shareStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+      document.getElementById('share-photo-video').srcObject = _shareStream;
+    } catch(_) {
+      document.getElementById('share-photo-err').textContent = 'Cámara bloqueada — puedes omitir.';
+    }
+  });
+}
+
+function _closeSharePhotoModal() {
+  const modal = document.getElementById('share-photo-modal');
+  if (modal) modal.style.display = 'none';
+  if (_shareStream) { _shareStream.getTracks().forEach(t => t.stop()); _shareStream = null; }
+}
+
+function _skipSharePhoto() {
+  _closeSharePhotoModal();
+  if (_shareResolve) { _shareResolve(null); _shareResolve = null; }
+}
+
+function _captureSharePhoto() {
+  const video = document.getElementById('share-photo-video');
+  const canvas = document.getElementById('share-photo-canvas');
+  canvas.width = video.videoWidth || 640;
+  canvas.height = video.videoHeight || 480;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+  _closeSharePhotoModal();
+  const img = new Image();
+  img.onload = () => { if (_shareResolve) { _shareResolve(img); _shareResolve = null; } };
+  img.src = dataUrl;
+}
+
+async function _generatePoster(title, subtitle, instName, results, total, photoImg) {
   const W = 1080, H = 1350, PAD = 80, INNER = W - PAD * 2;
   const canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
@@ -2490,9 +2563,19 @@ async function _generatePoster(title, subtitle, instName, results, total) {
   ctx.beginPath(); ctx.arc(iconX, iconY, ICON_R, 0, Math.PI * 2);
   ctx.strokeStyle = ring; ctx.lineWidth = 10; ctx.stroke();
 
-  // P letter
-  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 72px Georgia, serif';
-  ctx.textAlign = 'center'; ctx.fillText('P', iconX, iconY + 24); ctx.textAlign = 'left';
+  if (photoImg) {
+    // Foto personal recortada en círculo — "mira lo que hice"
+    ctx.save();
+    ctx.beginPath(); ctx.arc(iconX, iconY, ICON_R - 6, 0, Math.PI * 2); ctx.clip();
+    const s = Math.max((ICON_R * 2 - 12) / photoImg.width, (ICON_R * 2 - 12) / photoImg.height);
+    const dw = photoImg.width * s, dh = photoImg.height * s;
+    ctx.drawImage(photoImg, iconX - dw / 2, iconY - dh / 2, dw, dh);
+    ctx.restore();
+  } else {
+    // P letter (fallback sin foto)
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 72px Georgia, serif';
+    ctx.textAlign = 'center'; ctx.fillText('P', iconX, iconY + 24); ctx.textAlign = 'left';
+  }
 
   // Wordmark next to icon
   const wordX = PAD + ICON_R * 2 + 24;
@@ -2599,10 +2682,17 @@ async function _generatePoster(title, subtitle, instName, results, total) {
   return canvas;
 }
 
+// URL de la consulta lista para compartir — agrega el código de referido propio si el usuario está logueado
+function _shareLink(debId) {
+  const base = `${location.origin}/voter?debate=${debId}`;
+  return userReferralCode ? `${base}&rc=${userReferralCode}` : base;
+}
+
 async function _shareWithPoster(title, subtitle, instName, debId, fallbackText, results, total) {
-  const shareUrl = `${location.origin}/voter?debate=${debId}`;
+  const shareUrl = _shareLink(debId);
   try {
-    const canvas = await _generatePoster(title, subtitle, instName, results || [], total || 0);
+    const photoImg = await promptShareSelfie();
+    const canvas = await _generatePoster(title, subtitle, instName, results || [], total || 0, photoImg);
     const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
     const file = new File([blob], 'preferendum.png', { type: 'image/png' });
     if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -2681,12 +2771,12 @@ async function shareResult(debId) {
     winnerPct  = Math.round(winner.count / total * 100);
   }
   const instName = db.inst_name || 'Preferendum';
-  const fallback = `La consulta de ${instName} en Preferendum ya tiene resultado:\n"${winnerText}" ganó con ${winnerPct}% de los votos.\n¿Y tú qué prefieres?\n${location.origin}/voter?debate=${debId}`;
+  const fallback = `La consulta de ${instName} en Preferendum ya tiene resultado:\n"${winnerText}" ganó con ${winnerPct}% de los votos.\n¿Y tú qué prefieres?\n${_shareLink(debId)}`;
   _shareWithPoster(db.title, '', instName, debId, fallback, results, total);
 }
 
 async function shareViaWhatsApp(title, instName, debId) {
-  const url = `${location.origin}/voter?debate=${debId}`;
+  const url = _shareLink(debId);
   const inst = instName || 'Preferendum';
   const text = `Participé en la consulta de *${inst}* en Preferendum:\n"${title}"\n\n¿Tú qué prefieres? Vota aquí (verificado en blockchain):\n${url}`;
   const db = currentDebate;
@@ -2695,7 +2785,8 @@ async function shareViaWhatsApp(title, instName, debId) {
     try {
       const results = db.results || [];
       const total = db.total_votes || 0;
-      const canvas = await _generatePoster(title, '', inst, results, total);
+      const photoImg = await promptShareSelfie();
+      const canvas = await _generatePoster(title, '', inst, results, total, photoImg);
       const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
       const file = new File([blob], 'preferendum.png', { type: 'image/png' });
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -2711,7 +2802,7 @@ async function shareViaWhatsApp(title, instName, debId) {
 }
 
 async function shareViaWhatsAppWithReward(title, instName, debId, rewardDesc) {
-  const url = `${location.origin}/voter?debate=${debId}`;
+  const url = _shareLink(debId);
   const inst = instName || 'Preferendum';
   const prizeNote = rewardDesc ? `\n🎁 Premio: ${rewardDesc}` : '';
   const text = `Participé en la consulta de *${inst}* en Preferendum:\n"${title}"${prizeNote}\n\n¿Tú qué prefieres? Vota y gana tu premio:\n${url}`;
@@ -2720,7 +2811,8 @@ async function shareViaWhatsAppWithReward(title, instName, debId, rewardDesc) {
     try {
       const results = db.results || [];
       const total = db.total_votes || 0;
-      const canvas = await _generatePoster(title, '', inst, results, total);
+      const photoImg = await promptShareSelfie();
+      const canvas = await _generatePoster(title, '', inst, results, total, photoImg);
       const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.92));
       const file = new File([blob], 'preferendum.png', { type: 'image/png' });
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -2738,7 +2830,7 @@ async function shareMyVote(option, title, debId) {
   const instName = currentDebate?.inst_name || 'Preferendum';
   const results = currentDebate?.results || [];
   const total = currentDebate?.total_votes || 0;
-  const fallback = `Participé en la consulta de ${instName} en Preferendum.\n¿Y tú qué prefieres?\n${location.origin}/voter?debate=${debId}`;
+  const fallback = `Participé en la consulta de ${instName} en Preferendum.\n¿Y tú qué prefieres?\n${_shareLink(debId)}`;
   _shareWithPoster(title, '', instName, debId, fallback, results, total);
 }
 
@@ -3157,6 +3249,9 @@ function fmtDateTime(s) { try { const utc = s && !s.endsWith('Z') && !s.includes
 (function() {
   const ref = new URLSearchParams(location.search).get('ref');
   if (ref) sessionStorage.setItem('pref_ref_source', ref.slice(0, 32));
+  // rc= código de referido de otro usuario (invitación persona-a-persona, no campaña)
+  const rc = new URLSearchParams(location.search).get('rc');
+  if (rc) sessionStorage.setItem('pref_referred_by', rc.slice(0, 16));
 })();
 
 // Init country-dependent fields once DOM is fully ready

@@ -27,7 +27,7 @@ from datetime import datetime, timedelta
 import requests as _requests
 
 BACKEND_URL  = os.getenv('BACKEND_URL', 'https://preferendum-unzip.onrender.com')
-ADMIN_SECRET = os.getenv('ADMIN_SECRET', 'preferendum-admin-2024')
+ADMIN_SECRET = os.getenv('ADMIN_SECRET')
 
 def get_api_key():
     """Lee la key en tiempo de ejecución — env var o secret file."""

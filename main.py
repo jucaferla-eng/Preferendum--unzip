@@ -116,6 +116,9 @@ class User(Base):
     chain_verified  = Column(Boolean, default=False)
     is_verified     = Column(Boolean, default=False)
     verify_level    = Column(Integer, default=0)
+    referral_code       = Column(String, unique=True, index=True)  # código propio para invitar amigos
+    referred_by_user_id = Column(Integer, index=True, default=None)  # quién lo invitó (viral, no sponsor)
+    tier_pre_evaluated  = Column(Boolean, default=False)  # se_tier heredado del referente, no calculado con datos propios
     created_at      = Column(DateTime, default=datetime.utcnow)
 
 class OTPCode(Base):
@@ -673,13 +676,31 @@ def _migrate():
                           ('ref_source', "TEXT DEFAULT ''"),
                           ('hnw_score', 'FLOAT DEFAULT 0.0'),
                           ('verified_hnw', 'BOOLEAN DEFAULT FALSE'),
-                          ('hnw_source', "TEXT DEFAULT ''")]:
+                          ('hnw_source', "TEXT DEFAULT ''"),
+                          ('referral_code', 'TEXT'),
+                          ('referred_by_user_id', 'INTEGER'),
+                          ('tier_pre_evaluated', 'BOOLEAN DEFAULT FALSE')]:
             if col not in existing_user_cols:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
                     conn.commit()
                 except Exception:
                     pass
+        # referral_code — índice único, y backfill para usuarios existentes que no lo tengan
+        try:
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_referral_code ON users (referral_code)"))
+            conn.commit()
+        except Exception:
+            pass
+        try:
+            rows_no_code = conn.execute(text("SELECT id FROM users WHERE referral_code IS NULL OR referral_code = ''")).fetchall()
+            for (uid,) in rows_no_code:
+                import secrets as _secrets_migr
+                code = 'R' + _secrets_migr.token_hex(4).upper()
+                conn.execute(text("UPDATE users SET referral_code=:c WHERE id=:i"), {'c': code, 'i': uid})
+            conn.commit()
+        except Exception:
+            pass
         # debates — verify_opens_at
         existing_debate_cols2 = {c['name'] for c in inspector.get_columns('debates')} if inspector.has_table('debates') else set()
         if 'verify_opens_at' not in existing_debate_cols2:
@@ -862,9 +883,17 @@ try:
 except Exception as _sched_err:
     print(f'[Scheduler] ⚠️ No se pudo iniciar scheduler: {_sched_err}')
 
-SECRET = os.getenv('JWT_SECRET', 'preferendum-jwt-secret-2024')
+SECRET = os.getenv('JWT_SECRET')
 security          = HTTPBearer()
 security_optional = HTTPBearer(auto_error=False)  # no lanza error si no hay token
+
+# Sin valor de respaldo hardcodeado a propósito — si falta la variable de entorno,
+# el sistema debe fallar cerrado (nadie puede firmar tokens ni pasar el chequeo admin)
+# en vez de aceptar silenciosamente un secret conocido públicamente.
+if not SECRET:
+    print('[SECURITY] ⚠️⚠️⚠️ JWT_SECRET no está configurado — todo login/token fallará hasta que se setee en Render.')
+if not os.getenv('ADMIN_SECRET'):
+    print('[SECURITY] ⚠️⚠️⚠️ ADMIN_SECRET no está configurado — todos los endpoints /admin quedan inaccesibles hasta que se setee en Render.')
 
 # ══════════════════════════════════════════════════════════════
 # HELPERS
@@ -1843,6 +1872,7 @@ class VoterRegisterInput(BaseModel):
     cargo:        str        # cargo jerárquico (ceo, gerente, analista, etc.) — obligatorio
     company_size: str = ''   # tamaño de empresa (opcional)
     ref_source:   str = ''   # canal de adquisición: fb, ig, tiktok, direct, etc.
+    ref_code:     str = ''   # código de referido de otro usuario (invitación persona-a-persona)
     device_fp:    str = ''
 
 
@@ -1887,6 +1917,10 @@ def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
             'email_verified': existing.email_verified, 'phone': existing.phone or ''
         }}
     hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+    import secrets as _secrets_ref
+    referrer = None
+    if data.ref_code:
+        referrer = db.query(User).filter(User.referral_code == data.ref_code.strip().upper()).first()
     user = User(
         email=data.email, name=data.name, password=hashed,
         country=data.country, email_verified=False,
@@ -1896,6 +1930,8 @@ def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
         cargo=data.cargo or '',
         company_size=data.company_size or '',
         ref_source=data.ref_source or '',
+        referral_code='R' + _secrets_ref.token_hex(4).upper(),
+        referred_by_user_id=referrer.id if referrer else None,
     )
     try:
         db.add(user)
@@ -1906,6 +1942,15 @@ def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
         raise HTTPException(500, f'DB error al crear usuario: {str(_e)}')
     try:
         _assign_user_tier(user, db)
+        # Fallback: si no se pudo calcular un tier real (comuna sin datos), heredar
+        # el del referente — la gente invita a gente de nivel socioeconómico similar.
+        if not user.se_tier and referrer and referrer.se_tier:
+            db.execute(text(
+                "UPDATE users SET se_tier=:t, income_index=:i, tier_pre_evaluated=TRUE WHERE id=:uid"
+            ), {'t': referrer.se_tier, 'i': referrer.income_index or 0, 'uid': user.id})
+            db.commit()
+            user.se_tier = referrer.se_tier
+            user.tier_pre_evaluated = True
     except Exception as _e:
         print(f'[voter_register] _assign_user_tier non-fatal error: {_e}')
     code = gen_otp()
@@ -1921,6 +1966,7 @@ def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
         'id': user.id, 'name': user.name, 'email': user.email,
         'email_verified': False, 'phone': data.phone,
         'se_tier': user.se_tier or '',
+        'referral_code': user.referral_code or '',
     }}
 
 
@@ -2369,7 +2415,7 @@ def complete_login(data: CompleteLoginInput, db: Session = Depends(get_db)):
     }
 
 @app.get('/auth/me')
-def me(user: User = Depends(get_current_user)):
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return {
         'id': user.id, 'name': user.name, 'email': user.email,
         'country': user.country or 'CL',
@@ -2377,6 +2423,7 @@ def me(user: User = Depends(get_current_user)):
         'email_verified': user.email_verified,
         'phone_verified': user.phone_verified,
         'selfie_verified': user.selfie_verified,
+        'referral_code': _ensure_referral_code(user, db),
     }
 
 # ══════════════════════════════════════════════════════════════
@@ -2881,6 +2928,22 @@ def _calculate_hnw_score(user, db) -> float:
         pass
 
     return round(min(100.0, score), 1)
+
+
+def _ensure_referral_code(user, db):
+    """Genera y persiste un referral_code si el usuario aún no tiene uno —
+    cubre cualquier vía de registro (votante, organizador, marketer), no solo /voter/register."""
+    if user.referral_code:
+        return user.referral_code
+    import secrets as _secrets_lazy
+    code = 'R' + _secrets_lazy.token_hex(4).upper()
+    try:
+        db.execute(text("UPDATE users SET referral_code=:c WHERE id=:uid"), {'c': code, 'uid': user.id})
+        db.commit()
+        user.referral_code = code
+    except Exception:
+        db.rollback()
+    return user.referral_code
 
 
 def _assign_user_tier(user, db):
@@ -5628,7 +5691,8 @@ def organizer_login_v2(data: LoginInput, db: Session = Depends(get_db)):
     profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
     return {
         'token':   make_token(user.id, user.role),
-        'user':    {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+        'user':    {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role,
+                    'referral_code': _ensure_referral_code(user, db)},
         'profile': {
             'status':       profile.status if profile else 'pending',
             'org_type':     profile.org_type if profile else 'person',
@@ -9182,7 +9246,7 @@ def db_info():
 # ── ADMIN: email smoke test ──────────────────────────────────────
 @app.post('/admin/test-email')
 def test_email_send(to: str, secret: str):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     resend_key = os.getenv('RESEND_API_KEY')
     if not resend_key:
@@ -9213,7 +9277,7 @@ def test_email_send(to: str, secret: str):
 # (created and discarded by the test run itself).
 @app.get('/admin/test-otp')
 def get_test_otp(email: str, secret: str, channel: str = 'email', db: Session = Depends(get_db)):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     user = db.query(User).filter(User.email == email).first()
     if not user:
@@ -9236,7 +9300,7 @@ def get_test_otp(email: str, secret: str, channel: str = 'email', db: Session = 
 # by independent auditors who want to confirm this themselves.
 @app.get('/admin/test-vote-bridge')
 def test_vote_bridge(code: str, debate_id: int, secret: str, db: Session = Depends(get_db)):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     vote = db.query(DebateVote).filter(
         DebateVote.verify_code == code.upper().strip(),
@@ -9253,7 +9317,7 @@ def test_vote_bridge(code: str, debate_id: int, secret: str, db: Session = Depen
 
 @app.patch('/admin/debates/{debate_id}')
 def admin_patch_debate(debate_id: int, secret: str, target_age_min: int = None, target_age_max: int = None, scope_country: str = None, status: str = None, db: Session = Depends(get_db)):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
@@ -9294,7 +9358,7 @@ def admin_delete_debate(debate_id: int, secret: str, db: Session = Depends(get_d
     couldn't remove them, since /debates never filters by status either —
     the only real fix is deleting the rows).
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
@@ -9376,7 +9440,7 @@ def _recalculate_global_index(db):
 
 @app.get('/admin/aws-check')
 def aws_check(secret: str):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     key = os.getenv('AWS_ACCESS_KEY_ID', '')
     sec = os.getenv('AWS_SECRET_ACCESS_KEY', '')
@@ -9408,7 +9472,7 @@ def admin_ping():
 
 @app.get('/admin/blockchain-status')
 def blockchain_status(secret: str):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     try:
         _blockchain._ensure_init()
@@ -9422,7 +9486,7 @@ def blockchain_status(secret: str):
 @app.post('/admin/blockchain-debug')
 def blockchain_debug(secret: str):
     """Deep diagnostic: try to build+sign a tx and return the exact error if it fails."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import traceback as tb
     result = {}
@@ -9499,7 +9563,7 @@ def blockchain_debug(secret: str):
 @app.post('/admin/blockchain-reinit')
 def blockchain_reinit(secret: str):
     """Force blockchain to re-initialize and return full diagnostic."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     pk_env = (os.getenv('WALLET_PRIVATE_KEY') or '').strip()
     diag = {
@@ -9523,7 +9587,7 @@ def blockchain_reinit(secret: str):
 @app.post('/admin/blockchain-test-anchor')
 def blockchain_test_anchor(secret: str, debate_id: int = 101):
     """Cast a real test vote hash to the contract via anchor_vote. Verifiable on PolygonScan."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import time
     test_hash = hashlib.sha256(f'admin-test-{debate_id}-{time.time()}'.encode()).hexdigest()
@@ -9537,7 +9601,7 @@ def blockchain_test_anchor(secret: str, debate_id: int = 101):
 @app.get('/admin/targeting/matrix')
 def targeting_matrix_summary(secret: str):
     """Returns the current targeting matrix summary: GNI tiers, CPMs, communes per country."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     try:
         from targeting_agent import get_matrix_summary
@@ -9548,7 +9612,7 @@ def targeting_matrix_summary(secret: str):
 @app.post('/admin/targeting/update-communes')
 def targeting_update_communes(secret: str, bg: BackgroundTasks):
     """Trigger monthly commune price update (runs in background)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from targeting_agent import run_monthly_commune_update
     bg.add_task(run_monthly_commune_update)
@@ -9557,7 +9621,7 @@ def targeting_update_communes(secret: str, bg: BackgroundTasks):
 @app.post('/admin/targeting/update-gni')
 def targeting_update_gni(secret: str, bg: BackgroundTasks):
     """Trigger annual GNI update from World Bank API (runs in background)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from targeting_agent import run_annual_gni_update
     bg.add_task(run_annual_gni_update)
@@ -9566,7 +9630,7 @@ def targeting_update_gni(secret: str, bg: BackgroundTasks):
 @app.get('/admin/targeting/match-debate/{debate_id}')
 def targeting_match_debate(debate_id: int, secret: str, db: Session = Depends(get_db)):
     """Returns ranked campaigns for a debate. Use to preview/test matching logic."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
@@ -9841,7 +9905,7 @@ def payments_history(
 def payments_admin_init_tables(secret: str, db: Session = Depends(get_db)):
     """Admin: explicitly create payment tables (PostgreSQL-compatible)."""
     from sqlalchemy import text as _text
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     results = {}
     stmts = PAYMENTS_SCHEMA_SQL_PG.strip().split(';')
@@ -9860,7 +9924,7 @@ def payments_admin_init_tables(secret: str, db: Session = Depends(get_db)):
 
 @app.get('/admin/users/search')
 def admin_search_users(q: str, secret: str, db: Session = Depends(get_db)):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     users = db.query(User).filter(
         (User.email.ilike(f'%{q}%')) | (User.name.ilike(f'%{q}%'))
@@ -9875,7 +9939,7 @@ def admin_search_users(q: str, secret: str, db: Session = Depends(get_db)):
 
 @app.post('/admin/users/reset-password')
 def admin_reset_password(user_id: int, new_password: str, secret: str, db: Session = Depends(get_db)):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -9886,7 +9950,7 @@ def admin_reset_password(user_id: int, new_password: str, secret: str, db: Sessi
 
 @app.post('/admin/users/reset-selfie')
 def admin_reset_selfie(user_id: int, secret: str, db: Session = Depends(get_db)):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -9898,7 +9962,7 @@ def admin_reset_selfie(user_id: int, secret: str, db: Session = Depends(get_db))
 
 @app.post('/admin/purge-user')
 def admin_purge_user(user_id: int, secret: str, db: Session = Depends(get_db)):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from sqlalchemy import text as _text
     user = db.query(User).filter(User.id == user_id).first()
@@ -9964,7 +10028,7 @@ def public_sector_pricing(db: Session = Depends(get_db)):
 @app.post('/admin/set-public-sector-cpm')
 def admin_set_public_sector_cpm(secret: str, cpm_usd: float, db: Session = Depends(get_db)):
     """Aplica un override global de CPM (todos los países) sin redeploy."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     global _public_sector_global_override
     _public_sector_global_override = cpm_usd
@@ -9980,7 +10044,7 @@ def admin_set_public_sector_cpm(secret: str, cpm_usd: float, db: Session = Depen
 @app.post('/admin/fix-inst-name')
 def admin_fix_inst_name(secret: str, old_name: str, new_name: str, db: Session = Depends(get_db)):
     """Renombra inst_name en debates y brand en ad_campaigns."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from sqlalchemy import text as _text
     r1 = db.execute(_text('UPDATE debates SET inst_name = :new WHERE inst_name = :old'), {'new': new_name, 'old': old_name})
@@ -9992,7 +10056,7 @@ def admin_fix_inst_name(secret: str, old_name: str, new_name: str, db: Session =
 @app.post('/admin/cleanup-orphan-imei')
 def admin_cleanup_orphan_imei(secret: str, db: Session = Depends(get_db)):
     """Borra registros de imei_logs y sim_logs huérfanos (user_id que ya no existe en users)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from sqlalchemy import text as _text
     r1 = db.execute(_text('DELETE FROM imei_logs WHERE user_id NOT IN (SELECT id FROM users)'))
@@ -10002,7 +10066,7 @@ def admin_cleanup_orphan_imei(secret: str, db: Session = Depends(get_db)):
 
 @app.delete('/admin/users/{user_id}')
 def admin_delete_user(user_id: int, secret: str, db: Session = Depends(get_db)):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -10019,7 +10083,7 @@ def admin_delete_user(user_id: int, secret: str, db: Session = Depends(get_db)):
 @app.post('/admin/users/fix')
 def admin_fix_user(user_id: int, secret: str, email: str = '', name: str = '', role: str = '',
                    email_verified: str = '', selfie_verified: str = '', db: Session = Depends(get_db)):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -10046,7 +10110,7 @@ def admin_fix_user(user_id: int, secret: str, email: str = '', name: str = '', r
 @app.get('/admin/debug-vote')
 def admin_debug_vote(user_id: int, debate_id: int, secret: str, db: Session = Depends(get_db)):
     """Dry-run: check if user can vote in debate without committing anything."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -10102,7 +10166,7 @@ def payments_admin_manual(
     db: Session = Depends(get_db),
 ):
     """Admin: manually add credits for a user (promos, support refunds, etc.)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     ref = f"admin_{user_id}_{int(time.time())}"
     return add_credits(db, user_id, credits, 'manual', ref, description, tx_type='bonus')
@@ -10118,7 +10182,7 @@ def payments_demo_credits(user: User = Depends(get_current_user), db: Session = 
 @app.get('/admin/payments/pending-crypto')
 def payments_admin_pending_crypto(secret: str, db: Session = Depends(get_db)):
     """Admin: list pending crypto payment requests awaiting confirmation."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     rows = db.execute(
         text("""
@@ -10266,7 +10330,7 @@ def marketing_boost_debate(debate_id: int, db: Session = Depends(get_db), user: 
 @app.get('/admin/marketing/campaigns-attention')
 def marketing_admin_attention(secret: str, db: Session = Depends(get_db)):
     """Admin: campaigns needing attention (low budget, no impressions, expiring)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from marketing_agent import get_campaigns_needing_attention
     return get_campaigns_needing_attention(db)
@@ -10275,7 +10339,7 @@ def marketing_admin_attention(secret: str, db: Session = Depends(get_db)):
 @app.post('/admin/marketing/daily-checks')
 def marketing_admin_daily(secret: str, bg: BackgroundTasks, db: Session = Depends(get_db)):
     """Admin: run daily marketing checks in background."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from marketing_agent import run_daily_marketing_checks
     bg.add_task(run_daily_marketing_checks, db)
@@ -10285,7 +10349,7 @@ def marketing_admin_daily(secret: str, bg: BackgroundTasks, db: Session = Depend
 @app.post('/admin/marketing/weekly-reports')
 def marketing_admin_weekly(secret: str, bg: BackgroundTasks, db: Session = Depends(get_db)):
     """Admin: generate weekly advertiser reports in background."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from marketing_agent import run_weekly_advertiser_reports
     bg.add_task(run_weekly_advertiser_reports, db)
@@ -10295,7 +10359,7 @@ def marketing_admin_weekly(secret: str, bg: BackgroundTasks, db: Session = Depen
 @app.get('/admin/agent/test-api')
 def agent_test_api(secret: str):
     """Test Anthropic API key and RSS feeds. Returns raw status."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import requests as _req
     result = {}
@@ -10336,7 +10400,7 @@ def agent_test_api(secret: str):
 @app.post('/admin/agent/daily-debates')
 def agent_daily_debates(secret: str, bg: BackgroundTasks):
     """Trigger the news agent to create debates from world news."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from preferendum_agent import run_daily_debates
     bg.add_task(run_daily_debates)
@@ -10345,7 +10409,7 @@ def agent_daily_debates(secret: str, bg: BackgroundTasks):
 @app.post('/admin/agent/daily-debates/sync')
 def agent_daily_debates_sync(secret: str):
     """Run the news agent synchronously and return results (may take up to 2 min)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from preferendum_agent import run_daily_debates
     return run_daily_debates()
@@ -10353,7 +10417,7 @@ def agent_daily_debates_sync(secret: str):
 @app.post('/admin/agent/se-lifestyle-debates')
 def agent_se_lifestyle(secret: str, bg: BackgroundTasks):
     """Trigger the SE Lifestyle Agent — generates aspirational debates per income tier (A/B/C/D)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from se_lifestyle_agent import run_se_lifestyle_debates
     bg.add_task(run_se_lifestyle_debates)
@@ -10362,7 +10426,7 @@ def agent_se_lifestyle(secret: str, bg: BackgroundTasks):
 @app.post('/admin/agent/se-lifestyle-debates/sync')
 def agent_se_lifestyle_sync(secret: str, tier: str = None):
     """Run SE Lifestyle Agent synchronously. Optional ?tier=A to run only one tier."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from se_lifestyle_agent import run_se_lifestyle_debates, SE_TOPICS
     if tier:
@@ -10382,7 +10446,7 @@ def agent_se_lifestyle_sync(secret: str, tier: str = None):
 @app.post('/admin/agent/culture-debates')
 def agent_culture_debates(secret: str, bg: BackgroundTasks):
     """Trigger culture/everyday + general knowledge debate generation."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     def _run():
         from preferendum_agent import run_culture_debates, run_general_knowledge_debates
@@ -10395,7 +10459,7 @@ def agent_culture_debates(secret: str, bg: BackgroundTasks):
 @app.post('/admin/agent/regional-debates')
 def agent_regional_debates(secret: str, bg: BackgroundTasks):
     """Trigger the regional/sector news agent for Chile (health, transport, agro, pymes, education)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from preferendum_agent import run_regional_debates
     bg.add_task(run_regional_debates)
@@ -10404,7 +10468,7 @@ def agent_regional_debates(secret: str, bg: BackgroundTasks):
 @app.post('/admin/agent/regional-debates/sync')
 def agent_regional_debates_sync(secret: str, force: bool = False):
     """Run regional/sector agent synchronously. force=true bypasses dedup."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from preferendum_agent import run_regional_debates
     return run_regional_debates(force=force)
@@ -10412,7 +10476,7 @@ def agent_regional_debates_sync(secret: str, force: bool = False):
 @app.post('/admin/agent/task/{task_name}')
 def run_agent_task(task_name: str, secret: str):
     """Run any scheduled agent task by name."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from preferendum_agent import run_scheduled_task
     return run_scheduled_task(task_name)
@@ -10420,7 +10484,7 @@ def run_agent_task(task_name: str, secret: str):
 @app.get('/admin/db-schema')
 def db_schema(secret: str):
     """Inspecciona columnas de tablas clave — diagnóstico remoto."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from sqlalchemy import inspect as sa_inspect
     inspector = sa_inspect(engine)
@@ -10436,7 +10500,7 @@ def db_schema(secret: str):
 @app.post('/admin/run-market-agent')
 def run_market_agent(secret: str, db: Session = Depends(get_db)):
     """Corre el agente completo de una vez. Para uso manual o pruebas."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from market_data_agent import run_full_agent, get_fallback_table
     result = run_full_agent()
@@ -10452,7 +10516,7 @@ def run_market_agent_daily(secret: str, db: Session = Depends(get_db)):
     El orden es rotativo: día 1=CL, día 2=AR, día 3=MX... vuelve a empezar.
     En ~8 días cubre todos los países. Se repite cada 6 meses.
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from market_data_agent import PORTALS, run_apify_scraper, aggregate_by_commune, get_fallback_table, calculate_cpm_from_index, get_se_tier
 
@@ -10498,7 +10562,7 @@ def test_market_agent_portal(secret: str, country: str = None):
     Este endpoint repite la misma llamada pero reporta cada paso para que
     se pueda ver exactamente dónde se cae la cadena.
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from market_data_agent import (PORTALS, APIFY_TOKEN, APIFY_BASE,
                                    _build_page_function, aggregate_by_commune)
@@ -10598,7 +10662,7 @@ def run_market_agent_uk_landregistry(secret: str, db: Session = Depends(get_db))
     — de ahí en adelante /communes sirve datos reales sin depender de nada
     en tiempo real.
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from market_data_agent import run_uk_land_registry
     communes = run_uk_land_registry()
@@ -10621,7 +10685,7 @@ def import_zip_data(secret: str, country: str = 'US',
     Resto: prefijos de código postal precargados (instantáneo).
     country=ALL importa todos los países disponibles.
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
 
     def _upsert_batch(session, items):
@@ -10672,7 +10736,7 @@ def purge_stale_fallback_communes(secret: str, country: str, db: Session = Depen
     coinciden por nombre). Solo borra filas explícitamente marcadas como
     'fallback' — nunca toca datos reales de un scrape o una fuente oficial.
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     rows = db.query(CommuneMarketData).filter(
         CommuneMarketData.country == country.upper(),
@@ -10748,7 +10812,7 @@ def agent_chat(data: AgentChatInput, request: Request):
 @app.get('/agent/debug')
 def agent_debug(secret: str):
     """Diagnóstico — verifica variables de entorno del agente."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     ak = os.getenv('ANTHROPIC_API_KEY', '')
     return {
@@ -10762,7 +10826,7 @@ def agent_debug(secret: str):
 @app.get('/agent/security-log')
 def agent_security_log(secret: str):
     """Audit log de seguridad — solo admins."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from preferendum_agent import _audit_log, _blocked_ips, _rate_limit_store
     return {
@@ -10784,7 +10848,7 @@ def agent_moderate(content_type: str, title: str = '', body: str = '', options: 
 @app.post('/agent/run-task')
 def agent_run_task(task_name: str, secret: str):
     """Ejecuta una tarea programada del agente."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from preferendum_agent import run_scheduled_task
     result = run_scheduled_task(task_name)
@@ -10793,7 +10857,7 @@ def agent_run_task(task_name: str, secret: str):
 @app.get('/agent/pending-reviews')
 def admin_pending_reviews(secret: str, db: Session = Depends(get_db)):
     """Lista organizadores pendientes y consultas en revisión para el agente."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     pending_orgs = db.query(OrganizerProfile).filter(OrganizerProfile.status == 'pending').all()
     pending_debates = db.query(Debate).filter(Debate.status == 'draft').all()
@@ -10807,7 +10871,7 @@ def admin_pending_reviews(secret: str, db: Session = Depends(get_db)):
 @app.post('/admin/organizer/{user_id}/status')
 def admin_set_organizer_status(user_id: int, secret: str, status: str, reason: str = '', db: Session = Depends(get_db)):
     """El agente (o un admin) aprueba/rechaza/suspende un organizador."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user_id).first()
     if not profile:
@@ -10828,7 +10892,7 @@ def admin_set_marketer_status(user_id: int, secret: str, status: str, reason: st
     'approved' — ni el de un empleado ni el de su jefe — dejando la cadena entera
     (incluida la puerta de campañas) sin salida posible para cuentas de empresa reales.
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user_id).first()
     if not profile:
@@ -10847,7 +10911,7 @@ def admin_pending_approvals(secret: str, db: Session = Depends(get_db)):
     pensada para aprobación de un toque desde el celular — sin esto, una empresa
     real registrada en vivo queda atascada esperando selfie + autorización del jefe,
     un proceso que toma minutos/horas, no segundos."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     out = []
     for o in db.query(OrganizerProfile).filter(OrganizerProfile.status == 'pending').all():
@@ -10999,7 +11063,7 @@ def admin_reassign_tiers(
 ):
     """Re-corre _assign_user_tier en batches para evitar timeout.
     Usa offset+batch para paginar: offset=0,50,100,..."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     q = db.query(User)
     if not force:
@@ -11040,7 +11104,7 @@ def admin_reassign_tiers(
 @app.get('/admin/debug-user')
 def admin_debug_user(secret: str, email: str, db: Session = Depends(get_db)):
     """Muestra datos de targeting de un usuario para diagnóstico."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     u = db.query(User).filter(User.email == email).first()
     if not u:
@@ -11069,7 +11133,7 @@ def admin_debug_user(secret: str, email: str, db: Session = Depends(get_db)):
 @app.get('/admin/users/breakdown')
 def admin_users_breakdown(secret: str, db: Session = Depends(get_db)):
     """Desglose de usuarios por profesión, cargo y tier."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
 
     by_profession = db.execute(text("""
@@ -11116,7 +11180,7 @@ def admin_users_breakdown(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/users/hnw')
 def admin_hnw_breakdown(secret: str, min_score: float = 50, db: Session = Depends(get_db)):
     """Distribución de usuarios por HNW score. min_score filtra el umbral mínimo."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
 
     dist = db.execute(text("""
@@ -11155,7 +11219,7 @@ def admin_hnw_breakdown(secret: str, min_score: float = 50, db: Session = Depend
 @app.post('/admin/recalculate-hnw')
 def admin_recalculate_hnw(secret: str, db: Session = Depends(get_db)):
     """Recalcula hnw_score para todos los usuarios sin hacer reassign-tiers completo."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     users = db.query(User).all()
     updated = 0
@@ -11174,7 +11238,7 @@ def admin_recalculate_hnw(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/communes-by-country')
 def admin_communes_by_country(secret: str, db: Session = Depends(get_db)):
     """Cuenta registros CommuneMarketData por país."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from sqlalchemy import func as _f
     rows = db.query(CommuneMarketData.country, _f.count(CommuneMarketData.id))\
@@ -11186,7 +11250,7 @@ def admin_communes_by_country(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/tier-summary')
 def admin_tier_summary(secret: str, db: Session = Depends(get_db)):
     """Distribución de se_tier entre todos los usuarios."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from collections import Counter
     users = db.query(User).all()
@@ -11202,7 +11266,7 @@ def admin_tier_summary(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/audience-stats')
 def admin_audience_stats(secret: str, db: Session = Depends(get_db)):
     """Inventario de audiencia por país y tier — para pricing de campañas publicitarias."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
 
     from commune_agent import CPM_BASE_BY_COUNTRY
@@ -11277,7 +11341,7 @@ COUNTRY_NAMES = {
 @app.get('/admin/audience-dashboard')
 def admin_audience_dashboard(secret: str, db: Session = Depends(get_db)):
     """Dashboard HTML de inventario de audiencia — para presentaciones a anunciantes."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
 
     from commune_agent import CPM_BASE_BY_COUNTRY
@@ -11435,7 +11499,7 @@ def admin_audience_dashboard(secret: str, db: Session = Depends(get_db)):
 @app.post('/admin/fix-user-tier')
 def admin_fix_user_tier(secret: str, email: str, db: Session = Depends(get_db)):
     """Fuerza recalculo de se_tier para un usuario específico."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     u = db.query(User).filter(User.email == email).first()
     if not u:
@@ -11447,7 +11511,7 @@ def admin_fix_user_tier(secret: str, email: str, db: Session = Depends(get_db)):
 @app.post('/admin/rental-price-agent/run')
 def admin_run_rental_agent(secret: str, country: str = 'CL', db: Session = Depends(get_db)):
     """Ejecuta el RentalPriceAgent para un país — actualiza precios m² desde Portal Inmobiliario."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -11465,7 +11529,7 @@ def admin_run_rental_agent(secret: str, country: str = 'CL', db: Session = Depen
 @app.get('/admin/rental-price-agent/status')
 def admin_rental_agent_status(secret: str, country: str = 'CL', db: Session = Depends(get_db)):
     """Muestra estado actual de commune_market_data — último run del agente."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     rows = db.query(CommuneMarketData).filter(CommuneMarketData.country == country).order_by(CommuneMarketData.income_index.desc()).all()
     if not rows:
@@ -11486,7 +11550,7 @@ def admin_rental_agent_status(secret: str, country: str = 'CL', db: Session = De
 @app.post('/admin/rental-price-agent/run-global')
 def admin_run_rental_global(secret: str, db: Session = Depends(get_db)):
     """Carga seed Deutsche Bank 2025 para todos los países (47 países, ~75 ciudades)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -11547,7 +11611,7 @@ def marketer_advertising_govt(country: str = 'CL'):
 @app.post('/admin/import-usa-bea')
 def admin_import_usa_bea(secret: str, db: Session = Depends(get_db)):
     """Importa 3,115 condados USA desde BEA CAINC1 2024 a commune_market_data."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -11565,7 +11629,7 @@ def admin_import_usa_bea(secret: str, db: Session = Depends(get_db)):
 @app.post('/admin/import-nuts-eurostat')
 def admin_import_nuts(secret: str, db: Session = Depends(get_db)):
     """Importa 244 regiones NUTS2 Europa desde Eurostat (ingreso disponible real EUR/hab)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -11587,7 +11651,7 @@ def admin_import_occupation(secret: str, countries: str = '', db: Session = Depe
     Chile se descarga en tiempo real desde INE ESI SDMX.
     Resto usa seeds publicados (BR/MX/CO/AR/ZA/KR) — marcan fuente como 'seed'.
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     country_list = [c.strip().upper() for c in countries.split(',') if c.strip()] or None
     import threading
@@ -11606,7 +11670,7 @@ def admin_import_occupation(secret: str, countries: str = '', db: Session = Depe
 @app.get('/admin/occupation-salary/lookup')
 def admin_occupation_lookup(secret: str, country: str, profession: str, db: Session = Depends(get_db)):
     """Busca profession_score real para un país y profesión (ej: country=CL&profession=medico)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from occupation_salary_agent import get_profession_score_from_db, PROFESSION_TO_ISCO
     score = get_profession_score_from_db(country.upper(), profession.lower(), db)
@@ -11622,7 +11686,7 @@ def admin_occupation_lookup(secret: str, country: str, profession: str, db: Sess
 @app.get('/admin/tier-debug')
 def admin_tier_debug(secret: str, country: str, profession: str, db: Session = Depends(get_db)):
     """Muestra cada fuente de datos usada para asignar tier a un país+profesión."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     result = {'country': country.upper(), 'profession': profession.lower(), 'sources': {}}
     cc = country.upper()
@@ -11673,7 +11737,7 @@ def admin_tier_debug(secret: str, country: str, profession: str, db: Session = D
 @app.get('/admin/tier-assign-test')
 def admin_tier_assign_test(user_id: int, secret: str, db: Session = Depends(get_db)):
     """Ejecuta _assign_user_tier_inner sobre un usuario real y devuelve traceback si falla."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import traceback as _tb
     user = db.query(User).filter(User.id == user_id).first()
@@ -11706,7 +11770,7 @@ def admin_import_ilo_wages(secret: str, db: Session = Depends(get_db)):
     Indicador: EAR_4MTH_SEX_OCU_CUR_NB_A — salario mensual por ocupación ISCO-08.
     Tiempo estimado: 2-5 min (descarga ~50 MB + insert ~900 filas).
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -11731,7 +11795,7 @@ def admin_import_ilo_wages(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/ilo-wages/summary')
 def admin_ilo_wages_summary(secret: str, db: Session = Depends(get_db)):
     """Resumen de datos ILO ILOSTAT en ilo_wages."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from ilo_ilostat_agent import get_ilo_summary
     return get_ilo_summary(db)
@@ -11740,7 +11804,7 @@ def admin_ilo_wages_summary(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/ilo-wages/lookup')
 def admin_ilo_wages_lookup(secret: str, country: str, isco: int, db: Session = Depends(get_db)):
     """Busca salario ILO para un país y grupo ISCO (ej: country=CL&isco=2)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from ilo_ilostat_agent import get_ilo_income
     result = get_ilo_income(country.upper(), isco, db)
@@ -11752,7 +11816,7 @@ def admin_wages_ranking(secret: str, db: Session = Depends(get_db)):
     """Ranking de salarios por grupo ISCO para todos los países disponibles.
     Combina ILO (65 países) + occupation_salary (CA,AU,KR,CN,CL,etc.) + occupation_unified (US).
     Retorna top países por ISCO group con monthly_usd (nominal) y monthly_ppp_usd (PPP-ajustado)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
 
     from ppp_agent import PLI
@@ -11943,7 +12007,7 @@ def admin_import_ppp_ilo(secret: str, db: Session = Depends(get_db)):
     """Importa curva salarial PPP ILOSTAT 10 países (BGD,BRA,CHN,COL,FRA,GBR,MEX,NOR,RUS,USA).
     Actualiza median_monthly_ppp_usd en occupation_salary con valores PPP reales (dólares internacionales).
     Crea occupation_salary_ceo con nivel CEO/Alta Dirección (ISCO 0)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -11971,7 +12035,7 @@ def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
     I_comuna = price_m2_comuna / mediana_nacional × 100 (commune_market_data)
     β_eff ajustado por edad: <33→0, 33-39→β/2, ≥40→β (β_base=0.35)
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
 
     from ppp_agent import PLI as _PLI_MAP
@@ -12091,7 +12155,7 @@ def admin_import_perplexity_benchmarks(secret: str, db: Session = Depends(get_db
     """Importa benchmarks Perplexity 2026-07-31: CEO PPP (Tabla 1), % presupuesto
     9 marcas × 10 países (Tablas 2-3) y participación Visa (Tabla 4).
     Crea tablas: perplexity_budget_benchmarks, perplexity_ceo_ppp, perplexity_visa_share."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from perplexity_budget_agent import run_perplexity_import
     return run_perplexity_import(db)
@@ -12101,7 +12165,7 @@ def admin_import_perplexity_benchmarks(secret: str, db: Session = Depends(get_db
 def admin_import_gulf_asia(secret: str, db: Session = Depends(get_db)):
     """Importa salarios ISCO 1-9 para IL, AE, QA, SA, MY, KZ, CH, HK, TW.
     Fuentes: CBS/MOE-UAE/PSA-Qatar/GASTAT/DOSM/BNS/SFSO/C&SD/DGBAS 2022-2023."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from gulf_asia_wages_agent import run_gulf_asia_import
     return run_gulf_asia_import(db)
@@ -12113,7 +12177,7 @@ def save_model_definition(secret: str, db: Session = Depends(get_db),
                            model_type: str = 'matching', description: str = '',
                            config_json: str = '{}', source_code: str = '', author: str = ''):
     """Guarda o actualiza un modelo de optimización/matching en la BD."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     existing = db.execute(text(
         "SELECT id FROM model_definitions WHERE name=:n AND version=:v"
@@ -12139,7 +12203,7 @@ def save_model_definition(secret: str, db: Session = Depends(get_db),
 @app.get('/admin/model-definitions')
 def list_model_definitions(secret: str, db: Session = Depends(get_db)):
     """Lista todos los modelos guardados."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     rows = db.execute(text(
         "SELECT id, name, version, model_type, description, author, is_active, created_at, updated_at "
@@ -12158,7 +12222,7 @@ def admin_apply_ppp(secret: str, db: Session = Depends(get_db)):
     """Aplica factores PPP (World Bank ICP 2022) a occupation_salary e ilo_wages.
     Agrega columnas median_monthly_ppp_usd y ppp_price_level_index.
     PPP_USD = Nominal_USD / PLI (donde PLI = precio relativo vs USA=1.0)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -12183,7 +12247,7 @@ def admin_apply_ppp(secret: str, db: Session = Depends(get_db)):
 def admin_import_china_wages(secret: str, db: Session = Depends(get_db)):
     """Importa datos salariales China: NBS oficial × provincia + 60 cargos específicos.
     Usa tasa PPP (1 USD = 3.29 CNY) para estimated_income_usd comparable globalmente."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -12205,7 +12269,7 @@ def admin_import_china_wages(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/china-wages/summary')
 def admin_china_wages_summary(secret: str, db: Session = Depends(get_db)):
     """Resumen de datos en china_wages y china_wage_jobs."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from china_wages_agent import get_china_summary
     return get_china_summary(db)
@@ -12214,7 +12278,7 @@ def admin_china_wages_summary(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/china-wages/lookup')
 def admin_china_wages_lookup(secret: str, city: str, isco: int, db: Session = Depends(get_db)):
     """Busca salario PPP para usuario chino (ej: city=Shanghai&isco=2)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from china_wages_agent import get_china_income
     result = get_china_income(city, isco, db)
@@ -12224,7 +12288,7 @@ def admin_china_wages_lookup(secret: str, city: str, isco: int, db: Session = De
 @app.post('/admin/import-scandinavia-wages')
 def admin_import_scandinavia_wages(secret: str, db: Session = Depends(get_db)):
     """Importa salarios NO/SE/DK: 10 ocupaciones × 3 países, 2026. Fuente: SSB/SCB/DST."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -12246,7 +12310,7 @@ def admin_import_scandinavia_wages(secret: str, db: Session = Depends(get_db)):
 @app.post('/admin/import-australia-wages')
 def admin_import_australia_wages(secret: str, db: Session = Depends(get_db)):
     """Importa datos salariales Australia: ABS May 2025, ANZSCO→ISCO 1-9, AUD→USD."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -12268,7 +12332,7 @@ def admin_import_australia_wages(secret: str, db: Session = Depends(get_db)):
 @app.post('/admin/import-canada-wages')
 def admin_import_canada_wages(secret: str, db: Session = Depends(get_db)):
     """Importa datos salariales Canadá: Statistics Canada 2024, NOC→ISCO 1-9, CAD→USD."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -12290,7 +12354,7 @@ def admin_import_canada_wages(secret: str, db: Session = Depends(get_db)):
 @app.post('/admin/import-korea-wages')
 def admin_import_korea_wages(secret: str, db: Session = Depends(get_db)):
     """Importa datos salariales Korea: MOEL 2024, grupos ISCO 1-9 (KSCO), KRW→USD."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -12312,7 +12376,7 @@ def admin_import_korea_wages(secret: str, db: Session = Depends(get_db)):
 @app.post('/admin/import-japan-wages')
 def admin_import_japan_wages(secret: str, db: Session = Depends(get_db)):
     """Importa datos salariales Japan: e-Stat MHLW 2024, 47 prefecturas, JPY→USD."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -12334,7 +12398,7 @@ def admin_import_japan_wages(secret: str, db: Session = Depends(get_db)):
 @app.post('/admin/import-japan-isco')
 def admin_import_japan_isco(secret: str, db: Session = Depends(get_db)):
     """Importa Japón a occupation_salary con grupos ISCO 1-9 (MHLW 2024). Necesario para el ranking y gráfico."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from japan_wages_agent import run_japan_isco_import
     return run_japan_isco_import(db)
@@ -12343,7 +12407,7 @@ def admin_import_japan_isco(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/japan-wages/lookup')
 def admin_japan_wages_lookup(secret: str, prefecture: str, db: Session = Depends(get_db)):
     """Busca salario para usuario japonés (ej: prefecture=Tokyo)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from japan_wages_agent import get_japan_income
     result = get_japan_income(prefecture, db)
@@ -12353,7 +12417,7 @@ def admin_japan_wages_lookup(secret: str, prefecture: str, db: Session = Depends
 @app.post('/admin/import-russia-wages')
 def admin_import_russia_wages(secret: str, db: Session = Depends(get_db)):
     """Importa datos salariales Rusia: Rosstat 2024, 85+ sujetos federales, RUB→USD."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -12375,7 +12439,7 @@ def admin_import_russia_wages(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/russia-wages/lookup')
 def admin_russia_wages_lookup(secret: str, region: str, db: Session = Depends(get_db)):
     """Busca salario para usuario ruso (ej: region=Moscow)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from russia_wages_agent import get_russia_income
     result = get_russia_income(region, db)
@@ -12385,7 +12449,7 @@ def admin_russia_wages_lookup(secret: str, region: str, db: Session = Depends(ge
 @app.post('/admin/import-singapore-wages')
 def admin_import_singapore_wages(secret: str, db: Session = Depends(get_db)):
     """Importa datos salariales Singapore: MOM 2025, ~530 ocupaciones SSOC, SGD→USD."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -12407,7 +12471,7 @@ def admin_import_singapore_wages(secret: str, db: Session = Depends(get_db)):
 @app.post('/admin/import-new-zealand-wages')
 def admin_import_new_zealand_wages(secret: str, db: Session = Depends(get_db)):
     """Importa datos salariales Nueva Zelanda: Stats NZ 2025 (8 grupos ANZSCO) + 16 regiones, NZD→USD."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -12432,7 +12496,7 @@ def admin_nuts_pipeline_run(secret: str, db: Session = Depends(get_db)):
     Crea tablas rip_countries/rip_regions/rip_import_batches/rip_observations,
     carga 50-country seed y descarga 244 regiones NUTS2 reales de Eurostat.
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     import threading
     result_holder = {}
@@ -12450,7 +12514,7 @@ def admin_nuts_pipeline_run(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/nuts-pipeline/summary')
 def admin_nuts_pipeline_summary(secret: str, db: Session = Depends(get_db)):
     """Estado del pipeline NUTS — países, regiones, observaciones, últimos batches."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from nuts_pipeline import get_pipeline_summary
     return get_pipeline_summary(db)
@@ -12459,7 +12523,7 @@ def admin_nuts_pipeline_summary(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/usa-data-agent/stats')
 def admin_usa_data_stats(secret: str):
     """Estadísticas del agente USA — condados BEA + ocupaciones BLS cargados en memoria."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from usa_data_agent import get_stats
     return get_stats()
@@ -12468,7 +12532,7 @@ def admin_usa_data_stats(secret: str):
 @app.get('/admin/usa-data-agent/county')
 def admin_usa_county_lookup(secret: str, county: str, state: str = ''):
     """Busca un condado en los datos BEA — verifica el ingreso y tier asignado."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from usa_data_agent import get_county_data
     data = get_county_data(county, state)
@@ -12480,7 +12544,7 @@ def admin_usa_county_lookup(secret: str, county: str, state: str = ''):
 @app.get('/admin/usa-data-agent/occupation')
 def admin_bls_occupation_lookup(secret: str, title: str):
     """Busca una ocupación en los datos BLS — verifica el salario mediano y score."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from usa_data_agent import get_occupation_score, profession_score_to_tier
     data = get_occupation_score(title)
@@ -12528,7 +12592,7 @@ async def admin_import_oews_msa(
     Sube el archivo oesm23ma.zip manualmente (BLS bloquea descargas automáticas).
     Uso: POST /admin/import-oews-msa?secret=XXX con el ZIP adjunto como 'file'.
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     if not file:
         raise HTTPException(400, 'Se requiere el archivo ZIP de BLS OEWS (oesm23ma.zip). '
@@ -12546,7 +12610,7 @@ async def admin_import_oews_msa(
 
 @app.get('/admin/oews-msa/summary')
 def admin_oews_msa_summary(secret: str, db: Session = Depends(get_db)):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from bls_oews_msa_agent import get_oews_summary
     return get_oews_summary(db)
@@ -12555,7 +12619,7 @@ def admin_oews_msa_summary(secret: str, db: Session = Depends(get_db)):
 @app.get('/admin/oews-msa/lookup')
 def admin_oews_msa_lookup(secret: str, soc_code: str, commune: str, db: Session = Depends(get_db)):
     """Busca el salario de una ocupación en el MSA más cercano a la commune."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     from bls_oews_msa_agent import get_msa_salary
     result = get_msa_salary(soc_code, commune, db)
@@ -12643,7 +12707,7 @@ def demo_peugeot_families(budget_usd: float = 750000):
 @app.post('/admin/debates/{debate_id}/force-verify')
 def admin_force_verify(debate_id: int, secret: str, db: Session = Depends(get_db)):
     """Fuerza un debate a fase de verificación — para demos y pruebas."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
@@ -12659,7 +12723,7 @@ def admin_force_verify(debate_id: int, secret: str, db: Session = Depends(get_db
 @app.post('/admin/seed-opinions')
 def seed_opinions(secret: str, debate_id: int, count: int = 8, db: Session = Depends(get_db)):
     """Agrega opiniones de prueba a un debate para que aparezcan los ads (necesita ≥6)."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
@@ -12690,7 +12754,7 @@ def seed_opinions(secret: str, debate_id: int, count: int = 8, db: Session = Dep
 @app.get('/admin/campaigns')
 def admin_list_campaigns(secret: str, db: Session = Depends(get_db)):
     """Lista todas las campañas con su estado."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     campaigns = db.query(AdCampaign).order_by(AdCampaign.id.desc()).all()
     return {'campaigns': [_format_campaign(c) for c in campaigns]}
@@ -12699,7 +12763,7 @@ def admin_list_campaigns(secret: str, db: Session = Depends(get_db)):
 @app.patch('/admin/campaigns/{campaign_id}/activate')
 def admin_activate_campaign(campaign_id: int, secret: str, days: int = 30, db: Session = Depends(get_db)):
     """Reactiva una campaña expirada y extiende su fecha de fin."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not c:
@@ -12713,7 +12777,7 @@ def admin_activate_campaign(campaign_id: int, secret: str, days: int = 30, db: S
 @app.patch('/admin/campaigns/{campaign_id}/deactivate')
 def admin_deactivate_campaign(campaign_id: int, secret: str, db: Session = Depends(get_db)):
     """Desactiva una campaña (p.ej. campañas de prueba/QA) sin borrar su historial."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not c:
@@ -12736,7 +12800,7 @@ def admin_recompute_campaign_spend(campaign_id: int, secret: str, db: Session = 
     real number, recomputed honestly from its 3 logged impressions, is
     the only thing that should ever be shown to an investor.
     """
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not c:
@@ -12759,7 +12823,7 @@ def admin_recompute_campaign_spend(campaign_id: int, secret: str, db: Session = 
 def admin_update_campaign_creative(campaign_id: int, secret: str, db: Session = Depends(get_db),
                                    logo_url: str = '', ad_image_url: str = '', ad_copy: str = '',
                                    link_url: str = '', target_debate_ids: str = '', advertiser_name: str = ''):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not c:
@@ -12788,7 +12852,7 @@ def admin_create_campaign(secret: str, advertiser_name: str, ad_copy: str,
                           budget_clp: int = 250000000,
                           db: Session = Depends(get_db)):
     """Create a campaign directly from admin without requiring full CampaignCreate schema."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     now = datetime.utcnow()
     c = AdCampaign(
@@ -12819,7 +12883,7 @@ def admin_create_campaign(secret: str, advertiser_name: str, ad_copy: str,
 @app.get('/admin/debug-ads')
 def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session = Depends(get_db)):
     """Diagnóstico: por qué un usuario no ve ads en un debate. Devuelve user, opiniones, campañas activas y por qué cada una matchea o no."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
@@ -12897,7 +12961,7 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
 @app.delete('/admin/reset-marketers')
 def admin_reset_marketers(secret: str, db: Session = Depends(get_db)):
     """Borra todos los usuarios con role='marketer' y sus perfiles/campañas — reset completo para demo."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     marketer_users = db.query(User).filter(User.role == 'marketer').all()
     ids = [u.id for u in marketer_users]
@@ -12911,7 +12975,7 @@ def admin_reset_marketers(secret: str, db: Session = Depends(get_db)):
 @app.delete('/admin/reset-organizers')
 def admin_reset_organizers(secret: str, db: Session = Depends(get_db)):
     """Borra todos los usuarios con role='organizer' y sus perfiles — reset completo para demo."""
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     org_users = db.query(User).filter(User.role == 'organizer').all()
     ids = [u.id for u in org_users]
@@ -12927,7 +12991,7 @@ def admin_reset_organizers(secret: str, db: Session = Depends(get_db)):
 # ══════════════════════════════════════════════════════════════
 
 def _check_admin(secret: str):
-    if secret != os.getenv('ADMIN_SECRET', 'preferendum-admin-2024'):
+    if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
 
 def _get_sponsor_info(debate_id: int, db: Session):
@@ -13241,7 +13305,9 @@ def admin_verify_user(user_id: int, secret: str, db: Session = Depends(get_db)):
     return {'ok': True, 'user_id': user_id, 'email': user.email, 'email_verified': True}
 
 @app.get('/sable', response_class=HTMLResponse)
-def sable_demo(db: Session = Depends(get_db)):
+def sable_demo(secret: str = '', db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
     from commune_agent import calculate_commune_table
     communes = calculate_commune_table()[:12]
     REGION_NAMES = {
@@ -13507,7 +13573,7 @@ async function runRegionalAgent() {{
     log.scrollTop = log.scrollHeight;
   }}
   try {{
-    const r = await fetch(API + '/admin/agent/regional-debates/sync?secret=preferendum-admin-2024', {{method:'POST'}});
+    const r = await fetch(API + '/admin/agent/regional-debates/sync?secret=' + new URLSearchParams(location.search).get('secret'), {{method:'POST'}});
     const d = await r.json();
     log.textContent += `[SectorAgent] ✓ Created ${{d.debates_created || 0}} sector debate(s).\\n`;
     if (d.summary) d.summary.forEach(s => log.textContent += `  → [${{s.sector}}] ${{s.question}}\\n`);
@@ -13541,7 +13607,7 @@ async function runNewsAgent() {{
     log.scrollTop = log.scrollHeight;
   }}
   try {{
-    const r = await fetch(API + '/admin/agent/daily-debates/sync?secret=preferendum-admin-2024', {{method:'POST'}});
+    const r = await fetch(API + '/admin/agent/daily-debates/sync?secret=' + new URLSearchParams(location.search).get('secret'), {{method:'POST'}});
     const d = await r.json();
     if (d.debates_created !== undefined) {{
       log.textContent += `[Agent-01] ✓ Created ${{d.debates_created}} new debate(s) from today's news.\\n`;

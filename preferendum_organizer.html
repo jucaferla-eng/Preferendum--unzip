@@ -446,6 +446,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 const API = 'https://preferendum-unzip.onrender.com';
 let token = localStorage.getItem('pref_org_token') || '';
 let userName = '';
+let referralCode = localStorage.getItem('pref_org_referral_code') || '';
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 if (token) showApp();
@@ -466,7 +467,9 @@ async function doLogin() {
   if (!r.ok) { document.getElementById('l-err').textContent = d.detail || 'Login failed'; return; }
   token = d.token;
   userName = d.user?.name || email;
+  referralCode = d.user?.referral_code || '';
   localStorage.setItem('pref_org_token', token);
+  if (referralCode) localStorage.setItem('pref_org_referral_code', referralCode);
   showApp();
 }
 
@@ -938,12 +941,30 @@ async function loadDebates() {
           <span>${db.scope_country||'Global'}</span>
           ${db.closes_at ? `<span>Closes ${db.closes_at.split('T')[0]}</span>` : ''}
         </div>
-        <div style="font-size:12px;color:#6366f1;margin-top:8px;font-weight:600;">Ver resultados →</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;">
+          <span style="font-size:12px;color:#6366f1;font-weight:600;">Ver resultados →</span>
+          <button onclick="event.stopPropagation();shareDebate(${db.id},${JSON.stringify(db.title)})" style="font-size:12px;font-weight:600;color:#fff;background:#6366f1;border:none;border-radius:8px;padding:6px 14px;cursor:pointer;">📤 Compartir</button>
+        </div>
       </div>`;
     }).join('');
   } catch(e) {
     list.innerHTML = '<div style="color:#f87171;font-size:14px;">Error loading consultations.</div>';
   }
+}
+
+// ── COMPARTIR CONSULTA — el organizador empuja su propia consulta a su red ──
+async function shareDebate(id, title) {
+  const url = referralCode ? `${API}/voter?debate=${id}&rc=${referralCode}` : `${API}/voter?debate=${id}`;
+  const text = `Te invito a participar en la consulta "${title}" en Preferendum:\n${url}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: 'Preferendum', text, url });
+      return;
+    }
+  } catch(_) {}
+  const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+  const w = window.open(waUrl, '_blank');
+  if (!w) window.location.href = waUrl;
 }
 
 // ── TIPO DE CONSULTA / VERIFICACIÓN EMPRESA ─────────────────

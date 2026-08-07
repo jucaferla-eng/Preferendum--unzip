@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 import requests as _requests
 
 BACKEND_URL  = os.getenv('BACKEND_URL', 'https://preferendum-unzip.onrender.com')
-ADMIN_SECRET = os.getenv('ADMIN_SECRET', 'preferendum-admin-2024')
+ADMIN_SECRET = os.getenv('ADMIN_SECRET')
 
 # ── META AD LIBRARY ───────────────────────────────────────────────────────────
 # API pública de Meta — todos los anuncios activos de cualquier marca son públicos
