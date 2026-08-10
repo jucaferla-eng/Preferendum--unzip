@@ -19,7 +19,7 @@ import os, json, hashlib, re
 from datetime import datetime, timedelta
 import requests as _requests
 
-BACKEND_URL  = os.getenv('BACKEND_URL', 'https://preferendum-unzip.onrender.com')
+BACKEND_URL  = os.getenv('BACKEND_URL', 'https://preferendum-unzip-d2zd.onrender.com')
 ADMIN_SECRET = os.getenv('ADMIN_SECRET')
 
 # ── META AD LIBRARY ───────────────────────────────────────────────────────────
