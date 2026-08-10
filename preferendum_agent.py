@@ -2035,6 +2035,7 @@ def _draft_rescue_debate(campaign: dict) -> dict | None:
     """
     api_key = get_api_key()
     if not api_key:
+        print(f'[RescueAgent] No ANTHROPIC_API_KEY available — skipping campaign #{campaign.get("id")}')
         return None
 
     advertiser = campaign.get('advertiser_name') or 'la marca'
@@ -2079,11 +2080,13 @@ Responde ÚNICAMENTE con este JSON exacto, sin texto adicional:
             timeout=25,
         )
         if not resp.ok:
+            print(f'[RescueAgent] Claude API error {resp.status_code}: {resp.text[:200]}')
             return None
         content = resp.json().get('content', [])
         text = next((c['text'] for c in content if c.get('type') == 'text'), '')
         match = re.search(r'\{.*\}', text, re.DOTALL)
         if not match:
+            print(f'[RescueAgent] Could not parse JSON from Claude response: {text[:200]}')
             return None
         return json.loads(match.group())
     except Exception as e:
