@@ -4069,7 +4069,15 @@ def get_debate(debate_id: int, db: Session = Depends(get_db)):
     return format_debate(debate, sponsor_info=sp_info)
 
 @app.post('/debates')
-def create_debate(data: DebateCreate, db: Session = Depends(get_db)):
+def create_debate(
+    data: DebateCreate,
+    db: Session = Depends(get_db),
+    x_agent_secret: Optional[str] = Header(None, alias='X-Agent-Secret'),
+):
+    """Endpoint interno para los agentes automáticos (noticias, rescate de campañas).
+    Los organizadores humanos usan /organizers/debates, que requiere login."""
+    if x_agent_secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
     if len(data.options) < 2:
         raise HTTPException(400, 'At least 2 options required')
     closes = datetime.fromisoformat(data.closes_at)
@@ -10397,6 +10405,45 @@ def agent_test_api(secret: str):
         result['rss_error'] = str(e)
     return result
 
+@app.get('/admin/stalled-campaigns')
+def admin_stalled_campaigns(secret: str, days: int = 20, db: Session = Depends(get_db)):
+    """
+    Campañas activas que llevan `days` o más sin que se les muestre ninguna
+    consulta (sin fila nueva en ad_impression_logs) — se estancaron aunque
+    todavía tienen presupuesto (spent_clp solo se mueve junto con esas filas,
+    así que esto también cubre el criterio de "sin movimiento de presupuesto").
+    """
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=days)
+    campaigns = db.query(AdCampaign).filter(
+        AdCampaign.is_active == True,
+        (AdCampaign.budget_clp == 0) | (AdCampaign.budget_clp > AdCampaign.spent_clp),
+    ).all()
+    stalled = []
+    for c in campaigns:
+        last = db.query(AdImpressionLog).filter(
+            AdImpressionLog.campaign_id == c.id
+        ).order_by(AdImpressionLog.created_at.desc()).first()
+        reference_date = last.created_at if last else c.created_at
+        if reference_date and reference_date <= cutoff:
+            stalled.append({
+                'id':                  c.id,
+                'advertiser_name':     c.advertiser_name or '',
+                'title':               c.title or '',
+                'ad_copy':             c.ad_copy or '',
+                'target_country':      c.target_country or '',
+                'target_communes':     c.target_communes or '',
+                'target_se_tiers':     c.target_se_tiers or 'A,B,C,D',
+                'target_gender':       c.target_gender or 'all',
+                'target_age_min':      c.target_age_min or 13,
+                'target_age_max':      c.target_age_max or 99,
+                'excluded_categories': c.excluded_categories or '',
+                'days_stalled':        (now - reference_date).days,
+            })
+    return {'stalled_campaigns': stalled, 'count': len(stalled)}
+
 @app.post('/admin/agent/daily-debates')
 def agent_daily_debates(secret: str, bg: BackgroundTasks):
     """Trigger the news agent to create debates from world news."""
@@ -10413,6 +10460,24 @@ def agent_daily_debates_sync(secret: str):
         raise HTTPException(403, 'Forbidden')
     from preferendum_agent import run_daily_debates
     return run_daily_debates()
+
+@app.post('/admin/agent/campaign-rescue')
+def agent_campaign_rescue(secret: str, bg: BackgroundTasks):
+    """Trigger the campaign-rescue agent — finds stalled advertiser campaigns
+    (20+ days without a match) and creates a consultation targeted at their audience."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_campaign_rescue_debates
+    bg.add_task(run_campaign_rescue_debates)
+    return {'ok': True, 'message': 'Campaign-rescue agent started in background — check server logs for results'}
+
+@app.post('/admin/agent/campaign-rescue/sync')
+def agent_campaign_rescue_sync(secret: str):
+    """Run the campaign-rescue agent synchronously and return results."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    from preferendum_agent import run_campaign_rescue_debates
+    return run_campaign_rescue_debates()
 
 @app.post('/admin/agent/se-lifestyle-debates')
 def agent_se_lifestyle(secret: str, bg: BackgroundTasks):

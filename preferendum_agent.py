@@ -558,6 +558,11 @@ SCHEDULED_TASKS = [
         "schedule": "0 9 * * 1",        # every Monday at 9am UTC
         "prompt":   "marketing_weekly_reports",    # handled separately
     },
+    {
+        "name":     "campaign_rescue",
+        "schedule": "0 10 * * *",       # every day at 10am UTC — sin cron propio todavía, disparar manual o crear uno en Render
+        "prompt":   "campaign_rescue",  # handled separately
+    },
 ]
 
 
@@ -2020,6 +2025,155 @@ def _fetch_rss_feed(url: str, max_items: int = 5) -> list:
         return []
 
 
+def _draft_rescue_debate(campaign: dict) -> dict | None:
+    """
+    Llama a Claude para crear una consulta pensada específicamente para reactivar
+    una campaña de anunciante estancada (sin ninguna consulta asignada en 20+ días).
+    Piensa en quién REALMENTE decide/compra el producto — ej. campaña de productos
+    infantiles → la consulta debe estar pensada para las madres/padres que compran,
+    no para los niños que consumen (criterio de JC, 2026-08-10).
+    """
+    api_key = get_api_key()
+    if not api_key:
+        return None
+
+    advertiser = campaign.get('advertiser_name') or 'la marca'
+    product    = campaign.get('title') or campaign.get('ad_copy') or ''
+    days       = campaign.get('days_stalled', 20)
+
+    prompt = f"""Eres el agente de Preferendum que crea consultas ciudadanas para reactivar campañas de anunciantes estancadas — llevan {days} días sin que se les muestre a ningún usuario porque su público objetivo es muy específico.
+
+Marca/anunciante: {advertiser}
+Producto o campaña: {product}
+
+Crea una consulta que:
+✓ Sea genuinamente interesante de responder — no un anuncio disfrazado de pregunta
+✓ Piense en quién REALMENTE decide o compra el producto, no solo quién lo consume.
+  Ejemplo: si es un producto infantil, la consulta debe estar pensada para madres/padres
+  que compran — no para niños, que consumen pero no deciden ni pagan.
+✓ Tenga 3-4 opciones equilibradas y realistas, mutuamente excluyentes
+✓ La pregunta empieza con "¿" y es directa (máx 120 caracteres)
+✓ El contexto explica el tema en 2-3 frases neutrales
+
+Responde ÚNICAMENTE con este JSON exacto, sin texto adicional:
+{{
+  "question": "¿[pregunta clara en español, máx 120 caracteres]?",
+  "context": "[2-3 frases de contexto neutral]",
+  "options": ["Opción A", "Opción B", "Opción C"],
+  "category": "[una de: general/technology/health/social/economy/education — la que más calce]"
+}}"""
+
+    try:
+        resp = _requests.post(
+            'https://api.anthropic.com/v1/messages',
+            headers={
+                'x-api-key':         api_key,
+                'anthropic-version': '2023-06-01',
+                'content-type':      'application/json',
+            },
+            json={
+                'model':      'claude-haiku-4-5-20251001',
+                'max_tokens': 500,
+                'messages':   [{'role': 'user', 'content': prompt}],
+            },
+            timeout=25,
+        )
+        if not resp.ok:
+            return None
+        content = resp.json().get('content', [])
+        text = next((c['text'] for c in content if c.get('type') == 'text'), '')
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if not match:
+            return None
+        return json.loads(match.group())
+    except Exception as e:
+        print(f'[RescueAgent] Draft error: {e}')
+        return None
+
+
+def run_campaign_rescue_debates(max_campaigns: int = 5) -> dict:
+    """
+    Busca campañas de anunciantes activas que llevan 20+ días sin que se les
+    muestre ninguna consulta (targeting demasiado angosto) y crea una consulta
+    dirigida específicamente a su público objetivo para reactivarlas.
+    Umbral y criterio confirmados por JC el 2026-08-10 — ver memoria del proyecto.
+    """
+    total_created = 0
+    total_skipped = 0
+    summary = []
+
+    try:
+        r = _requests.get(
+            f'{BACKEND_URL}/admin/stalled-campaigns',
+            params={'secret': ADMIN_SECRET, 'days': 20},
+            timeout=30,
+        )
+        r.raise_for_status()
+        stalled = r.json().get('stalled_campaigns', [])
+    except Exception as e:
+        print(f'[RescueAgent] Error fetching stalled campaigns: {e}')
+        return {'debates_created': 0, 'debates_skipped': 0, 'summary': [],
+                'run_at': datetime.utcnow().isoformat()}
+
+    print(f'[RescueAgent] Found {len(stalled)} stalled campaign(s)')
+
+    for campaign in stalled[:max_campaigns]:
+        debate = _draft_rescue_debate(campaign)
+        if not debate:
+            total_skipped += 1
+            continue
+
+        payload = {
+            'title':          debate['question'],
+            'context':        debate['context'],
+            'options':        debate['options'],
+            'creator_type':   'agent',
+            'inst_name':      'Preferendum',
+            'debate_type':    'citizen',
+            'scope':          'country' if campaign.get('target_country') else 'global',
+            'scope_country':  campaign.get('target_country') or 'ALL',
+            'scope_commune':  (campaign.get('target_communes') or '').split(',')[0].strip(),
+            'target_gender':  campaign.get('target_gender') or 'all',
+            'target_age_min': campaign.get('target_age_min') or 13,
+            'target_age_max': campaign.get('target_age_max') or 99,
+            'target_se_tiers': campaign.get('target_se_tiers') or 'A,B,C,D',
+            'category':       debate.get('category', 'general'),
+            'closes_at':      (datetime.utcnow() + timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%S'),
+            'verify_days':    14,
+        }
+        try:
+            resp = _requests.post(
+                f'{BACKEND_URL}/debates',
+                json=payload,
+                headers={'X-Agent-Secret': ADMIN_SECRET},
+                timeout=15,
+            )
+            if resp.ok:
+                total_created += 1
+                summary.append({
+                    'campaign_id':   campaign['id'],
+                    'advertiser':    campaign.get('advertiser_name'),
+                    'question':      debate['question'][:80],
+                    'days_stalled':  campaign.get('days_stalled'),
+                })
+                print(f'[RescueAgent] Created rescue debate for {campaign.get("advertiser_name")} '
+                      f'(stalled {campaign.get("days_stalled")} days): {debate["question"][:60]}')
+            else:
+                total_skipped += 1
+                print(f'[RescueAgent] Failed to create debate for campaign #{campaign["id"]}: '
+                      f'{resp.status_code} {resp.text[:100]}')
+        except Exception as e:
+            total_skipped += 1
+            print(f'[RescueAgent] Create debate error: {e}')
+
+    return {
+        'debates_created': total_created,
+        'debates_skipped': total_skipped,
+        'summary':         summary,
+        'run_at':          datetime.utcnow().isoformat(),
+    }
+
+
 def run_regional_debates(max_per_region: int = 1, force: bool = False) -> dict:
     """
     Fetch Chilean regional and sector news, generate debates targeted
@@ -2098,6 +2252,8 @@ def run_scheduled_task(task_name: str) -> dict:
     print(f'[Agent] Ejecutando tarea: {task_name} — {datetime.utcnow().isoformat()}')
     if task_name == 'daily_debates':
         return run_daily_debates()
+    if task_name == 'campaign_rescue':
+        return run_campaign_rescue_debates()
     if task_name == 'update_targeting_communes':
         from targeting_agent import run_monthly_commune_update
         run_monthly_commune_update()
