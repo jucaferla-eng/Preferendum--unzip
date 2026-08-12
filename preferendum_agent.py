@@ -2028,10 +2028,15 @@ def _fetch_rss_feed(url: str, max_items: int = 5) -> list:
 def _draft_rescue_debate(campaign: dict) -> dict | None:
     """
     Llama a Claude para crear una consulta pensada específicamente para reactivar
-    una campaña de anunciante estancada (sin ninguna consulta asignada en 20+ días).
-    Piensa en quién REALMENTE decide/compra el producto — ej. campaña de productos
-    infantiles → la consulta debe estar pensada para las madres/padres que compran,
-    no para los niños que consumen (criterio de JC, 2026-08-10).
+    una campaña de anunciante estancada (sin ninguna consulta asignada en 20+ días)
+    Y para decidir a quién debe apuntar de verdad esa consulta — no basta con
+    redactarla bien, el targeting (género/edad) también lo decide el agente,
+    pensando en quién REALMENTE decide/compra el producto, no en el target
+    genérico que haya dejado la marca. Ej: campaña de productos infantiles →
+    la consulta va para madres/padres que compran (target_gender='F', edad
+    adulta), no para niños, que consumen pero no deciden ni pagan.
+    Criterio confirmado por JC el 2026-08-12: "el agente lo tiene que ajustar
+    todo... tiene que ser preciso la asignación de campaña".
     """
     api_key = get_api_key()
     if not api_key:
@@ -2047,21 +2052,33 @@ def _draft_rescue_debate(campaign: dict) -> dict | None:
 Marca/anunciante: {advertiser}
 Producto o campaña: {product}
 
-Crea una consulta que:
+Tu trabajo tiene DOS partes — la consulta Y a quién debe apuntar de verdad:
+
+1. Crea una consulta que:
 ✓ Sea genuinamente interesante de responder — no un anuncio disfrazado de pregunta
-✓ Piense en quién REALMENTE decide o compra el producto, no solo quién lo consume.
-  Ejemplo: si es un producto infantil, la consulta debe estar pensada para madres/padres
-  que compran — no para niños, que consumen pero no deciden ni pagan.
 ✓ Tenga 3-4 opciones equilibradas y realistas, mutuamente excluyentes
 ✓ La pregunta empieza con "¿" y es directa (máx 120 caracteres)
 ✓ El contexto explica el tema en 2-3 frases neutrales
+
+2. Decide el targeting real (no el genérico) — piensa en quién REALMENTE decide
+o compra el producto, no solo quién lo consume o a quién menciona la marca.
+Ejemplo: producto infantil → quien decide/compra son madres/padres adultos,
+no niños — target_gender debe reflejar eso si aplica, y el rango de edad debe
+ser el de quien realmente toma la decisión de compra, no el del consumidor final.
+Si el producto es genuinamente para cualquier persona sin distinción, usa
+target_gender="all" y un rango de edad amplio (13-99) — no fuerces un target
+angosto donde no corresponde.
 
 Responde ÚNICAMENTE con este JSON exacto, sin texto adicional:
 {{
   "question": "¿[pregunta clara en español, máx 120 caracteres]?",
   "context": "[2-3 frases de contexto neutral]",
   "options": ["Opción A", "Opción B", "Opción C"],
-  "category": "[una de: general/technology/health/social/economy/education — la que más calce]"
+  "category": "[una de: general/technology/health/social/economy/education — la que más calce]",
+  "target_gender": "[F, M, o all — quien realmente decide/compra]",
+  "target_age_min": [edad mínima de quien decide/compra, número entero],
+  "target_age_max": [edad máxima de quien decide/compra, número entero],
+  "targeting_reason": "[1 frase explicando por qué elegiste ese género/edad]"
 }}"""
 
     try:
@@ -2126,6 +2143,26 @@ def run_campaign_rescue_debates(max_campaigns: int = 5) -> dict:
             total_skipped += 1
             continue
 
+        # Targeting real inferido por Claude (quién decide/compra) — con
+        # validación y respaldo al de la campaña si Claude no dio algo usable.
+        inferred_gender = debate.get('target_gender')
+        if inferred_gender not in ('F', 'M', 'all'):
+            inferred_gender = campaign.get('target_gender') or 'all'
+
+        try:
+            inferred_age_min = int(debate.get('target_age_min'))
+            inferred_age_max = int(debate.get('target_age_max'))
+            if not (13 <= inferred_age_min <= inferred_age_max <= 99):
+                raise ValueError('rango de edad fuera de rango')
+        except (TypeError, ValueError):
+            inferred_age_min = campaign.get('target_age_min') or 13
+            inferred_age_max = campaign.get('target_age_max') or 99
+
+        if debate.get('targeting_reason'):
+            print(f'[RescueAgent] Targeting para {campaign.get("advertiser_name")}: '
+                  f'gender={inferred_gender} edad={inferred_age_min}-{inferred_age_max} '
+                  f'— {debate["targeting_reason"]}')
+
         payload = {
             'title':          debate['question'],
             'context':        debate['context'],
@@ -2136,9 +2173,9 @@ def run_campaign_rescue_debates(max_campaigns: int = 5) -> dict:
             'scope':          'country' if campaign.get('target_country') else 'global',
             'scope_country':  campaign.get('target_country') or 'ALL',
             'scope_commune':  (campaign.get('target_communes') or '').split(',')[0].strip(),
-            'target_gender':  campaign.get('target_gender') or 'all',
-            'target_age_min': campaign.get('target_age_min') or 13,
-            'target_age_max': campaign.get('target_age_max') or 99,
+            'target_gender':  inferred_gender,
+            'target_age_min': inferred_age_min,
+            'target_age_max': inferred_age_max,
             'target_se_tiers': campaign.get('target_se_tiers') or 'A,B,C,D',
             'category':       debate.get('category', 'general'),
             'closes_at':      (datetime.utcnow() + timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%S'),
@@ -2160,6 +2197,9 @@ def run_campaign_rescue_debates(max_campaigns: int = 5) -> dict:
                     'question':      debate['question'][:80],
                     'days_stalled':  campaign.get('days_stalled'),
                     'debate_id':     new_debate_id,
+                    'target_gender': inferred_gender,
+                    'target_age':    f'{inferred_age_min}-{inferred_age_max}',
+                    'targeting_reason': debate.get('targeting_reason', ''),
                 })
                 print(f'[RescueAgent] Created rescue debate #{new_debate_id} for {campaign.get("advertiser_name")} '
                       f'(stalled {campaign.get("days_stalled")} days): {debate["question"][:60]}')
