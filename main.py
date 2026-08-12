@@ -9473,6 +9473,30 @@ def _recalculate_global_index(db):
     db.commit()
 
 
+@app.get('/admin/selfie-verification-audit')
+def admin_selfie_verification_audit(secret: str, db: Session = Depends(get_db)):
+    """Solo lectura. Distribución real de match_score en selfie_logs — si el
+    valor 0.95 aparece con una frecuencia anormal, indica que muchas de esas
+    verificaciones cayeron en el modo demo (AWS caído/sin credenciales) en vez
+    de una comparación facial real."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    total = db.query(SelfieLog).filter(SelfieLog.verified == True).count()
+    demo_mode = db.query(SelfieLog).filter(
+        SelfieLog.verified == True, SelfieLog.match_score == 0.95
+    ).count()
+    sample = db.query(SelfieLog.match_score, SelfieLog.created_at).filter(
+        SelfieLog.verified == True
+    ).order_by(SelfieLog.created_at.desc()).limit(20).all()
+    return {
+        'total_verified': total,
+        'exactly_0.95_score_demo_mode': demo_mode,
+        'pct_demo_mode': round(demo_mode / total * 100, 1) if total else 0,
+        'most_recent_20_scores': [
+            {'match_score': s[0], 'created_at': str(s[1])} for s in sample
+        ],
+    }
+
 @app.get('/admin/aws-check')
 def aws_check(secret: str):
     if secret != os.getenv('ADMIN_SECRET'):
