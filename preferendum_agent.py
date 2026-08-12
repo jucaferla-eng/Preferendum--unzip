@@ -2153,14 +2153,35 @@ def run_campaign_rescue_debates(max_campaigns: int = 5) -> dict:
             )
             if resp.ok:
                 total_created += 1
+                new_debate_id = resp.json().get('debate', {}).get('id')
                 summary.append({
                     'campaign_id':   campaign['id'],
                     'advertiser':    campaign.get('advertiser_name'),
                     'question':      debate['question'][:80],
                     'days_stalled':  campaign.get('days_stalled'),
+                    'debate_id':     new_debate_id,
                 })
-                print(f'[RescueAgent] Created rescue debate for {campaign.get("advertiser_name")} '
+                print(f'[RescueAgent] Created rescue debate #{new_debate_id} for {campaign.get("advertiser_name")} '
                       f'(stalled {campaign.get("days_stalled")} days): {debate["question"][:60]}')
+
+                # Anclar la campaña a esta consulta específica — sin esto, la consulta
+                # de rescate compite en igualdad con cualquier otra campaña que también
+                # matchee genéricamente, y puede perder el espacio (pasó con Nestlé el
+                # 2026-08-12: Transfernet se ganó el espacio en vez de la campaña rescatada).
+                if new_debate_id:
+                    try:
+                        existing_pins = [x.strip() for x in (campaign.get('target_debate_ids') or '').split(',') if x.strip()]
+                        existing_pins.append(str(new_debate_id))
+                        pin_resp = _requests.patch(
+                            f'{BACKEND_URL}/admin/campaigns/{campaign["id"]}/creative',
+                            params={'secret': ADMIN_SECRET, 'target_debate_ids': ','.join(existing_pins)},
+                            timeout=15,
+                        )
+                        if not pin_resp.ok:
+                            print(f'[RescueAgent] Failed to pin campaign #{campaign["id"]} to debate #{new_debate_id}: '
+                                  f'{pin_resp.status_code} {pin_resp.text[:100]}')
+                    except Exception as e:
+                        print(f'[RescueAgent] Pin error (non-fatal): {e}')
             else:
                 total_skipped += 1
                 print(f'[RescueAgent] Failed to create debate for campaign #{campaign["id"]}: '

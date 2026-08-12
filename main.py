@@ -4252,6 +4252,27 @@ def _match_campaigns(user, debate, db) -> list:
         (AdCampaign.start_date == None) | (AdCampaign.start_date <= now)
     ).all()
 
+    # ── Campañas ancladas a esta consulta específica (target_debate_ids) ──
+    # Bypass total de la matriz de targeting/ranking — usado por el agente de
+    # rescate de campañas para garantizar que la campaña estancada gane el
+    # espacio en la consulta creada específicamente para ella, en vez de competir
+    # con cualquier otra campaña que también matchee genéricamente.
+    if debate:
+        pinned_orm = [
+            c for c in orm_campaigns
+            if c.target_debate_ids and
+               debate.id in {int(x.strip()) for x in c.target_debate_ids.split(',') if x.strip().isdigit()} and
+               ((c.budget_clp or 0) == 0 or (c.spent_clp or 0) < (c.budget_clp or 0))
+        ]
+        if pinned_orm:
+            return [{
+                'id': c.id, 'advertiser_name': c.advertiser_name or '',
+                'title': c.title or '', 'ad_copy': c.ad_copy or '',
+                'logo_url': c.logo_url or '', 'ad_image_url': c.ad_image_url or '',
+                'video_url': getattr(c, 'video_url', '') or '', 'link_url': c.link_url or '',
+                'cpm': 0, '_orm': c, 'optimization_rank': 0, 'pinned': True,
+            } for c in pinned_orm]
+
     # Debate context for brand-safety filtering
     debate_category  = (getattr(debate, 'category', '') or '').lower().strip() if debate else ''
     debate_country   = (debate.scope_country or 'GLOBAL').upper().strip() if debate else 'GLOBAL'
@@ -10528,6 +10549,7 @@ def admin_stalled_campaigns(secret: str, days: int = 20, db: Session = Depends(g
                 'target_age_min':      c.target_age_min or 13,
                 'target_age_max':      c.target_age_max or 99,
                 'excluded_categories': c.excluded_categories or '',
+                'target_debate_ids': c.target_debate_ids or '',
                 'days_stalled':        (now - reference_date).days,
             })
     return {'stalled_campaigns': stalled, 'count': len(stalled)}
