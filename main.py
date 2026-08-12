@@ -2322,9 +2322,8 @@ async def login_face_token(
     except HTTPException:
         raise
     except Exception as e:
-        # AWS/network error — fall back to demo mode (face captured, service unavailable)
-        print(f'[login face-token] Rekognition error (demo fallback): {e}')
-        rekognition_mode = 'aws_error'
+        print(f'[login face-token] Rekognition error: {e}')
+        raise HTTPException(503, 'Verificación facial no disponible en este momento.')
 
     # Solo llega aquí si rekognition_mode == 'verified'
     face_token = jwt.encode({
@@ -2627,7 +2626,9 @@ def _moderate_consultation(title: str, context: str, options: list) -> dict:
     """
     api_key = os.getenv('ANTHROPIC_API_KEY')
     if not api_key:
-        return {'score': 75, 'decision': 'approved', 'reason': 'Sin API key — modo demo'}
+        # Nunca aprobar a ciegas sin revisión real — si no se puede moderar con IA,
+        # que quede pendiente de revisión manual, no publicada automáticamente.
+        return {'score': 50, 'decision': 'review', 'reason': 'Sin acceso a IA de moderación — requiere revisión manual'}
 
     prompt = f"""Eres el moderador de Preferendum, plataforma de consultas ciudadanas verificadas.
 Analiza esta consulta y da un score de 0 a 100 basado en estos criterios:
@@ -3508,23 +3509,25 @@ async def verify_document(
     if file.content_type not in ['image/jpeg', 'image/png', 'image/webp']:
         raise HTTPException(400, 'Solo se aceptan imágenes JPG o PNG')
 
-    # Verificar que el documento tenga al menos una cara visible
+    # Verificar que el documento tenga al menos una cara visible — nunca se
+    # aprueba a ciegas: si no se puede verificar de verdad, se bloquea con un
+    # error claro en vez de dejar pasar el documento sin revisión.
     aws_key = os.getenv('AWS_ACCESS_KEY_ID')
-    face_detected = False
-    if aws_key:
-        try:
-            rek = _rekognition_client()
-            resp = rek.detect_faces(
-                Image={'Bytes': contents},
-                Attributes=['DEFAULT']
-            )
-            face_detected = len(resp.get('FaceDetails', [])) > 0
-            if not face_detected:
-                raise HTTPException(400, 'No detectamos una cara en el documento. Asegúrate de fotografiar el lado con tu foto.')
-        except ClientError as e:
-            face_detected = True  # si AWS falla, no bloqueamos al usuario
-    else:
-        face_detected = True  # sin credenciales: modo demo
+    if not aws_key:
+        raise HTTPException(503, 'Verificación de documento no disponible en este momento.')
+    try:
+        rek = _rekognition_client()
+        resp = rek.detect_faces(
+            Image={'Bytes': contents},
+            Attributes=['DEFAULT']
+        )
+        face_detected = len(resp.get('FaceDetails', [])) > 0
+        if not face_detected:
+            raise HTTPException(400, 'No detectamos una cara en el documento. Asegúrate de fotografiar el lado con tu foto.')
+    except HTTPException:
+        raise
+    except ClientError:
+        raise HTTPException(503, 'Verificación de documento no disponible en este momento.')
 
     # Extraer texto del documento: RUT y número de serie (9 dígitos)
     doc_rut_match = False
@@ -3634,25 +3637,31 @@ async def verify_selfie(
     verified = False
     aws_key = os.getenv('AWS_ACCESS_KEY_ID')
 
-    if aws_key and doc_log and doc_log.face_bytes:
-        try:
-            rek = _rekognition_client()
-            doc_bytes = base64.b64decode(doc_log.face_bytes)
-            resp = rek.compare_faces(
-                SourceImage={'Bytes': doc_bytes},   # cara del documento
-                TargetImage={'Bytes': contents},    # selfie con carné bajo el mentón
-                SimilarityThreshold=80.0
-            )
-            matches = resp.get('FaceMatches', [])
-            if matches:
-                match_score = matches[0]['Similarity'] / 100.0
-                verified = match_score >= 0.90
-            else:
-                raise HTTPException(400, 'Tu cara no coincide con el documento. Asegúrate de mirar directo a la cámara frontal con el carné bajo el mentón.')
-        except ClientError:
-            verified = True; match_score = 0.95  # AWS falló: modo demo
-    else:
-        verified = True; match_score = 0.95  # sin credenciales o documento: modo demo
+    # Nunca se aprueba a ciegas — sin documento de referencia o sin AWS disponible,
+    # se bloquea con un error claro en vez de marcar a la persona como verificada.
+    if not doc_log or not doc_log.face_bytes:
+        raise HTTPException(400, 'Primero debes subir tu documento de identidad antes de tomarte la selfie.')
+    if not aws_key:
+        raise HTTPException(503, 'Verificación facial no disponible en este momento.')
+
+    try:
+        rek = _rekognition_client()
+        doc_bytes = base64.b64decode(doc_log.face_bytes)
+        resp = rek.compare_faces(
+            SourceImage={'Bytes': doc_bytes},   # cara del documento
+            TargetImage={'Bytes': contents},    # selfie con carné bajo el mentón
+            SimilarityThreshold=80.0
+        )
+        matches = resp.get('FaceMatches', [])
+        if matches:
+            match_score = matches[0]['Similarity'] / 100.0
+            verified = match_score >= 0.90
+        else:
+            raise HTTPException(400, 'Tu cara no coincide con el documento. Asegúrate de mirar directo a la cámara frontal con el carné bajo el mentón.')
+    except HTTPException:
+        raise
+    except ClientError:
+        raise HTTPException(503, 'Verificación facial no disponible en este momento.')
 
     db.add(SelfieLog(
         user_id=user.id,
@@ -3692,22 +3701,27 @@ async def verify_face_returning(
     ).order_by(SelfieLog.created_at.desc()).first()
 
     aws_key = os.getenv('AWS_ACCESS_KEY_ID')
-    if aws_key and ref and ref.face_bytes:
-        try:
-            rek = _rekognition_client()
-            resp = rek.compare_faces(
-                SourceImage={'Bytes': base64.b64decode(ref.face_bytes)},
-                TargetImage={'Bytes': contents},
-                SimilarityThreshold=80.0
-            )
-            matches = resp.get('FaceMatches', [])
-            if not matches:
-                raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
-            score = matches[0]['Similarity'] / 100.0
-            if score < 0.90:
-                raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
-        except ClientError:
-            pass  # AWS falló: dejamos pasar
+    if not ref or not ref.face_bytes:
+        raise HTTPException(400, 'No tienes una cara de referencia registrada.')
+    if not aws_key:
+        raise HTTPException(503, 'Verificación facial no disponible en este momento.')
+    try:
+        rek = _rekognition_client()
+        resp = rek.compare_faces(
+            SourceImage={'Bytes': base64.b64decode(ref.face_bytes)},
+            TargetImage={'Bytes': contents},
+            SimilarityThreshold=80.0
+        )
+        matches = resp.get('FaceMatches', [])
+        if not matches:
+            raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
+        score = matches[0]['Similarity'] / 100.0
+        if score < 0.90:
+            raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
+    except HTTPException:
+        raise
+    except ClientError:
+        raise HTTPException(503, 'Verificación facial no disponible en este momento.')
 
     return {'verified': True, 'message': 'Identidad confirmada'}
 
@@ -4628,30 +4642,33 @@ async def get_face_vote_token(
     rekognition_score = None
     rekognition_mode = 'no_aws'
 
-    if aws_key and ref and ref.face_bytes:
-        try:
-            rek = _rekognition_client()
-            resp = rek.compare_faces(
-                SourceImage={'Bytes': base64.b64decode(ref.face_bytes)},
-                TargetImage={'Bytes': contents},
-                SimilarityThreshold=80.0
-            )
-            matches = resp.get('FaceMatches', [])
-            if matches:
-                rekognition_score = round(matches[0]['Similarity'], 2)
-                rekognition_mode = 'verified'
-                if rekognition_score / 100.0 < 0.90:
-                    raise HTTPException(400, f'Tu cara no coincide con la registrada ({rekognition_score}% similitud). Intenta con mejor iluminación.')
-            else:
-                rekognition_mode = 'no_match'
-                raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
-        except HTTPException:
-            raise
-        except ClientError:
-            rekognition_mode = 'aws_error'
-    else:
-        # Sin AWS configurado: modo demo — permite votar pero sin comparación real
-        rekognition_mode = 'demo'
+    # Nunca se emite un token de voto sin comparación facial real — si no hay
+    # foto de referencia o AWS no está disponible, se bloquea en vez de dejar
+    # votar sin verificación de identidad.
+    if not ref or not ref.face_bytes:
+        raise HTTPException(400, 'No tienes una cara de referencia registrada.')
+    if not aws_key:
+        raise HTTPException(503, 'Verificación facial no disponible en este momento — intenta de nuevo en unos minutos.')
+    try:
+        rek = _rekognition_client()
+        resp = rek.compare_faces(
+            SourceImage={'Bytes': base64.b64decode(ref.face_bytes)},
+            TargetImage={'Bytes': contents},
+            SimilarityThreshold=80.0
+        )
+        matches = resp.get('FaceMatches', [])
+        if matches:
+            rekognition_score = round(matches[0]['Similarity'], 2)
+            rekognition_mode = 'verified'
+            if rekognition_score / 100.0 < 0.90:
+                raise HTTPException(400, f'Tu cara no coincide con la registrada ({rekognition_score}% similitud). Intenta con mejor iluminación.')
+        else:
+            rekognition_mode = 'no_match'
+            raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
+    except HTTPException:
+        raise
+    except ClientError:
+        raise HTTPException(503, 'Verificación facial no disponible en este momento — intenta de nuevo en unos minutos.')
     token = jwt.encode({
         'sub': user.id,
         'debate_id': debate_id,
@@ -4662,7 +4679,7 @@ async def get_face_vote_token(
         'token': token,
         'rekognition_score': rekognition_score,
         'rekognition_mode': rekognition_mode,
-        'message': f'Identidad verificada — similitud {rekognition_score}%' if rekognition_score else 'Verificado (modo demo)'
+        'message': f'Identidad verificada — similitud {rekognition_score}%'
     }
 
 
