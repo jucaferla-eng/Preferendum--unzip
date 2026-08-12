@@ -9527,6 +9527,8 @@ def aws_check(secret: str):
         'key_length': len(key),
         'secret_set': bool(sec),
         'secret_length': len(sec),
+        'secret_last_3_repr': repr(sec[-3:]) if sec else '',
+        'key_last_3_repr': repr(key[-3:]) if key else '',
         'region': region,
     }
     if key and sec:
