@@ -4869,6 +4869,33 @@ def _cast_vote_inner(debate_id: int, data, user, db):
         print(f'[cast_vote] DB commit error for user={user.id} debate={debate_id}: {traceback.format_exc()}')
         db.rollback()
         raise HTTPException(500, f'Error al registrar el voto: {type(e).__name__}')
+
+    # Impresión + gasto de campaña al VOTAR — no solo al leer opiniones existentes.
+    # Votar es la acción universal (todos lo hacen); escribir opinión es opcional y
+    # poco frecuente, así que antes ninguna campaña gastaba presupuesto en consultas
+    # nuevas hasta que alguien escribía texto. No debe romper el voto si falla.
+    try:
+        matched_campaigns = _match_campaigns(user, debate, db)
+        if matched_campaigns:
+            top = matched_campaigns[0]
+            orm = top.get('_orm')
+            if orm:
+                db.add(AdImpressionLog(
+                    campaign_id = orm.id,
+                    debate_id   = debate_id,
+                    gender      = user.gender or '',
+                    age_group   = _get_age_group(user.dob),
+                    county      = user.county or '',
+                    country     = user.country or '',
+                ))
+                cpm_usd  = top.get('cpm') or 6.0
+                cost_clp = max(1, int(round((cpm_usd * USD_TO_CLP) / 1000.0)))
+                orm.spent_clp = min(orm.budget_clp or 0, (orm.spent_clp or 0) + cost_clp)
+                db.commit()
+    except Exception as e:
+        print(f'[cast_vote] ad impression error (non-fatal): {e}')
+        db.rollback()
+
     return {
         'success': True,
         'verify_code': verify_code,
