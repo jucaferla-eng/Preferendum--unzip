@@ -10475,6 +10475,24 @@ def agent_test_api(secret: str):
         result['rss_error'] = str(e)
     return result
 
+@app.get('/admin/recent-ad-impressions')
+def admin_recent_ad_impressions(secret: str, limit: int = 20, db: Session = Depends(get_db)):
+    """Solo lectura — últimas impresiones registradas, con nombre de campaña y debate."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    rows = db.query(AdImpressionLog).order_by(AdImpressionLog.created_at.desc()).limit(limit).all()
+    result = []
+    for r in rows:
+        camp = db.query(AdCampaign).filter(AdCampaign.id == r.campaign_id).first()
+        result.append({
+            'campaign_id': r.campaign_id,
+            'advertiser': camp.advertiser_name if camp else '(campaña no encontrada)',
+            'spent_clp': camp.spent_clp if camp else None,
+            'debate_id': r.debate_id,
+            'created_at': str(r.created_at),
+        })
+    return {'recent': result}
+
 @app.get('/admin/stalled-campaigns')
 def admin_stalled_campaigns(secret: str, days: int = 20, db: Session = Depends(get_db)):
     """
