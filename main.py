@@ -1737,7 +1737,7 @@ def force_otp(phone: str, db: Session = Depends(get_db)):
 @app.get('/admin/vote-code')
 def admin_vote_code(email: str, debate_id: int, db: Session = Depends(get_db)):
     """Admin: get verify_code for a user+debate combo (testing only)."""
-    user = db.query(User).filter(User.email == email).first()
+    user = db.query(User).filter(func.lower(User.email) == func.lower(email)).first()
     if not user:
         return {'error': 'user not found'}
     log = db.query(HasVotedLog).filter(HasVotedLog.user_id == user.id, HasVotedLog.debate_id == debate_id).first()
@@ -1900,7 +1900,7 @@ def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
     ).first()
     if dup_nid:
         raise HTTPException(409, 'Este documento de identidad ya está registrado')
-    existing = db.query(User).filter(User.email == data.email).first()
+    existing = db.query(User).filter(func.lower(User.email) == func.lower(data.email)).first()
     if existing:
         if not bcrypt.checkpw(data.password.encode(), existing.password.encode()):
             raise HTTPException(400, 'Email ya registrado con contraseña diferente')
@@ -2182,7 +2182,7 @@ En memoria del Socio Fundador José Ignacio Fernández (1989–2024), quien demo
 
 @app.post('/auth/register')
 def register(data: RegisterInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == data.email).first():
+    if db.query(User).filter(func.lower(User.email) == func.lower(data.email)).first():
         raise HTTPException(400, 'Email already registered')
     hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
     user = User(
@@ -2211,7 +2211,7 @@ def register(data: RegisterInput, bg: BackgroundTasks, db: Session = Depends(get
 
 @app.post('/auth/login')
 def login(data: LoginInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == data.email).first()
+    user = db.query(User).filter(func.lower(User.email) == func.lower(data.email)).first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
         raise HTTPException(401, 'Invalid credentials')
     check_and_register_device(data.device_fp, user.id, db)
@@ -5115,7 +5115,7 @@ def organizers_page():
         return f.read()
 @app.post('/organizers/register')
 def organizer_register(data: RegisterInput, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == data.email).first():
+    if db.query(User).filter(func.lower(User.email) == func.lower(data.email)).first():
         raise HTTPException(400, 'Email already registered')
     hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
     user = User(
@@ -5141,7 +5141,7 @@ def organizer_panel():
 
 @app.post('/organizers/login')
 def organizer_login(data: LoginInput, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == data.email, User.role == 'organizer').first()
+    user = db.query(User).filter(func.lower(User.email) == func.lower(data.email), User.role == 'organizer').first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
         raise HTTPException(401, 'Invalid credentials')
     return {
@@ -5639,7 +5639,7 @@ class OrganizerRegisterFullInput(BaseModel):
 
 @app.post('/organizer/register')
 def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == data.email).first()
+    existing = db.query(User).filter(func.lower(User.email) == func.lower(data.email)).first()
     if existing:
         # Citizen trying to become organizer — verify password then upgrade role
         if not bcrypt.checkpw(data.password.encode(), existing.password.encode()):
@@ -5756,7 +5756,7 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks,
 
 @app.post('/organizer/login')
 def organizer_login_v2(data: LoginInput, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == data.email).first()
+    user = db.query(User).filter(func.lower(User.email) == func.lower(data.email)).first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
         raise HTTPException(401, 'Credenciales inválidas')
     if user.role not in ('organizer', 'admin'):
@@ -6111,7 +6111,7 @@ class MarketerRegisterInput(BaseModel):
 
 @app.post('/marketer/register')
 def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == data.email).first()
+    existing = db.query(User).filter(func.lower(User.email) == func.lower(data.email)).first()
     if existing:
         # Citizen trying to become marketer — verify password then upgrade role
         if not bcrypt.checkpw(data.password.encode(), existing.password.encode()):
@@ -6236,7 +6236,7 @@ def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Sess
 
 @app.post('/marketer/login')
 def marketer_login(data: LoginInput, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == data.email, User.role.in_(['marketer', 'admin'])).first()
+    user = db.query(User).filter(func.lower(User.email) == func.lower(data.email), User.role.in_(['marketer', 'admin'])).first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
         raise HTTPException(401, 'Credenciales inválidas')
     profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user.id).first()
@@ -8787,7 +8787,7 @@ PLATFORM_PRICES_USD = {'instagram': 290, 'x': 240, 'tiktok': 320, 'facebook': 21
 @app.post('/marketer/social-sponsors')
 def create_social_sponsor(data: SocialSponsorInput, db: Session = Depends(get_db)):
     """Registra un patrocinio de amplificación social. Usa el targeting existente de la cuenta."""
-    user = db.query(User).filter(User.email == data.advertiser_email, User.role.in_(['marketer','admin'])).first()
+    user = db.query(User).filter(func.lower(User.email) == func.lower(data.advertiser_email), User.role.in_(['marketer','admin'])).first()
     if not user:
         raise HTTPException(404, 'Cuenta marketer no encontrada. Crea tu campaña primero.')
     total = sum(PLATFORM_PRICES_USD.get(p, 0) for p in data.platforms) * data.weeks
@@ -8806,7 +8806,7 @@ def create_social_sponsor(data: SocialSponsorInput, db: Session = Depends(get_db
 @app.get('/marketer/social-sponsors')
 def list_social_sponsors(email: str, db: Session = Depends(get_db)):
     """Lista patrocinios sociales de un marketer (placeholder — se persiste cuando haya modelo DB)."""
-    user = db.query(User).filter(User.email == email, User.role.in_(['marketer','admin'])).first()
+    user = db.query(User).filter(func.lower(User.email) == func.lower(email), User.role.in_(['marketer','admin'])).first()
     if not user:
         raise HTTPException(404, 'Cuenta marketer no encontrada.')
     return {'sponsors': [], 'note': 'Persistencia completa disponible en próxima versión.'}
@@ -8823,7 +8823,7 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
     # selfie-vs-ID face match, cargo document, and (if not the boss) the boss's
     # own sign-off from their own verified, selfie-checked account.
     marketer_user = db.query(User).filter(
-        User.email == data.advertiser_email
+        func.lower(User.email) == func.lower(data.advertiser_email)
     ).first()
     if not marketer_user:
         # Auto-create marketer account on first campaign
@@ -9352,7 +9352,7 @@ def test_email_send(to: str, secret: str):
 def get_test_otp(email: str, secret: str, channel: str = 'email', db: Session = Depends(get_db)):
     if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
-    user = db.query(User).filter(User.email == email).first()
+    user = db.query(User).filter(func.lower(User.email) == func.lower(email)).first()
     if not user:
         raise HTTPException(404, 'User not found')
     otp = db.query(OTPCode).filter(
@@ -11281,7 +11281,7 @@ def admin_debug_user(secret: str, email: str, db: Session = Depends(get_db)):
     """Muestra datos de targeting de un usuario para diagnóstico."""
     if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
-    u = db.query(User).filter(User.email == email).first()
+    u = db.query(User).filter(func.lower(User.email) == func.lower(email)).first()
     if not u:
         raise HTTPException(404, 'User not found')
     commune_row = None
@@ -11676,7 +11676,7 @@ def admin_fix_user_tier(secret: str, email: str, db: Session = Depends(get_db)):
     """Fuerza recalculo de se_tier para un usuario específico."""
     if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
-    u = db.query(User).filter(User.email == email).first()
+    u = db.query(User).filter(func.lower(User.email) == func.lower(email)).first()
     if not u:
         raise HTTPException(404, 'User not found')
     before = u.se_tier
