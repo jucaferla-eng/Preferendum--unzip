@@ -10059,6 +10059,23 @@ def admin_reset_selfie(user_id: int, secret: str, db: Session = Depends(get_db))
     db.commit()
     return {'ok': True, 'email': user.email, 'message': 'Selfie borrada — el usuario puede registrar su cara de nuevo'}
 
+@app.get('/admin/device-fingerprints/count')
+def admin_device_fp_count(secret: str, db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    return {'total_device_records': db.query(IMEILog).count()}
+
+@app.delete('/admin/device-fingerprints/clear-all')
+def admin_device_fp_clear_all(secret: str, db: Session = Depends(get_db)):
+    """Borra todo el historial de huellas de dispositivo (anti-fraude 'un dispositivo = una cuenta').
+    Pensado para limpiar datos acumulados durante pruebas internas antes de abrir a usuarios reales —
+    cada dispositivo se vuelve a registrar limpio en su próximo login, sin perder cuentas ni datos de usuario."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    deleted = db.query(IMEILog).delete()
+    db.commit()
+    return {'ok': True, 'deleted': deleted, 'message': 'Registros de dispositivo borrados — se re-registran limpios en el próximo login.'}
+
 @app.post('/admin/purge-user')
 def admin_purge_user(user_id: int, secret: str, db: Session = Depends(get_db)):
     if secret != os.getenv('ADMIN_SECRET'):
