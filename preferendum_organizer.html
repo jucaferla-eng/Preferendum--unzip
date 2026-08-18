@@ -304,6 +304,13 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
           <input type="hidden" id="c-country" value="GLOBAL"/>
         </div>
       </div>
+      <div class="field" style="margin-top:4px;">
+        <label>Comunas específicas (opcional — vacío = todo el país/nivel seleccionado)</label>
+        <div class="chip-row" id="commune-chips">
+          <div class="chip selected" data-value="ALL" onclick="toggleCommuneChip(this)">Todas las comunas</div>
+        </div>
+        <input type="hidden" id="c-communes" value=""/>
+      </div>
       <!-- SPONSORED TOGGLE -->
       <div class="branch-toggle-row" style="margin-top:20px;">
         <div>
@@ -642,7 +649,7 @@ async function createDebate() {
   const ageMin   = parseInt(document.getElementById('c-age-min').value) || 13;
   const ageMax   = parseInt(document.getElementById('c-age-max').value) || 99;
   const seTiers  = document.getElementById('c-se-tiers').value || 'A,B,C,D';
-  const commune  = document.getElementById('c-commune')?.value?.trim() || '';
+  const communes = document.getElementById('c-communes')?.value?.trim() || '';
   const options      = [...document.querySelectorAll('.opt-input')].map(i => i.value.trim()).filter(Boolean);
   const optionImages = [...document.querySelectorAll('#options-list .opt-img-file')].map(f => f.dataset.imgUrl || '');
 
@@ -677,8 +684,9 @@ async function createDebate() {
       cover_image_url: document.getElementById('c-cover-url').value || '',
       is_anonymous: document.getElementById('c-is-anonymous').value === 'true',
       debate_type: instType,
+      scope: communes ? 'commune' : 'country',
       scope_country: country,
-      scope_commune: commune,
+      scope_commune: communes,
       target_gender: gender,
       target_age_min: ageMin,
       target_age_max: ageMax,
@@ -882,6 +890,45 @@ function toggleCountryChip(el) {
   const selected = [...group.querySelectorAll('.chip.selected')].map(c => c.dataset.value);
   const val = selected.includes('GLOBAL') ? 'GLOBAL' : selected.join(',');
   document.getElementById('c-country').value = val;
+  renderCommuneChips();
+}
+
+// ── Comunas específicas por consulta (igual convención que target_communes en campañas) ──
+const CONSULT_COMMUNES = {
+  CL:['Vitacura','Las Condes','Lo Barnechea','Providencia','La Reina','Ñuñoa','Peñalolén','Santiago','Maipú','La Florida','Viña del Mar','Concepción'],
+  AR:['Palermo','Belgrano','Recoleta','Caballito','Nordelta','Pilar','Rosario Centro'],
+  PE:['Miraflores','San Isidro','Barranco','San Borja','La Molina','Surco'],
+  MX:['Polanco','Santa Fe','Condesa','Roma Norte','Coyoacán','San Pedro Garza'],
+  CO:['El Poblado','Laureles','Chapinero','Usaquén','Chía'],
+  US:['Manhattan','Beverly Hills','Miami Beach','Georgetown','Palo Alto'],
+  ES:['Salamanca','Retiro','Goya','Sarrià','Pedralbes'],
+};
+
+function renderCommuneChips() {
+  const countryVal = document.getElementById('c-country').value;
+  const group = document.getElementById('commune-chips');
+  const countries = countryVal === 'GLOBAL' ? [] : countryVal.split(',');
+  const communes = [...new Set(countries.flatMap(cc => CONSULT_COMMUNES[cc] || []))];
+
+  group.innerHTML = '<div class="chip selected" data-value="ALL" onclick="toggleCommuneChip(this)">Todas las comunas</div>'
+    + communes.map(name => `<div class="chip" data-value="${name}" onclick="toggleCommuneChip(this)">${name}</div>`).join('');
+  document.getElementById('c-communes').value = '';
+}
+
+function toggleCommuneChip(el) {
+  const isAll = el.dataset.value === 'ALL';
+  const group = document.getElementById('commune-chips');
+  if (isAll) {
+    group.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+  } else {
+    group.querySelector('[data-value="ALL"]').classList.remove('selected');
+    el.classList.toggle('selected');
+    const anySelected = [...group.querySelectorAll('.chip')].some(c => c.classList.contains('selected'));
+    if (!anySelected) group.querySelector('[data-value="ALL"]').classList.add('selected');
+  }
+  const selected = [...group.querySelectorAll('.chip.selected')].map(c => c.dataset.value);
+  document.getElementById('c-communes').value = selected.includes('ALL') ? '' : selected.join(',');
 }
 
 let _similarTimer = null;

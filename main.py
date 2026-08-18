@@ -3931,7 +3931,8 @@ def debates_for_me(
         # Filtro por alcance geográfico
         scope = (d.scope or 'global').lower()
         if scope == 'commune':
-            if not user_commune or user_commune != (d.scope_commune or '').strip().lower():
+            allowed_communes = {c.strip().lower() for c in (d.scope_commune or '').split(',') if c.strip()}
+            if not user_commune or user_commune not in allowed_communes:
                 continue
         elif scope == 'country':
             sc = (d.scope_country or '').upper()
@@ -4197,7 +4198,8 @@ def _campaign_matches_debate(c, debate) -> bool:
     # Comuna — si la campaña apunta a comunas específicas y la consulta tiene
     # alcance comunal definido, la comuna de la consulta debe estar en la lista
     target_communes = [x.strip() for x in (c.target_communes or '').split(',') if x.strip()]
-    if target_communes and debate.scope_commune and debate.scope_commune not in target_communes:
+    debate_communes = [x.strip() for x in (debate.scope_commune or '').split(',') if x.strip()]
+    if target_communes and debate_communes and not (set(debate_communes) & set(target_communes)):
         return False
     # Género — incompatible solo si ambas matrices especifican géneros distintos
     c_gender = (c.target_gender or 'all').lower()
@@ -4724,7 +4726,9 @@ def _cast_vote_inner(debate_id: int, data, user, db):
 
     # Elegibilidad: el votante debe cumplir las condiciones del consultante
     if debate.scope == 'commune' and debate.scope_commune:
-        if (user.commune or '').strip().lower() != debate.scope_commune.strip().lower():
+        # scope_commune puede ser una comuna o una lista separada por comas
+        allowed_communes = {c.strip().lower() for c in debate.scope_commune.split(',') if c.strip()}
+        if (user.county or '').strip().lower() not in allowed_communes:
             raise HTTPException(403, f'Esta consulta es solo para residentes de {debate.scope_commune}')
     elif debate.scope == 'country' and debate.scope_country and debate.scope_country != 'GL':
         if (user.country or '').upper() != debate.scope_country.upper():

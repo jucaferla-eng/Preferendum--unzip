@@ -381,6 +381,31 @@ def run_monthly_commune_update():
 TIER_ORDER = {'A': 4, 'B': 3, 'C': 2, 'D': 1}
 
 
+def _get_se_tier(income_index: float) -> str:
+    if income_index >= 80: return 'A'
+    if income_index >= 55: return 'B'
+    if income_index >= 35: return 'C'
+    return 'D'
+
+
+def _aggregate_communes(communes_map: dict, commune_names: list, default_tier: str, default_cpm: float) -> dict:
+    """Combines several communes into one population-weighted profile, for
+    debates targeted at more than one commune at once (scope_commune as a
+    comma-separated list, same convention as AdCampaign.target_communes)."""
+    rows = [communes_map[name] for name in commune_names if name in communes_map]
+    if not rows:
+        return {'income_tier': default_tier, 'income_index': 50, 'population': 50000, 'cpm': default_cpm}
+    total_pop = sum(r.get('population', 50000) for r in rows) or 1
+    weighted_index = sum(r.get('income_index', 50) * r.get('population', 50000) for r in rows) / total_pop
+    weighted_cpm   = sum(r.get('cpm', default_cpm) * r.get('population', 50000) for r in rows) / total_pop
+    return {
+        'income_tier':  _get_se_tier(weighted_index),
+        'income_index': round(weighted_index, 1),
+        'population':   total_pop,
+        'cpm':          round(weighted_cpm, 2),
+    }
+
+
 def _gender_precision(camp_gender: str, debate_gender: str) -> float:
     """Returns fraction of debate audience matching campaign gender target."""
     if camp_gender in ('all', '', None):
@@ -485,13 +510,23 @@ def score_and_optimize(campaign: dict, debate: dict, matrix: dict) -> Optional[d
     if camp_min_gni and country_gni < camp_min_gni:
         return None
 
-    # ── COMMUNE DATA (central variable) ─────────────────────────
-    communes_map   = country_data.get('communes', {})
-    commune_data   = communes_map.get(debate_commune) if debate_commune else None
-    commune_tier   = commune_data.get('income_tier', 'C')      if commune_data else 'C'
-    commune_index  = commune_data.get('income_index', 50)      if commune_data else 50
-    commune_pop    = commune_data.get('population', 50000)     if commune_data else 50000
-    commune_cpm    = commune_data.get('cpm', country_data.get('cpm_base', 4.0)) if commune_data else country_data.get('cpm_base', 4.0)
+    # ── COMMUNE DATA (central variable) ──────────────────────────
+    # scope_commune may hold one commune or a comma-separated list (same
+    # convention as AdCampaign.target_communes) — multiple communes are
+    # combined into one population-weighted profile.
+    communes_map    = country_data.get('communes', {})
+    debate_communes = [c.strip() for c in debate_commune.split(',') if c.strip()] if debate_commune else []
+    if len(debate_communes) <= 1:
+        commune_data   = communes_map.get(debate_communes[0]) if debate_communes else None
+        commune_tier   = commune_data.get('income_tier', 'C')      if commune_data else 'C'
+        commune_index  = commune_data.get('income_index', 50)      if commune_data else 50
+        commune_pop    = commune_data.get('population', 50000)     if commune_data else 50000
+        commune_cpm    = commune_data.get('cpm', country_data.get('cpm_base', 4.0)) if commune_data else country_data.get('cpm_base', 4.0)
+    else:
+        agg = _aggregate_communes(communes_map, debate_communes, 'C', country_data.get('cpm_base', 4.0))
+        commune_tier, commune_index, commune_pop, commune_cpm = (
+            agg['income_tier'], agg['income_index'], agg['population'], agg['cpm']
+        )
 
     # ── GATE 3: Income tier hard cutoff (>1 tier below = exclude) ─
     tier_val      = TIER_ORDER.get(commune_tier, 1)
@@ -500,7 +535,7 @@ def score_and_optimize(campaign: dict, debate: dict, matrix: dict) -> Optional[d
         return None
 
     # ── Commune precision ────────────────────────────────────────
-    exact_commune_match = debate_commune in camp_communes if camp_communes else False
+    exact_commune_match = bool(set(debate_communes) & set(camp_communes)) if camp_communes and debate_communes else False
     if exact_commune_match:
         commune_prec = 1.0
     else:
