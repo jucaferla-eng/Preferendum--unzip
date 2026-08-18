@@ -887,10 +887,10 @@ async function doLogin() {
   const email = document.getElementById('login-email').value.trim();
   const pass  = document.getElementById('login-pass').value;
   if (!email || !pass) return;
-  const r = await fetch(`${API}/auth/login`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, password: pass})});
+  const r = await fetch(`${API}/marketer/login`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, password: pass})});
   const d = await r.json();
   if (!r.ok) { showErr('login-err', d.detail || 'Login failed'); return; }
-  token     = d.access_token || d.token;
+  token     = d.token;
   userEmail = email;
   userName  = email.split('@')[0];
   localStorage.setItem('pref_adv_token', token);
