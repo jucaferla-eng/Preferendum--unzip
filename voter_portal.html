@@ -2047,6 +2047,14 @@ function renderAdCard(ad) {
   const cardAttrs = url ? `onclick="window.open('${esc(url)}','_blank')"` : '';
   const ctaHtml  = url ? `<a class="ad-cta" href="${esc(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(cta)}</a>` : '';
 
+  // Imagen principal de la campaña (distinta del logo chico) — solo si no hay video
+  let imageHtml = '';
+  if (ad.image_url && !ad.video_url) {
+    imageHtml = `<div style="margin:0 16px 10px;border-radius:10px;overflow:hidden;">
+      <img src="${esc(ad.image_url)}" alt="${esc(brand)}" style="width:100%;display:block;object-fit:cover;" onerror="this.parentElement.remove()"/>
+    </div>`;
+  }
+
   // Video: convert YouTube/Vimeo watch URLs to embeddable format
   let videoHtml = '';
   if (ad.video_url) {
@@ -2073,6 +2081,7 @@ function renderAdCard(ad) {
       </div>
       ${url ? '<div class="ad-arrow">›</div>' : ''}
     </div>
+    ${imageHtml}
     ${videoHtml}
     <div class="ad-sponsored">Patrocinado · Preferendum</div>
   </div>`;
