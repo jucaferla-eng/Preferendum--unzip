@@ -869,6 +869,7 @@ function toggleSeChip(el) {
   }
   const selected = [...group.querySelectorAll('.chip.selected')].map(c => c.dataset.value);
   document.getElementById('c-se-tiers').value = selected.includes('ALL') ? 'A,B,C,D' : selected.join(',');
+  renderCommuneChips();
 }
 
 function toggleCountryChip(el) {
@@ -893,26 +894,41 @@ function toggleCountryChip(el) {
   renderCommuneChips();
 }
 
-// ── Comunas específicas por consulta (igual convención que target_communes en campañas) ──
-const CONSULT_COMMUNES = {
-  CL:['Vitacura','Las Condes','Lo Barnechea','Providencia','La Reina','Ñuñoa','Peñalolén','Santiago','Maipú','La Florida','Viña del Mar','Concepción'],
-  AR:['Palermo','Belgrano','Recoleta','Caballito','Nordelta','Pilar','Rosario Centro'],
-  PE:['Miraflores','San Isidro','Barranco','San Borja','La Molina','Surco'],
-  MX:['Polanco','Santa Fe','Condesa','Roma Norte','Coyoacán','San Pedro Garza'],
-  CO:['El Poblado','Laureles','Chapinero','Usaquén','Chía'],
-  US:['Manhattan','Beverly Hills','Miami Beach','Georgetown','Palo Alto'],
-  ES:['Salamanca','Retiro','Goya','Sarrià','Pedralbes'],
-};
-
-function renderCommuneChips() {
+// ── Comunas específicas por consulta — datos reales de la base (mismo endpoint que campañas) ──
+async function renderCommuneChips() {
   const countryVal = document.getElementById('c-country').value;
+  const tierVal     = document.getElementById('c-se-tiers').value || 'A,B,C,D';
   const group = document.getElementById('commune-chips');
-  const countries = countryVal === 'GLOBAL' ? [] : countryVal.split(',');
-  const communes = [...new Set(countries.flatMap(cc => CONSULT_COMMUNES[cc] || []))];
-
-  group.innerHTML = '<div class="chip selected" data-value="ALL" onclick="toggleCommuneChip(this)">Todas las comunas</div>'
-    + communes.map(name => `<div class="chip" data-value="${name}" onclick="toggleCommuneChip(this)">${name}</div>`).join('');
   document.getElementById('c-communes').value = '';
+
+  if (countryVal === 'GLOBAL') {
+    group.innerHTML = '<div class="chip selected" data-value="ALL" onclick="toggleCommuneChip(this)">Todas las comunas</div>';
+    return;
+  }
+
+  group.innerHTML = '<span style="color:#7a7570;font-size:12px;">Cargando comunas…</span>';
+  const countries = countryVal.split(',').filter(Boolean);
+  const tiers = tierVal.split(',').filter(Boolean);
+
+  try {
+    const results = await Promise.all(
+      countries.map(cc => fetch(`${API}/marketer/communes?country=${cc}`).then(r => r.json()))
+    );
+    const all = results.flatMap(d => d.communes || []);
+    const filtered = all.filter(c => tiers.includes(c.se_tier));
+
+    if (!filtered.length) {
+      group.innerHTML = '<div class="chip selected" data-value="ALL" onclick="toggleCommuneChip(this)">Todas las comunas</div>'
+        + '<span style="color:#7a7570;font-size:12px;margin-left:8px;">No hay comunas de este nivel para el país elegido.</span>';
+      return;
+    }
+
+    group.innerHTML = '<div class="chip selected" data-value="ALL" onclick="toggleCommuneChip(this)">Todas las comunas</div>'
+      + filtered.map(c => `<div class="chip" data-value="${c.commune}" onclick="toggleCommuneChip(this)">${c.name || c.commune} <span style="opacity:0.6;font-size:10px;">(${c.se_tier})</span></div>`).join('');
+  } catch (e) {
+    group.innerHTML = '<div class="chip selected" data-value="ALL" onclick="toggleCommuneChip(this)">Todas las comunas</div>'
+      + '<span style="color:#7a7570;font-size:12px;margin-left:8px;">Error cargando comunas.</span>';
+  }
 }
 
 function toggleCommuneChip(el) {
