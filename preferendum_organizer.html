@@ -92,7 +92,9 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 .q3-section input{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;font-family:'Inter',sans-serif;margin-bottom:6px;}
 /* Targeting chips */
 .chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;margin-bottom:4px;}
+.chip-row-compact{max-height:130px;overflow-y:auto;padding:8px;border:1px solid var(--border);border-radius:10px;background:var(--bg2);align-content:flex-start;}
 .chip{padding:6px 14px;border-radius:20px;font-size:13px;cursor:pointer;border:1px solid var(--border);background:var(--bg2);color:var(--muted);transition:all .15s;user-select:none;}
+.chip-row-compact .chip{padding:4px 10px;font-size:12px;background:var(--bg,#fff);}
 .chip.selected{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600;}
 .targeting-block{margin-top:16px;border-top:1px solid var(--border);padding-top:16px;margin-bottom:12px;}
 .targeting-header{font-size:14px;font-weight:600;margin-bottom:4px;}
@@ -279,20 +281,19 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
         </div>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px;">
-        <div class="field"><label>Closes At</label><input type="date" id="c-closes"/></div>
-        <div class="field">
-          <label>País(es) de la consulta</label>
-          <div class="chip-row" id="country-chips" style="margin-bottom:8px;">
-            <div class="chip selected" data-value="GLOBAL" onclick="toggleCountryChip(this)">🌍 Global (todos)</div>
-            <span style="color:#7a7570;font-size:12px;">Cargando países…</span>
-          </div>
-          <input type="hidden" id="c-country" value="GLOBAL"/>
+      <div class="field"><label>Closes At</label><input type="date" id="c-closes" style="max-width:220px;"/></div>
+
+      <div class="field" style="margin-top:4px;">
+        <label>País(es) de la consulta</label>
+        <div class="chip-row chip-row-compact" id="country-chips" style="margin-bottom:8px;">
+          <div class="chip selected" data-value="GLOBAL" onclick="toggleCountryChip(this)">🌍 Global (todos)</div>
+          <span style="color:#7a7570;font-size:12px;">Cargando países…</span>
         </div>
+        <input type="hidden" id="c-country" value="GLOBAL"/>
       </div>
       <div class="field" style="margin-top:4px;">
         <label>Comunas específicas (opcional — vacío = todo el país/nivel seleccionado)</label>
-        <div class="chip-row" id="commune-chips">
+        <div class="chip-row chip-row-compact" id="commune-chips">
           <div class="chip selected" data-value="ALL" onclick="toggleCommuneChip(this)">Todas las comunas</div>
         </div>
         <input type="hidden" id="c-communes" value=""/>
