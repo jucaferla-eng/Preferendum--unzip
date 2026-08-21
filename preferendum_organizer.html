@@ -285,21 +285,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
           <label>País(es) de la consulta</label>
           <div class="chip-row" id="country-chips" style="margin-bottom:8px;">
             <div class="chip selected" data-value="GLOBAL" onclick="toggleCountryChip(this)">🌍 Global (todos)</div>
-            <div class="chip" data-value="CL" onclick="toggleCountryChip(this)">🇨🇱 Chile</div>
-            <div class="chip" data-value="AR" onclick="toggleCountryChip(this)">🇦🇷 Argentina</div>
-            <div class="chip" data-value="PE" onclick="toggleCountryChip(this)">🇵🇪 Peru</div>
-            <div class="chip" data-value="MX" onclick="toggleCountryChip(this)">🇲🇽 Mexico</div>
-            <div class="chip" data-value="CO" onclick="toggleCountryChip(this)">🇨🇴 Colombia</div>
-            <div class="chip" data-value="BR" onclick="toggleCountryChip(this)">🇧🇷 Brasil</div>
-            <div class="chip" data-value="EC" onclick="toggleCountryChip(this)">🇪🇨 Ecuador</div>
-            <div class="chip" data-value="UY" onclick="toggleCountryChip(this)">🇺🇾 Uruguay</div>
-            <div class="chip" data-value="US" onclick="toggleCountryChip(this)">🇺🇸 USA</div>
-            <div class="chip" data-value="ES" onclick="toggleCountryChip(this)">🇪🇸 España</div>
-            <div class="chip" data-value="GB" onclick="toggleCountryChip(this)">🇬🇧 UK</div>
-            <div class="chip" data-value="DE" onclick="toggleCountryChip(this)">🇩🇪 Alemania</div>
-            <div class="chip" data-value="FR" onclick="toggleCountryChip(this)">🇫🇷 Francia</div>
-            <div class="chip" data-value="CN" onclick="toggleCountryChip(this)">🇨🇳 China</div>
-            <div class="chip" data-value="JP" onclick="toggleCountryChip(this)">🇯🇵 Japón</div>
+            <span style="color:#7a7570;font-size:12px;">Cargando países…</span>
           </div>
           <input type="hidden" id="c-country" value="GLOBAL"/>
         </div>
@@ -538,7 +524,29 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.opt-input').forEach(el => {
     el.addEventListener('input', rebuildBranchConfig);
   });
+  loadCountryChips();
 });
+
+function countryFlag(code) {
+  if (!code || code.length !== 2) return '🏳️';
+  return String.fromCodePoint(...[...code.toUpperCase()].map(c => 127397 + c.charCodeAt(0)));
+}
+
+async function loadCountryChips() {
+  const group = document.getElementById('country-chips');
+  try {
+    const r = await fetch(`${API}/marketer/countries`);
+    const d = await r.json();
+    const countries = d.countries || [];
+    const globalChip = group.querySelector('[data-value="GLOBAL"]').outerHTML;
+    group.innerHTML = globalChip + countries.map(c =>
+      `<div class="chip" data-value="${c.code}" onclick="toggleCountryChip(this)">${countryFlag(c.code)} ${c.name}</div>`
+    ).join('');
+  } catch (e) {
+    group.innerHTML = group.querySelector('[data-value="GLOBAL"]').outerHTML
+      + '<span style="color:#7a7570;font-size:12px;">Error cargando países.</span>';
+  }
+}
 
 function showAlert(id, type, msg) {
   const el = document.getElementById(id);

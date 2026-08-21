@@ -8650,6 +8650,13 @@ def get_marketer_communes(country: str = None, se_tier: str = None, db: Session 
     if se_tier:  fallback = [c for c in fallback if c['se_tier'] == se_tier]
     return {'communes': fallback, 'source': 'fallback'}
 
+@app.get('/marketer/countries')
+def get_marketer_countries(db: Session = Depends(get_db)):
+    """Países con datos reales de comuna/nivel de ingreso en la base — para pickers de targeting."""
+    codes = [r[0] for r in db.query(CommuneMarketData.country).distinct().all() if r[0]]
+    codes.sort()
+    return {'countries': [{'code': cc, 'name': COUNTRY_NAMES.get(cc, cc)} for cc in codes]}
+
 
 def _optimize_campaign(budget_clp: float, target_country: str, target_communes: str,
                         target_se_tiers: str, target_income_min: float, target_income_max: float,
@@ -11537,6 +11544,9 @@ COUNTRY_NAMES = {
     'SA':'Saudi Arabia','AE':'UAE','KW':'Kuwait','QA':'Qatar','IL':'Israel',
     'JO':'Jordan','IQ':'Iraq','IR':'Iran','KZ':'Kazakhstan','TW':'Taiwan','HK':'Hong Kong',
     'DO':'Dominican Republic','SG':'Singapore',
+    'BG':'Bulgaria','CY':'Cyprus','DK':'Denmark','EE':'Estonia','FI':'Finland',
+    'HR':'Croatia','IE':'Ireland','LT':'Lithuania','LU':'Luxembourg','LV':'Latvia',
+    'MT':'Malta','NO':'Norway','SE':'Sweden','SI':'Slovenia','SK':'Slovakia',
 }
 
 @app.get('/admin/audience-dashboard')
