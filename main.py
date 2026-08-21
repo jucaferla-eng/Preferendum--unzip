@@ -2216,9 +2216,9 @@ def login(data: LoginInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
         raise HTTPException(401, 'Invalid credentials')
     check_and_register_device(data.device_fp, user.id, db)
 
-    # Cuenta demo para revisión de Apple/Google — sin 2FA porque el revisor
-    # no tiene acceso al correo/teléfono para completar el código.
-    APP_REVIEW_DEMO_EMAILS = {'jucaferla@gmail.com'}
+    # Cuentas demo para revisión de Apple/Google y auditoría externa — sin 2FA
+    # porque quien las usa no tiene acceso al correo/teléfono para completar el código.
+    APP_REVIEW_DEMO_EMAILS = {'jucaferla@gmail.com', 'chatgpt.auditor@preferendum.com'}
     is_demo_account = (user.email or '').strip().lower() in APP_REVIEW_DEMO_EMAILS
 
     needs_2fa = (not is_demo_account) and (user.email_verified or user.phone_verified or user.selfie_verified)
