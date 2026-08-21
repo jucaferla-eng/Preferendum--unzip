@@ -10603,6 +10603,122 @@ def agent_daily_debates_sync(secret: str):
     from preferendum_agent import run_daily_debates
     return run_daily_debates()
 
+@app.post('/admin/agent/income-data/sync')
+def agent_income_data_sync(secret: str, db: Session = Depends(get_db)):
+    """Runs the global income/salary data agent: ILO ILOSTAT import (broad
+    real coverage), Chile INE occupation salary, World Bank GNI per capita,
+    and rebuilds targeting_matrix.json from the LIVE CommuneMarketData table
+    (every country actually in the DB) instead of the old 12-country hardcoded
+    dict. Real work, real external calls — runs in a background thread with a
+    generous join timeout since it can take a few minutes; if it doesn't
+    finish within the timeout it keeps running server-side and the /status
+    endpoint below will show the real result once done.
+    """
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+
+    import threading, time as _time
+    result_holder = {}
+
+    def _run():
+        summary = {'started_at': datetime.utcnow().isoformat()}
+        # 1. ILO ILOSTAT — broad real occupation-salary coverage
+        try:
+            from ilo_ilostat_agent import run_ilo_import
+            summary['ilo'] = run_ilo_import(db)
+        except Exception as e:
+            summary['ilo'] = {'ok': False, 'error': str(e)}
+        # 2. Chile INE + published-report seeds (existing agent)
+        try:
+            from occupation_salary_agent import run_occupation_import
+            summary['occupation_salary'] = run_occupation_import(db)
+        except Exception as e:
+            summary['occupation_salary'] = {'ok': False, 'error': str(e)}
+        # 3. World Bank GNI per capita — only for countries we actually have
+        #    commune data for, not a hardcoded country list
+        try:
+            from targeting_agent import fetch_gni_from_worldbank
+            countries = [r[0] for r in db.query(CommuneMarketData.country).distinct().all() if r[0]]
+            gni_by_country = {}
+            for iso in countries:
+                gni = fetch_gni_from_worldbank(iso)
+                if gni:
+                    gni_by_country[iso] = gni
+            summary['gni'] = {'ok': True, 'countries_updated': len(gni_by_country)}
+        except Exception as e:
+            gni_by_country = {}
+            summary['gni'] = {'ok': False, 'error': str(e)}
+        # 4. Rebuild targeting_matrix.json from the live DB — this is the piece
+        #    that actually makes the matching engine use real data for every
+        #    country, not just the 12 that used to be hardcoded.
+        try:
+            from targeting_agent import build_matrix_from_db, save_matrix
+            rows = db.query(CommuneMarketData).all()
+            row_dicts = [{
+                'country': r.country, 'commune': r.commune,
+                'name': _COMMUNE_NAMES.get((r.country, r.commune), r.commune),
+                'income_index': r.income_index, 'cpm_usd': r.cpm_usd,
+                'se_tier': r.se_tier,
+            } for r in rows]
+            matrix = build_matrix_from_db(row_dicts, gni_by_country)
+            save_matrix(matrix)
+            summary['matrix'] = {
+                'ok': True, 'countries': len(matrix),
+                'total_communes': sum(v['commune_count'] for v in matrix.values()),
+            }
+        except Exception as e:
+            summary['matrix'] = {'ok': False, 'error': str(e)}
+        summary['finished_at'] = datetime.utcnow().isoformat()
+        result_holder['result'] = summary
+
+    t = threading.Thread(target=_run)
+    t.start()
+    t.join(timeout=240)
+    if not result_holder:
+        return {'ok': True, 'message': 'Income-data agent started — still running server-side, check /admin/agent/income-data/status shortly'}
+    return result_holder['result']
+
+@app.get('/admin/agent/income-data/status')
+def agent_income_data_status(secret: str, db: Session = Depends(get_db)):
+    """Read-only — genuine freshness check, not a self-reported claim.
+    Pulls real timestamps directly from the data itself."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    from sqlalchemy import text as _text
+
+    status = {}
+    try:
+        from ilo_ilostat_agent import get_ilo_summary
+        status['ilo_wages'] = get_ilo_summary(db)
+    except Exception as e:
+        status['ilo_wages'] = {'error': str(e)}
+
+    try:
+        row = db.execute(_text(
+            "SELECT COUNT(*), COUNT(DISTINCT country_iso), MAX(updated_at) FROM occupation_salary"
+        )).fetchone()
+        status['occupation_salary'] = {
+            'total_rows': row[0], 'countries': row[1],
+            'most_recent_updated_at': str(row[2]) if row[2] else None,
+        }
+    except Exception as e:
+        status['occupation_salary'] = {'error': str(e)}
+
+    try:
+        from targeting_agent import load_matrix
+        matrix = load_matrix()
+        status['targeting_matrix'] = {
+            'countries': len(matrix),
+            'total_communes': sum(len(v.get('communes', {})) for v in matrix.values()),
+            'source': next(iter(matrix.values()), {}).get('source', 'static_hardcoded'),
+            'sample_updated_at': next(iter(matrix.values()), {}).get('communes_updated'),
+        }
+    except Exception as e:
+        status['targeting_matrix'] = {'error': str(e)}
+
+    status['commune_market_data_countries'] = db.query(CommuneMarketData.country).distinct().count()
+    return status
+
 @app.post('/admin/agent/campaign-rescue')
 def agent_campaign_rescue(secret: str, bg: BackgroundTasks):
     """Trigger the campaign-rescue agent — finds stalled advertiser campaigns

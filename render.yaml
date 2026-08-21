@@ -40,3 +40,18 @@ services:
         sync: false
       - key: ADMIN_SECRET
         sync: false
+
+  - type: cron
+    name: preferendum-income-data
+    runtime: python
+    # Monthly, 1st of the month — GNI/occupation salary data doesn't move
+    # week to week; this matches the "monthly commune update" cadence already
+    # documented in targeting_agent.py's own docstrings.
+    schedule: "0 6 1 * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -c "import requests, os; url = os.environ.get('BACKEND_URL', 'https://preferendum-unzip-d2zd.onrender.com'); secret = os.environ['ADMIN_SECRET']; r = requests.post(f'{url}/admin/agent/income-data/sync?secret={secret}', timeout=580); print(r.json())"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_SECRET
+        sync: false

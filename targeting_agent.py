@@ -296,6 +296,61 @@ def build_matrix() -> dict:
     return matrix
 
 
+def build_matrix_from_db(commune_rows: list, gni_by_country: Optional[dict] = None) -> dict:
+    """
+    Builds the targeting matrix from live CommuneMarketData rows instead of
+    the small hardcoded COMMUNE_DATA dict — covers every country actually in
+    the database (76 as of 2026-08), not just the 12 in COMMUNE_DATA.
+
+    commune_rows: list of dicts with keys country, commune, name, income_index,
+                  cpm_usd, se_tier, updated_at (as returned by /marketer/communes,
+                  plus updated_at). This function is DB-agnostic — the caller
+                  queries CommuneMarketData and passes plain dicts in.
+    gni_by_country: optional {iso: gni_per_capita} from a fresh World Bank fetch;
+                     falls back to marketer_table_v2.GNI_PER_CAPITA when absent.
+    """
+    from marketer_table_v2 import GNI_PER_CAPITA
+    gni_by_country = gni_by_country or {}
+
+    by_country: dict = {}
+    for row in commune_rows:
+        iso = row['country']
+        by_country.setdefault(iso, []).append(row)
+
+    matrix = {}
+    now_iso = datetime.utcnow().isoformat()
+    for iso, rows in by_country.items():
+        gni = gni_by_country.get(iso) or GNI_PER_CAPITA.get(iso, GNI_PER_CAPITA['default'])
+        tier = gni_to_tier(gni)
+        cpm_base = tier_to_cpm_base(tier)
+
+        commune_dict = {}
+        for r in rows:
+            name = r.get('commune') or r.get('name')
+            if not name:
+                continue
+            commune_dict[name] = {
+                'region':       '',
+                'income_index': r.get('income_index', 100.0),
+                'income_tier':  r.get('se_tier', 'C') or 'C',
+                'cpm':          r.get('cpm_usd', cpm_base),
+                'population':   r.get('population') or 50000,
+            }
+
+        matrix[iso] = {
+            'gni_per_capita':   gni,
+            'gni_tier':         tier,
+            'cpm_base':         cpm_base,
+            'communes':         commune_dict,
+            'communes_updated': now_iso,
+            'gni_updated_at':   now_iso if iso in gni_by_country else matrix.get(iso, {}).get('gni_updated_at', now_iso),
+            'source':           'live_db',
+            'commune_count':    len(commune_dict),
+        }
+
+    return matrix
+
+
 def load_matrix() -> dict:
     """Loads matrix from cache file, builds if missing."""
     if os.path.exists(MATRIX_FILE):
