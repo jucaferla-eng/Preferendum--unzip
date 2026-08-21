@@ -4250,7 +4250,7 @@ def _match_campaigns(user, debate, db) -> list:
     Finds active campaigns for a debate using commune-based targeting optimization.
     Returns list of dicts (ORM fields + optimization metrics from targeting_agent).
     """
-    from targeting_agent import optimize_campaigns_for_debate, load_matrix
+    from targeting_agent import optimize_campaigns_for_debate, load_matrix, build_matrix_from_db
 
     now = datetime.utcnow()
     orm_campaigns = db.query(AdCampaign).filter(
@@ -4421,7 +4421,26 @@ def _match_campaigns(user, debate, db) -> list:
         'estimated_audience': 0,
     }
 
-    matrix = load_matrix()
+    # Build the matrix live from the DB on every call instead of trusting the
+    # cached targeting_matrix.json file — Render's web service filesystem is
+    # not guaranteed to persist across deploys/restarts, so a file-only cache
+    # would silently revert to stale/default data after the next unrelated
+    # deploy. CommuneMarketData is a cheap query (~6.5k rows) so this is fine
+    # to do per-request; GNI comes from world_countries (kept fresh by the
+    # monthly income-data agent), not a re-fetch from World Bank per request.
+    try:
+        _rows = db.query(CommuneMarketData).all()
+        _row_dicts = [{
+            'country': r.country, 'commune': r.commune,
+            'name': _COMMUNE_NAMES.get((r.country, r.commune), r.commune),
+            'income_index': r.income_index, 'cpm_usd': r.cpm_usd, 'se_tier': r.se_tier,
+        } for r in _rows]
+        _gni_rows = db.execute(text("SELECT iso2, gdp_per_capita_usd FROM world_countries WHERE gdp_per_capita_usd IS NOT NULL")).fetchall()
+        _gni_by_country = {row[0]: float(row[1]) for row in _gni_rows}
+        matrix = build_matrix_from_db(_row_dicts, _gni_by_country)
+    except Exception as _e:
+        print(f'[_match_campaigns] live matrix build failed, falling back to cached file: {_e}')
+        matrix = load_matrix()
     ranked = optimize_campaigns_for_debate(debate_dict, campaigns_dicts, matrix, max_ads=5)
 
     # Fallback: if optimizer filtered everything out, use all valid campaigns unscored
@@ -10635,16 +10654,29 @@ def agent_income_data_sync(secret: str, db: Session = Depends(get_db)):
         except Exception as e:
             summary['occupation_salary'] = {'ok': False, 'error': str(e)}
         # 3. World Bank GNI per capita — only for countries we actually have
-        #    commune data for, not a hardcoded country list
+        #    commune data for, not a hardcoded country list. Written into the
+        #    durable world_countries table (UPDATE only — never INSERT, since
+        #    we don't fully control that table's schema/constraints from here)
+        #    so it survives restarts, not just the ephemeral matrix file.
         try:
             from targeting_agent import fetch_gni_from_worldbank
             countries = [r[0] for r in db.query(CommuneMarketData.country).distinct().all() if r[0]]
             gni_by_country = {}
+            written = 0
             for iso in countries:
                 gni = fetch_gni_from_worldbank(iso)
                 if gni:
                     gni_by_country[iso] = gni
-            summary['gni'] = {'ok': True, 'countries_updated': len(gni_by_country)}
+                    try:
+                        res = db.execute(text(
+                            "UPDATE world_countries SET gdp_per_capita_usd = :gni WHERE iso2 = :iso"
+                        ), {'gni': gni, 'iso': iso})
+                        if res.rowcount:
+                            written += 1
+                    except Exception:
+                        pass
+            db.commit()
+            summary['gni'] = {'ok': True, 'countries_fetched': len(gni_by_country), 'world_countries_rows_updated': written}
         except Exception as e:
             gni_by_country = {}
             summary['gni'] = {'ok': False, 'error': str(e)}
