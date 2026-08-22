@@ -13485,6 +13485,19 @@ def admin_update_campaign_creative(campaign_id: int, secret: str, db: Session = 
             'target_debate_ids': c.target_debate_ids, 'advertiser_name': c.advertiser_name}
 
 
+@app.post('/admin/campaigns/{campaign_id}/unpin')
+def admin_unpin_campaign(campaign_id: int, secret: str, db: Session = Depends(get_db)):
+    """Quita el anclaje automático (target_debate_ids) para que la campaña
+    pase por el matching normal en vez de aparecer en todas las consultas."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(404, 'Campaign not found')
+    c.target_debate_ids = ''
+    db.commit()
+    return {'ok': True, 'campaign_id': campaign_id, 'target_debate_ids': c.target_debate_ids}
+
 @app.post('/admin/campaigns/create')
 def admin_create_campaign(secret: str, advertiser_name: str, ad_copy: str,
                           logo_url: str = '', link_url: str = '',
