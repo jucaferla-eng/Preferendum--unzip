@@ -10885,6 +10885,22 @@ def agent_income_data_sync(secret: str, db: Session = Depends(get_db)):
             summary['occupation_salary'] = run_occupation_import(db)
         except Exception as e:
             summary['occupation_salary'] = {'ok': False, 'error': str(e)}
+        # 2b. Corea y Rusia — datos oficiales reales (MOEL / Rosstat), pero
+        #     importados desde archivos CSV empaquetados con el código, no
+        #     desde una API en vivo. Correrlo mensualmente no trae datos más
+        #     nuevos (la fuente es estática hasta que alguien actualice el
+        #     CSV a mano), pero sí asegura que estén cargados/consistentes
+        #     y con timestamp fresco.
+        try:
+            from korea_wages_agent import run_korea_wages_import
+            summary['korea'] = run_korea_wages_import(db)
+        except Exception as e:
+            summary['korea'] = {'ok': False, 'error': str(e)}
+        try:
+            from russia_wages_agent import run_russia_wages_import
+            summary['russia'] = run_russia_wages_import(db)
+        except Exception as e:
+            summary['russia'] = {'ok': False, 'error': str(e)}
         # 3. World Bank GNI per capita — only for countries we actually have
         #    commune data for, not a hardcoded country list. Written into the
         #    durable world_countries table (UPDATE only — never INSERT, since
@@ -10979,6 +10995,20 @@ def agent_income_data_status(secret: str, db: Session = Depends(get_db)):
         }
     except Exception as e:
         status['targeting_matrix'] = {'error': str(e)}
+
+    try:
+        row = db.execute(_text(
+            "SELECT COUNT(*), MAX(updated_at) FROM korea_occupation_wages"
+        )).fetchone()
+        status['korea_wages'] = {'total_rows': row[0], 'most_recent_updated_at': str(row[1]) if row[1] else None}
+    except Exception as e:
+        status['korea_wages'] = {'error': str(e)}
+
+    try:
+        from russia_wages_agent import get_russia_summary
+        status['russia_wages'] = get_russia_summary(db)
+    except Exception as e:
+        status['russia_wages'] = {'error': str(e)}
 
     status['commune_market_data_countries'] = db.query(CommuneMarketData.country).distinct().count()
     return status
