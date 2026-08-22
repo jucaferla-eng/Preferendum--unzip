@@ -4588,6 +4588,16 @@ def get_opinions(debate_id: int,
             # Respetar tier del usuario: si tiene tier asignado, solo campañas compatibles
             if user_se and not _tier_matches(user_se, rc.target_se_tiers or 'A,B,C,D'):
                 continue
+            # Respetar el límite de frecuencia — esta ruta bypaseaba _match_campaigns
+            # (y por lo tanto el filtro de frecuencia) por completo.
+            freq_cap = getattr(rc, 'frequency_cap', None)
+            if user and freq_cap:
+                seen_count = db.query(AdImpressionLog).filter(
+                    AdImpressionLog.campaign_id == rc.id,
+                    AdImpressionLog.user_id == user.id,
+                ).count()
+                if seen_count >= freq_cap:
+                    continue
             prepend.append({
                 'id': rc.id, 'advertiser_name': rc.advertiser_name or '',
                 'ad_copy': rc.ad_copy or '', 'title': rc.title or '',
