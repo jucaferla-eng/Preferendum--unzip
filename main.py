@@ -753,6 +753,7 @@ def _migrate():
             ('min_per_capita_usd',  'REAL DEFAULT 0.0'),
             ('target_hnw_only',     'BOOLEAN DEFAULT FALSE'),
             ('min_hnw_score',       'REAL DEFAULT 0.0'),
+            ('frequency_cap',       'INTEGER DEFAULT NULL'),
         ]:
             if col not in existing_ad_cols:
                 try:
@@ -760,6 +761,14 @@ def _migrate():
                     conn.commit()
                 except Exception:
                     pass
+        # ad_impression_logs — user_id para poder limitar frecuencia por usuario
+        existing_impr_cols = {c['name'] for c in inspector.get_columns('ad_impression_logs')} if inspector.has_table('ad_impression_logs') else set()
+        if 'user_id' not in existing_impr_cols:
+            try:
+                conn.execute(text('ALTER TABLE ad_impression_logs ADD COLUMN user_id INTEGER'))
+                conn.commit()
+            except Exception:
+                pass
         # debate_ads — link_url para que "Ver más" tenga un destino real
         existing_debate_ad_cols = {c['name'] for c in inspector.get_columns('debate_ads')} if inspector.has_table('debate_ads') else set()
         if 'link_url' not in existing_debate_ad_cols:
