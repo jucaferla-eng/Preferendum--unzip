@@ -608,6 +608,22 @@ class CommuneMarketData(Base):
     scraped_at           = Column(DateTime)
     updated_at           = Column(DateTime, default=datetime.utcnow)
 
+class SystemTodo(Base):
+    """TO-DO real de trabajo pendiente/incompleto encontrado en auditorías.
+    Vive en la base de datos — cualquiera puede consultarlo directo,
+    sin depender de que Claude lo reporte de nuevo cada vez."""
+    __tablename__ = 'system_todos'
+    id           = Column(Integer, primary_key=True)
+    title        = Column(String, nullable=False)
+    description  = Column(Text, default='')
+    category     = Column(String, default='general')   # matching / income_data / verification / etc.
+    status       = Column(String, default='open')       # open / in_progress / done
+    priority     = Column(String, default='medium')     # low / medium / high
+    discovered_by= Column(String, default='')            # qué auditoría/sesión lo encontró
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow)
+    resolved_at  = Column(DateTime, nullable=True)
+
 Base.metadata.create_all(bind=engine)
 
 # Payment + attribution tables (managed directly in SQL, not via ORM)
@@ -10750,6 +10766,55 @@ def agent_income_data_status(secret: str, db: Session = Depends(get_db)):
 
     status['commune_market_data_countries'] = db.query(CommuneMarketData.country).distinct().count()
     return status
+
+
+# ══════════════════════════════════════════════════════════════
+# SYSTEM TODO — trabajo pendiente/incompleto, consultable directo
+# ══════════════════════════════════════════════════════════════
+
+@app.get('/admin/todo')
+def list_system_todos(secret: str, status: str = '', db: Session = Depends(get_db)):
+    """Lista el TO-DO real del sistema — sin depender de que alguien lo reporte de nuevo."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    q = db.query(SystemTodo)
+    if status:
+        q = q.filter(SystemTodo.status == status)
+    rows = q.order_by(SystemTodo.status.asc(), SystemTodo.priority.desc(), SystemTodo.created_at.asc()).all()
+    return {'total': len(rows), 'todos': [{
+        'id': r.id, 'title': r.title, 'description': r.description,
+        'category': r.category, 'status': r.status, 'priority': r.priority,
+        'discovered_by': r.discovered_by, 'created_at': str(r.created_at),
+        'updated_at': str(r.updated_at), 'resolved_at': str(r.resolved_at) if r.resolved_at else None,
+    } for r in rows]}
+
+@app.post('/admin/todo')
+def create_system_todo(secret: str, title: str, description: str = '', category: str = 'general',
+                        priority: str = 'medium', discovered_by: str = '', db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    todo = SystemTodo(title=title, description=description, category=category,
+                       priority=priority, discovered_by=discovered_by)
+    db.add(todo)
+    db.commit()
+    db.refresh(todo)
+    return {'ok': True, 'id': todo.id}
+
+@app.patch('/admin/todo/{todo_id}')
+def update_system_todo(todo_id: int, secret: str, status: str = '', db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    todo = db.query(SystemTodo).filter(SystemTodo.id == todo_id).first()
+    if not todo:
+        raise HTTPException(404, 'Not found')
+    if status:
+        todo.status = status
+        if status == 'done':
+            todo.resolved_at = datetime.utcnow()
+    todo.updated_at = datetime.utcnow()
+    db.commit()
+    return {'ok': True, 'id': todo.id, 'status': todo.status}
+
 
 @app.post('/admin/agent/campaign-rescue')
 def agent_campaign_rescue(secret: str, bg: BackgroundTasks):
