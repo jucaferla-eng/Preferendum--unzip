@@ -10878,12 +10878,14 @@ def agent_income_data_sync(secret: str, db: Session = Depends(get_db)):
             from ilo_ilostat_agent import run_ilo_import
             summary['ilo'] = run_ilo_import(db)
         except Exception as e:
+            db.rollback()
             summary['ilo'] = {'ok': False, 'error': str(e)}
         # 2. Chile INE + published-report seeds (existing agent)
         try:
             from occupation_salary_agent import run_occupation_import
             summary['occupation_salary'] = run_occupation_import(db)
         except Exception as e:
+            db.rollback()
             summary['occupation_salary'] = {'ok': False, 'error': str(e)}
         # 2b. Corea y Rusia — datos oficiales reales (MOEL / Rosstat), pero
         #     importados desde archivos CSV empaquetados con el código, no
@@ -10895,11 +10897,13 @@ def agent_income_data_sync(secret: str, db: Session = Depends(get_db)):
             from korea_wages_agent import run_korea_wages_import
             summary['korea'] = run_korea_wages_import(db)
         except Exception as e:
+            db.rollback()
             summary['korea'] = {'ok': False, 'error': str(e)}
         try:
             from russia_wages_agent import run_russia_wages_import
             summary['russia'] = run_russia_wages_import(db)
         except Exception as e:
+            db.rollback()
             summary['russia'] = {'ok': False, 'error': str(e)}
         # 3. World Bank GNI per capita — only for countries we actually have
         #    commune data for, not a hardcoded country list. Written into the
@@ -10922,10 +10926,11 @@ def agent_income_data_sync(secret: str, db: Session = Depends(get_db)):
                         if res.rowcount:
                             written += 1
                     except Exception:
-                        pass
+                        db.rollback()
             db.commit()
             summary['gni'] = {'ok': True, 'countries_fetched': len(gni_by_country), 'world_countries_rows_updated': written}
         except Exception as e:
+            db.rollback()
             gni_by_country = {}
             summary['gni'] = {'ok': False, 'error': str(e)}
         # 4. Rebuild targeting_matrix.json from the live DB — this is the piece
@@ -10971,6 +10976,7 @@ def agent_income_data_status(secret: str, db: Session = Depends(get_db)):
         from ilo_ilostat_agent import get_ilo_summary
         status['ilo_wages'] = get_ilo_summary(db)
     except Exception as e:
+        db.rollback()
         status['ilo_wages'] = {'error': str(e)}
 
     try:
@@ -10982,6 +10988,7 @@ def agent_income_data_status(secret: str, db: Session = Depends(get_db)):
             'most_recent_updated_at': str(row[2]) if row[2] else None,
         }
     except Exception as e:
+        db.rollback()
         status['occupation_salary'] = {'error': str(e)}
 
     try:
@@ -10994,6 +11001,7 @@ def agent_income_data_status(secret: str, db: Session = Depends(get_db)):
             'sample_updated_at': next(iter(matrix.values()), {}).get('communes_updated'),
         }
     except Exception as e:
+        db.rollback()
         status['targeting_matrix'] = {'error': str(e)}
 
     try:
@@ -11002,12 +11010,14 @@ def agent_income_data_status(secret: str, db: Session = Depends(get_db)):
         )).fetchone()
         status['korea_wages'] = {'total_rows': row[0], 'most_recent_updated_at': str(row[1]) if row[1] else None}
     except Exception as e:
+        db.rollback()
         status['korea_wages'] = {'error': str(e)}
 
     try:
         from russia_wages_agent import get_russia_summary
         status['russia_wages'] = get_russia_summary(db)
     except Exception as e:
+        db.rollback()
         status['russia_wages'] = {'error': str(e)}
 
     status['commune_market_data_countries'] = db.query(CommuneMarketData.country).distinct().count()
