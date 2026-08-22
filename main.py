@@ -4367,6 +4367,14 @@ def _match_campaigns(user, debate, db) -> list:
             if debate_tags & campaign_excluded_tags:
                 continue  # debate matches an excluded category — skip this campaign
 
+        # ── TARGETING POSITIVO: target_categories ──
+        # Si la campaña pide categorías específicas, la consulta debe estar en esa lista.
+        # Antes existía la columna pero nunca se usaba para filtrar — solo se guardaba/mostraba.
+        if c.target_categories:
+            desired = {t.strip().lower() for t in c.target_categories.split(',') if t.strip()}
+            if desired and debate_category not in desired:
+                continue
+
         # ── COUNTRY FILTER ──
         # scope_country puede ser multi-país "CL,AR" o "GLOBAL" — debates globales aceptan todo
         debate_countries = {x.strip().upper() for x in debate_country.split(',') if x.strip()} if debate_country else {'GLOBAL'}
