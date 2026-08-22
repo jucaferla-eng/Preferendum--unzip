@@ -3519,6 +3519,22 @@ def _rekognition_client():
         aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
     )
 
+_VOTER_FACE_COLLECTION = 'preferendum-voters'
+_voter_face_collection_ready = False
+
+def _ensure_voter_face_collection(rek):
+    """Crea la colección de caras de votantes si no existe todavía — idempotente.
+    ExternalImageId de cada cara indexada = '{debate_id}_{user_id}', para poder
+    detectar si la MISMA cara ya votó en la MISMA consulta bajo otra cuenta."""
+    global _voter_face_collection_ready
+    if _voter_face_collection_ready:
+        return
+    try:
+        rek.create_collection(CollectionId=_VOTER_FACE_COLLECTION)
+    except rek.exceptions.ResourceAlreadyExistsException:
+        pass
+    _voter_face_collection_ready = True
+
 @app.post('/verify/document')
 async def verify_document(
     file: UploadFile = File(...),
@@ -4732,6 +4748,37 @@ async def get_face_vote_token(
         else:
             rekognition_mode = 'no_match'
             raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
+
+        # Bloqueo por cara duplicada: ¿esta misma cara ya votó en esta consulta,
+        # bajo una cuenta distinta? Usa una Face Collection de Rekognition —
+        # busca la cara contra todas las ya indexadas, en vez de comparar una por una.
+        try:
+            _ensure_voter_face_collection(rek)
+            search = rek.search_faces_by_image(
+                CollectionId=_VOTER_FACE_COLLECTION,
+                Image={'Bytes': contents},
+                FaceMatchThreshold=90.0,
+                MaxFaces=20,
+            )
+            for m in search.get('FaceMatches', []):
+                ext_id = m.get('Face', {}).get('ExternalImageId', '')
+                if '_' not in ext_id:
+                    continue
+                ext_debate, ext_user = ext_id.split('_', 1)
+                if ext_debate == str(debate_id) and ext_user != str(user.id):
+                    raise HTTPException(409, 'Esta cara ya fue usada para votar en esta consulta, con otra cuenta.')
+            rek.index_faces(
+                CollectionId=_VOTER_FACE_COLLECTION,
+                Image={'Bytes': contents},
+                ExternalImageId=f'{debate_id}_{user.id}',
+                MaxFaces=1,
+                QualityFilter='NONE',
+                DetectionAttributes=[],
+            )
+        except HTTPException:
+            raise
+        except Exception as _e:
+            print(f'[face-dup-check] non-fatal error (not blocking vote): {_e}')
     except HTTPException:
         raise
     except ClientError:
@@ -9642,6 +9689,51 @@ def admin_rekognition_cross_test(secret: str, selfie_log_id_a: int, selfie_log_i
         }
     except Exception as e:
         return {'ok': False, 'error': str(e)}
+
+@app.get('/admin/face-collection-test')
+def admin_face_collection_test(secret: str, debate_id: int, selfie_log_id: int, db: Session = Depends(get_db)):
+    """DIAGNÓSTICO TEMPORAL — ejercita el mismo camino de index/search que usa
+    el bloqueo de cara duplicada, con una foto real ya guardada, sin pasar por
+    todo el flujo HTTP de registro. Solo lectura + escribe en la colección de
+    prueba de Rekognition (no toca la base de datos de Preferendum)."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    log = db.query(SelfieLog).filter(SelfieLog.id == selfie_log_id).first()
+    if not log or not log.face_bytes:
+        raise HTTPException(404, 'selfie_log no encontrado o sin face_bytes')
+    photo = base64.b64decode(log.face_bytes)
+    rek = _rekognition_client()
+    _ensure_voter_face_collection(rek)
+
+    search = rek.search_faces_by_image(
+        CollectionId=_VOTER_FACE_COLLECTION, Image={'Bytes': photo},
+        FaceMatchThreshold=90.0, MaxFaces=20,
+    )
+    existing_matches = [m.get('Face', {}).get('ExternalImageId', '') for m in search.get('FaceMatches', [])]
+
+    blocked_for = None
+    for ext_id in existing_matches:
+        if '_' in ext_id:
+            ext_debate, ext_user = ext_id.split('_', 1)
+            if ext_debate == str(debate_id) and ext_user != str(log.user_id):
+                blocked_for = ext_id
+
+    indexed = None
+    if not blocked_for:
+        idx = rek.index_faces(
+            CollectionId=_VOTER_FACE_COLLECTION, Image={'Bytes': photo},
+            ExternalImageId=f'{debate_id}_{log.user_id}', MaxFaces=1,
+            QualityFilter='NONE', DetectionAttributes=[],
+        )
+        indexed = [f['Face']['ExternalImageId'] for f in idx.get('FaceRecords', [])]
+
+    return {
+        'selfie_log_id': selfie_log_id, 'user_id': log.user_id, 'debate_id': debate_id,
+        'existing_matches_before': existing_matches,
+        'blocked_would_reject': bool(blocked_for),
+        'blocked_matched_external_id': blocked_for,
+        'newly_indexed_as': indexed,
+    }
 
 @app.get('/admin/aws-check')
 def aws_check(secret: str):
