@@ -4600,10 +4600,15 @@ def get_opinions(debate_id: int,
                 ))
             cpm_usd  = campaign.get('cpm') or 6.0
             cost_clp = max(1, int(round((cpm_usd * USD_TO_CLP) / 1000.0)))
-            orm.spent_clp = min(
-                orm.budget_clp or 0,
-                (orm.spent_clp or 0) + cost_clp,
-            )
+            # UPDATE atómico — un read-modify-write en Python aquí pierde
+            # incrementos bajo concurrencia real (confirmado empíricamente:
+            # 15 requests simultáneos → solo ~3 cobros persistidos).
+            db.execute(text("""
+                UPDATE ad_campaigns
+                SET spent_clp = LEAST(COALESCE(budget_clp, 0), COALESCE(spent_clp, 0) + :cost)
+                WHERE id = :cid
+            """), {'cost': cost_clp, 'cid': orm.id})
+            db.expire(orm, ['spent_clp'])
 
     for i, op in enumerate(opinions):
         result.append({'type': 'opinion', 'opinion': {
@@ -4971,7 +4976,12 @@ def _cast_vote_inner(debate_id: int, data, user, db):
                 ))
                 cpm_usd  = top.get('cpm') or 6.0
                 cost_clp = max(1, int(round((cpm_usd * USD_TO_CLP) / 1000.0)))
-                orm.spent_clp = min(orm.budget_clp or 0, (orm.spent_clp or 0) + cost_clp)
+                # UPDATE atómico — mismo motivo que en get_opinions (ver comentario ahí)
+                db.execute(text("""
+                    UPDATE ad_campaigns
+                    SET spent_clp = LEAST(COALESCE(budget_clp, 0), COALESCE(spent_clp, 0) + :cost)
+                    WHERE id = :cid
+                """), {'cost': cost_clp, 'cid': orm.id})
                 db.commit()
     except Exception as e:
         print(f'[cast_vote] ad impression error (non-fatal): {e}')
@@ -9808,43 +9818,51 @@ def targeting_matrix_summary(secret: str):
 
 @app.post('/admin/targeting/update-communes')
 def targeting_update_communes(secret: str, bg: BackgroundTasks):
-    """Trigger monthly commune price update (runs in background)."""
+    """DESACTIVADO — este camino regeneraba targeting_matrix.json desde el
+    diccionario estático de 12 países (COMMUNE_DATA), que quedó obsoleto
+    cuando el matching pasó a leer la base de datos en vivo (76 países)
+    la noche del 2026-08-21. Dejarlo activo arriesgaba revertir ese fix
+    en silencio. Usar POST /admin/agent/income-data/sync en su lugar."""
     if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
-    from targeting_agent import run_monthly_commune_update
-    bg.add_task(run_monthly_commune_update)
-    return {'ok': True, 'message': 'Commune price update started — check logs'}
+    raise HTTPException(410, 'Reemplazado por POST /admin/agent/income-data/sync — este endpoint usaba datos estáticos de solo 12 países.')
 
 @app.post('/admin/targeting/update-gni')
 def targeting_update_gni(secret: str, bg: BackgroundTasks):
-    """Trigger annual GNI update from World Bank API (runs in background)."""
+    """DESACTIVADO — mismo motivo que update-communes. Usar
+    POST /admin/agent/income-data/sync, que actualiza GNI real
+    (Banco Mundial) directo en world_countries."""
     if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
-    from targeting_agent import run_annual_gni_update
-    bg.add_task(run_annual_gni_update)
-    return {'ok': True, 'message': 'GNI update from World Bank started — check logs'}
+    raise HTTPException(410, 'Reemplazado por POST /admin/agent/income-data/sync.')
 
 @app.get('/admin/targeting/match-debate/{debate_id}')
 def targeting_match_debate(debate_id: int, secret: str, db: Session = Depends(get_db)):
-    """Returns ranked campaigns for a debate. Use to preview/test matching logic."""
+    """Preview de matching real — usa la MISMA función que corre en producción
+    (_match_campaigns), no una copia separada. La versión anterior de este
+    endpoint llamaba a una función distinta (targeting_agent.match_campaigns_to_debate)
+    que leía el archivo estático viejo y usaba columnas SQL que no existen en el
+    esquema real — daba falsos negativos (matches:[] aunque sí había match real).
+    Corregido 2026-08-22."""
     if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
         raise HTTPException(404, 'Debate not found')
-    from targeting_agent import match_campaigns_to_debate
-    debate_dict = {
-        'scope_country':  getattr(debate, 'scope_country', ''),
-        'scope_commune':  getattr(debate, 'scope_commune', ''),
-        'target_gender':  getattr(debate, 'target_gender', 'all'),
-        'target_age_min': getattr(debate, 'target_age_min', 13),
-        'target_age_max': getattr(debate, 'target_age_max', 99),
-    }
-    matches = match_campaigns_to_debate(debate_dict, db)
+    matches = _match_campaigns(None, debate, db)
     return {
         'debate_id':  debate_id,
-        'debate':     debate_dict,
-        'matches':    matches[:10],
+        'debate': {
+            'scope_country':  debate.scope_country,
+            'scope_commune':  debate.scope_commune,
+            'target_gender':  debate.target_gender,
+            'target_age_min': debate.target_age_min,
+            'target_age_max': debate.target_age_max,
+        },
+        'matches': [{
+            'campaign_id': m.get('id'), 'advertiser_name': m.get('advertiser_name'),
+            'optimization_rank': m.get('optimization_rank'), 'pinned': m.get('pinned', False),
+        } for m in matches[:10]],
         'total_candidates': len(matches),
     }
 
