@@ -9585,6 +9585,54 @@ def admin_selfie_verification_audit(secret: str, db: Session = Depends(get_db)):
         ],
     }
 
+@app.get('/admin/selfie-verification-audit/real-logs')
+def admin_selfie_real_logs(secret: str, db: Session = Depends(get_db)):
+    """Solo lectura. Lista los selfie_logs verificados con score real
+    (no 0.95 de modo demo) junto a su user_id, para poder cruzarlos
+    en una prueba de discriminación real (¿rechaza caras distintas?)."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    rows = db.query(SelfieLog).filter(
+        SelfieLog.verified == True, SelfieLog.match_score != 0.95, SelfieLog.face_bytes != None
+    ).order_by(SelfieLog.created_at.desc()).all()
+    return {'logs': [
+        {'id': r.id, 'user_id': r.user_id, 'match_score': r.match_score, 'created_at': str(r.created_at)}
+        for r in rows
+    ]}
+
+@app.get('/admin/rekognition-cross-test')
+def admin_rekognition_cross_test(secret: str, selfie_log_id_a: int, selfie_log_id_b: int, db: Session = Depends(get_db)):
+    """Solo lectura / no destructivo. Compara dos face_bytes YA guardados
+    (de dos selfie_logs reales existentes) entre sí vía Rekognition, sin
+    subir ninguna foto nueva — prueba si el sistema realmente distingue
+    caras distintas, o si aprobaría cualquier cosa."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    log_a = db.query(SelfieLog).filter(SelfieLog.id == selfie_log_id_a).first()
+    log_b = db.query(SelfieLog).filter(SelfieLog.id == selfie_log_id_b).first()
+    if not log_a or not log_b:
+        raise HTTPException(404, 'selfie_log no encontrado')
+    if not log_a.face_bytes or not log_b.face_bytes:
+        raise HTTPException(400, 'Uno de los dos selfie_logs no tiene face_bytes guardado')
+    try:
+        rek = _rekognition_client()
+        resp = rek.compare_faces(
+            SourceImage={'Bytes': base64.b64decode(log_a.face_bytes)},
+            TargetImage={'Bytes': base64.b64decode(log_b.face_bytes)},
+            SimilarityThreshold=1.0,  # bajo, para ver el score real aunque no pase el umbral de negocio (80%)
+        )
+        matches = resp.get('FaceMatches', [])
+        similarity = matches[0]['Similarity'] if matches else 0.0
+        return {
+            'ok': True,
+            'user_id_a': log_a.user_id, 'user_id_b': log_b.user_id,
+            'same_user': log_a.user_id == log_b.user_id,
+            'similarity_pct': round(similarity, 2),
+            'would_pass_80pct_threshold': similarity >= 80.0,
+        }
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
 @app.get('/admin/aws-check')
 def aws_check(secret: str):
     if secret != os.getenv('ADMIN_SECRET'):
