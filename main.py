@@ -407,6 +407,7 @@ class AdCampaign(Base):
     min_per_capita_usd  = Column(Float, default=0.0)   # filtro GNI per cápita mínimo del país
     target_hnw_only     = Column(Boolean, default=False) # True = solo usuarios verified_hnw
     min_hnw_score       = Column(Float, default=0.0)     # hnw_score mínimo (0 = sin límite)
+    frequency_cap       = Column(Integer, nullable=True) # máx. veces que UN usuario ve este anuncio (None = sin límite)
 
 class ModelDefinition(Base):
     """Modelos de optimización/matching versionados — guardados por JC y el equipo."""
@@ -429,6 +430,7 @@ class AdImpressionLog(Base):
     id          = Column(Integer, primary_key=True)
     campaign_id = Column(Integer, index=True)
     debate_id   = Column(Integer, index=True, nullable=True)
+    user_id     = Column(Integer, index=True, nullable=True)  # quién vio el anuncio — para límite de frecuencia
     gender      = Column(String, default='')
     age_group   = Column(String, default='')
     county      = Column(String, default='')
@@ -1415,6 +1417,7 @@ class CampaignCreate(BaseModel):
     min_per_capita_usd:  float = 0.0
     target_hnw_only:     bool  = False   # True = solo usuarios verified_hnw
     min_hnw_score:       float = 0.0     # hnw_score mínimo (ej: 50.0)
+    frequency_cap:       Optional[int] = None  # máx. veces que UN usuario ve este anuncio (None = sin límite)
 
 class AdViewInput(BaseModel):
     campaign_id: int
@@ -4396,6 +4399,16 @@ def _match_campaigns(user, debate, db) -> list:
             if min_hnw > 0 and user_hnw_score < min_hnw:
                 continue
 
+        # ── FRECUENCIA — no repetir el mismo anuncio más de N veces al mismo usuario ──
+        freq_cap = getattr(c, 'frequency_cap', None)
+        if user and freq_cap:
+            seen_count = db.query(AdImpressionLog).filter(
+                AdImpressionLog.campaign_id == c.id,
+                AdImpressionLog.user_id == user.id,
+            ).count()
+            if seen_count >= freq_cap:
+                continue
+
         valid_orm.append(c)
 
     if not valid_orm:
@@ -4609,6 +4622,7 @@ def get_opinions(debate_id: int,
                 db.add(AdImpressionLog(
                     campaign_id = orm.id,
                     debate_id   = debate_id,
+                    user_id     = user.id,
                     gender      = user.gender or '',
                     age_group   = _get_age_group(user.dob),
                     county      = user.county or '',
@@ -5016,6 +5030,7 @@ def _cast_vote_inner(debate_id: int, data, user, db):
                 db.add(AdImpressionLog(
                     campaign_id = orm.id,
                     debate_id   = debate_id,
+                    user_id     = user.id,
                     gender      = user.gender or '',
                     age_group   = _get_age_group(user.dob),
                     county      = user.county or '',
@@ -9059,6 +9074,7 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         video_url           = getattr(data, 'video_url', '') or '',
         link_url            = data.link_url or '',
         min_per_capita_usd  = getattr(data, 'min_per_capita_usd', 0.0) or 0.0,
+        frequency_cap       = getattr(data, 'frequency_cap', None),
     )
     db.add(campaign)
     db.commit()
@@ -9737,6 +9753,18 @@ def admin_face_collection_test(secret: str, debate_id: int, selfie_log_id: int, 
         'blocked_matched_external_id': blocked_for,
         'newly_indexed_as': indexed,
     }
+
+@app.patch('/admin/campaigns/{campaign_id}/frequency-cap')
+def admin_set_frequency_cap(campaign_id: int, secret: str, cap: int = None, db: Session = Depends(get_db)):
+    """Setea (o quita, con cap vacío) el límite de frecuencia de una campaña."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(404, 'Campaign not found')
+    c.frequency_cap = cap
+    db.commit()
+    return {'ok': True, 'campaign_id': campaign_id, 'frequency_cap': c.frequency_cap}
 
 @app.get('/admin/aws-check')
 def aws_check(secret: str):
