@@ -11006,9 +11006,9 @@ def agent_income_data_status(secret: str, db: Session = Depends(get_db)):
 
     try:
         row = db.execute(_text(
-            "SELECT COUNT(*), MAX(updated_at) FROM korea_occupation_wages"
+            "SELECT COUNT(*), MAX(year) FROM korea_occupation_wages"
         )).fetchone()
-        status['korea_wages'] = {'total_rows': row[0], 'most_recent_updated_at': str(row[1]) if row[1] else None}
+        status['korea_wages'] = {'total_rows': row[0], 'data_year': row[1]}
     except Exception as e:
         db.rollback()
         status['korea_wages'] = {'error': str(e)}
