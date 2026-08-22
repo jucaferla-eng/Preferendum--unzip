@@ -9691,16 +9691,19 @@ def admin_rekognition_cross_test(secret: str, selfie_log_id_a: int, selfie_log_i
         return {'ok': False, 'error': str(e)}
 
 @app.get('/admin/face-collection-test')
-def admin_face_collection_test(secret: str, debate_id: int, selfie_log_id: int, db: Session = Depends(get_db)):
+def admin_face_collection_test(secret: str, debate_id: int, selfie_log_id: int, as_user_id: int = 0, db: Session = Depends(get_db)):
     """DIAGNÓSTICO TEMPORAL — ejercita el mismo camino de index/search que usa
     el bloqueo de cara duplicada, con una foto real ya guardada, sin pasar por
     todo el flujo HTTP de registro. Solo lectura + escribe en la colección de
-    prueba de Rekognition (no toca la base de datos de Preferendum)."""
+    prueba de Rekognition (no toca la base de datos de Preferendum).
+    as_user_id: para simular "esta misma foto, reclamada por otra cuenta" —
+    prueba de fraude controlada, sin subir fotos nuevas."""
     if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     log = db.query(SelfieLog).filter(SelfieLog.id == selfie_log_id).first()
     if not log or not log.face_bytes:
         raise HTTPException(404, 'selfie_log no encontrado o sin face_bytes')
+    effective_user_id = as_user_id or log.user_id
     photo = base64.b64decode(log.face_bytes)
     rek = _rekognition_client()
     _ensure_voter_face_collection(rek)
@@ -9715,20 +9718,20 @@ def admin_face_collection_test(secret: str, debate_id: int, selfie_log_id: int, 
     for ext_id in existing_matches:
         if '_' in ext_id:
             ext_debate, ext_user = ext_id.split('_', 1)
-            if ext_debate == str(debate_id) and ext_user != str(log.user_id):
+            if ext_debate == str(debate_id) and ext_user != str(effective_user_id):
                 blocked_for = ext_id
 
     indexed = None
     if not blocked_for:
         idx = rek.index_faces(
             CollectionId=_VOTER_FACE_COLLECTION, Image={'Bytes': photo},
-            ExternalImageId=f'{debate_id}_{log.user_id}', MaxFaces=1,
+            ExternalImageId=f'{debate_id}_{effective_user_id}', MaxFaces=1,
             QualityFilter='NONE', DetectionAttributes=[],
         )
         indexed = [f['Face']['ExternalImageId'] for f in idx.get('FaceRecords', [])]
 
     return {
-        'selfie_log_id': selfie_log_id, 'user_id': log.user_id, 'debate_id': debate_id,
+        'selfie_log_id': selfie_log_id, 'user_id': effective_user_id, 'debate_id': debate_id,
         'existing_matches_before': existing_matches,
         'blocked_would_reject': bool(blocked_for),
         'blocked_matched_external_id': blocked_for,
