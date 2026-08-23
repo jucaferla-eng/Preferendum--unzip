@@ -10905,6 +10905,27 @@ def agent_income_data_sync(secret: str, db: Session = Depends(get_db)):
         except Exception as e:
             db.rollback()
             summary['russia'] = {'ok': False, 'error': str(e)}
+        # 2c. Japón, Escandinavia y China — mismo caso: datos oficiales reales
+        #     importados desde archivos estáticos empaquetados, no APIs en vivo.
+        try:
+            from japan_wages_agent import run_japan_wages_import, run_japan_isco_import
+            summary['japan'] = run_japan_wages_import(db)
+            summary['japan_isco'] = run_japan_isco_import(db)
+        except Exception as e:
+            db.rollback()
+            summary['japan'] = {'ok': False, 'error': str(e)}
+        try:
+            from scandinavia_wages_agent import run_scandinavia_wages_import
+            summary['scandinavia'] = run_scandinavia_wages_import(db)
+        except Exception as e:
+            db.rollback()
+            summary['scandinavia'] = {'ok': False, 'error': str(e)}
+        try:
+            from china_wages_agent import run_china_wages_import
+            summary['china'] = run_china_wages_import(db)
+        except Exception as e:
+            db.rollback()
+            summary['china'] = {'ok': False, 'error': str(e)}
         # 3. World Bank GNI per capita — only for countries we actually have
         #    commune data for, not a hardcoded country list. Written into the
         #    durable world_countries table (UPDATE only — never INSERT, since
@@ -11019,6 +11040,27 @@ def agent_income_data_status(secret: str, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         status['russia_wages'] = {'error': str(e)}
+
+    try:
+        from japan_wages_agent import get_japan_summary
+        status['japan_wages'] = get_japan_summary(db)
+    except Exception as e:
+        db.rollback()
+        status['japan_wages'] = {'error': str(e)}
+
+    try:
+        row = db.execute(_text("SELECT COUNT(*) FROM scandinavia_occupation_wages")).fetchone()
+        status['scandinavia_wages'] = {'total_rows': row[0] if row else 0}
+    except Exception as e:
+        db.rollback()
+        status['scandinavia_wages'] = {'error': str(e)}
+
+    try:
+        from china_wages_agent import get_china_summary
+        status['china_wages'] = get_china_summary(db)
+    except Exception as e:
+        db.rollback()
+        status['china_wages'] = {'error': str(e)}
 
     status['commune_market_data_countries'] = db.query(CommuneMarketData.country).distinct().count()
     return status
