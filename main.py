@@ -866,6 +866,8 @@ app = FastAPI(
     description='En memoria del Socio Fundador José Ignacio Fernández (1989–2024)'
 )
 
+_PROCESS_INSTANCE_ID = uuid.uuid4().hex[:8]  # diagnóstico temporal — ver si hay >1 proceso/instancia sirviendo tráfico
+
 app.add_middleware(CORSMiddleware,
     allow_origins=['*'], allow_credentials=True,
     allow_methods=['*'], allow_headers=['*'])
@@ -2075,6 +2077,7 @@ def health(db: Session = Depends(get_db)):
         'timestamp': datetime.utcnow().isoformat(),
         'git_commit': os.getenv('RENDER_GIT_COMMIT', ''),
         'db': 'ok' if db_ok else 'error',
+        'instance_id': _PROCESS_INSTANCE_ID,  # diagnóstico temporal
     }
 
 @app.get('/ping-test', response_class=HTMLResponse)
