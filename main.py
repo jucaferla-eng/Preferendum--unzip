@@ -433,6 +433,7 @@ class AdImpressionLog(Base):
     campaign_id = Column(Integer, index=True)
     debate_id   = Column(Integer, index=True, nullable=True)
     user_id     = Column(Integer, index=True, nullable=True)  # quién vio el anuncio — para límite de frecuencia
+    cost_clp    = Column(Integer, nullable=True)  # lo que se cobró a la campaña por ESTE impresión específico
     gender      = Column(String, default='')
     age_group   = Column(String, default='')
     county      = Column(String, default='')
@@ -770,6 +771,12 @@ def _migrate():
         if 'user_id' not in existing_impr_cols:
             try:
                 conn.execute(text('ALTER TABLE ad_impression_logs ADD COLUMN user_id INTEGER'))
+                conn.commit()
+            except Exception:
+                pass
+        if 'cost_clp' not in existing_impr_cols:
+            try:
+                conn.execute(text('ALTER TABLE ad_impression_logs ADD COLUMN cost_clp INTEGER'))
                 conn.commit()
             except Exception:
                 pass
@@ -4616,18 +4623,19 @@ def get_opinions(debate_id: int,
         }})
         orm = campaign.get('_orm')
         if orm:
+            cpm_usd  = campaign.get('cpm') or 6.0
+            cost_clp = max(1, int(round((cpm_usd * USD_TO_CLP) / 1000.0)))
             if user:
                 db.add(AdImpressionLog(
                     campaign_id = orm.id,
                     debate_id   = debate_id,
                     user_id     = user.id,
+                    cost_clp    = cost_clp,
                     gender      = user.gender or '',
                     age_group   = _get_age_group(user.dob),
                     county      = user.county or '',
                     country     = user.country or '',
                 ))
-            cpm_usd  = campaign.get('cpm') or 6.0
-            cost_clp = max(1, int(round((cpm_usd * USD_TO_CLP) / 1000.0)))
             # UPDATE atómico — un read-modify-write en Python aquí pierde
             # incrementos bajo concurrencia real (confirmado empíricamente:
             # 15 requests simultáneos → solo ~3 cobros persistidos).
@@ -5025,17 +5033,18 @@ def _cast_vote_inner(debate_id: int, data, user, db):
             top = matched_campaigns[0]
             orm = top.get('_orm')
             if orm:
+                cpm_usd  = top.get('cpm') or 6.0
+                cost_clp = max(1, int(round((cpm_usd * USD_TO_CLP) / 1000.0)))
                 db.add(AdImpressionLog(
                     campaign_id = orm.id,
                     debate_id   = debate_id,
                     user_id     = user.id,
+                    cost_clp    = cost_clp,
                     gender      = user.gender or '',
                     age_group   = _get_age_group(user.dob),
                     county      = user.county or '',
                     country     = user.country or '',
                 ))
-                cpm_usd  = top.get('cpm') or 6.0
-                cost_clp = max(1, int(round((cpm_usd * USD_TO_CLP) / 1000.0)))
                 # UPDATE atómico — mismo motivo que en get_opinions (ver comentario ahí)
                 db.execute(text("""
                     UPDATE ad_campaigns
@@ -5611,6 +5620,7 @@ async def track_ad_view(data: AdViewInput, db: Session = Depends(get_db)):
     log = AdImpressionLog(
         campaign_id = data.campaign_id,
         debate_id   = data.debate_id,
+        cost_clp    = COST_PER_VIEW,
         gender      = data.gender,
         age_group   = data.age_group,
         county      = data.county,
@@ -13518,6 +13528,50 @@ def admin_recompute_campaign_spend(campaign_id: int, secret: str, db: Session = 
         'cost_per_impression_clp': cost_each,
         'spent_clp_before': before,
         'spent_clp_after': c.spent_clp,
+    }
+
+
+@app.get('/admin/campaigns/{campaign_id}/impression-ledger')
+def admin_campaign_impression_ledger(campaign_id: int, secret: str, limit: int = 200, db: Session = Depends(get_db)):
+    """Individual per-impression audit trail — each row is one real charge
+    with its own id, cost_clp, user_id, debate_id and timestamp. Before this,
+    only the accumulated spent_clp total existed on the campaign, so a
+    specific past charge could never be individually verified after the
+    fact. sum(cost_clp) here should reconcile with spent_clp (small
+    drift possible only from impressions logged before this column
+    existed, which have cost_clp=NULL)."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not c:
+        raise HTTPException(404, 'Campaign not found')
+    rows = db.query(AdImpressionLog).filter(
+        AdImpressionLog.campaign_id == campaign_id
+    ).order_by(AdImpressionLog.created_at.desc()).limit(limit).all()
+    total_logged = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == campaign_id).count()
+    sum_cost = db.query(func.coalesce(func.sum(AdImpressionLog.cost_clp), 0)).filter(
+        AdImpressionLog.campaign_id == campaign_id
+    ).scalar() or 0
+    unpriced = db.query(AdImpressionLog).filter(
+        AdImpressionLog.campaign_id == campaign_id, AdImpressionLog.cost_clp.is_(None)
+    ).count()
+    return {
+        'campaign_id':        campaign_id,
+        'advertiser_name':    c.advertiser_name,
+        'spent_clp':          c.spent_clp,
+        'ledger_sum_cost_clp': sum_cost,
+        'total_impressions_logged': total_logged,
+        'impressions_without_cost_clp': unpriced,  # legadas, antes de esta columna
+        'ledger': [{
+            'id':          r.id,
+            'debate_id':   r.debate_id,
+            'user_id':     r.user_id,
+            'cost_clp':    r.cost_clp,
+            'gender':      r.gender,
+            'age_group':   r.age_group,
+            'country':     r.country,
+            'created_at':  r.created_at.isoformat() if r.created_at else None,
+        } for r in rows],
     }
 
 
