@@ -1053,13 +1053,35 @@ async def security_shield_middleware(request: Request, call_next):
                 f'IP hash: {_sec_hash(ip)}\n\n'
                 f'Esto es mucho más grave que un intento fallido normal: significa que '
                 f'encontraron ese valor específico en algún lado. Se le devolvió data falsa, '
-                f'nunca tocó la base real. Investigar de inmediato dónde pudo haberse filtrado.'
+                f'nunca tocó la base real, y la IP queda baneada de /admin/* — no vuelve a '
+                f'entrar aunque siga probando; solo seguirá recibiendo data falsa. '
+                f'Investigar de inmediato dónde pudo haberse filtrado.'
             )
+            # Baneado Y engañado a la vez (pedido explícito de Joseph): esta IP
+            # no vuelve a tener una chance real de entrar — Capa 1, más abajo,
+            # sigue devolviéndole data falsa en cada intento futuro mientras
+            # dure el bloqueo, en vez de un 403/429 honesto que le confirme
+            # que fue detectado.
+            _sec_block_ip(ip, _SEC_ADMIN_BLOCK_MIN, f'Canary secret usado en {path}')
             return _SecJSONResponse(status_code=200, content=_CANARY_DECOY_PAYLOAD)
 
-    # Capa 1 — IP ya bloqueada por un patrón confirmado previamente
+    # Capa 1 — IP ya bloqueada por un patrón confirmado previamente.
     if _sec_is_blocked(ip):
-        return _SecJSONResponse(status_code=429, content={'detail': 'Demasiadas solicitudes. Intenta más tarde.'})
+        real_secret = os.getenv('ADMIN_SECRET')
+        if path.startswith('/admin') and real_secret and request.query_params.get('secret', '') == real_secret:
+            # Quien manda el secret REAL correcto no puede ser el atacante —
+            # nunca lo tiene. Casi seguro es JC/Joseph en una IP que se
+            # bloqueó por ruido de alguien más en la misma red (oficina/WiFi
+            # compartido). Se desbloquea y pasa normal, nunca data falsa
+            # para quien de verdad tiene la llave.
+            _SEC_BLOCKED_IPS.pop(_sec_hash(ip), None)
+            _sec_log_event('legit_secret_after_block_unblocked', ip, path)
+        elif path.startswith('/admin'):
+            # La puerta no se vuelve a abrir: sigue recibiendo data falsa,
+            # nunca un 403/429 que le confirme al atacante que fue detectado.
+            return _SecJSONResponse(status_code=200, content=_CANARY_DECOY_PAYLOAD)
+        else:
+            return _SecJSONResponse(status_code=429, content={'detail': 'Demasiadas solicitudes. Intenta más tarde.'})
 
     # Capa 2 — rate limit en rutas sensibles (login/registro)
     if path in _SEC_SENSITIVE_PATHS:
