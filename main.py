@@ -9959,6 +9959,8 @@ def targeting_match_debate(debate_id: int, secret: str, db: Session = Depends(ge
         'matches': [{
             'campaign_id': m.get('id'), 'advertiser_name': m.get('advertiser_name'),
             'optimization_rank': m.get('optimization_rank'), 'pinned': m.get('pinned', False),
+            'specificity_score': m.get('specificity_score'), 'effective_cpm': m.get('effective_cpm'),
+            'precision_rate': m.get('precision_rate'), 'cpm': m.get('cpm'),
         } for m in matches[:10]],
         'total_candidates': len(matches),
     }
