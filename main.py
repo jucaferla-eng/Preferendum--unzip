@@ -449,6 +449,20 @@ class PostVoteComment(Base):
     text       = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class SecurityEvent(Base):
+    """Rastro de eventos del escudo de seguridad global — fuerza bruta de
+    ADMIN_SECRET, credential stuffing en login, IPs bloqueadas. Nunca
+    guarda IP, email ni password en texto plano — solo hashes truncados
+    (misma política que preferendum_agent.py). Persiste el historial
+    aunque el proceso se reinicie (la protección en memoria, más rápida
+    para el chequeo en caliente, no sobrevive un deploy)."""
+    __tablename__ = 'security_events'
+    id          = Column(Integer, primary_key=True)
+    event_type  = Column(String, index=True)   # 'admin_secret_fail'|'login_fail_ip_blocked'|'login_fail_email_locked'|'ip_blocked'
+    ip_hash     = Column(String, index=True, default='')
+    detail      = Column(String, default='')   # path o email_hash — nunca PII directa
+    created_at  = Column(DateTime, default=datetime.utcnow, index=True)
+
 class ClosedListEntry(Base):
     __tablename__ = 'closed_list_entries'
     id               = Column(Integer, primary_key=True)
@@ -855,6 +869,173 @@ app = FastAPI(
 app.add_middleware(CORSMiddleware,
     allow_origins=['*'], allow_credentials=True,
     allow_methods=['*'], allow_headers=['*'])
+
+# ══════════════════════════════════════════════════════════════
+# ESCUDO DE SEGURIDAD GLOBAL
+# Protege /auth/login, registro y las ~140 rutas /admin/* (gateadas por
+# ADMIN_SECRET) de fuerza bruta y credential stuffing. Antes de esto no
+# existía NINGÚN rate limiting global — solo el chat del agente
+# (preferendum_agent.py) tenía su propio rate limiter aislado. Esto es
+# la base ("anticuerpos") antes de cualquier capa de engaño/honeypot:
+# bloquea, audita y alerta por email en tiempo real a JC/Joseph.
+# ══════════════════════════════════════════════════════════════
+from collections import defaultdict as _sec_defaultdict
+
+_SEC_ADMIN_FAIL:     dict = _sec_defaultdict(list)   # ip -> [timestamps de ADMIN_SECRET incorrecto]
+_SEC_LOGIN_FAIL_IP:  dict = _sec_defaultdict(list)   # ip -> [timestamps de login fallido]
+_SEC_LOGIN_FAIL_EM:  dict = _sec_defaultdict(list)   # email_hash -> [timestamps]
+_SEC_SENSITIVE_RATE: dict = _sec_defaultdict(list)   # ip -> [timestamps en paths sensibles]
+_SEC_BLOCKED_IPS:    dict = {}   # ip_hash -> unblock_at iso
+_SEC_LOCKED_EMAILS:  dict = {}   # email_hash -> unblock_at iso
+
+#  Los umbrales por IP son deliberadamente generosos porque muchos usuarios
+#  reales comparten una sola IP pública (WiFi de colegio/oficina — JC tiene
+#  planeadas pruebas masivas con estudiantes en la misma red). El límite por
+#  EMAIL (cuenta específica) sí es estricto, porque ahí no hay colisión de
+#  NAT: cada cuenta es una persona. Un ataque automatizado real dispara
+#  cientos de intentos por minuto — muy por encima de estos umbrales — así
+#  que siguen protegiendo contra fuerza bruta sin romper el uso humano
+#  concurrente normal.
+_SEC_ADMIN_FAIL_MAX,    _SEC_ADMIN_FAIL_WINDOW,    _SEC_ADMIN_BLOCK_MIN    = 5,  600, 60
+_SEC_LOGIN_FAIL_IP_MAX, _SEC_LOGIN_FAIL_IP_WINDOW,  _SEC_LOGIN_IP_BLOCK_MIN = 40, 600, 15
+_SEC_LOGIN_FAIL_EM_MAX, _SEC_LOGIN_FAIL_EM_WINDOW,  _SEC_LOGIN_EM_LOCK_MIN  = 6,  900, 15
+_SEC_SENSITIVE_MAX, _SEC_SENSITIVE_WINDOW = 60, 60
+
+_SEC_SENSITIVE_PATHS = {
+    '/auth/login', '/auth/register', '/voter/register',
+    '/organizer/login', '/organizer/register', '/organizers/login', '/organizers/register',
+    '/marketer/login', '/marketer/register',
+}
+
+def _sec_client_ip(request: Request) -> str:
+    return request.headers.get('X-Forwarded-For', (request.client.host if request.client else '') or '0.0.0.0').split(',')[0].strip()
+
+def _sec_hash(val: str) -> str:
+    return hashlib.sha256((val or '').encode()).hexdigest()[:16]
+
+def _sec_log_event(event_type: str, ip: str = '', detail: str = ''):
+    """Best-effort — nunca debe romper el request si falla."""
+    try:
+        _db = SessionLocal()
+        try:
+            _db.add(SecurityEvent(event_type=event_type, ip_hash=_sec_hash(ip), detail=(detail or '')[:200]))
+            _db.commit()
+        finally:
+            _db.close()
+    except Exception as e:
+        print(f'[SECURITY] log error (non-fatal): {e}')
+
+def _sec_alert(subject: str, body: str):
+    """Alerta real por email — best-effort, nunca bloquea el request."""
+    try:
+        resend_key = os.getenv('RESEND_API_KEY')
+        if not resend_key:
+            print(f'[SECURITY ALERT - sin RESEND_API_KEY] {subject}: {body}')
+            return
+        alert_to = [e.strip() for e in os.getenv('SECURITY_ALERT_EMAILS', 'jucaferla@gmail.com').split(',') if e.strip()]
+        _requests.post(
+            'https://api.resend.com/emails',
+            json={
+                'from': 'Preferendum Security <noreply@preferendum.com>',
+                'to': alert_to,
+                'subject': f'[SEGURIDAD Preferendum] {subject}',
+                'text': body,
+            },
+            headers={'Authorization': f'Bearer {resend_key}'},
+            timeout=10,
+        )
+    except Exception as e:
+        print(f'[SECURITY ALERT] send error (non-fatal): {e}')
+
+def _sec_is_blocked(ip: str) -> bool:
+    ip_hash = _sec_hash(ip)
+    unblock_iso = _SEC_BLOCKED_IPS.get(ip_hash)
+    if not unblock_iso:
+        return False
+    if datetime.utcnow() < datetime.fromisoformat(unblock_iso):
+        return True
+    del _SEC_BLOCKED_IPS[ip_hash]
+    return False
+
+def _sec_block_ip(ip: str, minutes: int, reason: str):
+    ip_hash = _sec_hash(ip)
+    unblock_at = datetime.utcnow() + timedelta(minutes=minutes)
+    _SEC_BLOCKED_IPS[ip_hash] = unblock_at.isoformat()
+    _sec_log_event('ip_blocked', ip, reason)
+    _sec_alert(
+        f'IP bloqueada — {reason}',
+        f'IP hash: {ip_hash}\nRazón: {reason}\nBloqueada hasta: {unblock_at.isoformat()} UTC\n\n'
+        f'Alguien intentó forzar acceso repetidamente. Revisa /admin/security/status.'
+    )
+
+def sec_email_locked(email: str) -> bool:
+    email_hash = _sec_hash((email or '').strip().lower())
+    unblock_iso = _SEC_LOCKED_EMAILS.get(email_hash)
+    if not unblock_iso:
+        return False
+    if datetime.utcnow() < datetime.fromisoformat(unblock_iso):
+        return True
+    del _SEC_LOCKED_EMAILS[email_hash]
+    return False
+
+def sec_record_login_fail(ip: str, email: str):
+    now = time.time()
+    email_hash = _sec_hash((email or '').strip().lower())
+    # Por email — protege contra credential stuffing distribuido en muchas IPs
+    ts = [t for t in _SEC_LOGIN_FAIL_EM[email_hash] if now - t < _SEC_LOGIN_FAIL_EM_WINDOW]
+    ts.append(now)
+    _SEC_LOGIN_FAIL_EM[email_hash] = ts
+    if len(ts) >= _SEC_LOGIN_FAIL_EM_MAX:
+        unblock_at = datetime.utcnow() + timedelta(minutes=_SEC_LOGIN_EM_LOCK_MIN)
+        _SEC_LOCKED_EMAILS[email_hash] = unblock_at.isoformat()
+        _sec_log_event('login_fail_email_locked', ip, f'email_hash={email_hash}')
+        _sec_alert(
+            'Cuenta bloqueada temporalmente por intentos fallidos de login',
+            f'Email hash: {email_hash}\nIntentos: {len(ts)} en {_SEC_LOGIN_FAIL_EM_WINDOW//60} min\n'
+            f'Bloqueada hasta: {unblock_at.isoformat()} UTC'
+        )
+    # Por IP — protege contra una sola IP probando muchas cuentas distintas
+    ts_ip = [t for t in _SEC_LOGIN_FAIL_IP[ip] if now - t < _SEC_LOGIN_FAIL_IP_WINDOW]
+    ts_ip.append(now)
+    _SEC_LOGIN_FAIL_IP[ip] = ts_ip
+    if len(ts_ip) >= _SEC_LOGIN_FAIL_IP_MAX:
+        _sec_block_ip(ip, _SEC_LOGIN_IP_BLOCK_MIN,
+                       f'{len(ts_ip)} logins fallidos en {_SEC_LOGIN_FAIL_IP_WINDOW//60}min (posible credential stuffing)')
+
+@app.middleware('http')
+async def security_shield_middleware(request: Request, call_next):
+    from fastapi.responses import JSONResponse as _SecJSONResponse
+    ip   = _sec_client_ip(request)
+    path = request.url.path
+
+    # Capa 1 — IP ya bloqueada por un patrón confirmado previamente
+    if _sec_is_blocked(ip):
+        return _SecJSONResponse(status_code=429, content={'detail': 'Demasiadas solicitudes. Intenta más tarde.'})
+
+    # Capa 2 — rate limit en rutas sensibles (login/registro)
+    if path in _SEC_SENSITIVE_PATHS:
+        now = time.time()
+        ts = [t for t in _SEC_SENSITIVE_RATE[ip] if now - t < _SEC_SENSITIVE_WINDOW]
+        ts.append(now)
+        _SEC_SENSITIVE_RATE[ip] = ts
+        if len(ts) > _SEC_SENSITIVE_MAX:
+            return _SecJSONResponse(status_code=429, content={'detail': 'Demasiadas solicitudes. Espera un momento.'})
+
+    response = await call_next(request)
+
+    # Capa 3 — fuerza bruta de ADMIN_SECRET: cualquier 403 en /admin/* cuenta
+    if response.status_code == 403 and path.startswith('/admin'):
+        now = time.time()
+        ts = [t for t in _SEC_ADMIN_FAIL[ip] if now - t < _SEC_ADMIN_FAIL_WINDOW]
+        ts.append(now)
+        _SEC_ADMIN_FAIL[ip] = ts
+        if len(ts) >= _SEC_ADMIN_FAIL_MAX:
+            _sec_block_ip(ip, _SEC_ADMIN_BLOCK_MIN,
+                           f'{len(ts)} intentos fallidos de ADMIN_SECRET en {_SEC_ADMIN_FAIL_WINDOW//60}min (path: {path})')
+        else:
+            _sec_log_event('admin_secret_fail', ip, path)
+
+    return response
 
 # ── AUTO-SCHEDULER: corre el agente de noticias todos los días a las 7am UTC ──
 try:
@@ -2251,9 +2432,12 @@ def register(data: RegisterInput, bg: BackgroundTasks, db: Session = Depends(get
     }
 
 @app.post('/auth/login')
-def login(data: LoginInput, bg: BackgroundTasks, db: Session = Depends(get_db)):
+def login(data: LoginInput, request: Request, bg: BackgroundTasks, db: Session = Depends(get_db)):
+    if sec_email_locked(data.email):
+        raise HTTPException(429, 'Demasiados intentos fallidos. Intenta de nuevo en unos minutos.')
     user = db.query(User).filter(func.lower(User.email) == func.lower(data.email)).first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
+        sec_record_login_fail(_sec_client_ip(request), data.email)
         raise HTTPException(401, 'Invalid credentials')
     check_and_register_device(data.device_fp, user.id, db)
 
@@ -11544,6 +11728,31 @@ def agent_security_log(secret: str):
         'recent_high_risk':   [e for e in _audit_log[-50:] if e['risk_score'] >= 70],
         'rate_limited_ips':   {ip: len(ts) for ip, ts in _rate_limit_store.items() if len(ts) > 5},
     }
+
+@app.get('/admin/security/status')
+def admin_security_status(secret: str, db: Session = Depends(get_db)):
+    """Estado del escudo de seguridad global — IPs bloqueadas, cuentas
+    bloqueadas por intentos fallidos, y el historial persistido en
+    security_events (sobrevive reinicios, a diferencia de los diccionarios
+    en memoria que se resetean en cada deploy)."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    now = datetime.utcnow()
+    active_ip_blocks = {h: u for h, u in _SEC_BLOCKED_IPS.items() if datetime.fromisoformat(u) > now}
+    active_email_locks = {h: u for h, u in _SEC_LOCKED_EMAILS.items() if datetime.fromisoformat(u) > now}
+    recent = db.query(SecurityEvent).order_by(SecurityEvent.created_at.desc()).limit(100).all()
+    last_24h = db.query(SecurityEvent).filter(SecurityEvent.created_at >= now - timedelta(hours=24)).count()
+    return {
+        'currently_blocked_ips':   active_ip_blocks,
+        'currently_locked_emails': active_email_locks,
+        'events_last_24h':        last_24h,
+        'recent_events': [{
+            'event_type': e.event_type, 'ip_hash': e.ip_hash, 'detail': e.detail,
+            'created_at': e.created_at.isoformat() if e.created_at else None,
+        } for e in recent],
+        'note': 'Los diccionarios en memoria (bloqueos activos) se resetean en cada deploy — el historial en security_events no.',
+    }
+
 
 @app.post('/agent/moderate')
 def agent_moderate(content_type: str, title: str = '', body: str = '', options: str = ''):
