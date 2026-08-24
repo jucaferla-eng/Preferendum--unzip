@@ -458,10 +458,25 @@ class SecurityEvent(Base):
     para el chequeo en caliente, no sobrevive un deploy)."""
     __tablename__ = 'security_events'
     id          = Column(Integer, primary_key=True)
-    event_type  = Column(String, index=True)   # 'admin_secret_fail'|'login_fail_ip_blocked'|'login_fail_email_locked'|'ip_blocked'
+    event_type  = Column(String, index=True)   # 'admin_secret_fail'|'login_fail'|'ip_blocked'|'canary_secret_used'|...
     ip_hash     = Column(String, index=True, default='')
     detail      = Column(String, default='')   # path o email_hash — nunca PII directa
     created_at  = Column(DateTime, default=datetime.utcnow, index=True)
+
+class SecurityBlock(Base):
+    """Bloqueos activos (IP o cuenta) — persistidos en la BD real, no en
+    memoria. Render corre esta app en MÁS DE UNA instancia (confirmado
+    2026-08-24 con un instance_id de diagnóstico: dos IDs distintos
+    alternando en requests consecutivos a la misma URL) — un diccionario
+    en memoria es por-proceso, así que el conteo de intentos fallidos de
+    un atacante se reparte entre instancias y nunca cruza el umbral en
+    ninguna. La BD es lo único realmente compartido entre todas."""
+    __tablename__ = 'security_blocks'
+    id         = Column(Integer, primary_key=True)
+    block_key  = Column(String, unique=True, index=True)   # 'ip:<hash>' o 'email:<hash>'
+    reason     = Column(String, default='')
+    unblock_at = Column(DateTime, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class ClosedListEntry(Base):
     __tablename__ = 'closed_list_entries'
@@ -866,8 +881,6 @@ app = FastAPI(
     description='En memoria del Socio Fundador José Ignacio Fernández (1989–2024)'
 )
 
-_PROCESS_INSTANCE_ID = uuid.uuid4().hex[:8]  # diagnóstico temporal — ver si hay >1 proceso/instancia sirviendo tráfico
-
 app.add_middleware(CORSMiddleware,
     allow_origins=['*'], allow_credentials=True,
     allow_methods=['*'], allow_headers=['*'])
@@ -877,18 +890,23 @@ app.add_middleware(CORSMiddleware,
 # Protege /auth/login, registro y las ~140 rutas /admin/* (gateadas por
 # ADMIN_SECRET) de fuerza bruta y credential stuffing. Antes de esto no
 # existía NINGÚN rate limiting global — solo el chat del agente
-# (preferendum_agent.py) tenía su propio rate limiter aislado. Esto es
-# la base ("anticuerpos") antes de cualquier capa de engaño/honeypot:
-# bloquea, audita y alerta por email en tiempo real a JC/Joseph.
+# (preferendum_agent.py) tenía su propio rate limiter aislado.
+#
+# IMPORTANTE — por qué esto vive en la BD y no en memoria: la primera
+# versión (2026-08-24) usaba diccionarios en memoria y el bloqueo NUNCA
+# se disparó en la prueba en vivo pese a cruzar el umbral. Diagnóstico
+# con un instance_id aleatorio en /health confirmó que Render corre esta
+# app en MÁS DE UNA instancia — cada proceso tiene su propia memoria, así
+# que el conteo de un atacante se reparte entre instancias y nunca cruza
+# el umbral en ninguna. Los conteos y bloqueos ahora consultan
+# security_events / security_blocks (Postgres — lo único compartido de
+# verdad entre instancias). Solo el throttle blando de Capa 2 (ritmo de
+# requests, no un límite de seguridad duro) sigue en memoria — best
+# effort, tolerable si no es perfecto entre instancias.
 # ══════════════════════════════════════════════════════════════
 from collections import defaultdict as _sec_defaultdict
 
-_SEC_ADMIN_FAIL:     dict = _sec_defaultdict(list)   # ip -> [timestamps de ADMIN_SECRET incorrecto]
-_SEC_LOGIN_FAIL_IP:  dict = _sec_defaultdict(list)   # ip -> [timestamps de login fallido]
-_SEC_LOGIN_FAIL_EM:  dict = _sec_defaultdict(list)   # email_hash -> [timestamps]
-_SEC_SENSITIVE_RATE: dict = _sec_defaultdict(list)   # ip -> [timestamps en paths sensibles]
-_SEC_BLOCKED_IPS:    dict = {}   # ip_hash -> unblock_at iso
-_SEC_LOCKED_EMAILS:  dict = {}   # email_hash -> unblock_at iso
+_SEC_SENSITIVE_RATE: dict = _sec_defaultdict(list)   # ip -> [timestamps en paths sensibles] — solo Capa 2, best-effort
 
 #  Los umbrales por IP son deliberadamente generosos porque muchos usuarios
 #  reales comparten una sola IP pública (WiFi de colegio/oficina — JC tiene
@@ -949,20 +967,81 @@ def _sec_alert(subject: str, body: str):
     except Exception as e:
         print(f'[SECURITY ALERT] send error (non-fatal): {e}')
 
-def _sec_is_blocked(ip: str) -> bool:
-    ip_hash = _sec_hash(ip)
-    unblock_iso = _SEC_BLOCKED_IPS.get(ip_hash)
-    if not unblock_iso:
+def _sec_count_events(event_type: str, since_seconds: int, ip_hash: str = None, detail: str = None) -> int:
+    """Cuenta eventos en security_events dentro de la ventana — consulta
+    real a la BD, compartida por todas las instancias (a diferencia de un
+    contador en memoria, que es por-proceso)."""
+    try:
+        _db = SessionLocal()
+        try:
+            since = datetime.utcnow() - timedelta(seconds=since_seconds)
+            q = _db.query(SecurityEvent).filter(
+                SecurityEvent.event_type == event_type,
+                SecurityEvent.created_at > since,
+            )
+            if ip_hash is not None:
+                q = q.filter(SecurityEvent.ip_hash == ip_hash)
+            if detail is not None:
+                q = q.filter(SecurityEvent.detail == detail)
+            return q.count()
+        finally:
+            _db.close()
+    except Exception as e:
+        print(f'[SECURITY] count error (non-fatal, fail-open): {e}')
+        return 0
+
+def _sec_key_blocked(block_key: str) -> bool:
+    try:
+        _db = SessionLocal()
+        try:
+            row = _db.query(SecurityBlock).filter(SecurityBlock.block_key == block_key).first()
+            if not row:
+                return False
+            if datetime.utcnow() < row.unblock_at:
+                return True
+            _db.delete(row)
+            _db.commit()
+            return False
+        finally:
+            _db.close()
+    except Exception as e:
+        print(f'[SECURITY] block-check error (non-fatal, fail-open): {e}')
         return False
-    if datetime.utcnow() < datetime.fromisoformat(unblock_iso):
-        return True
-    del _SEC_BLOCKED_IPS[ip_hash]
-    return False
+
+def _sec_set_block(block_key: str, minutes: int, reason: str) -> datetime:
+    unblock_at = datetime.utcnow() + timedelta(minutes=minutes)
+    try:
+        _db = SessionLocal()
+        try:
+            row = _db.query(SecurityBlock).filter(SecurityBlock.block_key == block_key).first()
+            if row:
+                row.reason, row.unblock_at = reason, unblock_at
+            else:
+                _db.add(SecurityBlock(block_key=block_key, reason=reason, unblock_at=unblock_at))
+            _db.commit()
+        finally:
+            _db.close()
+    except Exception as e:
+        print(f'[SECURITY] set-block error (non-fatal): {e}')
+    return unblock_at
+
+def _sec_unblock_key(block_key: str):
+    try:
+        _db = SessionLocal()
+        try:
+            _db.query(SecurityBlock).filter(SecurityBlock.block_key == block_key).delete()
+            _db.commit()
+        finally:
+            _db.close()
+    except Exception as e:
+        print(f'[SECURITY] unblock error (non-fatal): {e}')
+
+def _sec_is_blocked(ip: str) -> bool:
+    return _sec_key_blocked(f'ip:{_sec_hash(ip)}')
 
 def _sec_block_ip(ip: str, minutes: int, reason: str):
     ip_hash = _sec_hash(ip)
-    unblock_at = datetime.utcnow() + timedelta(minutes=minutes)
-    _SEC_BLOCKED_IPS[ip_hash] = unblock_at.isoformat()
+    unblock_at = _sec_set_block(f'ip:{ip_hash}', minutes, reason)
     _sec_log_event('ip_blocked', ip, reason)
     _sec_alert(
         f'IP bloqueada — {reason}',
@@ -972,37 +1051,27 @@ def _sec_block_ip(ip: str, minutes: int, reason: str):
 
 def sec_email_locked(email: str) -> bool:
     email_hash = _sec_hash((email or '').strip().lower())
-    unblock_iso = _SEC_LOCKED_EMAILS.get(email_hash)
-    if not unblock_iso:
-        return False
-    if datetime.utcnow() < datetime.fromisoformat(unblock_iso):
-        return True
-    del _SEC_LOCKED_EMAILS[email_hash]
-    return False
+    return _sec_key_blocked(f'email:{email_hash}')
 
 def sec_record_login_fail(ip: str, email: str):
-    now = time.time()
+    ip_hash = _sec_hash(ip)
     email_hash = _sec_hash((email or '').strip().lower())
+    _sec_log_event('login_fail', ip, f'email_hash={email_hash}')
     # Por email — protege contra credential stuffing distribuido en muchas IPs
-    ts = [t for t in _SEC_LOGIN_FAIL_EM[email_hash] if now - t < _SEC_LOGIN_FAIL_EM_WINDOW]
-    ts.append(now)
-    _SEC_LOGIN_FAIL_EM[email_hash] = ts
-    if len(ts) >= _SEC_LOGIN_FAIL_EM_MAX:
-        unblock_at = datetime.utcnow() + timedelta(minutes=_SEC_LOGIN_EM_LOCK_MIN)
-        _SEC_LOCKED_EMAILS[email_hash] = unblock_at.isoformat()
-        _sec_log_event('login_fail_email_locked', ip, f'email_hash={email_hash}')
+    em_count = _sec_count_events('login_fail', _SEC_LOGIN_FAIL_EM_WINDOW, detail=f'email_hash={email_hash}')
+    if em_count >= _SEC_LOGIN_FAIL_EM_MAX:
+        unblock_at = _sec_set_block(f'email:{email_hash}', _SEC_LOGIN_EM_LOCK_MIN,
+                                     f'{em_count} logins fallidos en {_SEC_LOGIN_FAIL_EM_WINDOW//60}min')
         _sec_alert(
             'Cuenta bloqueada temporalmente por intentos fallidos de login',
-            f'Email hash: {email_hash}\nIntentos: {len(ts)} en {_SEC_LOGIN_FAIL_EM_WINDOW//60} min\n'
+            f'Email hash: {email_hash}\nIntentos: {em_count} en {_SEC_LOGIN_FAIL_EM_WINDOW//60} min\n'
             f'Bloqueada hasta: {unblock_at.isoformat()} UTC'
         )
     # Por IP — protege contra una sola IP probando muchas cuentas distintas
-    ts_ip = [t for t in _SEC_LOGIN_FAIL_IP[ip] if now - t < _SEC_LOGIN_FAIL_IP_WINDOW]
-    ts_ip.append(now)
-    _SEC_LOGIN_FAIL_IP[ip] = ts_ip
-    if len(ts_ip) >= _SEC_LOGIN_FAIL_IP_MAX:
+    ip_count = _sec_count_events('login_fail', _SEC_LOGIN_FAIL_IP_WINDOW, ip_hash=ip_hash)
+    if ip_count >= _SEC_LOGIN_FAIL_IP_MAX:
         _sec_block_ip(ip, _SEC_LOGIN_IP_BLOCK_MIN,
-                       f'{len(ts_ip)} logins fallidos en {_SEC_LOGIN_FAIL_IP_WINDOW//60}min (posible credential stuffing)')
+                       f'{ip_count} logins fallidos en {_SEC_LOGIN_FAIL_IP_WINDOW//60}min (posible credential stuffing)')
 
 # ── CAPA DE ENGAÑO (honeypot / canary secret) — TODO #15 ──────
 # La idea de JC: "anticuerpos" — nunca tocar sistemas de terceros, solo
@@ -1068,7 +1137,11 @@ async def security_shield_middleware(request: Request, call_next):
             return _SecJSONResponse(status_code=200, content=_CANARY_DECOY_PAYLOAD)
 
     # Capa 1 — IP ya bloqueada por un patrón confirmado previamente.
-    if _sec_is_blocked(ip):
+    # Restringido a rutas admin/sensibles — evita una consulta a la BD en
+    # CADA request público (feed de consultas, opiniones, etc), que es la
+    # inmensa mayoría del tráfico y no necesita este chequeo.
+    is_sensitive = path.startswith('/admin') or path in _SEC_SENSITIVE_PATHS
+    if is_sensitive and _sec_is_blocked(ip):
         real_secret = os.getenv('ADMIN_SECRET')
         if path.startswith('/admin') and real_secret and request.query_params.get('secret', '') == real_secret:
             # Quien manda el secret REAL correcto no puede ser el atacante —
@@ -1076,7 +1149,7 @@ async def security_shield_middleware(request: Request, call_next):
             # bloqueó por ruido de alguien más en la misma red (oficina/WiFi
             # compartido). Se desbloquea y pasa normal, nunca data falsa
             # para quien de verdad tiene la llave.
-            _SEC_BLOCKED_IPS.pop(_sec_hash(ip), None)
+            _sec_unblock_key(f'ip:{_sec_hash(ip)}')
             _sec_log_event('legit_secret_after_block_unblocked', ip, path)
         elif path.startswith('/admin'):
             # La puerta no se vuelve a abrir: sigue recibiendo data falsa,
@@ -1085,7 +1158,12 @@ async def security_shield_middleware(request: Request, call_next):
         else:
             return _SecJSONResponse(status_code=429, content={'detail': 'Demasiadas solicitudes. Intenta más tarde.'})
 
-    # Capa 2 — rate limit en rutas sensibles (login/registro)
+    # Capa 2 — rate limit en rutas sensibles (login/registro). Best-effort en
+    # memoria — es un throttle blando de ritmo, no la garantía de seguridad
+    # dura (esa es Capa 1 + Capa 3, respaldadas por BD). Con varias
+    # instancias el umbral real efectivo es más alto de lo que dice el
+    # número, pero sigue frenando ráfagas obvias de un bot en una sola
+    # instancia sin agregar una consulta a la BD en cada request.
     if path in _SEC_SENSITIVE_PATHS:
         now = time.time()
         ts = [t for t in _SEC_SENSITIVE_RATE[ip] if now - t < _SEC_SENSITIVE_WINDOW]
@@ -1096,17 +1174,17 @@ async def security_shield_middleware(request: Request, call_next):
 
     response = await call_next(request)
 
-    # Capa 3 — fuerza bruta de ADMIN_SECRET: cualquier 403 en /admin/* cuenta
+    # Capa 3 — fuerza bruta de ADMIN_SECRET: cualquier 403 en /admin/* cuenta.
+    # Se registra SIEMPRE primero y luego se cuenta contra la BD (compartida
+    # entre instancias) — así el umbral se cruza sin importar a cuál
+    # instancia haya caído cada intento individual.
     if response.status_code == 403 and path.startswith('/admin'):
-        now = time.time()
-        ts = [t for t in _SEC_ADMIN_FAIL[ip] if now - t < _SEC_ADMIN_FAIL_WINDOW]
-        ts.append(now)
-        _SEC_ADMIN_FAIL[ip] = ts
-        if len(ts) >= _SEC_ADMIN_FAIL_MAX:
+        ip_hash = _sec_hash(ip)
+        _sec_log_event('admin_secret_fail', ip, path)
+        count = _sec_count_events('admin_secret_fail', _SEC_ADMIN_FAIL_WINDOW, ip_hash=ip_hash)
+        if count >= _SEC_ADMIN_FAIL_MAX:
             _sec_block_ip(ip, _SEC_ADMIN_BLOCK_MIN,
-                           f'{len(ts)} intentos fallidos de ADMIN_SECRET en {_SEC_ADMIN_FAIL_WINDOW//60}min (path: {path})')
-        else:
-            _sec_log_event('admin_secret_fail', ip, path)
+                           f'{count} intentos fallidos de ADMIN_SECRET en {_SEC_ADMIN_FAIL_WINDOW//60}min (path: {path})')
 
     return response
 
@@ -2077,7 +2155,6 @@ def health(db: Session = Depends(get_db)):
         'timestamp': datetime.utcnow().isoformat(),
         'git_commit': os.getenv('RENDER_GIT_COMMIT', ''),
         'db': 'ok' if db_ok else 'error',
-        'instance_id': _PROCESS_INSTANCE_ID,  # diagnóstico temporal
     }
 
 @app.get('/ping-test', response_class=HTMLResponse)
@@ -11805,21 +11882,23 @@ def agent_security_log(secret: str):
 
 @app.get('/admin/security/status')
 def admin_security_status(secret: str, db: Session = Depends(get_db)):
-    """Estado del escudo de seguridad global — IPs bloqueadas, cuentas
-    bloqueadas por intentos fallidos, y el historial persistido en
-    security_events (sobrevive reinicios, a diferencia de los diccionarios
-    en memoria que se resetean en cada deploy)."""
+    """Estado del escudo de seguridad global — IPs/cuentas bloqueadas
+    (tabla security_blocks) y el historial de eventos (security_events).
+    Todo en Postgres, compartido por todas las instancias de Render —
+    la versión anterior en memoria daba un estado distinto según qué
+    instancia respondiera cada request."""
     if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     now = datetime.utcnow()
-    active_ip_blocks = {h: u for h, u in _SEC_BLOCKED_IPS.items() if datetime.fromisoformat(u) > now}
-    active_email_locks = {h: u for h, u in _SEC_LOCKED_EMAILS.items() if datetime.fromisoformat(u) > now}
+    active_blocks = db.query(SecurityBlock).filter(SecurityBlock.unblock_at > now).order_by(SecurityBlock.unblock_at.desc()).all()
     recent = db.query(SecurityEvent).order_by(SecurityEvent.created_at.desc()).limit(100).all()
     last_24h = db.query(SecurityEvent).filter(SecurityEvent.created_at >= now - timedelta(hours=24)).count()
     canary_hits = db.query(SecurityEvent).filter(SecurityEvent.event_type == 'canary_secret_used').count()
     return {
-        'currently_blocked_ips':   active_ip_blocks,
-        'currently_locked_emails': active_email_locks,
+        'currently_blocked': [{
+            'block_key': b.block_key, 'reason': b.reason,
+            'unblock_at': b.unblock_at.isoformat() if b.unblock_at else None,
+        } for b in active_blocks],
         'events_last_24h':        last_24h,
         'canary_secret_configured': bool(_sec_canary_secret() and _sec_canary_secret() != os.getenv('ADMIN_SECRET')),
         'canary_secret_triggered_total': canary_hits,  # >0 = ALGUIEN USÓ EL SEÑUELO — investigar de inmediato
@@ -11827,7 +11906,6 @@ def admin_security_status(secret: str, db: Session = Depends(get_db)):
             'event_type': e.event_type, 'ip_hash': e.ip_hash, 'detail': e.detail,
             'created_at': e.created_at.isoformat() if e.created_at else None,
         } for e in recent],
-        'note': 'Los diccionarios en memoria (bloqueos activos) se resetean en cada deploy — el historial en security_events no.',
     }
 
 
