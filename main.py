@@ -12395,6 +12395,66 @@ def admin_occupation_lookup(secret: str, country: str, profession: str, db: Sess
         'found': score is not None,
     }
 
+@app.get('/admin/occupation-salary/ppp-verify')
+def admin_ppp_verify(secret: str, db: Session = Depends(get_db)):
+    """Verifica median_monthly_ppp_usd en occupation_salary contra una
+    muestra amplia de países — hasta ahora la columna existía en el
+    esquema pero nunca se había verificado con valores reales.
+
+    Por país compara el promedio de median_monthly_ppp_usd vs.
+    median_monthly_usd (nominal) y lo cruza contra el PLI real de
+    ppp_agent.py: la razón ppp/nominal debiera acercarse a 1/PLI
+    (países caros como Noruega deberían tener PPP < nominal; países
+    baratos como India, PPP > nominal). Marca 'sin_ppp' si la columna
+    está NULL para todas las filas del país (el gap real que motivó
+    este chequeo — ajuste nunca aplicado), y 'sospechoso' si la razón
+    se aleja más de 30% de lo esperado por el PLI."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    from ppp_agent import PLI as _PLI_MAP
+    rows = db.execute(text("""
+        SELECT country_iso,
+               COUNT(*) AS n,
+               COUNT(median_monthly_ppp_usd) AS n_ppp,
+               AVG(median_monthly_usd) AS avg_nominal,
+               AVG(median_monthly_ppp_usd) AS avg_ppp
+        FROM occupation_salary
+        GROUP BY country_iso
+        ORDER BY country_iso
+    """)).fetchall()
+    out = []
+    for cc, n, n_ppp, avg_nom, avg_ppp in rows:
+        pli = _PLI_MAP.get(cc)
+        entry = {
+            'country': cc, 'rows': n, 'rows_with_ppp': n_ppp,
+            'avg_nominal_usd': round(avg_nom, 1) if avg_nom else None,
+            'avg_ppp_usd': round(avg_ppp, 1) if avg_ppp else None,
+            'pli_reference': pli,
+        }
+        if n_ppp == 0:
+            entry['flag'] = 'sin_ppp'
+        elif avg_nom and avg_ppp and pli:
+            actual_ratio = avg_ppp / avg_nom
+            expected_ratio = 1.0 / pli
+            entry['ratio_ppp_over_nominal'] = round(actual_ratio, 3)
+            entry['expected_ratio_from_pli'] = round(expected_ratio, 3)
+            if abs(actual_ratio - expected_ratio) / expected_ratio > 0.30:
+                entry['flag'] = 'sospechoso'
+            else:
+                entry['flag'] = 'ok'
+        else:
+            entry['flag'] = 'sin_pli_referencia'  # país sin PLI en ppp_agent.py — no se puede verificar
+        out.append(entry)
+    return {
+        'total_countries': len(out),
+        'flags_summary': {
+            f: sum(1 for e in out if e['flag'] == f)
+            for f in ('ok', 'sospechoso', 'sin_ppp', 'sin_pli_referencia')
+        },
+        'countries': out,
+    }
+
+
 @app.get('/admin/tier-debug')
 def admin_tier_debug(secret: str, country: str, profession: str, db: Session = Depends(get_db)):
     """Muestra cada fuente de datos usada para asignar tier a un país+profesión."""
