@@ -12455,6 +12455,42 @@ def admin_ppp_verify(secret: str, db: Session = Depends(get_db)):
     }
 
 
+@app.post('/admin/occupation-salary/ppp-backfill')
+def admin_ppp_backfill(secret: str, db: Session = Depends(get_db)):
+    """Rellena median_monthly_ppp_usd donde está NULL pero el país tiene
+    un PLI real en ppp_agent.py, usando la MISMA fórmula que ya produjo
+    valores correctos para los otros 28 países (ppp_usd = nominal_usd /
+    PLI — verificado por /admin/occupation-salary/ppp-verify: la razón
+    resultante coincide exactamente con 1/PLI en todos los países que sí
+    tenían el dato). No inventa países sin PLI de referencia."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    from ppp_agent import PLI as _PLI_MAP
+    rows = db.execute(text("""
+        SELECT id, country_iso, median_monthly_usd FROM occupation_salary
+        WHERE median_monthly_ppp_usd IS NULL AND median_monthly_usd IS NOT NULL
+    """)).fetchall()
+    updated_by_country = {}
+    skipped_no_pli = 0
+    for rid, cc, nominal in rows:
+        pli = _PLI_MAP.get(cc)
+        if not pli:
+            skipped_no_pli += 1
+            continue
+        ppp_val = round(float(nominal) / pli, 2)
+        db.execute(text(
+            "UPDATE occupation_salary SET median_monthly_ppp_usd = :v WHERE id = :id"
+        ), {'v': ppp_val, 'id': rid})
+        updated_by_country[cc] = updated_by_country.get(cc, 0) + 1
+    db.commit()
+    return {
+        'ok': True,
+        'rows_updated': sum(updated_by_country.values()),
+        'by_country': updated_by_country,
+        'skipped_no_pli_reference': skipped_no_pli,
+    }
+
+
 @app.get('/admin/tier-debug')
 def admin_tier_debug(secret: str, country: str, profession: str, db: Session = Depends(get_db)):
     """Muestra cada fuente de datos usada para asignar tier a un país+profesión."""
