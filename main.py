@@ -11902,6 +11902,12 @@ def admin_security_status(secret: str, db: Session = Depends(get_db)):
         'events_last_24h':        last_24h,
         'canary_secret_configured': bool(_sec_canary_secret() and _sec_canary_secret() != os.getenv('ADMIN_SECRET')),
         'canary_secret_triggered_total': canary_hits,  # >0 = ALGUIEN USÓ EL SEÑUELO — investigar de inmediato
+        'canary_secret_debug': {  # diagnóstico temporal, sin exponer el valor completo
+            'raw_env_present': 'ADMIN_SECRET_CANARY' in os.environ,
+            'length': len(_sec_canary_secret()),
+            'equals_real_admin_secret': _sec_canary_secret() == (os.getenv('ADMIN_SECRET') or ''),
+            'masked': (_sec_canary_secret()[:2] + '...' + _sec_canary_secret()[-2:]) if len(_sec_canary_secret()) > 4 else '(vacío o muy corto)',
+        },
         'recent_events': [{
             'event_type': e.event_type, 'ip_hash': e.ip_hash, 'detail': e.detail,
             'created_at': e.created_at.isoformat() if e.created_at else None,
