@@ -391,6 +391,8 @@ class AdCampaign(Base):
     target_age_ranges    = Column(String, default='')        # legacy
     target_age_weights   = Column(String, default='')        # JSON: {"18-24":30,"25-34":70}
     target_company_sizes = Column(String, default='')        # 'small,medium,large' o '' = todos
+    target_professions  = Column(String, default='')         # 'médico,abogado' o '' = todas
+    target_cargos       = Column(String, default='')         # 'gerente,director' o '' = todos
     target_categories   = Column(String, default='')
     excluded_categories = Column(String, default='')
     blocked_competitors = Column(String, default='')
@@ -745,6 +747,8 @@ def _migrate():
             ('target_age_ranges',   "TEXT DEFAULT ''"),
             ('target_age_weights',    "TEXT DEFAULT ''"),
             ('target_company_sizes',  "TEXT DEFAULT ''"),  # 'small,medium,large' o '' = todos
+            ('target_professions',  "TEXT DEFAULT ''"),  # 'médico,abogado' o '' = todas
+            ('target_cargos',       "TEXT DEFAULT ''"),  # 'gerente,director' o '' = todos
             ('target_categories',   "TEXT DEFAULT ''"),
             ('excluded_categories', "TEXT DEFAULT ''"),
             ('blocked_competitors', "TEXT DEFAULT ''"),
@@ -1413,6 +1417,8 @@ class CampaignCreate(BaseModel):
     target_age_ranges:   str = ''
     target_age_weights:   str = ''   # JSON {"18-24":30,"25-34":70}
     target_company_sizes: str = ''   # 'small,medium,large' o '' = todos
+    target_professions:   str = ''   # 'médico,abogado' o '' = todas
+    target_cargos:        str = ''   # 'gerente,director' o '' = todos
     target_categories:    str = ''
     excluded_categories: str = ''
     blocked_competitors: str = ''
@@ -4350,6 +4356,24 @@ def _match_campaigns(user, debate, db) -> list:
             if user_bucket and allowed and user_bucket not in allowed:
                 continue
 
+        # ── PROFESSION / CARGO FILTER — targeting directo (no vía tier) ──
+        # Antes la profesión solo influía indirectamente vía se_tier — una
+        # campaña no podía pedir "solo médicos" directamente. Solo filtra si
+        # el usuario declaró el dato Y la campaña lo pide explícitamente.
+        tgt_professions = getattr(c, 'target_professions', '') or ''
+        if tgt_professions and user:
+            user_prof = (getattr(user, 'profession', '') or '').strip().lower()
+            allowed_profs = {p.strip().lower() for p in tgt_professions.split(',') if p.strip()}
+            if user_prof and allowed_profs and user_prof not in allowed_profs:
+                continue
+
+        tgt_cargos = getattr(c, 'target_cargos', '') or ''
+        if tgt_cargos and user:
+            user_cargo = (getattr(user, 'cargo', '') or '').strip().lower()
+            allowed_cargos = {p.strip().lower() for p in tgt_cargos.split(',') if p.strip()}
+            if user_cargo and allowed_cargos and user_cargo not in allowed_cargos:
+                continue
+
         # ── HNW FILTER — Porsche, LVMH, Rolex, etc. ──
         # target_hnw_only=True → solo usuarios con verified_hnw=True
         # min_hnw_score > 0   → solo usuarios con hnw_score >= umbral
@@ -5468,6 +5492,8 @@ def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
         target_age_ranges    = data.target_age_ranges,
         target_age_weights   = getattr(data, 'target_age_weights', '') or '',
         target_company_sizes = getattr(data, 'target_company_sizes', '') or '',
+        target_professions   = getattr(data, 'target_professions', '') or '',
+        target_cargos        = getattr(data, 'target_cargos', '') or '',
         target_categories    = data.target_categories,
         excluded_categories  = data.excluded_categories,
         blocked_competitors  = data.blocked_competitors,
@@ -5513,6 +5539,8 @@ def update_campaign(campaign_id: int, data: CampaignCreate, db: Session = Depend
     campaign.target_age_ranges    = data.target_age_ranges
     campaign.target_age_weights   = getattr(data, 'target_age_weights', '') or ''
     campaign.target_company_sizes = getattr(data, 'target_company_sizes', '') or ''
+    campaign.target_professions   = getattr(data, 'target_professions', '') or ''
+    campaign.target_cargos        = getattr(data, 'target_cargos', '') or ''
     campaign.target_se_tiers      = data.target_se_tiers
     campaign.excluded_categories = data.excluded_categories
     campaign.blocked_competitors = data.blocked_competitors
@@ -5670,6 +5698,8 @@ def _format_campaign(c: AdCampaign) -> dict:
         'end_date':           c.end_date.isoformat() if c.end_date else None,
         'is_active':          c.is_active,
         'target_se_tiers':    c.target_se_tiers or '',
+        'target_professions': getattr(c, 'target_professions', '') or '',
+        'target_cargos':      getattr(c, 'target_cargos', '') or '',
         'target_age_min':     c.target_age_min or 13,
         'target_age_max':     c.target_age_max or 99,
         'min_per_capita_usd': getattr(c, 'min_per_capita_usd', 0) or 0,
@@ -9036,6 +9066,8 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         target_age_ranges    = data.target_age_ranges,
         target_age_weights   = getattr(data, 'target_age_weights', '') or '',
         target_company_sizes = getattr(data, 'target_company_sizes', '') or '',
+        target_professions   = getattr(data, 'target_professions', '') or '',
+        target_cargos        = getattr(data, 'target_cargos', '') or '',
         target_categories    = data.target_categories,
         excluded_categories  = data.excluded_categories,
         blocked_competitors  = data.blocked_competitors,
