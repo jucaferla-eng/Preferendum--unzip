@@ -4225,59 +4225,6 @@ def _tier_matches(user_tier: str, target_tiers_str: str) -> bool:
         return True
     return False
 
-def _campaign_matches_debate(c, debate) -> bool:
-    """
-    Cruza la matriz de targeting de la campaña contra la consulta.
-    Si la campaña tiene target_debate_ids explícitos, esos debates
-    siempre hacen match (bypass de la matriz — usado para demo/pruebas).
-    """
-    if not debate:
-        return True
-    # Conexión directa campaña ↔ debate (override de toda la matriz)
-    if c.target_debate_ids:
-        pinned = [int(x.strip()) for x in c.target_debate_ids.split(',') if x.strip().isdigit()]
-        if pinned:
-            return debate.id in pinned
-    # País — 'ALL'/'GLOBAL'/vacío = sin restricción; scope_country puede ser multi-país "CL,AR,PE"
-    c_country = _country_code(c.target_country) if c.target_country else ''
-    scope_raw = (debate.scope_country or '').strip().upper()
-    d_countries = {_country_code(x.strip()) for x in scope_raw.split(',') if x.strip()} if scope_raw else set()
-    if c_country and c_country not in ('ALL', 'GLOBAL') and d_countries and not d_countries.intersection({'ALL','GLOBAL'}) and c_country not in d_countries:
-        return False
-    # Comuna — si la campaña apunta a comunas específicas y la consulta tiene
-    # alcance comunal definido, la comuna de la consulta debe estar en la lista
-    target_communes = [x.strip() for x in (c.target_communes or '').split(',') if x.strip()]
-    debate_communes = [x.strip() for x in (debate.scope_commune or '').split(',') if x.strip()]
-    if target_communes and debate_communes and not (set(debate_communes) & set(target_communes)):
-        return False
-    # Género — incompatible solo si ambas matrices especifican géneros distintos
-    c_gender = (c.target_gender or 'all').lower()
-    d_gender = (debate.target_gender or 'all').lower()
-    if c_gender != 'all' and d_gender != 'all' and c_gender != d_gender:
-        return False
-    # Edad — los rangos de ambas matrices deben solaparse
-    c_min, c_max = c.target_age_min or 13, c.target_age_max or 99
-    d_min, d_max = debate.target_age_min or 13, debate.target_age_max or 99
-    if c_max < d_min or d_max < c_min:
-        return False
-    # NSE / Nivel socioeconómico — los conjuntos deben tener al menos un tier en común
-    c_tiers = {t.strip().upper() for t in (c.target_se_tiers or 'A,B,C,D').split(',') if t.strip()}
-    d_tiers = {t.strip().upper() for t in (getattr(debate, 'target_se_tiers', None) or 'A,B,C,D').split(',') if t.strip()}
-    if c_tiers and d_tiers and not c_tiers.intersection(d_tiers):
-        return False
-    # PIB per cápita — si la campaña exige un mínimo, al menos un país del debate debe calificarlo
-    min_gni = getattr(c, 'min_per_capita_usd', 0.0) or 0.0
-    if min_gni > 0 and d_countries and not d_countries.intersection({'ALL','GLOBAL'}):
-        try:
-            from targeting_agent import load_matrix as _lm
-            _matrix = _lm()
-            qualifying = any(_matrix.get(code, {}).get('gni_per_capita', 0) >= min_gni for code in d_countries)
-            if not qualifying:
-                return False
-        except Exception:
-            pass  # si la matrix falla, no bloquear
-    return True
-
 def _normalize_gender(g: str) -> str:
     """Normalize gender values from any source to 'F', 'M', or 'all'."""
     if not g:
