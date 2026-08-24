@@ -11,6 +11,8 @@ services:
         generateValue: true
       - key: ADMIN_SECRET
         sync: false
+      - key: ADMIN_SECRET_CANARY
+        sync: false
       - key: VOTE_ENCRYPTION_KEY
         generateValue: true
       - key: SESSION_SECRET
