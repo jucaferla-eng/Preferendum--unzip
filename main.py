@@ -1002,11 +1002,60 @@ def sec_record_login_fail(ip: str, email: str):
         _sec_block_ip(ip, _SEC_LOGIN_IP_BLOCK_MIN,
                        f'{len(ts_ip)} logins fallidos en {_SEC_LOGIN_FAIL_IP_WINDOW//60}min (posible credential stuffing)')
 
+# ── CAPA DE ENGAÑO (honeypot / canary secret) — TODO #15 ──────
+# La idea de JC: "anticuerpos" — nunca tocar sistemas de terceros, solo
+# detectar dentro del propio sistema y servir data falsa. Versión
+# construible esta noche: un segundo secret "señuelo" (ADMIN_SECRET_CANARY),
+# distinto del ADMIN_SECRET real, que NUNCA se usa en operación normal.
+# Si alguien lo usa contra cualquier ruta /admin/*, es una señal mucho más
+# grave que un intento fallido cualquiera — significa que encontró ESE
+# valor específico en algún lado (filtración, insider, o el propio
+# ADMIN_SECRET real quedó expuesto y esto es un canario). En vez de un
+# 403 normal, le devolvemos un payload sintético plausible (nunca datos
+# reales) y disparamos alerta CRÍTICA inmediata.
+#
+# Alcance real de esta versión (para no prometer de más): el payload señuelo
+# es GENÉRICO — el mismo para cualquier endpoint /admin/* que se golpee con
+# este secret, no una réplica fiel de cada una de las ~140 rutas reales.
+# Suficiente para que alguien probando manualmente "parezca" que entró; NO
+# es indistinguible de la API real bajo inspección cuidadosa. Dónde
+# "plantar" este valor como cebo (para que un atacante real lo encuentre)
+# es una decisión de distribución, no de código — pendiente con JC/Joseph.
+_CANARY_DECOY_PAYLOAD = {
+    'ok': True,
+    'users': [
+        {'id': 88231, 'email': 'm.gonzalez@example-mail.com', 'name': 'María González', 'role': 'voter', 'se_tier': 'B', 'country': 'CL'},
+        {'id': 88232, 'email': 'j.perez@example-mail.com',    'name': 'José Pérez',      'role': 'voter', 'se_tier': 'C', 'country': 'AR'},
+        {'id': 88233, 'email': 'a.silva@example-mail.com',    'name': 'Ana Silva',       'role': 'organizer', 'se_tier': 'A', 'country': 'CL'},
+    ],
+    'total': 41822,
+}
+
+def _sec_canary_secret() -> str:
+    return (os.getenv('ADMIN_SECRET_CANARY') or '').strip()
+
 @app.middleware('http')
 async def security_shield_middleware(request: Request, call_next):
     from fastapi.responses import JSONResponse as _SecJSONResponse
     ip   = _sec_client_ip(request)
     path = request.url.path
+
+    # Capa 0 — canary secret: nunca llega al endpoint real, nunca toca la BD real
+    if path.startswith('/admin'):
+        canary = _sec_canary_secret()
+        real_secret = os.getenv('ADMIN_SECRET')
+        provided = request.query_params.get('secret', '')
+        if canary and canary != real_secret and provided == canary:
+            _sec_log_event('canary_secret_used', ip, path)
+            _sec_alert(
+                'CRÍTICO — se usó el secret señuelo (canary)',
+                f'Alguien usó el ADMIN_SECRET_CANARY (no el real) contra {path}.\n'
+                f'IP hash: {_sec_hash(ip)}\n\n'
+                f'Esto es mucho más grave que un intento fallido normal: significa que '
+                f'encontraron ese valor específico en algún lado. Se le devolvió data falsa, '
+                f'nunca tocó la base real. Investigar de inmediato dónde pudo haberse filtrado.'
+            )
+            return _SecJSONResponse(status_code=200, content=_CANARY_DECOY_PAYLOAD)
 
     # Capa 1 — IP ya bloqueada por un patrón confirmado previamente
     if _sec_is_blocked(ip):
@@ -11742,10 +11791,13 @@ def admin_security_status(secret: str, db: Session = Depends(get_db)):
     active_email_locks = {h: u for h, u in _SEC_LOCKED_EMAILS.items() if datetime.fromisoformat(u) > now}
     recent = db.query(SecurityEvent).order_by(SecurityEvent.created_at.desc()).limit(100).all()
     last_24h = db.query(SecurityEvent).filter(SecurityEvent.created_at >= now - timedelta(hours=24)).count()
+    canary_hits = db.query(SecurityEvent).filter(SecurityEvent.event_type == 'canary_secret_used').count()
     return {
         'currently_blocked_ips':   active_ip_blocks,
         'currently_locked_emails': active_email_locks,
         'events_last_24h':        last_24h,
+        'canary_secret_configured': bool(_sec_canary_secret() and _sec_canary_secret() != os.getenv('ADMIN_SECRET')),
+        'canary_secret_triggered_total': canary_hits,  # >0 = ALGUIEN USÓ EL SEÑUELO — investigar de inmediato
         'recent_events': [{
             'event_type': e.event_type, 'ip_hash': e.ip_hash, 'detail': e.detail,
             'created_at': e.created_at.isoformat() if e.created_at else None,
