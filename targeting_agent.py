@@ -621,13 +621,45 @@ def score_and_optimize(campaign: dict, debate: dict, matrix: dict) -> Optional[d
     audience = debate_pop or commune_pop
     effective_audience = round(audience * gender_prec * age_prec)
 
+    # ── Specificity score (0-1): how narrowly the campaign targets ──
+    # Rewards precise targeting independent of the negotiated CPM rate.
+    # Without this, effective_cpm = cpm * precision_rate lets a broad
+    # campaign with a high negotiated CPM outrank a campaign that paid
+    # to target this exact commune/audience but negotiated a lower rate
+    # — confirmed live: a wide campaign was winning slots away from a
+    # narrowly-targeted one purely on CPM, not on match quality.
+    commune_specificity = 1.0 if exact_commune_match else (0.5 if camp_communes else 0.0)
+    gender_specificity  = 1.0 if camp_gender != 'all' else 0.0
+    age_span            = max(0, camp_age_max - camp_age_min)
+    age_specificity     = max(0.0, min(1.0, 1 - age_span / 86.0))  # 86 = full 13-99 range
+    tier_specificity     = 1.0 if camp_min_tier != 'D' else 0.0
+    specificity_score = (
+        commune_specificity * 0.50 +
+        gender_specificity  * 0.20 +
+        age_specificity      * 0.20 +
+        tier_specificity      * 0.10
+    )
+
     # ── Economics ────────────────────────────────────────────────
     effective_cpm        = round(cpm * precision_rate, 3)
     cost_per_contact_usd = round(cpm / max(precision_rate * 1000, 1), 5)
 
+    # ── Ranking: specificity first, effective_cpm as tiebreaker ──
+    # specificity_score is the PRIMARY sort key (scaled well above the
+    # typical effective_cpm range of ~0-30) so a narrowly-targeted
+    # campaign always wins its own targeted slot over a broad campaign,
+    # regardless of negotiated CPM. effective_cpm only breaks ties
+    # between campaigns of similar specificity — this is what actually
+    # rewards precise targeting over broad spray-and-pray; blending it
+    # as a small multiplier on effective_cpm (the previous attempt)
+    # wasn't enough to overcome a large CPM gap, since broad campaigns
+    # landing in a high-tier commune already score ~0.85-1.0 precision.
+    optimization_rank = round(specificity_score * 1000 + effective_cpm, 4)
+
     return {
         'affinity_score':       affinity_score,
         'precision_rate':       round(precision_rate, 4),
+        'specificity_score':    round(specificity_score, 4),
         'commune':              debate_commune,
         'commune_tier':         commune_tier,
         'commune_income_index': commune_index,
@@ -638,7 +670,7 @@ def score_and_optimize(campaign: dict, debate: dict, matrix: dict) -> Optional[d
         'cpm':                  cpm,
         'effective_cpm':        effective_cpm,
         'cost_per_contact_usd': cost_per_contact_usd,
-        'optimization_rank':    effective_cpm,   # sort key
+        'optimization_rank':    optimization_rank,   # sort key
     }
 
 
@@ -646,11 +678,14 @@ def optimize_campaigns_for_debate(debate: dict, campaigns: list, matrix: dict, m
     """
     Selects and ranks campaigns for a debate using cost-per-contact optimization.
 
-    Ranking criterion: effective_cpm (= CPM × precision_rate)
+    Ranking criterion: effective_cpm boosted by specificity_score
+    (= CPM × precision_rate × (1 + specificity_score × 0.5))
     This simultaneously:
       - Maximizes Preferendum revenue per impression
       - Minimizes advertiser cost per qualified contact
-      - Rewards precise targeting over broad spray-and-pray
+      - Rewards precise targeting over broad spray-and-pray (a narrowly
+        targeted campaign no longer loses its own slot to a broad
+        campaign just because the broad one negotiated a higher CPM)
 
     Returns list of campaigns with full optimization metrics, capped at max_ads.
     Each campaign in the output has a unique advertiser (no duplicates per debate).
