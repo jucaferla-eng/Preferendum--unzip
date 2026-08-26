@@ -975,7 +975,13 @@ function hideSimilar() {
 async function checkSimilarDebates(q) {
   const country = document.getElementById('c-country').value || 'CL';
   try {
-    const r = await fetch(`${API}/debates/search-similar?q=${encodeURIComponent(q)}&country=${country}`);
+    // CHANGE-002 regla 2 — /debates/search-similar pasó a exigir sesión. Sin
+    // la cabecera devolvía 401 y `hideSimilar()` lo trataba como "no hay
+    // consultas parecidas": la detección de duplicados del organizador
+    // fallaba en silencio, igual que la de los agentes internos (MED-1).
+    const r = await fetch(`${API}/debates/search-similar?q=${encodeURIComponent(q)}&country=${country}`, {
+      headers: token ? {'Authorization': 'Bearer ' + token} : {}
+    });
     if (!r.ok) { hideSimilar(); return; }
     const data = await r.json();
     const similar = data.similar || [];

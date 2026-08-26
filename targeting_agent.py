@@ -716,30 +716,19 @@ def optimize_campaigns_for_debate(debate: dict, campaigns: list, matrix: dict, m
     return scored[:max_ads]
 
 
-def match_campaigns_to_debate(debate: dict, db=None, max_ads: int = 5) -> list:
-    """
-    Main entry point: loads active campaigns from DB and runs optimization.
-    Returns up to max_ads campaigns with full optimization metrics.
-    """
-    matrix = load_matrix()
-
-    campaigns = []
-    if db is not None:
-        from sqlalchemy import text
-        try:
-            rows = db.execute(text(
-                "SELECT id, advertiser_name, title, ad_type, banner_url, ad_text, "
-                "target_country, target_communes, target_gender, target_age_min, "
-                "target_age_max, min_income_tier, min_gni_country, cpm "
-                "FROM ad_campaigns WHERE is_active=1 AND status='active' "
-                "AND start_date <= datetime('now') AND end_date >= datetime('now') "
-                "AND remaining_budget > 0"
-            )).fetchall()
-            campaigns = [dict(r._mapping) for r in rows]
-        except Exception as e:
-            print(f"[TargetingAgent] DB error: {e}")
-
-    return optimize_campaigns_for_debate(debate, campaigns, matrix, max_ads)
+# CHANGE-002 — `match_campaigns_to_debate` ELIMINADA.
+#
+# Era una segunda implementacion de matching campana<->consulta que:
+#   * leia el archivo estatico targeting_matrix.json en vez de la BD viva;
+#   * consultaba columnas que NO existen en el esquema real de ad_campaigns
+#     (cpm, remaining_budget, status, banner_url, ad_text, min_income_tier,
+#     min_gni_country), por lo que su query fallaba siempre y devolvia [];
+#   * no miraba al usuario en absoluto.
+#
+# La eleccion de campanas la hace ahora main._match_campaigns, que decide
+# elegibilidad con el evaluador canonico (eligibility.py) y solo despues
+# ordena con optimize_campaigns_for_debate, aqui arriba. Se elimina para que
+# ningun codigo futuro pueda usarla por descuido como matcher.
 
 
 def get_commune_info(country: str, commune: str) -> dict:

@@ -119,6 +119,16 @@ class User(Base):
     referral_code       = Column(String, unique=True, index=True)  # código propio para invitar amigos
     referred_by_user_id = Column(Integer, index=True, default=None)  # quién lo invitó (viral, no sponsor)
     tier_pre_evaluated  = Column(Boolean, default=False)  # se_tier heredado del referente, no calculado con datos propios
+    # ── HNW (alto patrimonio) ──
+    # Estas columnas YA existían en la base de datos (creadas por _migrate),
+    # pero no estaban declaradas aquí. Como todas las escrituras están
+    # protegidas por `hasattr(user, 'hnw_score')`, y hasattr devolvía False,
+    # NUNCA se persistían: hnw_score quedaba siempre en 0 y verified_hnw
+    # siempre en False. Efecto neto: las campañas con target_hnw_only o
+    # min_hnw_score no matcheaban a NADIE por targeting real (CHANGE-002).
+    hnw_score       = Column(Float, default=0.0)
+    verified_hnw    = Column(Boolean, default=False)
+    hnw_source      = Column(String, default='')
     created_at      = Column(DateTime, default=datetime.utcnow)
 
 class OTPCode(Base):
@@ -207,6 +217,20 @@ class Debate(Base):
     income_min_usd   = Column(Float, default=None)         # ingreso anual mínimo en USD (None = sin límite)
     income_max_usd   = Column(Float, default=None)         # ingreso anual máximo en USD (None = sin límite)
     category         = Column(String, default='general')   # deportes / política / economía / salud / etc.
+    # ── Targeting compartido con campañas (CHANGE-002 regla 12) ──
+    # Vocabulario común: mismas primitivas de normalización que ad_campaigns.
+    # Default '' / 0.0 = SIN restricción, así ninguna consulta existente
+    # cambia de audiencia al desplegar este cambio (regla 17).
+    target_professions   = Column(String, default='')   # ocupación canónica (catálogo BLS)
+    target_cargos        = Column(String, default='')   # cargo/rol jerárquico
+    target_company_sizes = Column(String, default='')   # 'small,medium,large' o rangos
+    min_per_capita_usd   = Column(Float, default=0.0)   # umbral de mercado país (termómetro)
+    # ── Lista cerrada (CHANGE-002 regla 6): LA LISTA ES LA AUDIENCIA ──
+    is_closed_list   = Column(Boolean, default=False)
+    # ── Visibilidad de resultados (CHANGE-002 regla 5) ──
+    # 'public' = cualquiera con el enlace; 'restricted' = solo creador/admin.
+    # Default 'public' preserva el comportamiento actual de /r/{id}.
+    results_visibility = Column(String, default='public')
     status           = Column(String, default='live')
     opens_at         = Column(DateTime, default=datetime.utcnow)
     closes_at        = Column(DateTime)
@@ -693,6 +717,15 @@ def _migrate():
             ('is_anonymous',        "BOOLEAN DEFAULT FALSE"),
             ('income_min_usd',      "FLOAT DEFAULT NULL"),
             ('income_max_usd',      "FLOAT DEFAULT NULL"),
+            # CHANGE-002 — vocabulario de targeting compartido con campañas.
+            # Todos con default "sin restricción": ninguna consulta existente
+            # pierde audiencia al aplicar la migración.
+            ('target_professions',   "TEXT DEFAULT ''"),
+            ('target_cargos',        "TEXT DEFAULT ''"),
+            ('target_company_sizes', "TEXT DEFAULT ''"),
+            ('min_per_capita_usd',   'FLOAT DEFAULT 0.0'),
+            ('is_closed_list',       'BOOLEAN DEFAULT FALSE'),
+            ('results_visibility',   "TEXT DEFAULT 'public'"),
         ]:
             if col not in existing_debate_cols:
                 try:
@@ -700,6 +733,25 @@ def _migrate():
                     conn.commit()
                 except Exception:
                     pass
+        # CHANGE-002 — backfill is_closed_list para consultas que YA tienen
+        # lista cerrada subida.
+        #
+        # Antes de este cambio, closed_list_entries se escribía pero NO se leía
+        # en ningún punto del sistema (bypass G-7 del mapeo Fase 0): el
+        # organizador subía un padrón y la consulta seguía abierta a todos.
+        # Marcarlas ahora RESTRINGE su audiencia a la lista — que es
+        # exactamente lo que el organizador pidió al subirla. Dejarlas
+        # abiertas sería preservar un control de acceso incumplido.
+        # Idempotente: solo toca filas con entradas reales.
+        try:
+            conn.execute(text("""
+                UPDATE debates SET is_closed_list = TRUE
+                WHERE is_closed_list IS NOT TRUE
+                  AND id IN (SELECT DISTINCT debate_id FROM closed_list_entries)
+            """))
+            conn.commit()
+        except Exception:
+            pass
         # debate_votes table
         existing_vote_cols = {c['name'] for c in inspector.get_columns('debate_votes')} if inspector.has_table('debate_votes') else set()
         if 'vote_chain' not in existing_vote_cols:
@@ -1318,6 +1370,261 @@ def get_verified_user(user: User = Depends(get_current_user)):
         raise HTTPException(403, 'Email verification required')
     return user
 
+# ══════════════════════════════════════════════════════════════
+# CANONICAL ELIGIBILITY — adapters (CHANGE-002)
+# ══════════════════════════════════════════════════════════════
+# Todas las rutas de descubrimiento, acceso directo, voto y entrega de
+# publicidad pasan por AQUÍ. No existe otra forma legítima de decidir
+# elegibilidad. El evaluador vive en eligibility.py (sin dependencias,
+# testeable sin base de datos); estas funciones solo traducen filas ORM
+# al snapshot que el evaluador consume.
+
+import eligibility as _elig
+
+
+def _ppp_reference_table() -> dict:
+    """Tabla de referencia PPP: GNI per capita PPP (USD 2023).
+
+    Fuente declarada en el propio modulo: World Bank NY.GNP.PCAP.PP.CD
+    (marketer_table_v2.py:44-45). Es un dataset PPP ya incorporado al
+    repositorio; NO se duplica ni se inventa aqui.
+    """
+    try:
+        from marketer_table_v2 import GNI_PER_CAPITA
+        return GNI_PER_CAPITA
+    except Exception:
+        return {}
+
+
+def _country_per_capita_ppp_usd(country_code: str, db) -> Optional[float]:
+    """Termometro de mercado pais (regla 9) — PPP/PPA per capita.
+
+    DECISION FINAL JC (fase 2): este umbral usa PPP/PPA per capita, NUNCA
+    GDP nominal per capita.
+
+    Fuentes autoritativas, en orden:
+
+      1. world_countries.gdp_per_capita_usd
+         El nombre de la columna dice "gdp", pero el UNICO escritor de esa
+         columna en todo el repositorio es
+         targeting_agent.fetch_gni_from_worldbank, que consulta el indicador
+         del Banco Mundial NY.GNP.PCAP.PP.CD = "GNI per capita, PPP (current
+         international $)". El dato es PPP; el nombre de la columna es un
+         nombre heredado equivocado. El cron mensual
+         /admin/agent/income-data/sync la mantiene fresca.
+
+      2. marketer_table_v2.GNI_PER_CAPITA
+         Tabla estatica PPP (GNI per capita PPP, USD 2023, misma fuente
+         Banco Mundial) ya presente en el repositorio. Cubre los paises que
+         el cron no refresca (solo refresca paises con datos de comuna).
+
+    Si ninguna resuelve, devuelve None -> el evaluador marca la dimension
+    como UNKNOWN, que NIEGA. Nunca se sustituye por un valor nominal.
+
+    Devuelve (valor, procedencia).
+    """
+    if not country_code:
+        return None, ''
+    try:
+        row = db.execute(
+            text('SELECT gdp_per_capita_usd FROM world_countries WHERE iso2 = :cc'),
+            {'cc': country_code}
+        ).fetchone()
+        if row and row[0] is not None:
+            return float(row[0]), _elig.PPP_SOURCE_DB
+    except Exception:
+        pass
+    ref = _ppp_reference_table().get(country_code)
+    if ref:
+        return float(ref), _elig.PPP_SOURCE_REFERENCE
+    return None, ''
+
+
+def _build_profile(user, db) -> Optional[_elig.UserProfile]:
+    """Fila ORM User -> snapshot normalizado para el evaluador canónico."""
+    if user is None:
+        return None
+    country = _elig.norm_country(getattr(user, 'country', '') or '')
+    ppp, _source = _country_per_capita_ppp_usd(country, db)
+    return _elig.profile_from_user(user, country_per_capita_ppp_usd=ppp)
+
+
+def _closed_list_hash(national_id: Any) -> str:
+    """THE closed-list hash. One definition, used by write, read and tools.
+
+    Privacy: only the SHA-256 of the canonical form is ever stored; the
+    plaintext document never lands in closed_list_entries.
+    """
+    return hash_str(_elig.norm_national_id(national_id), prefix='closedlist:')
+
+
+def _is_closed_list_member(debate, user, db) -> Optional[bool]:
+    """Regla 6 — LA LISTA ES LA AUDIENCIA.
+
+    Devuelve None si la pertenencia no se puede determinar (por ejemplo el
+    usuario no tiene documento registrado); el evaluador trata None como
+    no-resuelto, que NO concede acceso.
+    """
+    if user is None:
+        return None
+    nid = (getattr(user, 'national_id', '') or '').strip()
+    if not nid:
+        return None
+    try:
+        # CANONICAL hash — the same primitive the upload endpoint writes with.
+        # Before the CHANGE-002 remediation the two paths normalized
+        # DIFFERENTLY (upload hashed the raw CSV line, lookup hashed a
+        # stripped/uppercased form), so a normally formatted RUT could never
+        # match and every closed list denied every member.
+        hashes = [_closed_list_hash(nid)]
+        # LEGACY COMPATIBILITY — rows written by the old upload path hold the
+        # hash of whatever raw string was in the CSV. SHA-256 is not
+        # reversible, so those rows can only be honoured by re-deriving the
+        # plausible source renderings of THIS user's OWN document and testing
+        # them. Every candidate comes from the caller's own national_id, so
+        # this cannot admit a non-member: it would require already holding a
+        # listed person's exact document.
+        for variant in _elig.national_id_variants(nid)[1:]:
+            hashes.append(hash_str(variant, prefix='closedlist:'))
+        hit = db.query(ClosedListEntry).filter(
+            ClosedListEntry.debate_id == debate.id,
+            ClosedListEntry.national_id_hash.in_(hashes),
+        ).first()
+        return bool(hit)
+    except Exception:
+        return None
+
+
+def _consultation_decision(user, debate, db):
+    """LA decisión canónica de elegibilidad de consulta.
+
+    Todo camino de listado, acceso directo y voto llama a esto y decide sobre
+    `.allowed`. Nunca sobre estado del cliente, ni sobre conocer el ID.
+    """
+    if user is None:
+        return _elig.evaluate_consultation(None, debate)
+    member = None
+    if bool(getattr(debate, 'is_closed_list', False)):
+        member = _is_closed_list_member(debate, user, db)
+    return _elig.evaluate_consultation(_build_profile(user, db), debate,
+                                       closed_list_member=member)
+
+
+def _user_may_see_consultation(user, debate, db) -> bool:
+    return _consultation_decision(user, debate, db).allowed
+
+
+def _require_consultation_access(user, debate, db):
+    """Acceso directo por ID/URL (regla 3).
+
+    No-divulgación: un usuario no elegible recibe 404, idéntico a una consulta
+    inexistente, para no filtrar ni la existencia ni el contenido.
+    """
+    if not _user_may_see_consultation(user, debate, db):
+        raise HTTPException(404, 'Consultation not found')
+
+
+def _may_see_results(user, debate, db) -> bool:
+    """Visibilidad de resultados (regla 5) — concepto SEPARADO del derecho
+    a votar. 'public' = cualquiera con el enlace (comportamiento histórico,
+    default). 'restricted' = solo creador y admin.
+    """
+    if (getattr(debate, 'results_visibility', 'public') or 'public') != 'restricted':
+        return True
+    if user is None:
+        return False
+    if (getattr(user, 'role', '') or '') == 'admin':
+        return True
+    return bool(getattr(debate, 'creator_id', 0)) and debate.creator_id == user.id
+
+
+def _may_see_consultation_content(user, debate, db) -> bool:
+    """DECISION FINAL JC (remediacion CHANGE-002):
+
+        LOS RESULTADOS PUBLICOS NO PUEDEN SER UNA PUERTA TRASERA A UNA
+        CONSULTA RESTRINGIDA.
+
+    Publicar resultados y autorizar el CONTENIDO de la consulta son dos
+    conceptos distintos. `results_visibility='public'` autoriza lo primero;
+    nunca lo segundo.
+
+    Antes de esta remediacion, /debates/{id}/results y /r/{id} devolvian
+    `format_debate(...)` completo — titulo, contexto, opciones, pais, comuna,
+    genero y rango de edad objetivo — a CUALQUIER llamante, incluido uno
+    anonimo, mientras que GET /debates/{id} le respondia 404. Conocer la URL
+    de resultados bastaba para leer una consulta dirigida a otra comuna o a
+    un padron cerrado.
+
+    Regla aplicada aqui:
+      * consulta SIN restricciones (sin lista cerrada y sin ninguna dimension
+        de targeting) -> su contenido es publico por definicion; se preserva
+        el comportamiento historico de compartir el enlace.
+      * consulta RESTRINGIDA -> el contenido protegido exige la autorizacion
+        canonica de consulta, la misma que /debates/{id}. Los datos de
+        resultado intencionalmente publicables se siguen entregando (ver
+        `_public_results_payload`).
+    """
+    if not _elig.consultation_is_targeted(debate):
+        return True
+    if user is None:
+        return False
+    if (getattr(user, 'role', '') or '') == 'admin':
+        return True
+    if bool(getattr(debate, 'creator_id', 0)) and debate.creator_id == user.id:
+        return True
+    return _user_may_see_consultation(user, debate, db)
+
+
+# Campos de `format_debate` que son informacion de RESULTADO publicable, en
+# contraposicion al contenido protegido de la consulta. Se eligio la lista
+# mas estrecha que mantiene funcionando la pagina publica de resultados: hay
+# recuento y estado, pero ni titulo, ni contexto, ni opciones, ni targeting.
+_PUBLIC_RESULT_FIELDS = (
+    'id', 'status', 'total_votes', 'legitimacy_score',
+    'verifications_ok', 'verifications_total',
+    'opens_at', 'closes_at', 'verify_opens_at', 'verify_closes_at',
+)
+
+
+def _public_results_payload(debate) -> dict:
+    """Proyeccion no divulgativa de una consulta restringida.
+
+    Devuelve unicamente metricas agregadas de participacion. Nunca titulo,
+    contexto, opciones, imagenes, institucion ni targeting, porque todo eso
+    es contenido de la consulta y esta sujeto a autorizacion canonica.
+
+    Los recuentos por opcion se omiten a proposito: las etiquetas de las
+    opciones son texto de la consulta.
+    """
+    full = format_debate(debate)
+    return {k: full.get(k) for k in _PUBLIC_RESULT_FIELDS if k in full}
+
+
+def _hnw_signals(user):
+    """(hnw_score, verified_hnw) — señal de lujo, separada del perfil económico."""
+    if user is None:
+        return 0.0, False
+    try:
+        score = float(getattr(user, 'hnw_score', 0.0) or 0.0)
+    except (TypeError, ValueError):
+        score = 0.0
+    return score, bool(getattr(user, 'verified_hnw', False))
+
+
+def _campaign_decision(user, campaign, debate, db):
+    """LA decisión canónica de elegibilidad de campaña (reglas 13 y 15).
+
+    Dos barreras, en orden: compatibilidad campaña<->consulta, LUEGO
+    elegibilidad usuario<->campaña. La asociación (target_debate_ids) no
+    participa: es una señal de emplazamiento/ranking, nunca una autorización.
+    """
+    score, verified = _hnw_signals(user)
+    return _elig.evaluate_campaign_for_user_in_consultation(
+        _build_profile(user, db) if user is not None else None,
+        campaign, debate, hnw_score=score, hnw_verified=verified,
+    )
+
+
 def count_verified(user):
     flags = [user.email_verified, user.phone_verified, user.id_verified,
              user.selfie_verified, user.imei_verified, user.geo_verified,
@@ -1715,6 +2022,13 @@ class DebateCreate(BaseModel):
     target_se_tiers:     str = 'A,B,C,D'
     income_min_usd:      float = None   # ingreso anual mínimo en USD — None = sin filtro
     income_max_usd:      float = None   # ingreso anual máximo en USD — None = sin filtro
+    # ── Vocabulario de targeting compartido con campañas (CHANGE-002 regla 12) ──
+    target_professions:   str = ''      # ocupación canónica (catálogo BLS)
+    target_cargos:        str = ''      # cargo / rol jerárquico
+    target_company_sizes: str = ''      # 'small,medium,large' o rangos explícitos
+    min_per_capita_usd:   float = 0.0   # umbral de mercado país (termómetro, regla 9)
+    is_closed_list:       bool = False  # LA LISTA ES LA AUDIENCIA (regla 6)
+    results_visibility:   str = 'public'  # 'public' | 'restricted' (regla 5)
     category:            str = 'general'
     closes_at:           str
     verify_days:         int = 15
@@ -2344,10 +2658,29 @@ def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
 
 
 @app.get('/r/{debate_id}', response_class=HTMLResponse)
-def public_results_page(debate_id: int, db: Session = Depends(get_db)):
-    """Página pública de resultados — compartible por el organizador."""
+def public_results_page(debate_id: int,
+                        user: User = Depends(get_optional_user),
+                        db: Session = Depends(get_db)):
+    """Página de resultados — compartible por el organizador.
+
+    CHANGE-002 regla 5: la visibilidad de resultados es un concepto de
+    autorización SEPARADO del derecho a votar. El creador elige
+    `results_visibility`:
+      'public'     -> cualquiera con el enlace (comportamiento histórico, default)
+      'restricted' -> solo el creador y admin; conocer la URL no basta.
+    """
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
+        return HTMLResponse('<html><body>Consulta no encontrada</body></html>', status_code=404)
+    if not _may_see_results(user, debate, db):
+        # Misma respuesta que "no existe" — no se revela que la consulta existe.
+        return HTMLResponse('<html><body>Consulta no encontrada</body></html>', status_code=404)
+    # DECISION FINAL JC — esta pagina renderiza titulo, contexto y etiquetas
+    # de opciones, es decir CONTENIDO de la consulta. Para una consulta
+    # restringida eso exige autorizacion canonica; publicar sus resultados no
+    # la concede. Se responde igual que "no existe" para no divulgar ni
+    # siquiera su existencia (mismo criterio que GET /debates/{id}).
+    if not _may_see_consultation_content(user, debate, db):
         return HTMLResponse('<html><body>Consulta no encontrada</body></html>', status_code=404)
 
     opts    = json.loads(debate.options or '[]')
@@ -2470,7 +2803,7 @@ body{{background:#090D18;color:#f0f4ff;font-family:-apple-system,BlinkMacSystemF
     <div class="chain-icon">⛓</div>
     <div>
       <div class="chain-text">Resultado anclado en Polygon blockchain</div>
-      <div class="chain-hash">{debate.tx_hash or 'Pendiente de anclaje blockchain'}</div>
+      <div class="chain-hash">{getattr(debate, 'tx_hash', '') or 'Pendiente de anclaje blockchain'}</div>
     </div>
   </div>
 
@@ -3302,7 +3635,7 @@ def _calculate_hnw_score(user, db) -> float:
             SELECT COUNT(DISTINCT d.id)
             FROM debate_votes v
             JOIN debates d ON d.id = v.debate_id
-            WHERE v.user_id = :uid
+            WHERE v.voter_id = :uid
               AND (d.category IN ('{cat_list}') OR {kw_conditions})
         """), {'uid': user.id}).scalar() or 0
         score += min(25, int(hnw_votes) * 5)
@@ -3356,8 +3689,9 @@ def _assign_user_tier(user, db):
     try:
         db.execute(text(
             "UPDATE users SET se_tier=:t, income_index=:i, estimated_income_usd=:e,"
-            " estimated_income_ppp=:ppp WHERE id=:uid"
-        ), {'t': _new_tier, 'i': _new_index or 0, 'e': _new_est, 'ppp': _new_ppp, 'uid': user.id})
+            " estimated_income_ppp=:ppp, hnw_score=:hnw WHERE id=:uid"
+        ), {'t': _new_tier, 'i': _new_index or 0, 'e': _new_est, 'ppp': _new_ppp,
+            'hnw': _new_hnw if _new_hnw is not None else 0.0, 'uid': user.id})
         db.commit()
         user.se_tier              = _new_tier
         user.income_index         = _new_index
@@ -3365,6 +3699,8 @@ def _assign_user_tier(user, db):
             user.estimated_income_usd = _new_est
         if hasattr(user, 'estimated_income_ppp'):
             user.estimated_income_ppp = _new_ppp
+        if _new_hnw is not None:
+            user.hnw_score = _new_hnw
     except Exception:
         db.rollback()
 
@@ -4244,49 +4580,78 @@ async def upload_image(
 # ROUTES: DEBATES
 # ══════════════════════════════════════════════════════════════
 
-@app.get('/debates')
-def list_debates(
-    country: str = Query('CL'),
-    commune: str = Query(None),
-    limit:   int = Query(50),
-    status:  str = Query('live'),   # 'live' | 'expired'
-    db: Session = Depends(get_db)
-):
+def _eligible_debates_for(user, db, status: str = 'live', limit: int = 50) -> list:
+    """Camino ÚNICO de descubrimiento de consultas (CHANGE-002).
+
+    Toda ruta de listado/feed/recomendación llama a esto, así que todas
+    devuelven exactamente la misma decisión de elegibilidad. El filtro NO
+    depende de ningún parámetro suministrado por el cliente: el país, la
+    comuna y todo lo demás salen del perfil verificado del usuario.
+    """
     now = datetime.utcnow()
-    q = db.query(Debate)
-    if country and country != 'ALL':
-        q = q.filter(
-            Debate.scope_country.in_([country, 'ALL', 'GLOBAL', 'GL']) |
-            (Debate.scope_country == None) |
-            (Debate.scope_country == '')
-        )
+    q = db.query(Debate).filter(Debate.status != 'draft')
     if status == 'expired':
         q = q.filter(Debate.closes_at != None, Debate.closes_at < now)
     else:
-        q = q.filter(
-            (Debate.closes_at == None) | (Debate.closes_at >= now)
-        )
-    debates = q.order_by(Debate.created_at.desc()).limit(limit).all()
-    safe = []
-    for d in debates:
+        q = q.filter(Debate.status == 'live')
+        q = q.filter((Debate.closes_at == None) | (Debate.closes_at >= now))
+
+    # El perfil se construye UNA vez por petición, no una vez por consulta:
+    # incluye una consulta a world_countries, y recalcularlo dentro del bucle
+    # eran hasta 500 queries por request.
+    profile = _build_profile(user, db)
+
+    out = []
+    for d in q.order_by(Debate.created_at.desc()).limit(500).all():
         try:
-            sp_info = _get_sponsor_info(d.id, db)
-            safe.append(format_debate(d, sponsor_info=sp_info))
+            member = None
+            if bool(getattr(d, 'is_closed_list', False)):
+                member = _is_closed_list_member(d, user, db)
+            if not _elig.evaluate_consultation(profile, d,
+                                               closed_list_member=member).allowed:
+                continue
+            out.append(format_debate(d, sponsor_info=_get_sponsor_info(d.id, db)))
         except Exception:
-            pass
-    return {'debates': safe}
+            # Fail closed: una consulta que no se puede evaluar no se muestra.
+            continue
+        if len(out) >= limit:
+            break
+    return out
+
+
+@app.get('/debates')
+def list_debates(
+    limit:   int = Query(50),
+    status:  str = Query('live'),   # 'live' | 'expired'
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Listado de consultas.
+
+    CHANGE-002 regla 2: los usuarios no autenticados NO deben ver consultas.
+    Esta ruta era anónima y filtraba solo por un parámetro `country` que
+    enviaba el propio cliente — cualquiera enumeraba todas las consultas
+    abiertas con su contenido completo. Ahora exige sesión y aplica el
+    evaluador canónico.
+
+    Los parámetros `country`/`commune` se eliminaron a propósito: la
+    geografía se toma del perfil del usuario, nunca del cliente.
+    """
+    return {'debates': _eligible_debates_for(user, db, status=status, limit=limit)}
 
 @app.get('/debates/feed')
 def get_feed(
-    country: str = Query('CL'),
     user: User = Depends(get_verified_user),
     db: Session = Depends(get_db)
 ):
-    debates = db.query(Debate).filter(
-        Debate.scope_country == country
-    ).order_by(Debate.created_at.desc()).limit(10).all()
+    """Feed personalizado.
+
+    Antes filtraba por `Debate.scope_country == country` donde `country` era
+    un query param del cliente, ignorando por completo al usuario. Ahora
+    consume la misma decisión canónica que el resto de rutas.
+    """
     return {
-        'debates': [format_debate(d) for d in debates],
+        'debates': _eligible_debates_for(user, db, status='live', limit=10),
         'section_title': 'Consultations available to vote',
     }
 
@@ -4297,149 +4662,43 @@ def debates_for_me(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Devuelve solo las consultas para las que el usuario califica según su perfil verificado."""
-    from datetime import date as _date
-    now = datetime.utcnow()
+    """Consultas para las que el usuario califica segun su perfil verificado.
 
-    # Calcular edad del usuario
-    user_age = None
-    if user.dob:
-        try:
-            dob = _date.fromisoformat(user.dob)
-            today = _date.today()
-            user_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-        except Exception:
-            pass
-
-    user_country = (user.country or 'CL').upper()
-    user_commune = (user.county or '').strip().lower()
-    user_gender  = user.gender or ''
-
-    q = db.query(Debate).filter(Debate.status == 'live')
-    if status == 'expired':
-        q = db.query(Debate).filter(Debate.status != 'draft', Debate.closes_at != None, Debate.closes_at < now)
-    else:
-        q = q.filter((Debate.closes_at == None) | (Debate.closes_at >= now))
-
-    all_debates = q.order_by(Debate.created_at.desc()).limit(500).all()
-
-    eligible = []
-    for d in all_debates:
-        # Filtro por alcance geográfico
-        scope = (d.scope or 'global').lower()
-        if scope == 'commune':
-            allowed_communes = {c.strip().lower() for c in (d.scope_commune or '').split(',') if c.strip()}
-            if not user_commune or user_commune not in allowed_communes:
-                continue
-        elif scope == 'country':
-            sc = (d.scope_country or '').upper()
-            if sc and sc not in ('', 'ALL', 'GLOBAL', 'GL') and sc != user_country:
-                continue
-
-        # Filtro por género
-        tg = (d.target_gender or 'all').lower()
-        if tg != 'all' and user_gender and user_gender != tg:
-            continue
-
-        # Filtro por edad
-        if user_age is not None:
-            if d.target_age_min and user_age < d.target_age_min:
-                continue
-            if d.target_age_max and user_age > d.target_age_max:
-                continue
-
-        # Filtro por ingreso estimado
-        user_income = getattr(user, 'estimated_income_usd', None) if user else None
-        if user_income is not None:
-            if getattr(d, 'income_min_usd', None) and user_income < d.income_min_usd:
-                continue
-            if getattr(d, 'income_max_usd', None) and user_income > d.income_max_usd:
-                continue
-
-        # Filtro por SE Tier
-        user_se = (getattr(user, 'se_tier', '') or '') if user else ''
-        d_tiers = (getattr(d, 'target_se_tiers', '') or '').strip()
-        if user_se and d_tiers and d_tiers not in ('A,B,C,D', 'all', ''):
-            if not _tier_matches(user_se, d_tiers):
-                continue
-
-        try:
-            eligible.append(format_debate(d))
-        except Exception:
-            pass
-        if len(eligible) >= limit:
-            break
-
-    return {'debates': eligible}
+    CHANGE-002: el filtro inline que vivia aqui se elimino. Era la UNICA ruta
+    de descubrimiento consciente del usuario, y aun asi divergia del endpoint
+    de voto en cuatro dimensiones (comparaba genero contra un valor en
+    minusculas sin normalizar el del usuario, comparaba pais con .upper() en
+    crudo, ignoraba lista cerrada y aplicaba geografia solo cuando `scope`
+    coincidia). Ahora usa el evaluador canonico, igual que el voto.
+    """
+    return {'debates': _eligible_debates_for(user, db, status=status, limit=limit)}
 
 @app.get('/ads/featured')
 def get_featured_ads(user: User = Depends(get_optional_user), db: Session = Depends(get_db)):
-    """Returns up to 2 active ad campaigns to display in the debates list.
-    Si el usuario está autenticado, filtra por su se_tier."""
+    """Hasta 2 campanas activas para mostrar en el listado de consultas.
+
+    CHANGE-002: el filtro inline que vivia aqui (pais/comuna/genero/edad/
+    tier/ingreso, todo contra el usuario) se reemplaza por el evaluador
+    canonico, que ademas cubre profesion, cargo, tamano de empresa, umbral
+    de mercado y HNW — dimensiones que esta ruta nunca miraba. Tambien
+    corrige el centinela de ingreso maximo: `inc_max < 9999.0` ignoraba en
+    silencio cualquier maximo por encima de 9999 (p.ej. 50000).
+    """
     now = datetime.utcnow()
     candidates = db.query(AdCampaign).filter(
         AdCampaign.is_active == True,
-        AdCampaign.budget_clp > AdCampaign.spent_clp,
+    ).filter(
+        (AdCampaign.budget_clp == None) | (AdCampaign.budget_clp == 0) |
+        (AdCampaign.budget_clp > AdCampaign.spent_clp)
     ).filter(
         (AdCampaign.end_date == None) | (AdCampaign.end_date > now)
     ).order_by(AdCampaign.created_at.desc()).all()
 
-    user_se      = (getattr(user, 'se_tier', '') or '') if user else ''
-    user_income  = (getattr(user, 'estimated_income_usd', None)) if user else None
-    user_gender  = (getattr(user, 'gender', '') or '').lower() if user else ''
-    user_country = _country_code(getattr(user, 'country', '') or '') if user else ''
-    user_commune = (getattr(user, 'county', '') or '').strip().lower() if user else ''
-
-    user_age = None
-    if user and getattr(user, 'dob', ''):
-        try:
-            from datetime import date as _date
-            dob_str = (user.dob or '').strip()
-            for _fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d'):
-                try:
-                    _born = datetime.strptime(dob_str, _fmt).date()
-                    today = _date.today()
-                    user_age = today.year - _born.year - ((today.month, today.day) < (_born.month, _born.day))
-                    break
-                except ValueError:
-                    pass
-        except Exception:
-            pass
-
     campaigns = []
     for c in candidates:
-        # SE Tier
-        if user_se and not _tier_matches(user_se, c.target_se_tiers or 'A,B,C,D'):
+        # Sin contexto de consulta: solo aplica la barrera usuario<->campana.
+        if not _campaign_decision(user, c, None, db).allowed:
             continue
-        # Ingreso USD
-        if user_income is not None:
-            inc_min = getattr(c, 'target_income_min', 0.0) or 0.0
-            inc_max = getattr(c, 'target_income_max', 9999999.0) or 9999999.0
-            if inc_min > 0 and user_income < inc_min:
-                continue
-            if inc_max < 9999.0 and user_income > inc_max:
-                continue
-        # Género
-        tg = (getattr(c, 'target_gender', 'all') or 'all').lower()
-        if tg != 'all' and user_gender and user_gender != tg:
-            continue
-        # Edad
-        if user_age is not None:
-            age_min = getattr(c, 'target_age_min', 0) or 0
-            age_max = getattr(c, 'target_age_max', 99) or 99
-            if age_min > 0 and user_age < age_min:
-                continue
-            if age_max < 99 and user_age > age_max:
-                continue
-        # País
-        c_country = _country_code(getattr(c, 'target_country', '') or '')
-        if c_country and user_country and c_country != user_country:
-            continue
-        # Comuna
-        c_communes = [x.strip().lower() for x in (getattr(c, 'target_communes', '') or '').split(',') if x.strip()]
-        if c_communes and user_commune and user_commune not in c_communes:
-            continue
-
         campaigns.append(c)
         if len(campaigns) >= 2:
             break
@@ -4473,12 +4732,64 @@ def get_featured_ads(user: User = Depends(get_optional_user), db: Session = Depe
     return {'ads': ads}
 
 @app.get('/debates/{debate_id}')
-def get_debate(debate_id: int, db: Session = Depends(get_db)):
+def get_debate(debate_id: int,
+               user: User = Depends(get_current_user),
+               db: Session = Depends(get_db)):
+    """Acceso directo por ID (CHANGE-002 reglas 2 y 3).
+
+    Esta ruta era anonima y sin ningun control: conocer el ID bastaba para
+    obtener titulo, contexto, opciones y resultados de cualquier consulta,
+    incluso dirigida a otra comuna. Ahora exige sesion y elegibilidad
+    canonica.
+
+    No-divulgacion: un usuario no elegible recibe exactamente el mismo 404
+    que una consulta inexistente, para no filtrar ni su existencia ni su
+    contenido.
+    """
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
         raise HTTPException(404, 'Consultation not found')
+    _require_consultation_access(user, debate, db)
     sp_info = _get_sponsor_info(debate_id, db)
     return format_debate(debate, sponsor_info=sp_info)
+
+@app.get('/internal/debates/dedup')
+def internal_debates_for_dedup(
+    limit: int = Query(200),
+    db: Session = Depends(get_db),
+    x_agent_secret: Optional[str] = Header(None, alias='X-Agent-Secret'),
+):
+    """Deteccion de duplicados para los agentes internos — SOLO LECTURA.
+
+    CHANGE-002 remediacion MED-1: GET /debates paso a exigir sesion (regla 2),
+    pero preferendum_agent._find_similar_debate y se_lifestyle_agent lo
+    llamaban sin credencial. Recibian 401, `r.ok` era falso, la lista quedaba
+    vacia y la deteccion de duplicados fallaba EN SILENCIO: los agentes
+    empezaban a crear consultas repetidas creyendo que no existian.
+
+    En vez de reabrir /debates al publico, esta ruta reutiliza el mecanismo
+    interno que los mismos agentes YA usan para POST /debates
+    (cabecera X-Agent-Secret). No hay sistema de auth nuevo, no hay secreto
+    en el navegador — los agentes corren en el servidor.
+
+    Devuelve el minimo necesario para comparar titulos. Nada de contexto,
+    opciones, resultados ni targeting.
+    """
+    if x_agent_secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    rows = (db.query(Debate)
+              .filter(Debate.status != 'draft')
+              .order_by(Debate.created_at.desc())
+              .limit(min(int(limit or 200), 500)).all())
+    return {'debates': [{
+        'id': d.id,
+        'title': d.title or '',
+        'status': d.status or '',
+        'scope_country': d.scope_country or '',
+        'created_at': d.created_at.isoformat() if d.created_at else None,
+        'closes_at': d.closes_at.isoformat() if d.closes_at else None,
+    } for d in rows], 'total': len(rows)}
+
 
 @app.post('/debates')
 def create_debate(
@@ -4504,6 +4815,13 @@ def create_debate(
         target_gender=data.target_gender,
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
+        # CHANGE-002 — vocabulario de targeting compartido + reglas 5/6.
+        target_professions=getattr(data, 'target_professions', '') or '',
+        target_cargos=getattr(data, 'target_cargos', '') or '',
+        target_company_sizes=getattr(data, 'target_company_sizes', '') or '',
+        min_per_capita_usd=getattr(data, 'min_per_capita_usd', 0.0) or 0.0,
+        is_closed_list=bool(getattr(data, 'is_closed_list', False)),
+        results_visibility=(getattr(data, 'results_visibility', 'public') or 'public'),
         income_min_usd=getattr(data, 'income_min_usd', None),
         income_max_usd=getattr(data, 'income_max_usd', None),
         category=getattr(data, 'category', 'general') or 'general',
@@ -4560,34 +4878,38 @@ def _tier_gte(user_tier: str, min_tier: str) -> bool:
     except ValueError:
         return True
 
-def _tier_matches(user_tier: str, target_tiers_str: str) -> bool:
-    """Handles both 'AAA,BBB' and abbreviated 'A,B,C,D' tier formats."""
-    tiers = [t.strip() for t in target_tiers_str.split(',') if t.strip()]
-    if not tiers:
-        return True
-    if user_tier in tiers:
-        return True
-    # Abbreviated format: first letter of user_tier (e.g. 'BBB' → 'B')
-    first = user_tier[0] if user_tier else ''
-    if first and first in tiers:
-        return True
-    return False
-
-def _normalize_gender(g: str) -> str:
-    """Normalize gender values from any source to 'F', 'M', or 'all'."""
-    if not g:
-        return 'all'
-    g = g.lower().strip()
-    if g in ('f', 'female', 'mujer', 'femenino'):
-        return 'F'
-    if g in ('m', 'male', 'hombre', 'masculino'):
-        return 'M'
-    return 'all'
+# CHANGE-002 — `_tier_matches` y `_normalize_gender` se RETIRARON de aqui.
+#
+# Eran dos de las siete implementaciones de matching que convivian en este
+# archivo y que daban veredictos distintos para el mismo usuario. Su logica
+# (incluido el formato de tier heredado 'AAA'/'BBC' y los alias de genero)
+# vive ahora en eligibility.norm_tier / eligibility.norm_gender, que es lo
+# que consumen TODAS las rutas. Se eliminan en vez de dejarse como utilidad
+# para que ningun codigo futuro pueda usar por descuido un evaluador mas
+# debil que el canonico.
 
 def _match_campaigns(user, debate, db) -> list:
-    """
-    Finds active campaigns for a debate using commune-based targeting optimization.
-    Returns list of dicts (ORM fields + optimization metrics from targeting_agent).
+    """Campanas elegibles para (usuario, consulta), ya rankeadas.
+
+    CHANGE-002. Cambios estructurales respecto de la version anterior:
+
+    1. Se ELIMINO el cortocircuito por `target_debate_ids`. Antes, si la
+       campana estaba anclada a esta consulta, la funcion hacia `return`
+       ANTES de todos los filtros: pais, comuna, tier, tamano de empresa,
+       profesion, cargo, HNW, tope de frecuencia, competidores bloqueados,
+       categorias y marca-segura quedaban sin aplicar. Como
+       /marketer/campaigns anclaba automaticamente cada campana nueva a
+       TODAS las consultas vivas, en la practica toda campana se entregaba a
+       todo usuario. La asociacion ahora solo influye en el ranking
+       (regla 13).
+
+    2. La elegibilidad la decide el evaluador canonico, que ademas comprueba
+       la comuna y el pais DEL USUARIO — dimensiones que esta funcion nunca
+       miraba (solo comparaba la campana contra la consulta, y la comuna era
+       una penalizacion de score, no una barrera).
+
+    Separacion estricta (regla 15): aqui solo se decide el CONJUNTO elegible.
+    El orden lo pone targeting_agent, que no puede volver elegible a nadie.
     """
     from targeting_agent import optimize_campaigns_for_debate, load_matrix, build_matrix_from_db
 
@@ -4598,138 +4920,26 @@ def _match_campaigns(user, debate, db) -> list:
         (AdCampaign.start_date == None) | (AdCampaign.start_date <= now)
     ).all()
 
-    # ── Campañas ancladas a esta consulta específica (target_debate_ids) ──
-    # Bypass total de la matriz de targeting/ranking — usado por el agente de
-    # rescate de campañas para garantizar que la campaña estancada gane el
-    # espacio en la consulta creada específicamente para ella, en vez de competir
-    # con cualquier otra campaña que también matchee genéricamente.
-    if debate:
-        pinned_orm = [
-            c for c in orm_campaigns
-            if c.target_debate_ids and
-               debate.id in {int(x.strip()) for x in c.target_debate_ids.split(',') if x.strip().isdigit()} and
-               ((c.budget_clp or 0) == 0 or (c.spent_clp or 0) < (c.budget_clp or 0))
-        ]
-        if pinned_orm:
-            return [{
-                'id': c.id, 'advertiser_name': c.advertiser_name or '',
-                'title': c.title or '', 'ad_copy': c.ad_copy or '',
-                'logo_url': c.logo_url or '', 'ad_image_url': c.ad_image_url or '',
-                'video_url': getattr(c, 'video_url', '') or '', 'link_url': c.link_url or '',
-                'cpm': 0, '_orm': c, 'optimization_rank': 0, 'pinned': True,
-            } for c in pinned_orm]
-
-    # Debate context for brand-safety filtering
-    debate_category  = (getattr(debate, 'category', '') or '').lower().strip() if debate else ''
-    debate_country   = (debate.scope_country or 'GLOBAL').upper().strip() if debate else 'GLOBAL'
-    debate_tags      = {debate_category} if debate_category else set()
-    # Also add title-based keyword tags for safety matching
-    debate_title_low = (debate.title or '').lower() if debate else ''
-    SENSITIVE_KEYWORDS = {
-        'religion': {'religión','religion','iglesia','church','dios','god','fe','faith','islam','cristian','catholic','budis','hindu','jewish','judío'},
-        'política': {'política','politica','election','elección','partido','gobierno','gobierno','president','alcalde','senado','congreso','diputado'},
-        'sexual': {'sexual','sexo','sex','género','genero','lgbt','trans','homosex','hetero','gay','orientación','aborto','abortion','reproductive'},
-        'conflicto_armado': {'guerra','war','conflicto','conflict','armas','weapons','militar','military','ejército','army','bomba','bomb','ataque','attack','terroris'},
-        'sindicatos': {'sindicato','huelga','strike','laboral','gremio','union','trabajador','obrero'},
-        'drogas': {'droga','drug','narcótico','narcotic','cannabis','cocaína','alcohol','bebida','licor'},
-        'apuestas': {'apuesta','casino','juego','gambling','lotería','lottery','bet'},
-        'menores': {'menor','niño','infan','child','adolescen','escolar'},
-        'litigios': {'juicio','tribunal','corte','demanda','lawsuit','litig','arbitraj'},
-        'crisis': {'crisis','catástrofe','desastre','disaster','terremoto','inundación','refugee','refugiado'},
-    }
-    # Derive debate's sensitive tags from category + title keywords
-    for tag, keywords in SENSITIVE_KEYWORDS.items():
-        if any(kw in debate_category for kw in keywords) or any(kw in debate_title_low for kw in keywords):
-            debate_tags.add(tag)
+    # Perfil y senales HNW: una vez por peticion, no una vez por campana.
+    profile = _build_profile(user, db) if user is not None else None
+    hnw_score, hnw_verified = _hnw_signals(user)
 
     valid_orm = []
     for c in orm_campaigns:
+        # ── Politica de entrega (NO es elegibilidad): vigencia y presupuesto ──
         if c.end_date and c.end_date < (now - timedelta(hours=24)):
             continue
         if (c.budget_clp or 0) > 0 and (c.spent_clp or 0) >= (c.budget_clp or 0):
             continue
 
-        # ── BRAND SAFETY: excluded_categories ──
-        if c.excluded_categories:
-            excluded = {e.strip().lower() for e in c.excluded_categories.split(',') if e.strip()}
-            # Map to canonical tags
-            campaign_excluded_tags = set()
-            for excl in excluded:
-                for tag, keywords in SENSITIVE_KEYWORDS.items():
-                    if excl == tag or any(kw in excl for kw in keywords):
-                        campaign_excluded_tags.add(tag)
-                campaign_excluded_tags.add(excl)  # also keep raw value
-            if debate_tags & campaign_excluded_tags:
-                continue  # debate matches an excluded category — skip this campaign
+        # ── ELEGIBILIDAD CANONICA: barrera 1 (campana<->consulta) y
+        #    barrera 2 (usuario<->campana), en ese orden (regla 13) ──
+        if not _elig.evaluate_campaign_for_user_in_consultation(
+                profile, c, debate,
+                hnw_score=hnw_score, hnw_verified=hnw_verified).allowed:
+            continue
 
-        # ── TARGETING POSITIVO: target_categories ──
-        # Si la campaña pide categorías específicas, la consulta debe estar en esa lista.
-        # Antes existía la columna pero nunca se usaba para filtrar — solo se guardaba/mostraba.
-        if c.target_categories:
-            desired = {t.strip().lower() for t in c.target_categories.split(',') if t.strip()}
-            if desired and debate_category not in desired:
-                continue
-
-        # ── COUNTRY FILTER ──
-        # scope_country puede ser multi-país "CL,AR" o "GLOBAL" — debates globales aceptan todo
-        debate_countries = {x.strip().upper() for x in debate_country.split(',') if x.strip()} if debate_country else {'GLOBAL'}
-        if not debate_countries.intersection({'GLOBAL','ALL',''}):
-            c_tgt = (c.target_country or '').upper().strip()
-            if c_tgt and c_tgt not in ('ALL', 'GLOBAL', '') and c_tgt not in debate_countries:
-                continue
-
-        # ── SE TIER FILTER — usuario debe pertenecer al tier objetivo ──
-        if user and getattr(user, 'se_tier', ''):
-            if not _tier_matches(user.se_tier, c.target_se_tiers or 'A,B,C,D'):
-                continue
-
-        # ── COMPANY SIZE FILTER (modelo JC 2026-08-01) ──
-        # Mapeo: '1-10','11-50' → small | '51-250' → medium | '251-1000','+1000' → large
-        tgt_sizes = getattr(c, 'target_company_sizes', '') or ''
-        if tgt_sizes and user:
-            _SIZE_BUCKET = {
-                '1-10': 'small', '11-50': 'small',
-                '51-250': 'medium',
-                '251-1000': 'large', '+1000': 'large',
-            }
-            user_cs = getattr(user, 'company_size', '') or ''
-            user_bucket = _SIZE_BUCKET.get(user_cs, '')
-            allowed = {s.strip().lower() for s in tgt_sizes.split(',') if s.strip()}
-            if user_bucket and allowed and user_bucket not in allowed:
-                continue
-
-        # ── PROFESSION / CARGO FILTER — targeting directo (no vía tier) ──
-        # Antes la profesión solo influía indirectamente vía se_tier — una
-        # campaña no podía pedir "solo médicos" directamente. Solo filtra si
-        # el usuario declaró el dato Y la campaña lo pide explícitamente.
-        tgt_professions = getattr(c, 'target_professions', '') or ''
-        if tgt_professions and user:
-            user_prof = (getattr(user, 'profession', '') or '').strip().lower()
-            allowed_profs = {p.strip().lower() for p in tgt_professions.split(',') if p.strip()}
-            if user_prof and allowed_profs and user_prof not in allowed_profs:
-                continue
-
-        tgt_cargos = getattr(c, 'target_cargos', '') or ''
-        if tgt_cargos and user:
-            user_cargo = (getattr(user, 'cargo', '') or '').strip().lower()
-            allowed_cargos = {p.strip().lower() for p in tgt_cargos.split(',') if p.strip()}
-            if user_cargo and allowed_cargos and user_cargo not in allowed_cargos:
-                continue
-
-        # ── HNW FILTER — Porsche, LVMH, Rolex, etc. ──
-        # target_hnw_only=True → solo usuarios con verified_hnw=True
-        # min_hnw_score > 0   → solo usuarios con hnw_score >= umbral
-        if user:
-            hnw_only = getattr(c, 'target_hnw_only', False) or False
-            min_hnw  = float(getattr(c, 'min_hnw_score', 0.0) or 0.0)
-            user_hnw_verified = bool(getattr(user, 'verified_hnw', False))
-            user_hnw_score    = float(getattr(user, 'hnw_score', 0.0) or 0.0)
-            if hnw_only and not user_hnw_verified:
-                continue
-            if min_hnw > 0 and user_hnw_score < min_hnw:
-                continue
-
-        # ── FRECUENCIA — no repetir el mismo anuncio más de N veces al mismo usuario ──
+        # ── Tope de frecuencia — politica de entrega, no elegibilidad ──
         freq_cap = getattr(c, 'frequency_cap', None)
         if user and freq_cap:
             seen_count = db.query(AdImpressionLog).filter(
@@ -4826,6 +5036,26 @@ def _match_campaigns(user, debate, db) -> list:
         if '_orm' not in item:
             item['_orm'] = orm_by_id.get(item['id'])
 
+    # ── ASOCIACION = EMPLAZAMIENTO, NUNCA AUTORIZACION (regla 13) ──
+    # target_debate_ids sigue existiendo y sigue sirviendo para que una
+    # campana gane el espacio de la consulta creada para ella, pero ahora
+    # actua DENTRO del conjunto ya elegible: reordena, no admite. Una campana
+    # anclada que el usuario no cumple ni siquiera llega hasta aqui.
+    if debate:
+        for item in ranked:
+            orm = item.get('_orm')
+            pinned_ids = {
+                int(x.strip())
+                for x in ((getattr(orm, 'target_debate_ids', '') or '').split(','))
+                if x.strip().isdigit()
+            } if orm else set()
+            if debate.id in pinned_ids:
+                item['pinned'] = True
+                item['optimization_rank'] = (item.get('optimization_rank') or 0) + 10_000
+            else:
+                item['pinned'] = False
+        ranked.sort(key=lambda x: x.get('optimization_rank') or 0, reverse=True)
+
     return ranked
 
 
@@ -4879,55 +5109,35 @@ USD_TO_CLP = 950
 
 @app.get('/debates/{debate_id}/opinions')
 def get_opinions(debate_id: int,
-                 user: User = Depends(get_optional_user),
+                 user: User = Depends(get_current_user),
                  db: Session = Depends(get_db)):
+    # CHANGE-002 reglas 2 y 3: las opiniones son CONTENIDO de la consulta.
+    # Esta ruta era anonima, asi que conocer el ID bastaba para leer el hilo
+    # completo de una consulta dirigida a otra audiencia. Ahora exige sesion
+    # y la misma elegibilidad canonica que el listado y el voto.
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Consultation not found')
+    _require_consultation_access(user, debate, db)
+
     opinions = db.query(Opinion).filter(
         Opinion.debate_id == debate_id
     ).order_by(Opinion.created_at.asc()).all()
 
-    debate    = db.query(Debate).filter(Debate.id == debate_id).first()
-    matched   = _match_campaigns(user, debate, db)
+    matched = _match_campaigns(user, debate, db)
 
-    # Always merge in any active campaign not already in matched
-    # so newly created campaigns always appear everywhere ads show
-    # (same filter as /ads/featured so behavior is consistent)
-    now_ts = datetime.utcnow()
-    recent = db.query(AdCampaign).filter(
-        AdCampaign.is_active == True,
-        (AdCampaign.end_date == None) | (AdCampaign.end_date > now_ts),
-    ).filter(
-        # Incluir campañas sin presupuesto definido (pruebas) y las que aún tienen saldo
-        (AdCampaign.budget_clp == None) |
-        (AdCampaign.budget_clp == 0) |
-        (AdCampaign.budget_clp > AdCampaign.spent_clp)
-    ).order_by(AdCampaign.created_at.desc()).limit(10).all()
-    matched_ids = {c.get('id') for c in matched}
-    user_se = (getattr(user, 'se_tier', '') or '') if user else ''
-    prepend = []
-    for rc in recent:
-        if rc.id not in matched_ids:
-            # Respetar tier del usuario: si tiene tier asignado, solo campañas compatibles
-            if user_se and not _tier_matches(user_se, rc.target_se_tiers or 'A,B,C,D'):
-                continue
-            # Respetar el límite de frecuencia — esta ruta bypaseaba _match_campaigns
-            # (y por lo tanto el filtro de frecuencia) por completo.
-            freq_cap = getattr(rc, 'frequency_cap', None)
-            if user and freq_cap:
-                seen_count = db.query(AdImpressionLog).filter(
-                    AdImpressionLog.campaign_id == rc.id,
-                    AdImpressionLog.user_id == user.id,
-                ).count()
-                if seen_count >= freq_cap:
-                    continue
-            prepend.append({
-                'id': rc.id, 'advertiser_name': rc.advertiser_name or '',
-                'ad_copy': rc.ad_copy or '', 'title': rc.title or '',
-                'logo_url': rc.logo_url or '', 'ad_image_url': rc.ad_image_url or '',
-                'video_url': getattr(rc, 'video_url', '') or '',
-                'link_url': rc.link_url or '',
-                '_orm': rc, 'optimization_rank': 0,
-            })
-    matched = prepend + matched  # newest campaigns show first
+    # CHANGE-002 — BLOQUE "prepend" ELIMINADO.
+    #
+    # Aqui vivia un bloque que anteponia (es decir, servia PRIMERO) cualquier
+    # campana activa que no estuviera ya en `matched`, comprobando unicamente
+    # el tier del usuario y el tope de frecuencia. Se saltaba pais, comuna,
+    # genero, edad, ingreso, profesion, cargo, tamano de empresa, HNW,
+    # target_categories, excluded_categories y marca-segura. Su comentario lo
+    # declaraba explicitamente: "so newly created campaigns always appear
+    # everywhere ads show".
+    #
+    # Una campana recien creada ya no necesita este atajo: _match_campaigns
+    # devuelve toda campana elegible, sin importar su antiguedad.
 
     static_ads = db.query(DebateAd).filter(DebateAd.debate_id == debate_id).all()
     # Si no hay ads específicos del debate, usar los globales como fallback
@@ -5013,6 +5223,9 @@ def post_opinion(debate_id: int, data: OpinionCreate, user: User = Depends(get_v
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
         raise HTTPException(404, 'Consultation not found')
+    # CHANGE-002 regla 3 — no se puede aportar contenido a una consulta para
+    # la que no se es elegible.
+    _require_consultation_access(user, debate, db)
     op = Opinion(debate_id=debate_id, user_id=0, user_name='Ciudadano',
                  text=data.text, knowledge_level=data.knowledge_level)
     db.add(op)
@@ -5021,7 +5234,15 @@ def post_opinion(debate_id: int, data: OpinionCreate, user: User = Depends(get_v
     return {'opinion': {'id': op.id, 'text': op.text, 'created_at': op.created_at.isoformat()}}
 
 @app.get('/debates/{debate_id}/comments')
-def get_comments(debate_id: int, db: Session = Depends(get_db)):
+def get_comments(debate_id: int,
+                 user: User = Depends(get_current_user),
+                 db: Session = Depends(get_db)):
+    # CHANGE-002 reglas 2 y 3 — los comentarios post-voto son contenido de la
+    # consulta; esta ruta era anonima.
+    debate = db.query(Debate).filter(Debate.id == debate_id).first()
+    if not debate:
+        raise HTTPException(404, 'Consultation not found')
+    _require_consultation_access(user, debate, db)
     comments = db.query(PostVoteComment).filter(
         PostVoteComment.debate_id == debate_id
     ).order_by(PostVoteComment.created_at.asc()).all()
@@ -5170,34 +5391,29 @@ def _cast_vote_inner(debate_id: int, data, user, db):
     if get_debate_status(debate) != 'live':
         raise HTTPException(400, 'Consultation is not open for voting')
 
-    # Elegibilidad: el votante debe cumplir las condiciones del consultante
-    if debate.scope == 'commune' and debate.scope_commune:
-        # scope_commune puede ser una comuna o una lista separada por comas
-        allowed_communes = {c.strip().lower() for c in debate.scope_commune.split(',') if c.strip()}
-        if (user.county or '').strip().lower() not in allowed_communes:
-            raise HTTPException(403, f'Esta consulta es solo para residentes de {debate.scope_commune}')
-    elif debate.scope == 'country' and debate.scope_country and debate.scope_country != 'GL':
-        if (user.country or '').upper() != debate.scope_country.upper():
-            raise HTTPException(403, f'Esta consulta es solo para residentes de {debate.scope_country}')
-
-    if debate.target_gender and debate.target_gender != 'all':
-        if (user.gender or '') != debate.target_gender:
-            raise HTTPException(403, 'Esta consulta está dirigida a un género específico')
-
-    if user.dob:
-        try:
-            from datetime import date
-            dob = date.fromisoformat(user.dob)
-            today = date.today()
-            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-            if debate.target_age_min and age < debate.target_age_min:
-                raise HTTPException(403, f'Esta consulta es para mayores de {debate.target_age_min} años')
-            if debate.target_age_max and age > debate.target_age_max:
-                raise HTTPException(403, f'Esta consulta es para menores de {debate.target_age_max} años')
-        except HTTPException:
-            raise
-        except Exception:
-            pass  # si dob tiene formato inválido, no bloqueamos
+    # ══════════════════════════════════════════════════════════════
+    # AUTORIZACION DE VOTO — RE-EVALUACION CANONICA (CHANGE-002 regla 4)
+    # ══════════════════════════════════════════════════════════════
+    # Este es EL limite de autorizacion. Se re-evalua la elegibilidad actual
+    # del usuario contra el evaluador canonico inmediatamente antes de
+    # aceptar el voto, sin confiar en nada de lo anterior:
+    #   - ni en el estado del frontend,
+    #   - ni en que la consulta apareciera antes en su feed,
+    #   - ni en elegibilidad enviada por el cliente,
+    #   - ni en conocer el debate_id,
+    #   - ni en llamar la API directamente.
+    #
+    # El bloque inline anterior comprobaba comuna/pais/genero/edad pero NO
+    # tier socioeconomico, NI banda de ingreso, NI lista cerrada: un usuario
+    # excluido del feed por tier o ingreso podia votar igualmente llamando a
+    # esta ruta. Ademas fallaba abierto ante un `dob` invalido y comparaba
+    # pais con .upper() en crudo ('Chile' != 'CL').
+    _decision = _consultation_decision(user, debate, db)
+    if not _decision.allowed:
+        _blocked = ', '.join(_decision.blocking_dimensions()) or 'targeting'
+        print(f'[cast_vote] eligibility denied user={user.id} debate={debate_id} '
+              f'verdict={_decision.verdict} blocking={_blocked}')
+        raise HTTPException(403, 'No cumples las condiciones de participacion de esta consulta')
 
     # Bloqueo 0: verificación facial (solo para usuarios con selfie verificada)
     if user.selfie_verified:
@@ -5545,6 +5761,28 @@ def get_results(debate_id: int,
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
         raise HTTPException(404, 'Consultation not found')
+    # CHANGE-002 regla 5 — resultados restringidos: solo creador/admin.
+    if not _may_see_results(user, debate, db):
+        raise HTTPException(404, 'Consultation not found')
+    # DECISION FINAL JC — el contenido protegido de una consulta restringida
+    # NO se entrega solo porque sus resultados sean publicables.
+    #
+    # Este bloque va ANTES del control "debes votar primero" a proposito. Si
+    # fuera despues se produciria la inversion que hay que evitar: el llamante
+    # anonimo salta ese control (`and user` es falso sin sesion) y recibiria
+    # MAS informacion que un usuario autenticado no elegible, que se llevaria
+    # un 403. Resolviendo primero el contenido, anonimo y autenticado-no-
+    # elegible obtienen exactamente lo mismo: solo el agregado publicable.
+    if not _may_see_consultation_content(user, debate, db):
+        return {
+            'debate': _public_results_payload(debate),
+            'content_restricted': True,
+            'legitimacy_score': debate.legitimacy_score,
+            'verifications': {
+                'total': debate.verifications_total,
+                'confirmed': debate.verifications_ok,
+            },
+        }
     # Resultados solo visibles si el usuario ya votó o la consulta está cerrada
     if debate.status == 'live' and user:
         log = db.query(HasVotedLog).filter(
@@ -5607,11 +5845,27 @@ def organizer_login(data: LoginInput, db: Session = Depends(get_db)):
     }
 
 @app.get('/debates/search-similar')
-def search_similar_debate(q: str, country: str = 'CL', db: Session = Depends(get_db)):
+def search_similar_debate(q: str, country: str = 'CL',
+                          user: User = Depends(get_current_user),
+                          db: Session = Depends(get_db)):
     """
     Before creating a debate, check if a similar one already exists.
     Returns matching debates so organizers and agents can converge
     into an existing debate instead of fragmenting the same topic.
+
+    CHANGE-002 — decisión explícita sobre esta ruta:
+
+    NO es un camino de descubrimiento para votantes: es una herramienta de
+    de-duplicación para quien CREA una consulta, y devuelve solo id, título y
+    recuento de votos (nunca contexto, opciones ni resultados).
+
+    Por eso NO se filtra por elegibilidad de votante: un organizador de Las
+    Condes debe poder ver que ya existe una consulta similar dirigida a
+    Conchalí — si se filtrara, la de-duplicación dejaría de funcionar y se
+    fragmentaría el mismo tema.
+
+    Sí se exige sesión (regla 2): antes era anónima y permitía enumerar
+    títulos de consultas sin ninguna credencial.
     """
     STOP_WORDS = {'el','la','los','las','un','una','de','del','en','que','qué',
                   'y','o','a','al','se','su','sus','por','para','con','es','son',
@@ -5672,6 +5926,13 @@ def organizer_create_debate(data: DebateCreate, user: User = Depends(get_current
         target_gender=data.target_gender,
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
+        # CHANGE-002 — vocabulario de targeting compartido + reglas 5/6.
+        target_professions=getattr(data, 'target_professions', '') or '',
+        target_cargos=getattr(data, 'target_cargos', '') or '',
+        target_company_sizes=getattr(data, 'target_company_sizes', '') or '',
+        min_per_capita_usd=getattr(data, 'min_per_capita_usd', 0.0) or 0.0,
+        is_closed_list=bool(getattr(data, 'is_closed_list', False)),
+        results_visibility=(getattr(data, 'results_visibility', 'public') or 'public'),
         income_min_usd=getattr(data, 'income_min_usd', None),
         income_max_usd=getattr(data, 'income_max_usd', None),
         category=getattr(data, 'category', 'general') or 'general',
@@ -5819,8 +6080,86 @@ def get_cpm_for_country(country_code: str) -> float:
     code = (country_code or '').upper().strip()
     return PUBLIC_SECTOR_CPM_BY_COUNTRY.get(code, PUBLIC_SECTOR_CPM_DEFAULT)
 
+# ══════════════════════════════════════════════════════════════
+# CAMPAIGN AUTHORIZATION — CHANGE-002
+# ══════════════════════════════════════════════════════════════
+# DECISION FINAL JC: UN USUARIO ANONIMO NO PUEDE CREAR NI ACTIVAR
+# CAMPANAS REALES.
+#
+# Una campana real gasta presupuesto, se muestra dentro de consultas
+# publicas con el nombre de marca del anunciante, y factura impresiones.
+# Antes de CHANGE-002 cuatro rutas mutaban campanas sin identidad
+# (crear/pausar) o sin verificar propiedad (editar), y dos rutas de pagos
+# movian presupuesto de CUALQUIER campana.
+#
+# No se inventa un sistema de autorizacion paralelo: se reutiliza la misma
+# cadena que ya usan los organizadores (get_current_user -> rol ->
+# perfil aprobado), espejo exacto de create_organizer_consultation.
+# El onboarding sigue viviendo aparte, en /marketer/register.
+
+def _require_campaign_authority(user: User, db: Session) -> Optional[MarketerProfile]:
+    """Identidad + autoridad para operar campanas reales.
+
+    Espejo de la puerta de organizadores (create_organizer_consultation):
+    rol correcto + perfil no suspendido ni pendiente. Devuelve el perfil
+    (None para admin, que no necesita MarketerProfile).
+    """
+    if user is None:
+        raise HTTPException(401, 'Authentication required')
+    if user.role == 'admin':
+        return None
+    if user.role != 'marketer':
+        raise HTTPException(403, 'Marketer role required')
+    profile = db.query(MarketerProfile).filter(
+        MarketerProfile.user_id == user.id
+    ).first()
+    if not profile:
+        raise HTTPException(403, 'Perfil de marketer requerido')
+    if profile.status == 'suspended':
+        raise HTTPException(403, 'Tu cuenta está suspendida')
+    if profile.status != 'approved':
+        raise HTTPException(403, 'Tu cuenta está pendiente de aprobación')
+    return profile
+
+
+def _same_email(a: str, b: str) -> bool:
+    return (a or '').strip().lower() == (b or '').strip().lower()
+
+
+def _require_campaign_owner(user: User, campaign: AdCampaign, db: Session) -> None:
+    """Propiedad: un marketer solo muta SUS campanas.
+
+    La clave de propiedad ya existente en el repositorio es
+    AdCampaign.advertiser_email (es la que usa GET /advertiser/campaigns
+    para listar "mis campanas"). No se introduce una nueva.
+    """
+    _require_campaign_authority(user, db)
+    if user.role == 'admin':
+        return
+    if not _same_email(campaign.advertiser_email, user.email):
+        # No se revela si la campana existe y es de otro: mismo 403 que
+        # cualquier otro no-autorizado.
+        raise HTTPException(403, 'No autorizado sobre esta campaña')
+
+
+def _bind_campaign_to_caller(data: CampaignCreate, user: User) -> None:
+    """Una campana se crea SIEMPRE a nombre de quien la firma.
+
+    Sin esto, un marketer aprobado podria crear campanas atribuidas al
+    email de otro anunciante y, dado que advertiser_email ES la clave de
+    propiedad, apropiarse de la marca ajena o ensuciar su panel.
+    """
+    if user.role == 'admin':
+        return
+    if not _same_email(data.advertiser_email, user.email):
+        raise HTTPException(403, 'La campaña debe crearse con tu propio email')
+
+
 @app.post('/advertiser/campaigns')
-def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
+def create_campaign(data: CampaignCreate, db: Session = Depends(get_db),
+                    user: User = Depends(get_verified_user)):
+    _require_campaign_authority(user, db)
+    _bind_campaign_to_caller(data, user)
     campaign = AdCampaign(
         advertiser_email    = data.advertiser_email,
         advertiser_name     = data.advertiser_name,
@@ -5830,6 +6169,11 @@ def create_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
         target_country      = data.target_country,
         target_communes     = data.target_communes,
         target_se_tiers     = data.target_se_tiers,
+        # CHANGE-002 — estos tres campos se aceptaban en el payload y se
+        # descartaban en silencio al crear la campana.
+        target_income_min   = getattr(data, 'target_income_min', 0.0) or 0.0,
+        target_income_max   = getattr(data, 'target_income_max', 9999.0),
+        frequency_cap       = getattr(data, 'frequency_cap', None),
         target_gender       = data.target_gender,
         target_age_min      = data.target_age_min,
         target_age_max      = data.target_age_max,
@@ -5875,6 +6219,8 @@ def update_campaign(campaign_id: int, data: CampaignCreate, db: Session = Depend
     campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(404, 'Campaign not found')
+    # CHANGE-002 — estar autenticado no basta: hay que ser el dueno.
+    _require_campaign_owner(user, campaign, db)
     campaign.title               = data.campaign_title
     campaign.budget_clp          = data.budget_clp
     campaign.target_country      = data.target_country
@@ -5898,6 +6244,11 @@ def update_campaign(campaign_id: int, data: CampaignCreate, db: Session = Depend
     campaign.min_hnw_score       = getattr(data, 'min_hnw_score', 0.0) or 0.0
     campaign.target_age_min      = data.target_age_min
     campaign.target_age_max      = data.target_age_max
+    # CHANGE-002 — antes no se actualizaban al editar la campana.
+    campaign.target_income_min   = getattr(data, 'target_income_min', 0.0) or 0.0
+    campaign.target_income_max   = getattr(data, 'target_income_max', 9999.0)
+    campaign.frequency_cap       = getattr(data, 'frequency_cap', None)
+    campaign.target_categories   = data.target_categories
     if data.start_date:
         try: campaign.start_date = datetime.fromisoformat(data.start_date)
         except: pass
@@ -5909,10 +6260,14 @@ def update_campaign(campaign_id: int, data: CampaignCreate, db: Session = Depend
     return {'message': 'Campaign updated', 'campaign': _format_campaign(campaign)}
 
 @app.put('/advertiser/campaigns/{campaign_id}/pause')
-def pause_campaign(campaign_id: int, db: Session = Depends(get_db)):
+def pause_campaign(campaign_id: int, db: Session = Depends(get_db),
+                   user: User = Depends(get_verified_user)):
     campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(404, 'Campaign not found')
+    # CHANGE-002 — esta ruta ALTERNA is_active, asi que tambien REACTIVA.
+    # Anonima equivalia a "cualquiera enciende la campana de cualquiera".
+    _require_campaign_owner(user, campaign, db)
     campaign.is_active = not campaign.is_active
     db.commit()
     return {'campaign_id': campaign_id, 'is_active': campaign.is_active}
@@ -5948,30 +6303,58 @@ def get_dashboard(campaign_id: int, db: Session = Depends(get_db)):
     }
 
 @app.post('/ads/view')
-async def track_ad_view(data: AdViewInput, db: Session = Depends(get_db)):
-    campaign = db.query(AdCampaign).filter(AdCampaign.id == data.campaign_id, AdCampaign.is_active == True).first()
+def track_ad_view(data: AdViewInput,
+                  user: User = Depends(get_current_user),
+                  db: Session = Depends(get_db)):
+    """Registra una impresion y la cobra al presupuesto de la campana.
+
+    CHANGE-002: esta ruta era ANONIMA, no comprobaba targeting y aceptaba la
+    demografia (genero/edad/comuna/pais) que enviara el cliente. Cualquiera
+    podia facturar impresiones arbitrarias contra cualquier campana y
+    envenenar la demografia que despues reporta /admin/audience-stats.
+
+    Ahora: exige sesion, verifica con el evaluador canonico que esta campana
+    sea realmente elegible para ESTE usuario en ESTA consulta, y toma la
+    demografia del perfil del servidor, no del cuerpo de la peticion.
+    """
+    campaign = db.query(AdCampaign).filter(
+        AdCampaign.id == data.campaign_id, AdCampaign.is_active == True
+    ).first()
     if not campaign:
         raise HTTPException(404, 'Campaign not found or inactive')
+
+    debate = None
+    if data.debate_id:
+        debate = db.query(Debate).filter(Debate.id == data.debate_id).first()
+        if debate:
+            # No se puede cobrar una impresion dentro de una consulta que el
+            # usuario no tiene derecho a ver.
+            _require_consultation_access(user, debate, db)
+
+    if not _campaign_decision(user, campaign, debate, db).allowed:
+        raise HTTPException(403, 'Campaign not eligible for this user')
+
     log = AdImpressionLog(
         campaign_id = data.campaign_id,
         debate_id   = data.debate_id,
+        user_id     = user.id,
         cost_clp    = COST_PER_VIEW,
-        gender      = data.gender,
-        age_group   = data.age_group,
-        county      = data.county,
-        country     = data.country,
+        gender      = user.gender or '',
+        age_group   = _get_age_group(user.dob),
+        county      = user.county or '',
+        country     = user.country or '',
     )
     db.add(log)
     total_imp = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == data.campaign_id).count() + 1
     spent     = total_imp * COST_PER_VIEW
-    if spent >= campaign.budget_clp:
+    if spent >= (campaign.budget_clp or 0):
         campaign.is_active = False
     db.commit()
     return {
         'message':     'Impression recorded',
         'impressions': total_imp,
         'spent_clp':   spent,
-        'balance_clp': max(0, campaign.budget_clp - spent),
+        'balance_clp': max(0, (campaign.budget_clp or 0) - spent),
     }
 
 @app.post('/ads/impression')
@@ -5979,13 +6362,36 @@ def record_impression(
     campaign_id: int,
     debate_id:   int,
     db: Session = Depends(get_db),
-    user: Optional[User] = Depends(lambda: None),  # anonymous ok
+    user: User = Depends(get_current_user),
 ):
     """
     Records a paid impression and deducts Credits from campaign budget.
     Uses CPM from targeting matrix (commune-based).
     Returns False if campaign ran out of budget (caller should swap to next ad).
+
+    CHANGE-002 — esta era la SEGUNDA via de facturacion y estaba marcada
+    `# anonymous ok`: sin sesion, sin targeting y sin comprobar que el
+    usuario pudiera siquiera ver la consulta, pero descontando creditos
+    reales del presupuesto con deduct_credits_for_impression. Cerrar
+    /ads/view sin cerrar esta habria dejado el mismo abuso disponible una
+    ruta mas alla.
+
+    Ahora aplica exactamente la misma barrera canonica que /ads/view:
+    sesion, elegibilidad de la consulta y elegibilidad campana<->usuario.
     """
+    _campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not _campaign:
+        raise HTTPException(404, 'Campaign not found')
+    _debate = None
+    if debate_id:
+        _debate = db.query(Debate).filter(Debate.id == debate_id).first()
+        if _debate:
+            # No se puede cobrar una impresion dentro de una consulta que el
+            # usuario no tiene derecho a ver.
+            _require_consultation_access(user, _debate, db)
+    if not _campaign_decision(user, _campaign, _debate, db).allowed:
+        raise HTTPException(403, 'Campaign not eligible for this user')
+
     from sqlalchemy import text as _text
     # Get campaign CPM — prefer campaign's negotiated CPM, else use commune rate
     row = db.execute(
@@ -6441,6 +6847,15 @@ def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_c
         target_gender=data.target_gender,
         target_age_min=data.target_age_min, target_age_max=data.target_age_max,
         target_se_tiers=getattr(data, 'target_se_tiers', None) or 'A,B,C,D',
+        # CHANGE-002 — vocabulario de targeting compartido + reglas 5/6.
+        target_professions=getattr(data, 'target_professions', '') or '',
+        target_cargos=getattr(data, 'target_cargos', '') or '',
+        target_company_sizes=getattr(data, 'target_company_sizes', '') or '',
+        min_per_capita_usd=getattr(data, 'min_per_capita_usd', 0.0) or 0.0,
+        is_closed_list=bool(getattr(data, 'is_closed_list', False)),
+        results_visibility=(getattr(data, 'results_visibility', 'public') or 'public'),
+        income_min_usd=getattr(data, 'income_min_usd', None),
+        income_max_usd=getattr(data, 'income_max_usd', None),
         category=getattr(data, 'category', 'general') or 'general',
         closes_at=closes, verify_opens_at=verify_opens, verify_closes_at=verify_closes,
         vote_counts=json.dumps({opt: 0 for opt in data.options}),
@@ -6480,11 +6895,19 @@ async def upload_closed_list(
     content = await file.read()
     lines = content.decode('utf-8', errors='ignore').strip().splitlines()
     added = 0
+    skipped = 0
     for line in lines:
         nid = line.strip()
         if not nid:
             continue
-        h = hash_str(nid, prefix='closedlist:')
+        # CHANGE-002 remediation CRIT-1 — hash the CANONICAL form, the exact
+        # same primitive membership lookup uses. Previously this hashed the
+        # raw line, so '12.345.678-9' in the organizer's CSV never matched the
+        # same person's profile and the whole list was inert.
+        if not _elig.norm_national_id(nid):
+            skipped += 1
+            continue
+        h = _closed_list_hash(nid)
         exists = db.query(ClosedListEntry).filter(
             ClosedListEntry.debate_id == debate_id,
             ClosedListEntry.national_id_hash == h
@@ -6492,8 +6915,16 @@ async def upload_closed_list(
         if not exists:
             db.add(ClosedListEntry(debate_id=debate_id, national_id_hash=h))
             added += 1
+    # CHANGE-002 regla 6 — subir un padrón ES el acto explícito que convierte
+    # la consulta en lista cerrada. Antes, closed_list_entries se escribía y
+    # NUNCA se leía: el organizador subía la lista y la consulta seguía
+    # abierta a cualquiera. Ahora la lista es la audiencia.
+    debate.is_closed_list = True
     db.commit()
-    return {'message': f'{added} voter IDs added to closed list', 'debate_id': debate_id, 'total_added': added}
+    return {'message': f'{added} voter IDs added to closed list',
+            'debate_id': debate_id, 'total_added': added,
+            'skipped_unusable': skipped,
+            'is_closed_list': True}
 
 @app.get('/organizer/consultations/{consultation_id}/results')
 def get_consultation_results(consultation_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -9284,7 +9715,8 @@ def list_social_sponsors(email: str, db: Session = Depends(get_db)):
 
 
 @app.post('/marketer/campaigns')
-def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)):
+def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db),
+                             user: User = Depends(get_verified_user)):
     """Crea la campaña y devuelve la optimización de asignación."""
     # Gate: the brand name on this campaign (advertiser_name) is shown live,
     # publicly, inside real debates (main.py _match_campaigns → 'brand': ...).
@@ -9293,31 +9725,19 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
     # has cleared the same chain organizers go through: RUT/web/domain checks,
     # selfie-vs-ID face match, cargo document, and (if not the boss) the boss's
     # own sign-off from their own verified, selfie-checked account.
-    marketer_user = db.query(User).filter(
-        func.lower(User.email) == func.lower(data.advertiser_email)
-    ).first()
-    if not marketer_user:
-        # Auto-create marketer account on first campaign
-        hashed = bcrypt.hashpw((data.advertiser_name or 'marketer').encode(), bcrypt.gensalt()).decode()
-        marketer_user = User(
-            email=data.advertiser_email, name=data.advertiser_name or 'Anunciante',
-            password=hashed, role='marketer',
-        )
-        db.add(marketer_user)
-        db.commit()
-        db.refresh(marketer_user)
-    elif marketer_user.role not in ('marketer', 'admin'):
-        marketer_user.role = 'marketer'
-        db.commit()
-    # Ensure marketer profile exists and is approved
-    profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == marketer_user.id).first()
-    if not profile:
-        profile = MarketerProfile(
-            user_id=marketer_user.id, org_type='person', is_supervisor=True,
-            status='approved', company_name=data.advertiser_name or '',
-        )
-        db.add(profile)
-        db.commit()
+    #
+    # CHANGE-002 — esa era la INTENCION, pero el codigo hacia lo contrario:
+    # sin token, auto-creaba el User con rol 'marketer' y auto-insertaba un
+    # MarketerProfile con status='approved' e is_supervisor=True. Es decir,
+    # un POST anonimo se fabricaba a si mismo la aprobacion que esta puerta
+    # decia exigir, y ninguna de las verificaciones (RUT/web/dominio/selfie/
+    # documento de cargo/firma del jefe) llegaba a ejecutarse nunca.
+    #
+    # Ahora la autoridad debe existir ANTES y venir de /marketer/register +
+    # aprobacion. El onboarding sigue disponible por separado; lo que ya no
+    # puede es manufacturar su propia autorizacion.
+    _require_campaign_authority(user, db)
+    _bind_campaign_to_caller(data, user)
 
     # Guard against accidental duplicate submissions (e.g. a slow response
     # tempting a double-click, or a flaky connection causing a silent retry):
@@ -9426,16 +9846,24 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         link_url            = data.link_url or '',
         min_per_capita_usd  = getattr(data, 'min_per_capita_usd', 0.0) or 0.0,
         frequency_cap       = getattr(data, 'frequency_cap', None),
+        # CHANGE-002 — el targeting HNW se aceptaba y se descartaba aqui.
+        target_hnw_only     = getattr(data, 'target_hnw_only', False) or False,
+        min_hnw_score       = getattr(data, 'min_hnw_score', 0.0) or 0.0,
     )
     db.add(campaign)
     db.commit()
     db.refresh(campaign)
-    # Auto-pin to all live debates so the campaign appears immediately
-    all_debate_ids = [str(d.id) for d in db.query(Debate).filter(Debate.status == 'live').all()]
-    if not all_debate_ids:
-        all_debate_ids = [str(d.id) for d in db.query(Debate).all()]
-    campaign.target_debate_ids = ','.join(all_debate_ids)
-    db.commit()
+    # CHANGE-002 — AUTO-ANCLAJE ELIMINADO.
+    #
+    # Aqui se asignaba `target_debate_ids` con TODAS las consultas vivas, lo
+    # que combinado con el cortocircuito de _match_campaigns hacia que cada
+    # campana nueva se sirviera a todo usuario en toda consulta, saltandose
+    # su propio targeting. Ese cortocircuito ya no existe (la asociacion solo
+    # reordena), pero anclar automaticamente a todo tampoco tiene sentido:
+    # una campana aparece donde es elegible, sin necesidad de anclaje.
+    #
+    # El anclaje deliberado sigue disponible para el agente de rescate y para
+    # administracion, y ahora opera DENTRO del conjunto elegible (regla 13).
     return {'message': 'Campaign created', 'campaign_id': campaign.id,
             'optimization': optimization, 'campaign': _format_campaign(campaign)}
 
@@ -10559,6 +10987,11 @@ def payments_allocate_budget(
     db: Session = Depends(get_db),
 ):
     """Moves Credits from user account to a campaign's running budget."""
+    # CHANGE-002 — sin esto se podia financiar la campana de otro anunciante.
+    _campaign = db.query(AdCampaign).filter(AdCampaign.id == body.campaign_id).first()
+    if not _campaign:
+        raise HTTPException(404, 'Campaign not found')
+    _require_campaign_owner(user, _campaign, db)
     return allocate_budget_to_campaign(db, user.id, body.campaign_id, body.credits)
 
 
@@ -10569,6 +11002,13 @@ def payments_return_budget(
     db: Session = Depends(get_db),
 ):
     """Returns unspent campaign budget to user's credit account (on pause/cancel)."""
+    # CHANGE-002 — esta ruta acredita remaining_budget en la cuenta de QUIEN
+    # LLAMA. Sin comprobacion de propiedad, cualquier usuario autenticado
+    # podia vaciar el presupuesto de una campana ajena hacia su propio saldo.
+    _campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not _campaign:
+        raise HTTPException(404, 'Campaign not found')
+    _require_campaign_owner(user, _campaign, db)
     return return_budget_to_account(db, user.id, campaign_id)
 
 
@@ -14115,9 +14555,108 @@ def admin_create_campaign(secret: str, advertiser_name: str, ad_copy: str,
     return {'ok': True, 'campaign_id': c.id, 'advertiser_name': c.advertiser_name}
 
 
+@app.get('/admin/ppp-audit')
+def admin_ppp_audit(secret: str, db: Session = Depends(get_db)):
+    """SOLO LECTURA — audita el termometro de mercado pais (PPP/PPA).
+
+    CHANGE-002 fase 2, decision JC: el umbral de mercado usa PPP/PPA per
+    capita, nunca GDP nominal per capita.
+
+    La columna world_countries.gdp_per_capita_usd tiene un nombre heredado
+    equivocado: su UNICO escritor en el repositorio es
+    targeting_agent.fetch_gni_from_worldbank, que consulta el indicador del
+    Banco Mundial NY.GNP.PCAP.PP.CD (GNI per capita, PPP). Pero la tabla se
+    creo fuera de este repositorio, asi que las filas que el cron mensual
+    nunca ha refrescado podrian contener un valor NOMINAL heredado.
+
+    Este endpoint compara cada valor almacenado con la tabla de referencia
+    PPP y marca como `suspected_nominal` los que quedan muy por debajo — la
+    firma tipica de un valor nominal. NO escribe nada y NO cambia ninguna
+    decision de elegibilidad.
+    """
+    _check_admin(secret)
+    import matching_diagnostics as _diag
+    stored = {}
+    table_error = ''
+    try:
+        for row in db.execute(text(
+            'SELECT iso2, gdp_per_capita_usd FROM world_countries'
+        )).fetchall():
+            stored[row[0]] = float(row[1]) if row[1] is not None else None
+    except Exception as e:
+        # La tabla puede no existir en un despliegue dado. Eso NO invalida la
+        # auditoria: el resolvedor cae en la tabla PPP de referencia, asi que
+        # el informe sigue describiendo el termometro realmente en uso.
+        table_error = f'world_countries unavailable: {e}'
+    report = _diag.ppp_audit(stored, _ppp_reference_table())
+    report['ok'] = True
+    report['world_countries_available'] = not table_error
+    if table_error:
+        report['world_countries_error'] = table_error
+    report['column_note'] = (
+        'world_countries.gdp_per_capita_usd is written from World Bank '
+        'NY.GNP.PCAP.PP.CD (GNI per capita, PPP). The column name is a '
+        'legacy misnomer; the data is PPP.'
+    )
+    report['reference_source'] = _elig.PPP_SOURCE_REFERENCE
+    return report
+
+
+@app.get('/admin/legacy-income-audit')
+def admin_legacy_income_audit(secret: str, db: Session = Depends(get_db)):
+    """SOLO LECTURA — identifica filas con targeting de ingreso ambiguo.
+
+    CHANGE-002 fase 2, decision JC: el targeting economico personal es el
+    tier A/B/C/D. Las filas heredadas con target_income_min/max ambiguos NO
+    deben reinterpretarse en silencio; deben ser identificables para
+    revision/migracion antes del despliegue.
+
+    Este endpoint NO adivina si un valor antiguo significaba indice, USD
+    anual, ingreso mensual o PPP. Reporta unicamente lo que es demostrable a
+    partir del propio valor, y marca el resto como `requires_review`.
+    NO escribe nada.
+    """
+    _check_admin(secret)
+    import matching_diagnostics as _diag
+    rows = []
+    for c in db.query(AdCampaign).all():
+        rows.append(('campaign', c.id, c.advertiser_name or c.title or '',
+                     getattr(c, 'target_income_min', None),
+                     getattr(c, 'target_income_max', None)))
+    # Las consultas usan income_min_usd/income_max_usd, documentadas
+    # inequivocamente como USD anual — se incluyen para dar el panorama
+    # completo, y se clasificaran como dominio USD salvo que alguien haya
+    # cargado un indice ahi.
+    for d in db.query(Debate).all():
+        lo = getattr(d, 'income_min_usd', None)
+        hi = getattr(d, 'income_max_usd', None)
+        if lo is not None or hi is not None:
+            rows.append(('consultation', d.id, (d.title or '')[:60], lo, hi))
+    report = _diag.income_audit(rows)
+    report['ok'] = True
+    report['guidance'] = (
+        'Rows in `requires_review` must be re-expressed as socioeconomic '
+        'tiers (A/B/C/D) before deploy. Until then they resolve to '
+        'UNRESOLVED, which denies delivery and is reported — never a silent '
+        'reinterpretation.'
+    )
+    return report
+
+
 @app.get('/admin/debug-ads')
 def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session = Depends(get_db)):
-    """Diagnóstico: por qué un usuario no ve ads en un debate. Devuelve user, opiniones, campañas activas y por qué cada una matchea o no."""
+    """Diagnostico: por que un usuario ve (o no) cada campana en un debate.
+
+    CHANGE-002: este endpoint tenia su PROPIA copia del matching (pais,
+    genero, edad, tier) que divergia de la ruta real de produccion, de modo
+    que su veredicto podia no coincidir con lo que el usuario recibia. Ahora
+    reporta las razones del evaluador canonico — la misma decision que se
+    aplica al servir.
+
+    Tambien corrige un AttributeError: hacia `[c.id for c in
+    _match_campaigns(...)]`, pero _match_campaigns devuelve dicts, asi que el
+    endpoint fallaba con 500.
+    """
     if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
@@ -14132,63 +14671,49 @@ def admin_debug_ads(secret: str, debate_id: int, user_id: int = 0, db: Session =
         user = db.query(User).order_by(User.id.desc()).first()
 
     user_info = None
-    reasons = []
-    matched_ids = []
+    profile_info = None
     if user:
-        now = datetime.utcnow()
-        user_tier      = user.se_tier or 'BBB'
-        user_gender    = _normalize_gender(user.gender)
-        user_age_group = _get_age_group(user.dob)
-        user_country   = _country_code(user.country)
-        user_age       = int(user_age_group.split('-')[0]) if '-' in (user_age_group or '') else 30
+        prof = _build_profile(user, db)
         user_info = {
             'id': user.id, 'email': user.email, 'county': user.county,
-            'se_tier': user.se_tier, 'computed_tier': user_tier,
-            'gender': user.gender, 'dob': user.dob, 'computed_age': user_age,
-            'country': user.country, 'computed_country': user_country,
+            'se_tier': user.se_tier, 'gender': user.gender, 'dob': user.dob,
+            'country': user.country, 'profession': getattr(user, 'profession', ''),
+            'cargo': getattr(user, 'cargo', ''),
+            'company_size': getattr(user, 'company_size', ''),
         }
-        all_campaigns = db.query(AdCampaign).all()
-        for c in all_campaigns:
-            r = {'id': c.id, 'advertiser': c.advertiser_name, 'is_active': c.is_active,
-                 'start_date': c.start_date.isoformat() if c.start_date else None,
-                 'end_date': c.end_date.isoformat() if c.end_date else None,
-                 'target_se_tiers': c.target_se_tiers, 'target_country': c.target_country,
-                 'target_gender': c.target_gender,
-                 'target_age_min': c.target_age_min, 'target_age_max': c.target_age_max,
-                 'verdict': 'MATCH', 'reason': ''}
-            campaign_gender = _normalize_gender(c.target_gender)
-            if not c.is_active:
-                r['verdict'] = 'SKIP'; r['reason'] = 'is_active=False'
-            elif c.start_date and c.start_date > now:
-                r['verdict'] = 'SKIP'; r['reason'] = f'start_date {c.start_date.isoformat()} > now {now.isoformat()}'
-            elif c.end_date and c.end_date < (now - timedelta(hours=24)):
-                r['verdict'] = 'SKIP'; r['reason'] = f'end_date {c.end_date.isoformat()} expired'
-            elif c.target_country and _country_code(c.target_country) != user_country:
-                r['verdict'] = 'SKIP'; r['reason'] = f'country mismatch: target={c.target_country} user={user_country}'
-            elif campaign_gender != 'all' and user_gender != 'all' and campaign_gender != user_gender:
-                r['verdict'] = 'SKIP'; r['reason'] = f'gender mismatch: target={c.target_gender}(→{campaign_gender}) user={user.gender}(→{user_gender})'
-            elif not ((c.target_age_min or 13) <= user_age <= (c.target_age_max or 99)):
-                r['verdict'] = 'SKIP'; r['reason'] = f'age mismatch: range=[{c.target_age_min},{c.target_age_max}] user_age={user_age}'
-            else:
-                target_tiers = c.target_se_tiers or 'AAA,AAB,ABB,BBB,BBC,BCC'
-                if user_tier and not _tier_matches(user_tier, target_tiers):
-                    r['verdict'] = 'SKIP'; r['reason'] = f'tier mismatch: target={target_tiers} user={user_tier}'
-            if r['verdict'] == 'MATCH':
-                matched_ids.append(c.id)
-            reasons.append(r)
-        now_iso = now.isoformat()
-    else:
-        now_iso = datetime.utcnow().isoformat()
+        profile_info = prof.as_dict() if prof else None
 
-    real_match_ids = [c.id for c in _match_campaigns(user, debate, db)]
+    consult = _consultation_decision(user, debate, db) if user else None
+
+    reasons = []
+    matched_ids = []
+    for c in db.query(AdCampaign).all():
+        dec = _campaign_decision(user, c, debate, db)
+        reasons.append({
+            'id': c.id,
+            'advertiser': c.advertiser_name,
+            'is_active': c.is_active,
+            'start_date': c.start_date.isoformat() if c.start_date else None,
+            'end_date': c.end_date.isoformat() if c.end_date else None,
+            'verdict': dec.verdict,
+            'blocking': dec.blocking_dimensions(),
+            'reasons': [r.as_dict() for r in dec.reasons
+                        if r.outcome in (_elig.FAIL, _elig.UNKNOWN)],
+        })
+        if dec.allowed:
+            matched_ids.append(c.id)
+
+    served = _match_campaigns(user, debate, db)
     return {
-        'now_utc': now_iso,
+        'now_utc': datetime.utcnow().isoformat(),
         'debate_id': debate_id,
         'opinions_count': len(opinions),
         'ads_would_show_at_indices': [i for i in range(len(opinions)) if i > 0 and i % AD_EVERY_N_OPINIONS == 0],
         'user': user_info,
-        'matched_campaign_ids': matched_ids,
-        'real_match_campaigns_result': real_match_ids,
+        'normalized_profile': profile_info,
+        'consultation_eligibility': consult.as_dict() if consult else None,
+        'eligible_campaign_ids': matched_ids,
+        'served_campaign_ids': [c.get('id') for c in served],
         'campaigns': reasons,
     }
 
@@ -14370,7 +14895,44 @@ def admin_send_campaign(
     ).all()
     sent_count = 0
     errors = []
+    skipped_ineligible = 0
+    sent_undisclosed = 0
     for inv in invitees:
+        # ── K-14 (CHANGE-002) ──────────────────────────────────────────
+        # DECISION FINAL JC: UNA INVITACION ORDINARIA NO SALTA EL TARGETING.
+        #
+        # La invitacion no autoriza nada: solo decide QUE se puede contar en
+        # el correo. Se resuelve con el MISMO evaluador canonico que las
+        # rutas (incluida la semantica de lista cerrada, donde LA LISTA ES
+        # LA AUDIENCIA), nunca con una regla paralela.
+        #
+        #   ELEGIBLE      -> correo completo, nombrando la consulta.
+        #   NO ELEGIBLE   -> no se envia nada. Invitar a alguien que sera
+        #                    rechazado filtra el titulo y la existencia de
+        #                    una consulta dirigida a otra audiencia.
+        #   NO RESUELTO   -> el invitado no tiene cuenta todavia, o faltan
+        #                    datos materiales. UNKNOWN NO se convierte en
+        #                    elegibilidad: se envia una invitacion generica
+        #                    que NO nombra la consulta, preservando el
+        #                    onboarding legitimo sin divulgar nada.
+        #
+        # En los tres casos el destino sigue aplicando la autorizacion
+        # canonica del servidor: llevar un token de invitacion valido no
+        # concede acceso a una consulta para la que no se es elegible.
+        invitee_user = db.query(User).filter(
+            func.lower(User.email) == func.lower(inv.email or '')
+        ).first()
+        disclose = False
+        if debate is not None and invitee_user is not None:
+            _inv_decision = _consultation_decision(invitee_user, debate, db)
+            if _inv_decision.allowed:
+                disclose = True
+            elif _inv_decision.verdict == _elig.INELIGIBLE:
+                skipped_ineligible += 1
+                continue
+            # UNRESOLVED cae aqui con disclose=False.
+        if not disclose:
+            sent_undisclosed += 1
         invite_url = f"{base_url}/?invite={inv.invite_token}&debate={sp_debate.debate_id if sp_debate else ''}"
         subject = f"{sponsor.name} te invita a compartir tu opinión — {sp_debate.discount_pct}% de descuento"
         html_body = f"""
@@ -14382,7 +14944,7 @@ def admin_send_campaign(
     <h3 style="color:#1a1a2e">Te invitamos a dar tu opinión</h3>
     <p>{sponsor.name} quiere conocer tu experiencia y preferencias.</p>
     <p><strong>Como agradecimiento, recibirás {sp_debate.discount_pct}% de descuento</strong> en tu próximo servicio con nosotros al completar la consulta.</p>
-    {'<p style="color:#666">Consulta: ' + debate.title + '</p>' if debate else ''}
+    {'<p style="color:#666">Consulta: ' + debate.title + '</p>' if (debate and disclose) else ''}
     <div style="text-align:center;margin:32px 0;">
       <a href="{invite_url}" style="background:#3b82f6;color:#fff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:bold;">
         Votar ahora y obtener {sp_debate.discount_pct}% de descuento
@@ -14400,7 +14962,11 @@ def admin_send_campaign(
     campaign.sent = sent_count
     campaign.status = 'sent' if sent_count > 0 else 'draft'
     db.commit()
-    return {'ok': True, 'sent': sent_count, 'errors': len(errors), 'error_detail': errors[:5]}
+    return {'ok': True, 'sent': sent_count, 'errors': len(errors),
+            'error_detail': errors[:5],
+            # K-14: visibilidad de por que no se envio/no se nombro.
+            'skipped_ineligible': skipped_ineligible,
+            'sent_without_disclosing_consultation': sent_undisclosed}
 
 @app.get('/admin/sponsors/{sponsor_id}/dashboard')
 def admin_sponsor_dashboard(sponsor_id: int, secret: str, db: Session = Depends(get_db)):
@@ -14441,10 +15007,26 @@ def admin_sponsor_dashboard(sponsor_id: int, secret: str, db: Session = Depends(
 # ══════════════════════════════════════════════════════════════
 
 @app.get('/pilot/{debate_id}/live')
-def pilot_live_dashboard(debate_id: int, db: Session = Depends(get_db)):
-    """Real-time pilot metrics for agency/brand. No auth required (debate_id is the access token)."""
+def pilot_live_dashboard(debate_id: int,
+                         user: User = Depends(get_optional_user),
+                         db: Session = Depends(get_db)):
+    """Métricas en vivo del piloto para agencia/marca.
+
+    CHANGE-002 regla 5: ya NO se acepta "debate_id es el token de acceso".
+    Este panel expone desglose de votantes por canal de adquisición, país y
+    tier socioeconómico; queda sujeto a `results_visibility` como el resto de
+    las salidas de resultados.
+    """
     debate = db.query(Debate).filter(Debate.id == debate_id).first()
     if not debate:
+        raise HTTPException(404, 'Debate not found')
+    if not _may_see_results(user, debate, db):
+        raise HTTPException(404, 'Debate not found')
+    # DECISION FINAL JC — este panel expone el titulo de la consulta y el
+    # desglose de sus participantes por canal, pais y tier: contenido y
+    # metadatos de participante. Una consulta restringida los protege aunque
+    # sus resultados sean publicables.
+    if not _may_see_consultation_content(user, debate, db):
         raise HTTPException(404, 'Debate not found')
 
     # All votes for this debate

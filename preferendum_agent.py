@@ -1063,6 +1063,12 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional."""
         return None
 
 
+# Centinela: la comprobacion de duplicados NO se pudo realizar. Es TRUTHY a
+# proposito, para que los llamantes existentes (`if existing:`) se abstengan
+# de crear. Ante la duda preferimos no publicar a publicar duplicados.
+_DEDUP_UNAVAILABLE = {'id': None, 'title': '', 'dedup_unavailable': True}
+
+
 def _find_similar_debate(question: str, country_code: str) -> dict | None:
     """
     Search existing debates (live + closed last 60 days) for the same topic.
@@ -1079,18 +1085,31 @@ def _find_similar_debate(question: str, country_code: str) -> dict | None:
 
     q_kw = keywords(question)
     all_debates = []
+    # CHANGE-002 remediacion MED-1 — GET /debates ahora exige sesion de
+    # usuario (regla 2). Este agente lo llamaba sin credencial: recibia 401,
+    # `r.ok` era falso y la lista quedaba VACIA, de modo que la deteccion de
+    # duplicados fallaba en silencio y el agente creaba consultas repetidas.
+    #
+    # Se usa la ruta interna de solo lectura con la MISMA cabecera
+    # X-Agent-Secret que este archivo ya emplea para POST /debates. No se
+    # reabre /debates al publico ni se inventa un mecanismo nuevo.
     try:
-        # Debates live activos
-        r = _requests.get(f'{BACKEND_URL}/debates?limit=100&status=live&country=ALL', timeout=10)
+        r = _requests.get(
+            f'{BACKEND_URL}/internal/debates/dedup?limit=200',
+            headers={'X-Agent-Secret': ADMIN_SECRET},
+            timeout=10,
+        )
         if r.ok:
             all_debates.extend(r.json().get('debates', []))
-        # Debates cerrados recientes (últimos 60 días)
-        r2 = _requests.get(f'{BACKEND_URL}/debates?limit=100&status=expired&country=ALL', timeout=10)
-        if r2.ok:
-            all_debates.extend(r2.json().get('debates', []))
+        else:
+            # Un fallo aqui significa "no puedo comprobar duplicados". Debe
+            # ser RUIDOSO: en silencio se traduce en consultas duplicadas.
+            print(f'[Convergence] DEDUP UNAVAILABLE: {r.status_code} {r.text[:120]} '
+                  f'— skipping creation to avoid duplicates')
+            return _DEDUP_UNAVAILABLE
     except Exception as e:
-        print(f'[Convergence] Search error: {e}')
-        return None
+        print(f'[Convergence] DEDUP UNAVAILABLE: {e} — skipping creation to avoid duplicates')
+        return _DEDUP_UNAVAILABLE
 
     cutoff = datetime.utcnow() - timedelta(days=60)
     for d in all_debates:
@@ -1122,6 +1141,11 @@ def _create_debate_via_api(debate_data: dict, country_code: str) -> bool:
     """
     # Convergence check: don't fragment the same topic across multiple debates
     existing = _find_similar_debate(debate_data['question'], country_code)
+    if existing and existing.get('dedup_unavailable'):
+        # No es convergencia: es que no pudimos comprobar. Se registra
+        # distinto para que no se confunda con un duplicado real.
+        print('[NewsAgent] Skipped: duplicate check unavailable — not creating blind.')
+        return False
     if existing:
         print(f'[NewsAgent] Converged → debate #{existing["id"]} already covers this topic. Skipping duplicate.')
         return False   # counted as skipped, not created
@@ -2208,6 +2232,15 @@ def run_campaign_rescue_debates(max_campaigns: int = 5) -> dict:
                 # de rescate compite en igualdad con cualquier otra campaña que también
                 # matchee genéricamente, y puede perder el espacio (pasó con Nestlé el
                 # 2026-08-12: Transfernet se ganó el espacio en vez de la campaña rescatada).
+                #
+                # CHANGE-002 (regla 16): el anclaje ya NO es un bypass de targeting.
+                # Antes, anclar hacía que _match_campaigns devolviera la campaña sin
+                # aplicar NINGÚN filtro. Ahora el anclaje solo sube el ranking DENTRO
+                # del conjunto ya elegible: la campaña rescatada gana el espacio frente
+                # a otras campañas elegibles, pero nunca se entrega a un usuario que no
+                # cumple su targeting. El rescate funciona creando una oportunidad
+                # COMPATIBLE (la consulta se genera con el género/edad/país de la propia
+                # campaña), no relajando sus condiciones.
                 if new_debate_id:
                     try:
                         existing_pins = [x.strip() for x in (campaign.get('target_debate_ids') or '').split(',') if x.strip()]

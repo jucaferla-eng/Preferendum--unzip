@@ -485,21 +485,38 @@ def _create_se_debate_via_api(debate_data: dict, se_tier: str) -> bool:
     if q_hash in _created_this_run:
         return False
 
-    # Dedup: verificar contra debates existentes
+    # Dedup: verificar contra debates existentes.
+    #
+    # CHANGE-002 remediacion MED-1 — GET /debates ahora exige sesion de
+    # usuario. Esta llamada iba sin credencial: devolvia 401, `r.ok` era
+    # falso y el `except: pass` se tragaba el fallo, de modo que el agente
+    # dejaba de detectar duplicados sin que nadie se enterara.
+    #
+    # Se usa la ruta interna de solo lectura con la misma cabecera
+    # X-Agent-Secret que este archivo ya usa para POST /debates.
     try:
-        r = _requests.get(f'{BACKEND_URL}/debates?limit=100', timeout=10)
-        if r.ok:
-            existing = r.json().get('debates', [])
-            stop_words = {'el','la','los','las','un','una','de','del','en','que','qué',
-                          'y','o','a','al','se','su','por','para','con','es','son','cuál','cuáles'}
-            def kw(t): return {w for w in re.findall(r'\b\w{4,}\b', t.lower()) if w not in stop_words}
-            q_kw = kw(question)
-            for d in existing:
-                if d.get('status') == 'live' and len(q_kw & kw(d.get('title', ''))) >= 3:
-                    print(f'[SEAgent] Duplicate skipped — similar to #{d["id"]}: {d["title"][:50]}')
-                    return False
-    except Exception:
-        pass
+        r = _requests.get(
+            f'{BACKEND_URL}/internal/debates/dedup?limit=200',
+            headers={'X-Agent-Secret': ADMIN_SECRET},
+            timeout=10,
+        )
+        if not r.ok:
+            print(f'[SEAgent] DEDUP UNAVAILABLE: {r.status_code} {r.text[:120]} '
+                  f'— skipping creation to avoid duplicates')
+            return False
+        existing = r.json().get('debates', [])
+        stop_words = {'el','la','los','las','un','una','de','del','en','que','qué',
+                      'y','o','a','al','se','su','por','para','con','es','son','cuál','cuáles'}
+        def kw(t): return {w for w in re.findall(r'\b\w{4,}\b', t.lower()) if w not in stop_words}
+        q_kw = kw(question)
+        for d in existing:
+            if d.get('status') == 'live' and len(q_kw & kw(d.get('title', ''))) >= 3:
+                print(f'[SEAgent] Duplicate skipped — similar to #{d["id"]}: {d["title"][:50]}')
+                return False
+    except Exception as e:
+        # Fallar RUIDOSO y no crear: en silencio esto produce duplicados.
+        print(f'[SEAgent] DEDUP UNAVAILABLE: {e} — skipping creation to avoid duplicates')
+        return False
 
     closes_at = (datetime.utcnow() + timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%S')
     payload = {

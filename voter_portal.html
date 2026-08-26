@@ -950,24 +950,26 @@ let branchPath = [];       // [{level, option_index, option_text, question}]
 let branchCurrentQ = null; // null = Q1, else {title, options, branches}
 
 async function _showDebateBannerOnAuth() {
+  // CHANGE-002 regla 2 — este banner se muestra a un visitante SIN sesión que
+  // llega por un enlace compartido. Antes pedía GET /debates/{id} sin token y
+  // pintaba el título y la imagen de la consulta: exactamente el contenido que
+  // un usuario no autenticado no debe obtener. Esa ruta ahora responde 401, así
+  // que ni siquiera se llama — no se pide contenido protegido y luego se
+  // descarta, simplemente no se pide.
+  //
+  // El flujo de captación se conserva: se invita a registrarse y, ya con
+  // sesión, validateAndShowApp() abre la consulta si el usuario es elegible.
   const debateId = new URLSearchParams(location.search).get('debate');
   if (!debateId) return;
-  try {
-    const r = await fetch(`${API}/debates/${debateId}`);
-    if (!r.ok) return;
-    const d = await r.json();
-    const banner = document.createElement('div');
-    banner.style.cssText = 'background:linear-gradient(135deg,#6b21ff22,#2d6eff22);border:1px solid #2d6eff44;border-radius:14px;padding:14px 16px;margin-bottom:16px;text-align:center;';
-    const img = (d.option_images || [])[0] || '';
-    banner.innerHTML = `
-      ${img ? `<img src="${img}" style="width:54px;height:54px;object-fit:cover;border-radius:10px;margin-bottom:8px;" alt=""/>` : ''}
-      <div style="font-size:11px;font-weight:700;color:#2d6eff;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">${esc(d.inst_name || 'Preferendum')}</div>
-      <div style="font-size:14px;font-weight:700;color:#060810;line-height:1.4;margin-bottom:4px;">${esc(d.title)}</div>
-      <div style="font-size:12px;color:#7a7570;">Crea tu cuenta gratuita para participar →</div>`;
-    const card = document.querySelector('.auth-card');
-    if (card) card.insertBefore(banner, card.firstChild);
-    switchTab('register');
-  } catch(_) {}
+  const banner = document.createElement('div');
+  banner.style.cssText = 'background:linear-gradient(135deg,#6b21ff22,#2d6eff22);border:1px solid #2d6eff44;border-radius:14px;padding:14px 16px;margin-bottom:16px;text-align:center;';
+  banner.innerHTML = `
+    <div style="font-size:11px;font-weight:700;color:#2d6eff;text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;">Preferendum</div>
+    <div style="font-size:14px;font-weight:700;color:#060810;line-height:1.4;margin-bottom:4px;">Te invitaron a participar en una consulta</div>
+    <div style="font-size:12px;color:#7a7570;">Crea tu cuenta gratuita para ver si puedes participar →</div>`;
+  const card = document.querySelector('.auth-card');
+  if (card) card.insertBefore(banner, card.firstChild);
+  switchTab('register');
 }
 
 // ── INIT ──
@@ -1946,16 +1948,28 @@ async function loadDebates(status = 'live') {
   const secTitle = document.querySelector('.section-title');
   if (secTitle) secTitle.textContent = status === 'expired' ? 'Consultas expiradas' : 'Consultas';
   list.innerHTML = '<div class="loading"><span class="spinner"></span></div>';
-  const debatesUrl = token
-    ? `${API}/debates/for-me?limit=500&status=${status}`
-    : `${API}/debates?limit=500&country=${encodeURIComponent(userCountry)}&status=${status}`;
-  const debatesHeaders = token ? {'Authorization': 'Bearer ' + token} : {};
+
+  // CHANGE-002 regla 2: la elegibilidad se determina DESPUÉS de autenticar.
+  // Antes, sin sesión se llamaba a /debates?country=… — una ruta anónima que
+  // devolvía todas las consultas abiertas del país sin filtrar por perfil.
+  // Esa ruta ahora exige sesión, así que sin token no se pide nada: el
+  // backend es la autoridad y el cliente no intenta rodearlo.
+  if (!token) {
+    list.innerHTML = '<div class="no-debates">Inicia sesión para ver las consultas disponibles para ti.</div>';
+    return;
+  }
+
+  const debatesUrl = `${API}/debates/for-me?limit=500&status=${status}`;
+  const debatesHeaders = {'Authorization': 'Bearer ' + token};
   try {
-    // Si hay sesión activa, usar el endpoint autenticado que filtra por perfil del usuario
     const [dr, ar] = await Promise.all([
       fetch(debatesUrl, {headers: debatesHeaders}),
-      status === 'live' ? fetch(`${API}/ads/featured`, {headers: token ? {'Authorization':'Bearer '+token} : {}}).catch(() => null) : Promise.resolve(null),
+      status === 'live' ? fetch(`${API}/ads/featured`, {headers: debatesHeaders}).catch(() => null) : Promise.resolve(null),
     ]);
+    if (dr.status === 401 || dr.status === 403) {
+      list.innerHTML = '<div class="no-debates">Tu sesión expiró. Vuelve a iniciar sesión para ver tus consultas.</div>';
+      return;
+    }
     const debates = (await dr.json()).debates || [];
     const featuredAds = ar && ar.ok ? (await ar.json()).ads || [] : [];
 
@@ -2016,14 +2030,37 @@ async function openDebate(id) {
   selectedOption = null;
   branchPath = [];
   branchCurrentQ = null;
+  // CHANGE-002 regla 2 — /debates/{id}, /results y /opinions exigen sesión.
+  // Antes las dos primeras iban SIN cabecera: el backend respondía 401 y el
+  // cuerpo del error ({"detail": ...}) se asignaba a currentDebate y se
+  // renderizaba como si fuera la consulta.
+  if (!token) { showAuth(); return; }
+  const authHeaders = {'Authorization': 'Bearer ' + token};
   try {
     const [dr, rr, ar] = await Promise.all([
-      fetch(`${API}/debates/${id}`),
-      fetch(`${API}/debates/${id}/results`),
-      fetch(`${API}/debates/${id}/opinions`, {headers: token ? {'Authorization':'Bearer '+token} : {}})
+      fetch(`${API}/debates/${id}`, {headers: authHeaders}),
+      fetch(`${API}/debates/${id}/results`, {headers: authHeaders}),
+      fetch(`${API}/debates/${id}/opinions`, {headers: authHeaders})
     ]);
-    const db  = await dr.json();
-    const res = await rr.json();
+    // La consulta es la autoridad. Si el servidor no la entrega, NO se
+    // renderiza nada derivado de la respuesta de error.
+    if (dr.status === 401) {
+      content.innerHTML = '<div class="no-debates">Tu sesión expiró. Vuelve a iniciar sesión.</div>';
+      return;
+    }
+    if (!dr.ok) {
+      // 404 = inexistente o no elegible (respuesta no divulgativa deliberada).
+      content.innerHTML = '<div class="no-debates">Esta consulta no está disponible para ti.</div>';
+      return;
+    }
+    const db = await dr.json();
+    if (!db || !db.id) {
+      content.innerHTML = '<div class="no-debates">Esta consulta no está disponible para ti.</div>';
+      return;
+    }
+    // Los resultados son secundarios: pueden denegarse (p.ej. "debes votar
+    // primero") sin impedir que se muestre la consulta.
+    const res = rr.ok ? await rr.json() : {};
     const opinions_data = ar.ok ? await ar.json() : {};
     currentDebate = db;
     renderDebate(db, res, opinions_data.items || []);
@@ -2716,8 +2753,20 @@ async function _shareWithPoster(title, subtitle, instName, debId, fallbackText, 
 async function loadComments(debId) {
   const list = document.getElementById(`comments-list-${debId}`);
   if (!list) return;
+  // CHANGE-002 reglas 2 y 3 — los comentarios son contenido de la consulta y
+  // la ruta exige sesión + elegibilidad. Antes iba sin cabecera y el 401 se
+  // procesaba como si fuera una lista de comentarios vacía.
+  if (!token) { list.innerHTML = ''; return; }
   try {
-    const r = await fetch(`${API}/debates/${debId}/comments`);
+    const r = await fetch(`${API}/debates/${debId}/comments`, {
+      headers: {'Authorization': 'Bearer ' + token}
+    });
+    if (!r.ok) {
+      list.innerHTML = r.status === 401
+        ? '<div style="color:#7a7570;font-size:13px;text-align:center;padding:12px;">Tu sesión expiró.</div>'
+        : '';
+      return;
+    }
     const d = await r.json();
     const comments = d.comments || [];
     if (!comments.length) {
