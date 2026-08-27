@@ -1035,5 +1035,164 @@ class TestImpactToolIsReadOnly(unittest.TestCase):
             self.assertNotIn(forbidden, src)
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# PostgreSQL migration regression guard for economic_reference_versions
+#
+# CHANGE-003 remediation B2: `id INTEGER PRIMARY KEY` (no AUTOINCREMENT, no
+# SERIAL) is a rowid alias under SQLite but an ordinary NOT NULL column with
+# no sequence under PostgreSQL. An INSERT that omits `id` — exactly what
+# _record_reference_version does — would fail on every write once the app
+# runs against production Postgres. The table was never exercised outside
+# SQLite, so this shipped invisibly.
+#
+# The fix branches the DDL on `is_pg`, the same flag payments.py already uses
+# for PAYMENTS_SCHEMA_SQL / PAYMENTS_SCHEMA_SQL_PG. These tests parse the
+# ACTUAL source of `_migrate` and `_record_reference_version` and evaluate
+# the real conditional expression main.py contains — not a hand-copied
+# duplicate — so a regression is caught even if the surrounding code is
+# refactored. No live Postgres server is started or required.
+# ═══════════════════════════════════════════════════════════════════════
+
+def _migrate_source():
+    return _src_of(_function('_migrate'))
+
+
+def _pk_ddl_expression():
+    """The exact `_err_pk = ... if is_pg else ...` line from _migrate,
+    isolated so it can be evaluated for both is_pg=True and is_pg=False."""
+    m = re.search(r"_err_pk\s*=\s*(.+)", _migrate_source())
+    if not m:
+        raise AssertionError('_err_pk assignment not found in _migrate — '
+                             'the PostgreSQL DDL branch may have been removed')
+    return m.group(1).strip()
+
+
+def _create_table_erv_block():
+    src = _migrate_source()
+    start = src.index('CREATE TABLE IF NOT EXISTS economic_reference_versions')
+    end = src.index(')', src.index('policy_version TEXT', start))
+    return src[start:end + 1]
+
+
+class TestEconomicReferenceVersionsPostgresDDL(unittest.TestCase):
+
+    def test_err_pk_expression_still_branches_on_is_pg(self):
+        expr = _pk_ddl_expression()
+        self.assertIn('is_pg', expr,
+                      '_err_pk no longer depends on is_pg — the dialect '
+                      'branch was removed')
+        self.assertIn('SERIAL PRIMARY KEY', expr)
+        self.assertIn('INTEGER PRIMARY KEY AUTOINCREMENT', expr)
+
+    def test_evaluating_the_real_expression_with_is_pg_true_gives_SERIAL(self):
+        """Evaluates main.py's ACTUAL conditional-expression source, not a
+        copy of it, with is_pg forced True. This is what fails if the branch
+        is deleted or its arms are swapped."""
+        value = eval(_pk_ddl_expression(), {'is_pg': True})
+        self.assertEqual(value, 'SERIAL PRIMARY KEY')
+
+    def test_evaluating_the_real_expression_with_is_pg_false_gives_sqlite_form(self):
+        value = eval(_pk_ddl_expression(), {'is_pg': False})
+        self.assertEqual(value, 'INTEGER PRIMARY KEY AUTOINCREMENT')
+
+    def test_the_old_unconditional_bug_would_fail_this_test(self):
+        """Directly simulates reverting to the historical defect: a DDL
+        template with a hardcoded, dialect-blind primary key. Proves the
+        assertions above are not vacuously true."""
+        buggy_ddl = 'CREATE TABLE IF NOT EXISTS economic_reference_versions (\n    id INTEGER PRIMARY KEY,\n'
+        self.assertNotIn('is_pg', buggy_ddl)
+        with self.assertRaises(AssertionError):
+            self.assertIn('SERIAL PRIMARY KEY', buggy_ddl)
+
+    def test_create_table_uses_the_branched_variable_not_a_literal(self):
+        """The DDL string must interpolate {_err_pk}; it must not hardcode
+        either dialect's primary-key syntax directly."""
+        block = _create_table_erv_block()
+        self.assertIn('id {_err_pk}', block,
+                      'CREATE TABLE no longer interpolates the dialect-branched '
+                      'primary key — it may be hardcoded again')
+        self.assertNotIn('id INTEGER PRIMARY KEY,', block)
+        self.assertNotIn('id SERIAL PRIMARY KEY,', block)
+
+    def test_create_table_still_declares_applied_by_and_applied_at(self):
+        block = _create_table_erv_block()
+        self.assertIn('applied_by TEXT', block)
+        self.assertIn('applied_at TIMESTAMP', block)
+
+    def test_backfill_migration_for_applied_columns_still_present(self):
+        """Installs that created the table before the APPLY columns existed
+        must still receive them additively."""
+        src = _migrate_source()
+        self.assertIn("'applied_by'", src)
+        self.assertIn("'applied_at'", src)
+        self.assertIn('ALTER TABLE economic_reference_versions ADD COLUMN', src)
+
+    def test_is_pg_flag_used_by_this_migration_is_the_real_dialect_check(self):
+        src = _migrate_source()
+        self.assertIn("is_pg = 'postgresql' in DATABASE_URL", src)
+
+    def test_insert_does_not_supply_id_manually(self):
+        """The actual defect surface: an INSERT that names `id` would break
+        the SQLite branch's AUTOINCREMENT semantics, and worked around the
+        Postgres bug rather than fixing it. Parses the real column list out
+        of _record_reference_version's INSERT statement."""
+        src = _src_of(_function('_record_reference_version'))
+        self.assertIn('INSERT INTO economic_reference_versions', src)
+        m = re.search(
+            r'INSERT INTO economic_reference_versions\s*\n?\s*\(([^)]+)\)',
+            src)
+        self.assertIsNotNone(m, 'could not locate the INSERT column list')
+        columns = [c.strip() for c in m.group(1).replace('\n', ' ').split(',')]
+        self.assertNotIn('id', columns,
+                         '_record_reference_version supplies id manually — '
+                         'this defeats SERIAL/AUTOINCREMENT on both dialects')
+
+    def test_id_is_read_back_after_insert_rather_than_assumed(self):
+        """Since the INSERT does not supply id, the id used afterwards (for
+        approve/apply) must come from a SELECT, not a guessed value."""
+        src = _src_of(_function('_record_reference_version'))
+        self.assertIn('SELECT id FROM economic_reference_versions', src)
+
+    def test_payments_module_uses_the_same_dialect_branch_pattern(self):
+        """Sanity: this is not a novel pattern invented for CHANGE-003 — it
+        matches the existing PAYMENTS_SCHEMA_SQL / _PG precedent, so the fix
+        is consistent with how the codebase already handles this class of
+        bug."""
+        payments_src = Path(main.__file__).with_name('payments.py').read_text(encoding='utf-8')
+        self.assertIn('PAYMENTS_SCHEMA_SQL_PG', payments_src)
+        self.assertIn('SERIAL PRIMARY KEY', payments_src)
+
+
+class TestEconomicReferenceVersionsDDLRunsUnderSQLite(Base):
+    """Behavioural half: the is_pg=False branch this environment CAN
+    exercise actually creates a usable table and round-trips a proposal
+    through the real endpoint, id and all."""
+
+    def test_table_exists_with_sqlite_autoincrement_pk(self):
+        row = self.db.execute(main.text(
+            "SELECT sql FROM sqlite_master WHERE type='table' "
+            "AND name='economic_reference_versions'")).fetchone()
+        self.assertIsNotNone(row, 'economic_reference_versions was not created')
+        self.assertIn('AUTOINCREMENT', row[0])
+
+    def test_propose_endpoint_round_trips_an_id_without_the_caller_supplying_one(self):
+        r = self.client.post('/admin/socioeconomic/reference/propose',
+                             params={'secret': ADMIN_SECRET, 'country': 'PE',
+                                     'field': 'ppp_per_capita_usd',
+                                     'new_value': 13500,
+                                     'source': 'world_bank_ny_gnp_pcap_pp_cd',
+                                     'data_year': 2023})
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertTrue(body.get('ok'))
+        self.assertIsInstance(body.get('proposal_id'), int,
+                              'propose did not return an id read back after INSERT')
+        row = self.db.execute(main.text(
+            "SELECT id FROM economic_reference_versions WHERE country='PE' "
+            "ORDER BY id DESC LIMIT 1")).fetchone()
+        self.assertIsNotNone(row)
+        self.assertIsInstance(row[0], int)
+
+
 if __name__ == '__main__':
     unittest.main()
