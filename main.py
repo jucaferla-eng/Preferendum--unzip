@@ -97,6 +97,38 @@ class User(Base):
     income_index         = Column(Float, default=0.0)   # índice de ingreso de su comuna
     estimated_income_usd = Column(Float, default=None)  # ingreso anual estimado en USD (señal ocupacional)
     estimated_income_ppp = Column(Float, default=None)  # ingreso mensual PPP — composite (ocupación+residencial+empresa)
+    # ── CHANGE-003: ingreso declarado, individual y de hogar ──────────────
+    # El ingreso es la señal PRIMARIA del tier A/B/C/D (regla R1), así que
+    # tiene que poder almacenarse tal como la persona lo declaró — no sólo el
+    # estimado ocupacional que ya existía.
+    #
+    # Se preserva SIEMPRE la declaración original (monto, moneda, período,
+    # banda) además de la forma normalizada, para no destruir información al
+    # normalizar (R8) y para poder auditar cualquier clasificación después.
+    #
+    # individual != hogar (R5): el individual gobierna el tier; el del hogar
+    # es una dimensión de targeting aparte y NUNCA lo sustituye.
+    declared_income_amount     = Column(Float, default=None)   # tal como se declaró
+    declared_income_amount_max = Column(Float, default=None)   # si fue una banda
+    declared_income_currency   = Column(String, default='')    # 'CLP', 'USD', …
+    declared_income_period     = Column(String, default='')    # annual/monthly/…
+    declared_income_as_of      = Column(DateTime, default=None)
+    declared_income_confirmed  = Column(Boolean, default=False)  # verificada
+    declared_income_annual_usd = Column(Float, default=None)   # DERIVADO
+
+    household_income_amount     = Column(Float, default=None)
+    household_income_amount_max = Column(Float, default=None)
+    household_income_currency   = Column(String, default='')
+    household_income_period     = Column(String, default='')
+    household_income_as_of      = Column(DateTime, default=None)
+    household_income_annual_usd = Column(Float, default=None)  # DERIVADO
+    household_size              = Column(Integer, default=None)
+
+    # Procedencia de la clasificación: qué la produjo y bajo qué política.
+    se_tier_source          = Column(String, default='')   # socioeconomic.IncomeSource
+    se_tier_policy_version  = Column(String, default='')
+    se_tier_computed_at     = Column(DateTime, default=None)
+
     profession           = Column(String, default='')   # profesión declarada al registrarse
     cargo           = Column(String, default='')   # cargo/posición jerárquica
     company_size    = Column(String, default='')   # tamaño de empresa: 1-10, 11-50, etc.
@@ -921,6 +953,91 @@ def _migrate():
                 conn.commit()
             except Exception:
                 pass
+        # ── CHANGE-003 — ingreso declarado individual/hogar + procedencia ──
+        # Todas ADITIVAS y NULL por defecto: ningún usuario existente cambia
+        # de clasificación por aplicar esta migración. La reclasificación
+        # masiva es una decisión aparte y explícita (ver
+        # /admin/socioeconomic/impact, que es SOLO LECTURA).
+        for col, defn in [
+            ('declared_income_amount',      'FLOAT DEFAULT NULL'),
+            ('declared_income_amount_max',  'FLOAT DEFAULT NULL'),
+            ('declared_income_currency',    "TEXT DEFAULT ''"),
+            ('declared_income_period',      "TEXT DEFAULT ''"),
+            ('declared_income_as_of',       'TIMESTAMP DEFAULT NULL'),
+            ('declared_income_confirmed',   'BOOLEAN DEFAULT FALSE'),
+            ('declared_income_annual_usd',  'FLOAT DEFAULT NULL'),
+            ('household_income_amount',     'FLOAT DEFAULT NULL'),
+            ('household_income_amount_max', 'FLOAT DEFAULT NULL'),
+            ('household_income_currency',   "TEXT DEFAULT ''"),
+            ('household_income_period',     "TEXT DEFAULT ''"),
+            ('household_income_as_of',      'TIMESTAMP DEFAULT NULL'),
+            ('household_income_annual_usd', 'FLOAT DEFAULT NULL'),
+            ('household_size',              'INTEGER DEFAULT NULL'),
+            ('se_tier_source',              "TEXT DEFAULT ''"),
+            ('se_tier_policy_version',      "TEXT DEFAULT ''"),
+            ('se_tier_computed_at',         'TIMESTAMP DEFAULT NULL'),
+        ]:
+            if col not in existing_user_cols:
+                try:
+                    conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
+                    conn.commit()
+                except Exception:
+                    pass
+        # economic_reference_versions — PROPOSE -> VALIDATE -> VERSION ->
+        # APPROVE -> APPLY. Un agente NUNCA escribe una clasificación de
+        # producción directamente ni un dato de referencia canónico
+        # directamente; propone aquí, un humano aprueba, y sólo entonces se
+        # aplica (ver admin_socioeconomic_apply).
+        #
+        # CHANGE-003 remediation B2: `id INTEGER PRIMARY KEY` (sin AUTOINCREMENT
+        # ni SERIAL) es un alias de rowid bajo SQLite, pero bajo PostgreSQL es
+        # una columna NOT NULL corriente SIN secuencia. Un INSERT que omite
+        # `id` (como hace admin_socioeconomic_propose) fallaba siempre en
+        # Postgres; la tabla nunca se probó fuera de SQLite. Mismo patrón
+        # dialecto-específico que payments.PAYMENTS_SCHEMA_SQL /
+        # PAYMENTS_SCHEMA_SQL_PG (SERIAL en Postgres, AUTOINCREMENT en SQLite).
+        _err_pk = 'SERIAL PRIMARY KEY' if is_pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'
+        try:
+            conn.execute(text(f"""
+                CREATE TABLE IF NOT EXISTS economic_reference_versions (
+                    id {_err_pk},
+                    country TEXT,
+                    field TEXT,
+                    old_value FLOAT,
+                    new_value FLOAT,
+                    source TEXT,
+                    data_year INTEGER,
+                    status TEXT,
+                    requires_review BOOLEAN,
+                    review_reasons TEXT,
+                    validation_errors TEXT,
+                    proposed_by TEXT,
+                    proposed_at TIMESTAMP,
+                    approved_by TEXT,
+                    approved_at TIMESTAMP,
+                    applied_by TEXT,
+                    applied_at TIMESTAMP,
+                    policy_version TEXT
+                )
+            """))
+            conn.commit()
+        except Exception:
+            pass
+        # Aditivo: instalaciones que ya crearon la tabla (p.ej. un entorno de
+        # pruebas levantado antes de esta remediación) reciben las columnas
+        # de APPLY sin perder las propuestas ya registradas.
+        try:
+            existing_erv_cols = ({c['name'] for c in inspector.get_columns('economic_reference_versions')}
+                                 if inspector.has_table('economic_reference_versions') else set())
+            for col, defn in [('applied_by', 'TEXT'), ('applied_at', 'TIMESTAMP')]:
+                if existing_erv_cols and col not in existing_erv_cols:
+                    try:
+                        conn.execute(text(f'ALTER TABLE economic_reference_versions ADD COLUMN {col} {defn}'))
+                        conn.commit()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 _migrate()
 
 # ══════════════════════════════════════════════════════════════
@@ -1598,6 +1715,304 @@ def _public_results_payload(debate) -> dict:
     """
     full = format_debate(debate)
     return {k: full.get(k) for k in _PUBLIC_RESULT_FIELDS if k in full}
+
+
+# ══════════════════════════════════════════════════════════════
+# CANONICAL SOCIOECONOMIC CLASSIFICATION — adapters (CHANGE-003)
+# ══════════════════════════════════════════════════════════════
+# El evaluador vive en socioeconomic.py (sin dependencias, testeable sin base
+# de datos). Estas funciones sólo traducen filas ORM al snapshot que consume,
+# igual que los adaptadores de CHANGE-002.
+#
+# CHANGE-003 mejora los INSUMOS que consume el matching de CHANGE-002; no
+# toca ni debilita el matching.
+
+import socioeconomic as _socio
+
+
+def _country_economic_context(country_code: str, db) -> '_socio.CountryEconomicContext':
+    """Contexto económico del país para clasificar (reglas R2/R3/R4).
+
+    Reutiliza EXACTAMENTE el resolvedor PPP canónico de CHANGE-002
+    (`_country_per_capita_ppp_usd`), que ya devuelve valor + procedencia. No
+    se abre una segunda vía de acceso al termómetro: si CHANGE-002 no puede
+    resolver el PPP, aquí tampoco, y la clasificación queda UNRESOLVED en vez
+    de inventarse un número.
+
+    La procedencia se traduce a las etiquetas tipadas que socioeconomic.py
+    acepta; cualquier otra cosa (por ejemplo una serie NOMINAL) es rechazada
+    por el propio constructor.
+    """
+    value, provenance = _country_per_capita_ppp_usd(country_code, db)
+    if provenance == _elig.PPP_SOURCE_DB:
+        src = 'world_bank_ny_gnp_pcap_pp_cd'
+    elif provenance == _elig.PPP_SOURCE_REFERENCE:
+        src = 'marketer_table_v2_gni_per_capita_ppp'
+    else:
+        src = ''
+    return _socio.CountryEconomicContext(
+        country=country_code, ppp_per_capita_usd=value, ppp_source=src,
+    )
+
+
+def _individual_income_observations(user, db) -> list:
+    """Observaciones de ingreso INDIVIDUAL de un usuario, por precedencia.
+
+    R5: el ingreso del hogar NO entra en esta lista. R6: la precedencia la
+    decide socioeconomic.select_income, no el orden en que se añaden aquí.
+    """
+    out = []
+    amount = getattr(user, 'declared_income_amount', None)
+    if amount is not None:
+        # B1 remediation: the stored currency/period are passed through
+        # EXACTLY as declared — never coerced to 'USD'/'annual' when blank.
+        # The column default for both is '' (see the User model), and '' is
+        # not a currency or a period; it is unknown. IncomeObservation
+        # already refuses to resolve annual_usd for a blank currency or an
+        # unrecognised period (R7), so a row nobody actually priced can never
+        # produce a tier.
+        _declared_currency = getattr(user, 'declared_income_currency', '') or ''
+        out.append(_socio.IncomeObservation(
+            amount=amount,
+            amount_max=getattr(user, 'declared_income_amount_max', None),
+            currency=_declared_currency,
+            period=getattr(user, 'declared_income_period', '') or '',
+            source=(_socio.DECLARED_CONFIRMED
+                    if getattr(user, 'declared_income_confirmed', False)
+                    else _socio.DECLARED),
+            as_of=getattr(user, 'declared_income_as_of', None),
+            country=_elig.norm_country(getattr(user, 'country', '') or ''),
+            fx_rate_to_usd=_fx_rate_to_usd(_declared_currency),
+        ))
+    est = getattr(user, 'estimated_income_usd', None)
+    if est is not None:
+        # El estimador ocupacional existente ya produce USD anuales.
+        out.append(_socio.IncomeObservation(
+            amount=est, currency='USD', period=_socio.PERIOD_ANNUAL,
+            source=_socio.ESTIMATED_OCCUPATION,
+            as_of=getattr(user, 'se_tier_computed_at', None),
+            country=_elig.norm_country(getattr(user, 'country', '') or ''),
+        ))
+    return out
+
+
+# Tipos de cambio a USD. Sólo se usan para NORMALIZAR una declaración; la
+# cifra original en moneda local se conserva intacta en la fila (R8). Una
+# moneda ausente de esta tabla devuelve None -> la observación no se puede
+# normalizar -> no se usa, en vez de tratarse como si fuera USD (R7).
+_FX_TO_USD = {
+    'USD': 1.0,
+    'CLP': 1.0 / 950.0,
+    'EUR': 1.08,
+    'GBP': 1.27,
+    'MXN': 1.0 / 17.0,
+    'BRL': 1.0 / 5.0,
+    'ARS': 1.0 / 900.0,
+    'COP': 1.0 / 4000.0,
+    'PEN': 1.0 / 3.75,
+    'CNY': 1.0 / 7.2,
+    'JPY': 1.0 / 150.0,
+    'KRW': 1.0 / 1330.0,
+}
+
+
+def _fx_rate_to_usd(currency: str):
+    return _FX_TO_USD.get((currency or '').strip().upper())
+
+
+def _professional_profile(user) -> dict:
+    """Perfil PROFESIONAL — se registra y viaja con la clasificación, pero
+    NO promueve el tier (R1). Tamaño de empresa ausente = UNKNOWN (rank 0),
+    nunca 'pequeña' (R7)."""
+    return {
+        'occupation': _elig._base(getattr(user, 'profession', '') or ''),
+        'cargo': _elig.norm_cargo(getattr(user, 'cargo', '') or ''),
+        'company_size_rank': _elig.norm_company_size(
+            getattr(user, 'company_size', '') or ''),
+    }
+
+
+def _classify_user(user, db) -> '_socio.Classification':
+    """LA clasificación socioeconómica canónica de un usuario."""
+    country = _elig.norm_country(getattr(user, 'country', '') or '')
+    return _socio.classify(
+        _individual_income_observations(user, db),
+        _country_economic_context(country, db),
+        _professional_profile(user),
+    )
+
+
+def _household_income_annual_usd(user):
+    """Dimensión de targeting SEPARADA (R5). Nunca sustituye al individual.
+
+    B1 remediation: mismo criterio que el ingreso individual — moneda y
+    período se pasan tal cual, sin convertir un valor de columna en blanco a
+    'USD'/'annual'.
+    """
+    amount = getattr(user, 'household_income_amount', None)
+    if amount is None:
+        return None
+    _hh_currency = getattr(user, 'household_income_currency', '') or ''
+    return _socio.IncomeObservation(
+        amount=amount,
+        amount_max=getattr(user, 'household_income_amount_max', None),
+        currency=_hh_currency,
+        period=getattr(user, 'household_income_period', '') or '',
+        source=_socio.DECLARED, note='household',
+        fx_rate_to_usd=_fx_rate_to_usd(_hh_currency),
+    ).annual_usd
+
+
+# ══════════════════════════════════════════════════════════════
+# INCOME DECLARATION — user-owned write path (CHANGE-003 remediation, HIGH)
+# ══════════════════════════════════════════════════════════════
+# Before this remediation the declared_income_* / household_income_* columns
+# existed and were read, but nothing ever wrote them: R1 ("income governs the
+# tier") was correct in design and unreachable in practice, because no real
+# user's declared_income_amount was ever non-NULL. These routes are that
+# missing write path.
+#
+# Same authentication as every other self-service profile route in this file
+# (get_current_user): the caller is identified ONLY from their own JWT, there
+# is no user_id field anywhere in the request body, so a user can write only
+# their own row by construction — the same pattern /verify/location,
+# /verify/imei and /verify/wallet already use.
+#
+# Currency/period are REQUIRED and validated at the boundary — not merely
+# left to resolve to UNRESOLVED later — so a caller gets an immediate,
+# actionable 400 instead of silently storing data that can never produce a
+# tier (B1/E: this module never guesses a blank currency into 'USD' or an
+# unrecognised period into 'annual').
+
+_CURRENCY_CODE_RE = re.compile(r'^[A-Za-z]{3}$')
+
+
+def _validate_income_currency_period(currency: str, period: str):
+    """Shared validation for both the individual and household routes.
+
+    Raises HTTPException(400) with a specific reason. Does NOT accept an
+    unpriced-but-well-formed currency (e.g. a real ISO code this platform
+    has no FX rate for yet) — that is a legitimate declaration that simply
+    cannot resolve to a tier until FX data exists for it (R7), which is
+    different from a malformed/blank currency, which is a client error.
+    """
+    cur = (currency or '').strip().upper()
+    if not _CURRENCY_CODE_RE.match(cur):
+        raise HTTPException(400, "currency is required and must be a 3-letter code (e.g. 'USD', 'CLP')")
+    per = _socio.normalize_period(period)
+    if not per:
+        accepted = ', '.join(_socio.ACCEPTED_PERIODS)
+        raise HTTPException(400, f'period is not recognised; use one of: {accepted}')
+    return cur, per
+
+
+class DeclaredIncomeInput(BaseModel):
+    amount:     float                  # o el mínimo de una banda
+    amount_max: Optional[float] = None # si se declara un rango
+    currency:   str                    # ISO 4217, p.ej. 'USD', 'CLP' — obligatorio
+    period:     str                    # 'annual' | 'monthly' | 'weekly' | 'daily' | 'hourly'
+
+
+class HouseholdIncomeInput(BaseModel):
+    amount:         float
+    amount_max:     Optional[float] = None
+    currency:       str
+    period:         str
+    household_size: Optional[int] = None
+
+
+@app.post('/profile/income')
+def declare_individual_income(data: DeclaredIncomeInput,
+                              user: User = Depends(get_current_user),
+                              db: Session = Depends(get_db)):
+    """El usuario declara/actualiza su ingreso INDIVIDUAL (R1, R5, R8).
+
+    IMPORTANTE (regla del brief de remediación): declarar un ingreso aquí
+    NUNCA marca `declared_income_confirmed=True`. Esa bandera está reservada
+    para una confirmación futura fuera de esta ruta — por ejemplo un
+    verificador humano o una carga documental equivalente a /verify/document,
+    que hoy NO existe. Inventar ese mecanismo no es parte de este cambio;
+    dejarlo pendiente y documentado sí lo es. Hasta que exista, toda
+    declaración propia queda en `DECLARED`, por debajo de
+    `DECLARED_CONFIRMED` en la precedencia de socioeconomic.select_income —
+    nunca por encima de una confirmación real ya existente.
+    """
+    if data.amount < 0:
+        raise HTTPException(400, 'amount cannot be negative')
+    if data.amount_max is not None and data.amount_max < data.amount:
+        raise HTTPException(400, 'amount_max cannot be less than amount')
+    currency, period = _validate_income_currency_period(data.currency, data.period)
+
+    user.declared_income_amount = data.amount
+    user.declared_income_amount_max = data.amount_max
+    user.declared_income_currency = currency
+    user.declared_income_period = period
+    user.declared_income_as_of = datetime.utcnow()
+    # Server-controlled, never client-controlled: a self-declared figure is
+    # DECLARED, not DECLARED_CONFIRMED, no matter what the request contains —
+    # this Pydantic model does not even accept a `confirmed` field.
+    user.declared_income_confirmed = False
+    db.commit()
+
+    _assign_user_tier(user, db)
+    db.refresh(user)
+    return {'ok': True, 'resolved': bool(user.se_tier),
+            'note': 'Declaration recorded as DECLARED (not confirmed). '
+                    'Confirmation requires a separate future verification step.'}
+
+
+@app.get('/profile/income')
+def get_my_declared_income(user: User = Depends(get_current_user)):
+    """Devuelve la declaración ORIGINAL del propio usuario (R8) — nunca la
+    de otro usuario, porque `user` sale exclusivamente del JWT de quien
+    llama."""
+    return {
+        'amount': user.declared_income_amount,
+        'amount_max': user.declared_income_amount_max,
+        'currency': user.declared_income_currency or None,
+        'period': user.declared_income_period or None,
+        'as_of': user.declared_income_as_of.isoformat() if user.declared_income_as_of else None,
+        'confirmed': bool(user.declared_income_confirmed),
+    }
+
+
+@app.post('/profile/household-income')
+def declare_household_income(data: HouseholdIncomeInput,
+                             user: User = Depends(get_current_user),
+                             db: Session = Depends(get_db)):
+    """El usuario declara/actualiza el ingreso de su HOGAR — dimensión de
+    targeting SEPARADA (R5). Nunca alimenta el tier individual: por eso esta
+    ruta no llama a `_assign_user_tier`."""
+    if data.amount < 0:
+        raise HTTPException(400, 'amount cannot be negative')
+    if data.amount_max is not None and data.amount_max < data.amount:
+        raise HTTPException(400, 'amount_max cannot be less than amount')
+    if data.household_size is not None and data.household_size < 1:
+        raise HTTPException(400, 'household_size must be at least 1')
+    currency, period = _validate_income_currency_period(data.currency, data.period)
+
+    user.household_income_amount = data.amount
+    user.household_income_amount_max = data.amount_max
+    user.household_income_currency = currency
+    user.household_income_period = period
+    user.household_income_as_of = datetime.utcnow()
+    if data.household_size is not None:
+        user.household_size = data.household_size
+    db.commit()
+    return {'ok': True}
+
+
+@app.get('/profile/household-income')
+def get_my_household_income(user: User = Depends(get_current_user)):
+    """Mismo criterio que get_my_declared_income: sólo el propio hogar."""
+    return {
+        'amount': user.household_income_amount,
+        'amount_max': user.household_income_amount_max,
+        'currency': user.household_income_currency or None,
+        'period': user.household_income_period or None,
+        'as_of': user.household_income_as_of.isoformat() if user.household_income_as_of else None,
+        'household_size': user.household_size,
+    }
 
 
 def _hnw_signals(user):
@@ -3675,8 +4090,21 @@ def _assign_user_tier(user, db):
     _new_est   = getattr(user, 'estimated_income_usd', None)
     _new_ppp   = getattr(user, 'estimated_income_ppp',  None)
     _new_hnw   = getattr(user, 'hnw_score', None)
+    _new_source  = getattr(user, 'se_tier_source', None)
+    _new_policy  = getattr(user, 'se_tier_policy_version', None)
+    _new_computed_at = getattr(user, 'se_tier_computed_at', None)
+    # CHANGE-003 remediation (audit finding D): `_assign_user_tier_inner` sets
+    # this True ONLY on an explicit UNRESOLVED verdict (see the else-branch
+    # there). Without this flag, `if not _new_tier: return` below cannot tell
+    # "the inner call blew up before computing anything — leave the old DB
+    # value alone" apart from "the classifier explicitly says clear it" —
+    # both look identical from here (`_new_tier` falsy) unless this is
+    # checked. An unrelated exception must still be conservative (skip); a
+    # deliberate UNRESOLVED verdict must NOT be swallowed into a no-op, or a
+    # stale tier like 'A' would keep granting CHANGE-002 eligibility forever.
+    _invalidated = bool(getattr(user, '_se_tier_invalidated', False))
 
-    if not _new_tier:
+    if not _new_tier and not _invalidated:
         return
 
     # Limpiar cualquier transacción PostgreSQL abortada antes del UPDATE final
@@ -3685,15 +4113,22 @@ def _assign_user_tier(user, db):
     except Exception:
         pass
 
-    # UPDATE directo por SQL — no depende del ORM flush, funciona aunque la TX anterior haya fallado
+    # UPDATE directo por SQL — no depende del ORM flush, funciona aunque la TX anterior haya fallado.
+    # se_tier_source/se_tier_policy_version/se_tier_computed_at se persisten
+    # aquí también (antes se fijaban sólo en el objeto Python y el
+    # db.rollback() de arriba los descartaba sin que ningún UPDATE los
+    # llegara a grabar).
     try:
         db.execute(text(
             "UPDATE users SET se_tier=:t, income_index=:i, estimated_income_usd=:e,"
-            " estimated_income_ppp=:ppp, hnw_score=:hnw WHERE id=:uid"
-        ), {'t': _new_tier, 'i': _new_index or 0, 'e': _new_est, 'ppp': _new_ppp,
-            'hnw': _new_hnw if _new_hnw is not None else 0.0, 'uid': user.id})
+            " estimated_income_ppp=:ppp, hnw_score=:hnw, se_tier_source=:src,"
+            " se_tier_policy_version=:pv, se_tier_computed_at=:ca WHERE id=:uid"
+        ), {'t': _new_tier or '', 'i': _new_index or 0, 'e': _new_est, 'ppp': _new_ppp,
+            'hnw': _new_hnw if _new_hnw is not None else 0.0,
+            'src': _new_source or '', 'pv': _new_policy or '', 'ca': _new_computed_at,
+            'uid': user.id})
         db.commit()
-        user.se_tier              = _new_tier
+        user.se_tier              = _new_tier or ''
         user.income_index         = _new_index
         if hasattr(user, 'estimated_income_usd'):
             user.estimated_income_usd = _new_est
@@ -3701,6 +4136,12 @@ def _assign_user_tier(user, db):
             user.estimated_income_ppp = _new_ppp
         if _new_hnw is not None:
             user.hnw_score = _new_hnw
+        if hasattr(user, 'se_tier_source'):
+            user.se_tier_source = _new_source or ''
+        if hasattr(user, 'se_tier_policy_version'):
+            user.se_tier_policy_version = _new_policy or ''
+        if hasattr(user, 'se_tier_computed_at'):
+            user.se_tier_computed_at = _new_computed_at
     except Exception:
         db.rollback()
 
@@ -3770,19 +4211,40 @@ def _assign_user_tier_inner(user, db):
     user_profession   = getattr(user, 'profession', '') or ''
     user_country_code = _country_code(user.country)
 
-    # Consultar GDP per cápita real desde world_countries (Banco Mundial, 264 países)
-    _wc = db.execute(text(
-        "SELECT gdp_per_capita_usd FROM world_countries WHERE iso2 = :cc"
-    ), {'cc': user_country_code}).fetchone()
-    _country_gdp = float(_wc[0]) if _wc and _wc[0] else None
+    # ── CHANGE-003: CAUSA RAÍZ DEL PROBLEMA PPP ──────────────────────────
+    #
+    # Este bloque leía `world_countries.gdp_per_capita_usd` y lo trataba como
+    # GDP NOMINAL per cápita: umbral "país pobre" en <$10.000 y mediana
+    # personal = valor x 0.50 con el comentario "el GDP incluye utilidades
+    # empresariales y gasto público".
+    #
+    # Pero esa columna NO contiene GDP nominal. Su ÚNICO escritor en todo el
+    # repositorio es targeting_agent.fetch_gni_from_worldbank, que consulta el
+    # indicador NY.GNP.PCAP.PP.CD = "GNI per capita, PPP". El nombre de la
+    # columna es un nombre heredado equivocado (CHANGE-002 ya lo documentó y
+    # lo verificó).
+    #
+    # Consecuencia real: PPP es ~2-3x el nominal en mercados emergentes, así
+    # que la mediana personal quedaba inflada y el umbral de "país de bajo
+    # ingreso" casi nunca se activaba. Ambos alimentan se_tier, y se_tier es
+    # una dimensión de elegibilidad de CHANGE-002.
+    #
+    # Ahora se usa el resolvedor PPP canónico de CHANGE-002 (mismo valor,
+    # misma procedencia) y el contexto tipado de socioeconomic.py, que además
+    # RECHAZA cualquier procedencia que no sea PPP.
+    _ctx = _country_economic_context(user_country_code, db)
+    _country_ppp_per_capita = _ctx.ppp_per_capita_usd
 
-    # Países con GDP per cápita < $10K → m² de arriendo es el clasificador primario de tier
-    _is_low_gdp = bool(_country_gdp and _country_gdp < 10000)
+    # Umbral de mercado de bajo ingreso, ahora expresado en PPP (no nominal).
+    # ~USD 10.000 nominal corresponde grosso modo a ~USD 20.000 PPP.
+    _is_low_income_market = bool(
+        _country_ppp_per_capita and _country_ppp_per_capita < 20000)
 
-    # Ingreso mediano estimado ≈ GDP per cápita × 0.50
-    # (el GDP incluye utilidades empresariales y gasto público; el ingreso
-    #  personal mediano es ~50% del GDP per cápita en la mayoría de países)
-    _country_median_income = (_country_gdp * 0.50) if _country_gdp else None
+    # Mediana personal del país: medida si existe, si no derivada del PPP con
+    # la razón documentada. socioeconomic.CountryEconomicContext marca
+    # `derived_median` para que toda clasificación apoyada en la suposición
+    # sea auditable como tal.
+    _country_median_income = _ctx.median_personal_income_usd
 
     profession_tier = None
     if user_profession:
@@ -4017,59 +4479,81 @@ def _assign_user_tier_inner(user, db):
     if not user.estimated_income_usd and _country_median_income and user.income_index and user.income_index > 0:
         user.estimated_income_usd = round(_country_median_income * (user.income_index / 50.0), 0)
 
-    cargo_tier       = _CARGO_TIER.get(getattr(user, 'cargo', '') or '', None)
     company_size     = getattr(user, 'company_size', '') or ''
 
-    # Empresa grande (251+ empleados) sube el cargo 1 nivel adicional
-    # Lógica: gerente general de Copec ≠ gerente general de empresa de 5 personas
-    _BIG_COMPANY_SIZES = {'+1000', '251-1000'}
-    if cargo_tier and company_size in _BIG_COMPANY_SIZES:
-        tier_ladder  = ['D', 'C', 'B', 'A']
-        cargo_rank   = _tier_rank(cargo_tier)
-        cargo_tier   = tier_ladder[min(cargo_rank, 3)]  # sube 1 nivel (ya está en índice 0-3)
-
-    # Tier base:
-    # - Países GDP < $10K: commune_tier (m² arriendo) es el clasificador primario
-    # - Países GDP >= $10K: el más alto entre commune y profesión
-    if _is_low_gdp and commune_tier:
-        base_tier = commune_tier  # m² arriendo manda
+    # ── CHANGE-003 — EL TIER SE DECIDE POR INGRESO (regla R1) ────────────
+    #
+    # Lo que había aquí construía el tier a partir de comuna + profesión y
+    # luego lo SUBÍA por cargo, y el cargo se subía otro nivel si la empresa
+    # era grande. El ingreso se calculaba pero no decidía nada. Un "gerente"
+    # en una empresa grande terminaba en A aunque su ingreso conocido dijera
+    # otra cosa: exactamente la promoción arbitraria que R1 y R8 prohíben.
+    #
+    # Ahora comuna/profesión/cargo/tamaño sólo alimentan la ESTIMACIÓN de
+    # ingreso (arriba, y los multiplicadores de más abajo). El tier lo decide
+    # socioeconomic.classify comparando ese ingreso con la mediana del país
+    # del propio usuario, de modo que A/B/C/D signifique "posición en su
+    # mercado local" (R2) sin absorber el poder adquisitivo del país (R3).
+    #
+    # Si el ingreso no se puede resolver, el tier queda VACÍO. CHANGE-002 ya
+    # trata un tier ausente como UNKNOWN, que deniega — no se inventa una
+    # clasificación para poder decidir (R7).
+    _classification = _socio.classify(
+        _individual_income_observations(user, db),
+        _ctx,
+        _professional_profile(user),
+    )
+    if _classification.resolved:
+        user.se_tier = _classification.tier
+        if hasattr(user, 'se_tier_source'):
+            user.se_tier_source = _classification.income_source or ''
+        if hasattr(user, 'se_tier_policy_version'):
+            user.se_tier_policy_version = _classification.policy_version
+        if hasattr(user, 'se_tier_computed_at'):
+            user.se_tier_computed_at = datetime.utcnow()
+        user._se_tier_invalidated = False
     else:
-        base_candidates = [t for t in [commune_tier, profession_tier] if t]
-        base_tier = max(base_candidates, key=_tier_rank) if base_candidates else None
-
-    # Cargo (ya ajustado por tamaño empresa) sube máximo UN nivel sobre el tier base
-    if base_tier and cargo_tier:
-        base_rank  = _tier_rank(base_tier)
-        cargo_rank = _tier_rank(cargo_tier)
-        if cargo_rank > base_rank + 1:
-            tier_ladder = ['D', 'C', 'B', 'A']
-            cargo_tier  = tier_ladder[min(base_rank, 3)]
-        user.se_tier = max(base_tier, cargo_tier, key=_tier_rank)
-    elif base_tier:
-        user.se_tier = base_tier
-    elif cargo_tier:
-        user.se_tier = cargo_tier
+        # CHANGE-003 remediation (audit finding D) — UNRESOLVED must CLEAR a
+        # stale tier, not leave it standing. Before this fix, a user whose
+        # tier had been set 'A' under the old (buggy) policy, or years ago
+        # from since-changed data, kept that 'A' forever once this
+        # recalculation could no longer resolve a tier for them — the
+        # opposite of R7/fail-closed: CHANGE-002 treats a MISSING tier as
+        # UNKNOWN (denies), but a STALE tier as if it were still a real,
+        # current classification (grants). `_se_tier_invalidated` tells the
+        # outer `_assign_user_tier` this is a deliberate clearing, not "the
+        # inner function didn't get far enough to compute anything" — so the
+        # `if not _new_tier: return` guard there does not silently swallow
+        # it (an unrelated exception must still leave the old value alone;
+        # only an explicit UNRESOLVED verdict clears it).
+        user.se_tier = ''
+        if hasattr(user, 'se_tier_source'):
+            user.se_tier_source = ''
+        if hasattr(user, 'se_tier_policy_version'):
+            user.se_tier_policy_version = _classification.policy_version
+        if hasattr(user, 'se_tier_computed_at'):
+            user.se_tier_computed_at = datetime.utcnow()
+        user._se_tier_invalidated = True
+        # Se registra el porqué sin exponer ninguna cifra de ingreso.
+        print(f'[socioeconomic] user={getattr(user, "id", "?")} '
+              f'{_socio.safe_log_summary(_classification)}')
 
     # ── Ajuste de estimated_income_usd por tamaño de empresa y edad ─────────────
-    # Multiplicadores por tamaño de empresa: empresa grande paga más por mismo cargo
-    _COMPANY_SIZE_MULT = {
-        '1-10':    0.72,
-        '11-50':   0.85,
-        '51-250':  1.00,
-        '251-1000': 1.13,
-        '+1000':   1.22,
-    }
-    # Multiplicadores por edad: curva de carrera típica
-    _AGE_INCOME_MULT = {
-        (0,  24): 0.55,
-        (25, 29): 0.72,
-        (30, 34): 0.87,
-        (35, 44): 1.00,  # pico de carrera
-        (45, 54): 1.08,
-        (55, 64): 1.05,
-        (65, 99): 0.85,
-    }
-
+    # CHANGE-003 remediation (finding H): este bloque tenía su PROPIA copia de
+    # los multiplicadores de edad y tamaño de empresa — duplicados de
+    # socioeconomic.AGE_INCOME_CURVE / COMPANY_SIZE_INCOME_MULT, con valores
+    # que ya habían empezado a divergir (el rango superior de edad aquí era
+    # (65,99); el del módulo canónico es (65,200) — ambos producen el mismo
+    # multiplicador para cualquier edad real, pero son dos números distintos
+    # que alguien podría editar sin darse cuenta de que existe un segundo
+    # lugar). Ahora hay UNA sola implementación: la de socioeconomic.py, la
+    # misma que usan sus propios tests. `norm_company_size` es el mismo
+    # normalizador canónico que eligibility.py y _professional_profile ya
+    # usan — no se introduce un segundo mapeo de tamaño de empresa.
+    #
+    # Regla de JC preservada: edad + ocupación + tamaño de empresa ajustan el
+    # ingreso ESTIMADO; nunca manipulan el tier directamente (eso ya se
+    # decidió arriba, exclusivamente por socioeconomic.classify).
     user_age_val = None
     if getattr(user, 'dob', ''):
         try:
@@ -4090,26 +4574,29 @@ def _assign_user_tier_inner(user, db):
 
     # Aplicar multiplicadores al ingreso estimado
     if user.estimated_income_usd and user.estimated_income_usd > 0:
-        size_mult = _COMPANY_SIZE_MULT.get(company_size, 1.00)
-        age_mult  = 1.00
-        if user_age_val:
-            for (lo, hi), m in _AGE_INCOME_MULT.items():
-                if lo <= user_age_val <= hi:
-                    age_mult = m
-                    break
+        size_mult = _socio.company_size_income_multiplier(_elig.norm_company_size(company_size))
+        age_mult  = _socio.age_income_multiplier(user_age_val)
         user.estimated_income_usd = round(user.estimated_income_usd * size_mult * age_mult, 0)
 
-    # ── Ajuste de tier por edad ───────────────────────────────────────────────
-    if user.se_tier and user_age_val:
-        try:
-            tier_ladder  = ['D', 'C', 'B', 'A']
-            current_rank = _tier_rank(user.se_tier)
-            if user_age_val < 33:
-                user.se_tier = tier_ladder[max(current_rank - 2, 0)]
-            elif user_age_val > 45:
-                user.se_tier = tier_ladder[min(current_rank + 1, 3)]
-        except Exception:
-            pass
+    # ── CHANGE-003 — AJUSTE DE TIER POR EDAD: ELIMINADO ──────────────────
+    #
+    # Aquí se movía el TIER directamente por edad: <33 bajar, >45 subir. Dos
+    # razones para quitarlo:
+    #
+    # 1. Conceptual (R1): la edad no es una clase socioeconómica. Influye en
+    #    cuánto gana una persona, y eso ya se refleja arriba en la curva de
+    #    carrera aplicada al ingreso ESTIMADO (socioeconomic.AGE_INCOME_CURVE,
+    #    "ingeniero de 24 vs ingeniero de 30"). Si el ingreso sube, el tier
+    #    sube por la vía correcta: el ingreso.
+    #
+    # 2. Defecto real: `_tier_rank` devuelve A=4..D=1 (base 1) mientras que
+    #    `tier_ladder` se indexa 0..3. Mezclarlos hacía que >45 promoviera
+    #    C->A y D->B — DOS niveles, sólo por edad — mientras que <33 bajaba
+    #    uno solo en vez de los dos que el propio código pretendía.
+    #    Verificado ejecutando la tabla completa de las cuatro entradas.
+    #
+    # No queda ningún camino por el que la edad promueva el tier sin pasar
+    # por el ingreso.
 
     # ── Fallback: ingreso per cápita del país cuando no hay otro dato ─────────
     # Para países con GDP < $10K, el m² de arriendo ya domina via commune_tier.
@@ -11692,34 +12179,10 @@ def agent_income_data_sync(secret: str, db: Session = Depends(get_db)):
         except Exception as e:
             db.rollback()
             summary['china'] = {'ok': False, 'error': str(e)}
-        # 3. World Bank GNI per capita — only for countries we actually have
-        #    commune data for, not a hardcoded country list. Written into the
-        #    durable world_countries table (UPDATE only — never INSERT, since
-        #    we don't fully control that table's schema/constraints from here)
-        #    so it survives restarts, not just the ephemeral matrix file.
-        try:
-            from targeting_agent import fetch_gni_from_worldbank
-            countries = [r[0] for r in db.query(CommuneMarketData.country).distinct().all() if r[0]]
-            gni_by_country = {}
-            written = 0
-            for iso in countries:
-                gni = fetch_gni_from_worldbank(iso)
-                if gni:
-                    gni_by_country[iso] = gni
-                    try:
-                        res = db.execute(text(
-                            "UPDATE world_countries SET gdp_per_capita_usd = :gni WHERE iso2 = :iso"
-                        ), {'gni': gni, 'iso': iso})
-                        if res.rowcount:
-                            written += 1
-                    except Exception:
-                        db.rollback()
-            db.commit()
-            summary['gni'] = {'ok': True, 'countries_fetched': len(gni_by_country), 'world_countries_rows_updated': written}
-        except Exception as e:
-            db.rollback()
-            gni_by_country = {}
-            summary['gni'] = {'ok': False, 'error': str(e)}
+        # 3. World Bank GNI per capita — see _run_governed_gni_sync for why
+        #    this goes through PROPOSE/VALIDATE/VERSION instead of a direct
+        #    UPDATE (CHANGE-003 remediation, governance finding F).
+        summary['gni'], gni_by_country = _run_governed_gni_sync(db)
         # 4. Rebuild targeting_matrix.json from the live DB — this is the piece
         #    that actually makes the matching engine use real data for every
         #    country, not just the 12 that used to be hardcoded.
@@ -12577,13 +13040,43 @@ if (!secret) {
 @app.post('/admin/reassign-tiers')
 def admin_reassign_tiers(
     secret: str, force: bool = False,
+    authorized_by: str = '',
     batch: int = 50, offset: int = 0,
     db: Session = Depends(get_db)
 ):
     """Re-corre _assign_user_tier en batches para evitar timeout.
-    Usa offset+batch para paginar: offset=0,50,100,..."""
-    if secret != os.getenv('ADMIN_SECRET'):
-        raise HTTPException(403, 'Forbidden')
+    Usa offset+batch para paginar: offset=0,50,100,...
+
+    CHANGE-003 remediation (finding I — mass-reclassification guard):
+
+      * force=False (default) sólo toca usuarios SIN tier asignado
+        (se_tier NULL/''). Nunca puede sobrescribir una clasificación
+        existente, así que no es "reclasificación masiva" en el sentido
+        peligroso — es rellenar vacíos.
+      * force=True SÍ reclasifica usuarios que YA tienen un tier, bajo la
+        política corregida de CHANGE-003 (income-primary, sin promoción por
+        edad/cargo/tamaño). Esto es exactamente el escenario de 545/840
+        usuarios cambiando de tier que el diagnóstico de impacto reportó.
+        Por eso force=True exige `authorized_by` — un nombre concreto que
+        asume la decisión — y NO tiene un valor por defecto que lo satisfaga:
+        omitirlo (el caso "alguien agregó ?force=true sin pensarlo") ahora
+        responde 400 en vez de ejecutar.
+
+    El flujo previsto sigue siendo manual pero deja de ser silencioso:
+    1. GET /admin/socioeconomic/impact  (sólo lectura, decide si hace falta)
+    2. Revisión humana del resultado
+    3. POST /admin/reassign-tiers?force=true&authorized_by=<nombre>  (aquí)
+    """
+    _check_admin(secret)
+    if force:
+        if not authorized_by or not authorized_by.strip():
+            raise HTTPException(400,
+                'force=True reclassifies users who already have a tier — this requires '
+                'authorized_by (a named person taking responsibility). Review '
+                'GET /admin/socioeconomic/impact first, then retry with '
+                '?force=true&authorized_by=<name>.')
+        print(f'[MASS-RECLASSIFY] force=True authorized_by={authorized_by!r} '
+              f'batch={batch} offset={offset} at={datetime.utcnow().isoformat()}')
     q = db.query(User)
     if not force:
         q = q.filter((User.se_tier == None) | (User.se_tier == ''))
@@ -12617,6 +13110,8 @@ def admin_reassign_tiers(
         'next_offset': offset + batch if offset + batch < total else None,
         'updated_in_batch': len(updated),
         'updated': updated,
+        'mass_reclassification': force,
+        'authorized_by': authorized_by if force else None,
     }
 
 
@@ -14553,6 +15048,389 @@ def admin_create_campaign(secret: str, advertiser_name: str, ad_copy: str,
     db.commit()
     db.refresh(c)
     return {'ok': True, 'campaign_id': c.id, 'advertiser_name': c.advertiser_name}
+
+
+@app.get('/admin/socioeconomic/policy')
+def admin_socioeconomic_policy(secret: str):
+    """SOLO LECTURA — la política de tiers ACTUALMENTE en vigor (CHANGE-003).
+
+    DECISION FINAL JC — pendiente: los umbrales A/B/C/D
+    (socioeconomic.TIER_BANDS) son PROVISIONALES. El implementador los
+    definió para poder probar el mecanismo corregido de punta a punta
+    (ingreso relativo a la mediana local, sin promoción por edad/cargo/
+    tamaño); JC NO los ha aprobado como decisión de negocio. Que la
+    suite de tests pase no es aprobación de estos números — los tests
+    verifican el MECANISMO, no que 3.0x sea el corte correcto para el tier A.
+
+    Esta ruta existe para que esa distinción sea visible en tiempo de
+    ejecución, no sólo en un comentario de código: cualquiera que consulte
+    la política ve explícitamente `thresholds_approved_by_business`.
+    """
+    _check_admin(secret)
+    return {
+        'ok': True,
+        'policy_version': _socio.POLICY_VERSION,
+        'tier_bands': list(_socio.TIER_BANDS),
+        'thresholds_approved_by_business': _socio.THRESHOLDS_APPROVED_BY_BUSINESS,
+        'note': ('These specific multiples of the country median are PROVISIONAL '
+                 'defaults for testing the corrected mechanism, not an approved '
+                 'business decision. Business approval is required before these '
+                 'thresholds drive any production reclassification.'),
+    }
+
+
+@app.get('/admin/socioeconomic/impact')
+def admin_socioeconomic_impact(secret: str, limit: int = 2000,
+                               db: Session = Depends(get_db)):
+    """SOLO LECTURA — simulacro de reclasificación A/B/C/D (CHANGE-003).
+
+    Responde la pregunta que hay que responder ANTES de tocar ninguna
+    clasificación de producción: si aplicáramos la política corregida (PPP
+    real, ingreso como señal primaria, sin promoción por edad/cargo), ¿a
+    quién le cambiaría el tier y por qué?
+
+    NO ESCRIBE NADA. Ninguna fila de usuario se modifica. La reclasificación
+    masiva es una autorización aparte y explícita.
+
+    Privacidad: el informe devuelve tiers, motivos y conteos. NUNCA una cifra
+    de ingreso de nadie.
+    """
+    _check_admin(secret)
+    rows = []
+    for u in db.query(User).limit(min(int(limit or 2000), 20000)).all():
+        try:
+            rows.append((u.id, getattr(u, 'se_tier', ''), _classify_user(u, db)))
+        except Exception as e:
+            rows.append((u.id, getattr(u, 'se_tier', ''),
+                         _socio.Classification(
+                             _socio.UNRESOLVED,
+                             unresolved_reason=f'classification error: {type(e).__name__}')))
+    report = _socio.impact_report(rows)
+    report['ok'] = True
+    report['dry_run'] = True
+    report['wrote_nothing'] = True
+    return report
+
+
+def _reference_old_value(field: str, country: str, db) -> Optional[float]:
+    """Lee el valor canónico ACTUAL para un campo de referencia soportado.
+
+    Sólo `ppp_per_capita_usd` tiene una tabla canónica hoy
+    (`world_countries.gdp_per_capita_usd` — CHANGE-002). Cualquier otro campo
+    no tiene un "valor viejo" que leer; se documenta explícitamente en vez de
+    fallar en silencio con None indistinguible de "no encontrado".
+    """
+    if field != 'ppp_per_capita_usd':
+        return None
+    try:
+        row = db.execute(text(
+            'SELECT gdp_per_capita_usd FROM world_countries WHERE iso2 = :cc'
+        ), {'cc': (country or '').upper()}).fetchone()
+        return float(row[0]) if row and row[0] is not None else None
+    except Exception:
+        return None
+
+
+def _record_reference_version(p: '_socio.ReferenceProposal', proposed_by: str, db: Session) -> Optional[int]:
+    """Inserta la fila de versión y devuelve su id (o None si no se pudo).
+
+    Punto ÚNICO de escritura en `economic_reference_versions`: tanto
+    /reference/propose (un humano o un agente vía API) como el cron de
+    income-data pasan por aquí, así que TODA actualización de referencia
+    queda validada y versionada — nunca sólo una de las dos vías.
+    """
+    proposed_at = datetime.utcnow()
+    try:
+        db.execute(text("""
+            INSERT INTO economic_reference_versions
+              (country, field, old_value, new_value, source, data_year, status,
+               requires_review, review_reasons, validation_errors, proposed_by,
+               proposed_at, policy_version)
+            VALUES (:c,:f,:ov,:nv,:s,:y,:st,:rr,:rrs,:ve,:pb,:pa,:pv)
+        """), {'c': p.country, 'f': p.field, 'ov': p.old_value, 'nv': p.new_value,
+               's': p.source, 'y': p.data_year, 'st': p.status,
+               'rr': bool(p.requires_review), 'rrs': '; '.join(p.review_reasons),
+               've': '; '.join(p.validation_errors), 'pb': proposed_by,
+               'pa': proposed_at, 'pv': _socio.POLICY_VERSION})
+        db.commit()
+    except Exception:
+        db.rollback()
+        return None
+    try:
+        row = db.execute(text("""
+            SELECT id FROM economic_reference_versions
+            WHERE country=:c AND field=:f AND data_year=:y AND proposed_at=:pa
+            ORDER BY id DESC LIMIT 1
+        """), {'c': p.country, 'f': p.field, 'y': p.data_year, 'pa': proposed_at}).fetchone()
+        return int(row[0]) if row else None
+    except Exception:
+        return None
+
+
+def _apply_reference_value(field: str, country: str, new_value: float, db: Session) -> bool:
+    """ÚNICO escritor del dato canónico, invocado sólo tras aprobación
+    (APPLY). No reclasifica usuarios: eso es una autorización aparte
+    (regla J de la auditoría — ninguna reclasificación masiva automática).
+    """
+    if field != 'ppp_per_capita_usd':
+        return False
+    try:
+        db.execute(text(
+            'UPDATE world_countries SET gdp_per_capita_usd = :v WHERE iso2 = :cc'
+        ), {'v': new_value, 'cc': (country or '').upper()})
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        return False
+
+
+def _run_governed_gni_sync(db: Session):
+    """World Bank GNI per capita refresh — GOVERNED (CHANGE-003 remediation).
+
+    Called from /admin/agent/income-data/sync (the existing monthly cron).
+    Only for countries we actually have commune data for, not a hardcoded
+    list. Returns (summary_dict, gni_by_country) — the caller uses
+    gni_by_country to rebuild the targeting matrix regardless of how many
+    values were actually written to world_countries.
+
+    Before this remediation, every fetched value was UPDATEd into
+    world_countries directly: the one automated writer of the PPP figure
+    that feeds every socioeconomic classification was not governed at all —
+    a bad World Bank response, a unit error, or a nominal series would have
+    been written straight into production with no validation and no audit
+    trail. Every fetched value now runs through the SAME validator
+    /reference/propose uses, and every attempt (written or not) is versioned
+    in economic_reference_versions:
+
+      * validation error (e.g. non-positive)       -> NOT written, versioned as rejected.
+      * requires_review (>40% jump, stale, etc.)    -> NOT written, left `pending` for a
+                                                        human to review via /reference/approve
+                                                        + /reference/apply (force=True).
+      * clean pass (small, expected monthly drift)  -> applied immediately via the SAME
+                                                        _apply_reference_value the manual
+                                                        APPLY route uses, and the version row
+                                                        records approved_by/applied_by as this
+                                                        cron identity — never a silent,
+                                                        unversioned UPDATE.
+
+    Does not reclassify a single user (rule J) — it only governs who is
+    allowed to move the country-level PPP figure and how that move is
+    recorded.
+    """
+    _CRON_IDENTITY = 'cron:income-data-sync'
+    try:
+        from targeting_agent import fetch_gni_from_worldbank
+        countries = [r[0] for r in db.query(CommuneMarketData.country).distinct().all() if r[0]]
+        gni_by_country = {}
+        written, flagged_for_review, rejected = 0, 0, 0
+        for iso in countries:
+            gni = fetch_gni_from_worldbank(iso)
+            if not gni:
+                continue
+            gni_by_country[iso] = gni
+            old = _reference_old_value('ppp_per_capita_usd', iso, db)
+            p = _socio.ReferenceProposal(
+                country=iso, field='ppp_per_capita_usd', new_value=gni,
+                # Machine-readable provenance label — the same one
+                # _country_economic_context maps world_countries rows to, NOT
+                # the human-readable eligibility.PPP_SOURCE_DB string. This is
+                # what socioeconomic.PPP_ACCEPTED_SOURCES actually checks.
+                source='world_bank_ny_gnp_pcap_pp_cd',
+                data_year=datetime.utcnow().year, old_value=old)
+            _socio.validate_proposal(p, current_year=datetime.utcnow().year)
+            if p.validation_errors:
+                _record_reference_version(p, _CRON_IDENTITY, db)
+                rejected += 1
+                continue
+            if p.requires_review:
+                _record_reference_version(p, _CRON_IDENTITY, db)
+                flagged_for_review += 1
+                continue
+            # Clean, unremarkable update: version it as approved+applied by
+            # this cron identity, then perform the SAME write the manual
+            # APPLY route performs — one writer function, two callers.
+            p.status = _socio.PROPOSAL_APPROVED
+            proposal_id = _record_reference_version(p, _CRON_IDENTITY, db)
+            if _apply_reference_value('ppp_per_capita_usd', iso, gni, db) and proposal_id:
+                try:
+                    db.execute(text("""
+                        UPDATE economic_reference_versions
+                        SET status = :st, approved_by = :ab, approved_at = :aa,
+                            applied_by = :ap, applied_at = :at
+                        WHERE id = :id
+                    """), {'st': _socio.PROPOSAL_APPROVED, 'ab': _CRON_IDENTITY,
+                           'aa': datetime.utcnow(), 'ap': _CRON_IDENTITY,
+                           'at': datetime.utcnow(), 'id': proposal_id})
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                written += 1
+        db.commit()
+        return ({'ok': True, 'countries_fetched': len(gni_by_country),
+                 'world_countries_rows_updated': written,
+                 'flagged_for_review': flagged_for_review,
+                 'rejected': rejected}, gni_by_country)
+    except Exception as e:
+        db.rollback()
+        return ({'ok': False, 'error': str(e)}, {})
+
+
+@app.post('/admin/socioeconomic/reference/propose')
+def admin_socioeconomic_propose(secret: str, country: str, field: str,
+                                new_value: float, source: str, data_year: int,
+                                proposed_by: str = 'agent',
+                                db: Session = Depends(get_db)):
+    """PROPOSE -> VALIDATE -> VERSION (CHANGE-003).
+
+    Un agente PROPONE una actualización de dato económico de referencia. No
+    aplica nada: la propuesta se valida, se versiona y queda pendiente de
+    aprobación humana (APPROVE) y aplicación explícita (APPLY) — ver las dos
+    rutas siguientes.
+
+    La validación rechaza de plano una serie NOMINAL presentada como PPP, y
+    marca para revisión cualquier salto mayor al límite sin revisar — la
+    firma típica de un error de unidad.
+    """
+    _check_admin(secret)
+    old = _reference_old_value(field, country, db)
+
+    p = _socio.ReferenceProposal(country=country, field=field,
+                                 new_value=new_value, source=source,
+                                 data_year=data_year, old_value=old)
+    _socio.validate_proposal(p, current_year=datetime.utcnow().year)
+
+    version = f'{_socio.POLICY_VERSION}:{(country or "").upper()}:{field}:{data_year}'
+    p.version = version
+    proposal_id = _record_reference_version(p, proposed_by, db)
+    if proposal_id is None:
+        return {'ok': False, 'error': 'could not record proposal',
+                'proposal': p.as_dict()}
+
+    return {'ok': True, 'applied': False, 'proposal_id': proposal_id,
+            'note': 'Proposal recorded. Reference data is NOT changed until a '
+                    'human approves it (see /reference/approve) and applies it '
+                    '(see /reference/apply).',
+            'proposal': p.as_dict()}
+
+
+@app.get('/admin/socioeconomic/reference/pending')
+def admin_socioeconomic_pending(secret: str, db: Session = Depends(get_db)):
+    """SOLO LECTURA — propuestas de dato económico pendientes."""
+    _check_admin(secret)
+    try:
+        rows = db.execute(text("""
+            SELECT * FROM economic_reference_versions
+            WHERE status = 'pending' ORDER BY proposed_at DESC LIMIT 200
+        """)).fetchall()
+        return {'ok': True, 'pending': [dict(r._mapping) for r in rows]}
+    except Exception as e:
+        return {'ok': False, 'error': str(e), 'pending': []}
+
+
+@app.post('/admin/socioeconomic/reference/approve')
+def admin_socioeconomic_approve(secret: str, proposal_id: int, approver: str,
+                                force: bool = False,
+                                db: Session = Depends(get_db)):
+    """APPROVE (CHANGE-003). Un acto humano explícito — nunca automático.
+
+    No escribe el dato canónico: sólo mueve la propuesta a `approved`, para
+    que APPLY pueda actuar sobre ella. Una propuesta ya rechazada en VALIDATE
+    (`validation_errors` no vacío) no puede aprobarse jamás. Una propuesta
+    marcada `requires_review` (salto >40%, dato viejo, o similar) exige
+    `force=True` — así, saltarse el límite de seguridad es una decisión
+    registrada, no un default.
+    """
+    _check_admin(secret)
+    if not approver or not approver.strip():
+        raise HTTPException(400, 'approver is required — approval must be attributable to a named person')
+    row = db.execute(text(
+        'SELECT * FROM economic_reference_versions WHERE id = :id'
+    ), {'id': proposal_id}).fetchone()
+    if not row:
+        raise HTTPException(404, 'proposal not found')
+    r = dict(row._mapping)
+
+    p = _socio.ReferenceProposal(
+        country=r['country'], field=r['field'], new_value=r['new_value'],
+        source=r['source'], data_year=r['data_year'], old_value=r['old_value'])
+    p.status = r['status']
+    p.validation_errors = [e for e in (r.get('validation_errors') or '').split('; ') if e]
+    p.review_reasons = [e for e in (r.get('review_reasons') or '').split('; ') if e]
+    p.requires_review = bool(r['requires_review'])
+
+    _socio.approve_proposal(p, approver=approver, approved_at=datetime.utcnow(), force=force)
+
+    try:
+        db.execute(text("""
+            UPDATE economic_reference_versions
+            SET status = :st, approved_by = :ab, approved_at = :aa
+            WHERE id = :id
+        """), {'st': p.status, 'ab': approver if p.status == _socio.PROPOSAL_APPROVED else None,
+               'aa': datetime.utcnow() if p.status == _socio.PROPOSAL_APPROVED else None,
+               'id': proposal_id})
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return {'ok': False, 'error': f'could not record approval: {e}'}
+
+    return {'ok': True, 'proposal_id': proposal_id, 'status': p.status,
+            'requires_review': p.requires_review, 'review_reasons': p.review_reasons,
+            'note': ('Approved. Nothing is applied yet — see /reference/apply.'
+                     if p.status == _socio.PROPOSAL_APPROVED else
+                     'Not approved: still requires review (retry with force=True) '
+                     'or was rejected at validation.')}
+
+
+@app.post('/admin/socioeconomic/reference/apply')
+def admin_socioeconomic_apply(secret: str, proposal_id: int, applied_by: str,
+                              db: Session = Depends(get_db)):
+    """APPLY (CHANGE-003) — el ÚNICO camino legítimo que escribe el dato
+    económico canónico (p.ej. world_countries.gdp_per_capita_usd).
+
+    Sólo actúa sobre una propuesta ya `approved`. No reclasifica NINGÚN
+    usuario: eso requeriría la autorización explícita y separada de mass
+    reclassification (ver /admin/reassign-tiers y su compuerta de impacto).
+    Deja rastro de auditoría (`applied_by`, `applied_at`) en la misma fila
+    versionada, para que quién aplicó qué y cuándo sea siempre reconstruible.
+    """
+    _check_admin(secret)
+    if not applied_by or not applied_by.strip():
+        raise HTTPException(400, 'applied_by is required — application must be attributable to a named person')
+    row = db.execute(text(
+        'SELECT * FROM economic_reference_versions WHERE id = :id'
+    ), {'id': proposal_id}).fetchone()
+    if not row:
+        raise HTTPException(404, 'proposal not found')
+    r = dict(row._mapping)
+    if r['status'] != _socio.PROPOSAL_APPROVED:
+        raise HTTPException(409, f"proposal status is {r['status']!r}, not approved — "
+                                 f"apply requires an explicit prior approval")
+    if r.get('applied_at'):
+        return {'ok': True, 'already_applied': True, 'proposal_id': proposal_id,
+                'applied_by': r.get('applied_by'), 'applied_at': str(r.get('applied_at'))}
+
+    wrote = _apply_reference_value(r['field'], r['country'], r['new_value'], db)
+    if not wrote:
+        return {'ok': False, 'error': 'reference write failed or field unsupported',
+                'proposal_id': proposal_id}
+
+    applied_at = datetime.utcnow()
+    try:
+        db.execute(text("""
+            UPDATE economic_reference_versions
+            SET applied_by = :ap, applied_at = :at
+            WHERE id = :id
+        """), {'ap': applied_by, 'at': applied_at, 'id': proposal_id})
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        return {'ok': False, 'error': f'value written but audit trail failed: {e}'}
+
+    return {'ok': True, 'applied': True, 'proposal_id': proposal_id,
+            'applied_by': applied_by, 'applied_at': applied_at.isoformat(),
+            'note': 'Reference value applied. No user was reclassified — '
+                    'mass reclassification is a separate, explicit authorization.'}
 
 
 @app.get('/admin/ppp-audit')
