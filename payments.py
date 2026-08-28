@@ -34,6 +34,7 @@ from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 # ══════════════════════════════════════════════════════════════
 # PAQUETES DE CRÉDITOS
@@ -196,11 +197,20 @@ def get_or_create_account(db: Session, user_id: int) -> dict:
         {'uid': user_id}
     ).fetchone()
     if not row:
-        db.execute(
-            text("INSERT INTO credit_accounts (user_id) VALUES (:uid)"),
-            {'uid': user_id}
-        )
-        db.commit()
+        # CHANGE-001 remediation (§4) — found via real concurrent testing,
+        # not the audit text itself: two callers can both see "no row" and
+        # both INSERT for the SAME brand-new user (e.g. two concurrent
+        # first-ever purchases). user_id is UNIQUE on credit_accounts, so
+        # the loser must not crash — it re-selects the winner's row
+        # instead, same pattern as _ledger_post's idempotency-key race fix.
+        try:
+            db.execute(
+                text("INSERT INTO credit_accounts (user_id) VALUES (:uid)"),
+                {'uid': user_id}
+            )
+            db.commit()
+        except IntegrityError:
+            db.rollback()
         row = db.execute(
             text("SELECT * FROM credit_accounts WHERE user_id = :uid"),
             {'uid': user_id}
@@ -232,23 +242,33 @@ def add_credits(
         if existing:
             return {'ok': True, 'idempotent': True, 'ref': ref}
 
-    account = get_or_create_account(db, user_id)
-    new_balance = account['balance_credits'] + amount_credits
-
-    db.execute(
+    get_or_create_account(db, user_id)  # ensures the row exists; balance itself read below atomically
+    # CHANGE-001 remediation (§4) — this used to read balance_credits into
+    # Python, add to it, and UPDATE with the computed value: a classic
+    # lost-update race under two concurrent add_credits calls for the same
+    # user. credit_accounts is a non-authoritative legacy display/cache
+    # mirror (the canonical value lives in ledger_balances, see
+    # _ledger_fund), but a lossy mirror is still a wrong number shown to
+    # the user, so the arithmetic now happens INSIDE the atomic UPDATE
+    # itself (delta, not snapshot-plus-delta) and RETURNING reads back the
+    # exact post-update value with no window for another writer to
+    # interleave.
+    row = db.execute(
         text("""
             UPDATE credit_accounts
-            SET balance_credits = :bal,
+            SET balance_credits = balance_credits + :delta,
                 total_purchased = total_purchased + :purchased,
                 updated_at = CURRENT_TIMESTAMP
             WHERE user_id = :uid
+            RETURNING balance_credits
         """),
         {
-            'bal':       new_balance,
+            'delta':     amount_credits,
             'purchased': amount_credits if tx_type == 'purchase' else 0,
             'uid':       user_id,
         }
-    )
+    ).fetchone()
+    new_balance = row[0]
     db.execute(
         text("""
             INSERT INTO credit_transactions
@@ -274,9 +294,15 @@ def add_credits(
 
 
 def deduct_credits_for_impression(db: Session, campaign_id: int, cpm: float) -> bool:
-    """
-    Atomically deducts CPM/1000 credits from campaign budget.
-    Returns False if campaign has insufficient budget (should be paused).
+    """DEPRECATED (CHANGE-001) — DO NOT CALL. Superseded by
+    main._ledger_spend, which every ad-serving route uses instead.
+
+    This function references `ad_campaigns.remaining_budget` and
+    `ad_campaigns.impressions_served`, neither of which exists in any
+    schema — confirmed by direct execution: every call crashed with
+    `no such column`. It predates the ledger and is kept, unreachable,
+    only so nothing external that may still import this name breaks at
+    import time. See ledger.py and main.py's `_ledger_*` adapters.
     """
     cost = cpm / 1000.0
     result = db.execute(
@@ -302,9 +328,14 @@ def deduct_credits_for_impression(db: Session, campaign_id: int, cpm: float) -> 
 
 
 def allocate_budget_to_campaign(db: Session, user_id: int, campaign_id: int, credits: float) -> dict:
-    """
-    Moves credits from user account to a campaign's budget.
-    Called when a campaign is created or topped up.
+    """DEPRECATED (CHANGE-001) — DO NOT CALL. Superseded by
+    main._ledger_reserve (see also POST /payments/allocate-to-campaign).
+
+    Read-modify-write on `credit_accounts.balance_credits` (a real race
+    under concurrency) and references `ad_campaigns.remaining_budget`,
+    which does not exist in any schema — confirmed by direct execution.
+    Also has no REAL/DEMO concept. Kept, unreachable, only so nothing
+    external that may still import this name breaks at import time.
     """
     account = get_or_create_account(db, user_id)
     if account['balance_credits'] < credits:
@@ -332,8 +363,15 @@ def allocate_budget_to_campaign(db: Session, user_id: int, campaign_id: int, cre
 
 
 def return_budget_to_account(db: Session, user_id: int, campaign_id: int) -> dict:
-    """
-    Returns unspent campaign budget to user's credit account (on pause/cancel).
+    """DEPRECATED (CHANGE-001) — DO NOT CALL. Superseded by
+    main._ledger_release (see also POST /payments/return-from-campaign/{id}).
+
+    References `ad_campaigns.remaining_budget` (does not exist — confirmed
+    by direct execution) and unconditionally zeroes it rather than
+    decrementing by the amount actually returned, which under concurrency
+    could erase and double-credit a spend that landed mid-transaction.
+    Kept, unreachable, only so nothing external that may still import this
+    name breaks at import time.
     """
     row = db.execute(
         text("SELECT remaining_budget FROM ad_campaigns WHERE id=:cid"),

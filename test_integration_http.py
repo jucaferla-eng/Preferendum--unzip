@@ -743,7 +743,8 @@ class TestCampaignServingAndBilling(Base):
                         target_debate_ids=str(d.id))
         outsider = mk_user(self.db, country='CL', county='Conchali')
         r = self.client.post('/ads/view',
-                             json={'campaign_id': c.id, 'debate_id': d.id},
+                             json={'campaign_id': c.id, 'debate_id': d.id,
+                                   'idempotency_key': f'evt-{_uid()}'},
                              headers=auth(outsider))
         self.assertEqual(r.status_code, 403, r.text)
 
@@ -754,7 +755,8 @@ class TestCampaignServingAndBilling(Base):
         before = self.db.query(main.AdImpressionLog).filter(
             main.AdImpressionLog.campaign_id == c.id).count()
         r = self.client.post('/ads/view',
-                             json={'campaign_id': c.id, 'debate_id': d.id},
+                             json={'campaign_id': c.id, 'debate_id': d.id,
+                                   'idempotency_key': f'evt-{_uid()}'},
                              headers=auth(outsider))
         self.assertEqual(r.status_code, 403, r.text)
         self.db.expire_all()
@@ -764,7 +766,8 @@ class TestCampaignServingAndBilling(Base):
 
     def test_Q2_anonymous_impression_is_not_billed(self):
         c = mk_campaign(self.db)
-        r = self.client.post('/ads/view', json={'campaign_id': c.id})
+        r = self.client.post('/ads/view', json={'campaign_id': c.id,
+                                                 'idempotency_key': f'evt-{_uid()}'})
         self.assertIn(r.status_code, (401, 403), r.text)
         self.assertEqual(self.db.query(main.AdImpressionLog).filter(
             main.AdImpressionLog.campaign_id == c.id).count(), 0)
@@ -775,19 +778,47 @@ class TestCampaignServingAndBilling(Base):
         c = mk_campaign(self.db)  # untargeted campaign, matches everyone
         outsider = mk_user(self.db, country='CL', county='Conchali')
         r = self.client.post('/ads/view',
-                             json={'campaign_id': c.id, 'debate_id': d.id},
+                             json={'campaign_id': c.id, 'debate_id': d.id,
+                                   'idempotency_key': f'evt-{_uid()}'},
                              headers=auth(outsider))
         self.assertIn(r.status_code, (403, 404), r.text)
         self.assertEqual(self.db.query(main.AdImpressionLog).filter(
             main.AdImpressionLog.campaign_id == c.id).count(), 0)
 
+    # NOTE — CHANGE-001 (prepaid ledger) changed what "eligible to bill"
+    # requires: a campaign must now hold a real/demo RESERVATION, not just
+    # a budget_clp cap, or /ads/view correctly declines to bill it
+    # (budget_exhausted, no AdImpressionLog written) — that is the whole
+    # point of the prepaid model. `mk_campaign` alone no longer implies
+    # "funded". These two tests are about BILLING outcomes specifically
+    # (client demographics ignored; an eligible impression gets billed),
+    # so — same as CHANGE-003 updating the two results-visibility tests
+    # its own new rule invalidated — they now fund the campaign through
+    # the real ledger first, leaving their original CHANGE-002 assertions
+    # intact and still exercised under the new precondition.
+    def _fund_and_reserve(self, campaign, credits=1000):
+        # `mk_campaign` defaults advertiser_email to the same fixed address
+        # across many tests in this class, so get-or-create rather than
+        # inserting a fresh User row every call (User.email is UNIQUE).
+        owner = self.db.query(main.User).filter(
+            main.User.email == campaign.advertiser_email).first()
+        if not owner:
+            owner = mk_user(self.db, email=campaign.advertiser_email, role='marketer')
+        main._ledger_fund(self.db, main._ledger.REAL, owner.id, credits, method='manual',
+                          idempotency_key=f'test-fund-{campaign.id}-{owner.id}',
+                          description='test funding')
+        main._ledger_reserve(self.db, campaign, owner.id, credits,
+                             idempotency_key=f'test-reserve-{campaign.id}-{owner.id}')
+
     def test_Q4_client_supplied_demographics_are_ignored(self):
         """The body used to set the billed demographics. It must not."""
         d = mk_debate(self.db, scope_country='CL')
         c = mk_campaign(self.db)
+        self._fund_and_reserve(c)
         u = mk_user(self.db, country='CL', county='Las Condes', gender='M')
         r = self.client.post('/ads/view',
                              json={'campaign_id': c.id, 'debate_id': d.id,
+                                   'idempotency_key': f'evt-{_uid()}',
                                    'gender': 'F', 'county': 'Vitacura',
                                    'country': 'AR', 'age_group': '99+'},
                              headers=auth(u))
@@ -806,7 +837,8 @@ class TestCampaignServingAndBilling(Base):
         d = mk_debate(self.db, scope_country='CL')
         c = mk_campaign(self.db)
         r = self.client.post('/ads/impression',
-                             params={'campaign_id': c.id, 'debate_id': d.id})
+                             params={'campaign_id': c.id, 'debate_id': d.id,
+                                     'idempotency_key': f'evt-{_uid()}'})
         self.assertIn(r.status_code, (401, 403), r.text)
 
     def test_Q7_second_billing_path_rejects_ineligible_user(self):
@@ -814,7 +846,8 @@ class TestCampaignServingAndBilling(Base):
         c = mk_campaign(self.db, target_communes='Las Condes')
         outsider = mk_user(self.db, country='CL', county='Conchali')
         r = self.client.post('/ads/impression',
-                             params={'campaign_id': c.id, 'debate_id': d.id},
+                             params={'campaign_id': c.id, 'debate_id': d.id,
+                                     'idempotency_key': f'evt-{_uid()}'},
                              headers=auth(outsider))
         self.assertEqual(r.status_code, 403, r.text)
 
@@ -823,16 +856,19 @@ class TestCampaignServingAndBilling(Base):
         c = mk_campaign(self.db)
         outsider = mk_user(self.db, country='CL', county='Conchali')
         r = self.client.post('/ads/impression',
-                             params={'campaign_id': c.id, 'debate_id': d.id},
+                             params={'campaign_id': c.id, 'debate_id': d.id,
+                                     'idempotency_key': f'evt-{_uid()}'},
                              headers=auth(outsider))
         self.assertIn(r.status_code, (403, 404), r.text)
 
     def test_Q5_eligible_impression_is_billed(self):
         d = mk_debate(self.db, scope_country='CL')
         c = mk_campaign(self.db)
+        self._fund_and_reserve(c)
         u = mk_user(self.db, country='CL', county='Las Condes')
         r = self.client.post('/ads/view',
-                             json={'campaign_id': c.id, 'debate_id': d.id},
+                             json={'campaign_id': c.id, 'debate_id': d.id,
+                                   'idempotency_key': f'evt-{_uid()}'},
                              headers=auth(u))
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(self.db.query(main.AdImpressionLog).filter(

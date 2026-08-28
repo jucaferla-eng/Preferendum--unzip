@@ -36,7 +36,8 @@ from sqlalchemy import (create_engine, Column, Integer, String, Boolean,
                         DateTime, Text, Float, func, text)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
-from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel, validator
 import jwt
 import bcrypt
 from blockchain import blockchain as _blockchain
@@ -66,9 +67,20 @@ DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./preferendum.db')
 # Render provides postgres:// but SQLAlchemy 1.4+ requires postgresql://
 if DATABASE_URL.startswith('postgres://'):
     DATABASE_URL = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+# CHANGE-001 release hardening — Phase 3 finding: local docs disagree on
+# which engine production actually runs (README.md/render.yaml/psycopg2-binary
+# and this file's own postgres://->postgresql:// rewrite all point to
+# PostgreSQL; STATUS.md separately claims SQLite "en producción"). This was
+# NOT resolved by contacting production (out of scope for this change) — it
+# is disclosed as a real ambiguity. Since the SQLite branch previously set no
+# explicit `timeout`, it silently relied on the sqlite3 driver's own default
+# (5s) busy-wait before raising "database is locked" under write contention.
+# `timeout` here ONLY affects the sqlite branch — the PostgreSQL branch
+# (`else {}`) is untouched; Postgres has its own lock/retry semantics that a
+# SQLite busy-timeout has nothing to do with, and none is added here.
 engine = create_engine(
     DATABASE_URL,
-    connect_args={'check_same_thread': False} if 'sqlite' in DATABASE_URL else {},
+    connect_args={'check_same_thread': False, 'timeout': 15} if 'sqlite' in DATABASE_URL else {},
     pool_pre_ping=True,
 )
 Base = declarative_base()
@@ -431,8 +443,26 @@ class AdCampaign(Base):
     advertiser_name     = Column(String)
     title               = Column(String)
     budget_clp          = Column(Integer, default=0)
-    spent_clp           = Column(Integer, default=0)
+    spent_clp           = Column(Integer, default=0)   # espejo CLP — CHANGE-002 lo usa para elegibilidad de entrega
     ad_type             = Column(String, default='banner')
+    # ── CHANGE-001 — clase de valor del ledger canónico ──
+    # Una campaña es REAL o DEMO, NUNCA ambas: fijado en creación,
+    # inmutable después (update_campaign nunca la toca). Determina qué
+    # cuenta del ledger (CAMPAIGN_REAL_RESERVED vs CAMPAIGN_DEMO_RESERVED)
+    # respalda su gasto. budget_clp/spent_clp siguen existiendo — son el
+    # tope declarado por el anunciante y lo que CHANGE-002 usa para
+    # elegibilidad de entrega — pero ya NO implican fondos reales: eso lo
+    # decide exclusivamente el ledger (ver ledger.py).
+    value_class         = Column(String, default='REAL')
+    clicks_count        = Column(Integer, default=0)
+    # ── CHANGE-001 remediation — transición legacy/ledger ──
+    # 'LEGACY_UNRECONCILED' (default, TODAS las filas existentes) vs
+    # 'LEDGER_MANAGED' (solo tras una _ledger_reserve exitosa y real).
+    # Nadie más que _ledger_reserve escribe este campo. Es lo único que
+    # autoriza a los cuatro sitios de cobro a facturar contra el ledger;
+    # una campaña LEGACY_UNRECONCILED nunca se desactiva ni se factura
+    # solo porque el ledger no tiene reserva — ver _campaign_billable().
+    ledger_status        = Column(String, default='LEGACY_UNRECONCILED')
     # ── Targeting geográfico ──
     target_country      = Column(String, default='')        # 'CL' / 'AR' / '' = todos
     target_communes     = Column(String, default='')        # 'Vitacura,Las Condes' / '' = todas
@@ -1033,6 +1063,109 @@ def _migrate():
                 if existing_erv_cols and col not in existing_erv_cols:
                     try:
                         conn.execute(text(f'ALTER TABLE economic_reference_versions ADD COLUMN {col} {defn}'))
+                        conn.commit()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # ══════════════════════════════════════════════════════════════
+        # CHANGE-001 — LEDGER CANÓNICO (double-entry, REAL/DEMO separados)
+        # ══════════════════════════════════════════════════════════════
+        # CHANGE-001 recon encontró CUATRO representaciones de dinero sin
+        # coordinar entre sí: credit_accounts.balance_credits (compras
+        # reales), AdCampaign.budget_clp/spent_clp (declarado por el
+        # anunciante, sin respaldo de fondos), AdCampaign.remaining_budget
+        # (referenciado por payments.py pero la columna NUNCA existió —
+        # confirmado ejecutando las rutas reales: todas fallaban con
+        # `no such column`), y AdImpressionLog (el único que nada escribía
+        # de forma inconsistente). Ninguna de las tres primeras coincidía
+        # con las demás.
+        #
+        # A partir de aquí el ledger es la ÚNICA fuente canónica. Todo lo
+        # demás que parezca dinero (credit_accounts.balance_credits,
+        # AdCampaign.spent_clp) es un ESPEJO de solo lectura mantenido
+        # EXCLUSIVAMENTE por los adaptadores _ledger_* — nunca escrito de
+        # forma independiente. Mismo patrón "un solo escritor, todo lo
+        # demás deriva de él" que CHANGE-002 usa para se_tier y CHANGE-003
+        # para las tablas de referencia económica.
+        _ldg_pk = 'SERIAL PRIMARY KEY' if is_pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'
+        try:
+            conn.execute(text(f"""
+                CREATE TABLE IF NOT EXISTS ledger_accounts (
+                    id {_ldg_pk},
+                    kind TEXT NOT NULL,
+                    ref_id INTEGER NOT NULL,
+                    created_at TIMESTAMP,
+                    UNIQUE(kind, ref_id)
+                )
+            """))
+            conn.execute(text(f"""
+                CREATE TABLE IF NOT EXISTS ledger_transactions (
+                    id {_ldg_pk},
+                    idempotency_key TEXT UNIQUE,
+                    txn_type TEXT NOT NULL,
+                    value_class TEXT NOT NULL,
+                    actor_user_id INTEGER,
+                    campaign_id INTEGER,
+                    source TEXT,
+                    reference TEXT,
+                    description TEXT,
+                    created_at TIMESTAMP,
+                    policy_version TEXT
+                )
+            """))
+            conn.execute(text(f"""
+                CREATE TABLE IF NOT EXISTS ledger_entries (
+                    id {_ldg_pk},
+                    transaction_id INTEGER NOT NULL,
+                    account_id INTEGER NOT NULL,
+                    amount FLOAT NOT NULL,
+                    created_at TIMESTAMP
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS ledger_balances (
+                    account_id INTEGER PRIMARY KEY,
+                    balance FLOAT NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMP
+                )
+            """))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_ledger_entries_txn ON ledger_entries(transaction_id)"))
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_ledger_accounts_kind_ref ON ledger_accounts(kind, ref_id)"))
+            conn.commit()
+        except Exception:
+            pass
+
+        # ad_campaigns — CHANGE-001: clase de valor + contador de clicks.
+        # Aditivo, default 'REAL': ninguna campaña existente cambia de
+        # clase al aplicar esta migración (sección 4 del CHANGE-001 —
+        # "no invent historical funding"). clicks_count reemplaza la
+        # columna `clicks` que /ads/click referenciaba sin que existiera
+        # nunca (confirmado: la ruta devolvía 500 en cada llamada).
+        try:
+            existing_adc_cols = ({c['name'] for c in inspector.get_columns('ad_campaigns')}
+                                 if inspector.has_table('ad_campaigns') else set())
+            for col, defn in [('value_class', "TEXT DEFAULT 'REAL'"),
+                              ('clicks_count', 'INTEGER DEFAULT 0'),
+                              # CHANGE-001 remediation (release blocker) —
+                              # EVERY existing row defaults to
+                              # LEGACY_UNRECONCILED, never LEDGER_MANAGED.
+                              # No campaign is silently deemed funded by
+                              # this migration; the ONLY thing that ever
+                              # flips it is a real, successful
+                              # _ledger_reserve call backed by real posted
+                              # funds (see that function). This is what
+                              # makes the transition explicit rather than
+                              # inferred, and is the single source of truth
+                              # every billing site and the reconciliation
+                              # diagnostic both read.
+                              ('ledger_status', "TEXT DEFAULT 'LEGACY_UNRECONCILED'")]:
+                if existing_adc_cols and col not in existing_adc_cols:
+                    try:
+                        conn.execute(text(f'ALTER TABLE ad_campaigns ADD COLUMN {col} {defn}'))
                         conn.commit()
                     except Exception:
                         pass
@@ -1728,6 +1861,8 @@ def _public_results_payload(debate) -> dict:
 # toca ni debilita el matching.
 
 import socioeconomic as _socio
+import ledger as _ledger
+import uuid as _uuid
 
 
 def _country_economic_context(country_code: str, db) -> '_socio.CountryEconomicContext':
@@ -2013,6 +2148,374 @@ def get_my_household_income(user: User = Depends(get_current_user)):
         'as_of': user.household_income_as_of.isoformat() if user.household_income_as_of else None,
         'household_size': user.household_size,
     }
+
+
+# ══════════════════════════════════════════════════════════════
+# CANONICAL LEDGER — adapters (CHANGE-001)
+# ══════════════════════════════════════════════════════════════
+# ledger.py decides WHAT a financial event means (which accounts move, by
+# how much, whether it is even legal). These functions are the ONLY code
+# that actually reads/writes ledger_accounts/ledger_transactions/
+# ledger_entries/ledger_balances. No other function in this file may touch
+# those four tables directly — enforced by a structural regression test
+# (test_ledger_wiring.py) that greps main.py for any other reference to
+# them.
+#
+# `_ledger_post` is THE single writer. Every financial route in this file
+# funds, reserves, spends or releases by calling it — never by writing a
+# balance field directly. This is what makes the ledger canonical instead
+# of a fifth parallel representation: there is exactly one place the
+# number can change.
+
+# Singleton accounts (ORIGIN_*, SPEND_*) have no natural ref_id. ledger.py
+# uses None for "no specific ref"; the DB layer needs a concrete, non-NULL
+# value so `UNIQUE(kind, ref_id)` actually prevents a duplicate row under a
+# race (SQL treats two NULLs as distinct for uniqueness purposes on both
+# SQLite and PostgreSQL, which would silently defeat the constraint).
+_LEDGER_SINGLETON_REF = 0
+
+
+def _ledger_get_or_create_account(db: Session, kind: str, ref_id) -> int:
+    """Returns the ledger_accounts.id for (kind, ref_id), creating both the
+    account row and its zero-balance row if this is the first time either
+    is referenced.
+
+    Uses `flush()`, NEVER `commit()`. This is called from inside
+    `_ledger_post`, which may itself be called after the caller has already
+    added-but-not-committed OTHER rows in the same session (e.g. /ads/view
+    flushes an AdImpressionLog before calling this). A `commit()` here
+    would durably persist that unrelated pending work even if the spend
+    that follows is then rejected and rolled back — silently breaking the
+    "nothing is written on failure" guarantee. `_ledger_post` performs the
+    one commit (or the one rollback) for the whole operation.
+
+    Race-safe: a concurrent duplicate INSERT hits the UNIQUE(kind, ref_id)
+    constraint; this catches it and re-selects rather than erroring.
+    """
+    rid = _LEDGER_SINGLETON_REF if ref_id is None else int(ref_id)
+    row = db.execute(text(
+        "SELECT id FROM ledger_accounts WHERE kind=:k AND ref_id=:r"
+    ), {'k': kind, 'r': rid}).fetchone()
+    if row:
+        return int(row[0])
+    try:
+        db.execute(text(
+            "INSERT INTO ledger_accounts (kind, ref_id, created_at) VALUES (:k,:r,:now)"
+        ), {'k': kind, 'r': rid, 'now': datetime.utcnow()})
+        db.flush()
+    except Exception:
+        db.rollback()
+    row = db.execute(text(
+        "SELECT id FROM ledger_accounts WHERE kind=:k AND ref_id=:r"
+    ), {'k': kind, 'r': rid}).fetchone()
+    if not row:
+        raise RuntimeError(f'could not create or find ledger account {kind}/{rid}')
+    account_id = int(row[0])
+    try:
+        db.execute(text(
+            "INSERT INTO ledger_balances (account_id, balance, updated_at) "
+            "VALUES (:aid, 0, :now)"
+        ), {'aid': account_id, 'now': datetime.utcnow()})
+        db.flush()
+    except Exception:
+        db.rollback()   # balance row already exists — fine
+    return account_id
+
+
+def _ledger_balance(db: Session, kind: str, ref_id) -> float:
+    """Current balance for (kind, ref_id). 0.0 if the account has never
+    been touched — never None, so callers can compare directly."""
+    rid = _LEDGER_SINGLETON_REF if ref_id is None else int(ref_id)
+    row = db.execute(text("""
+        SELECT b.balance FROM ledger_balances b
+        JOIN ledger_accounts a ON a.id = b.account_id
+        WHERE a.kind=:k AND a.ref_id=:r
+    """), {'k': kind, 'r': rid}).fetchone()
+    return float(row[0]) if row else 0.0
+
+
+def _ledger_lifetime_credited(db: Session, kind: str, ref_id) -> float:
+    """Sum of every POSITIVE entry ever posted to (kind, ref_id) — total
+    ever issued, independent of subsequent spending/reservation. Used by
+    the demo-grant lifetime cap, which must not reset just because the
+    user spent what they were granted."""
+    rid = _LEDGER_SINGLETON_REF if ref_id is None else int(ref_id)
+    row = db.execute(text("""
+        SELECT COALESCE(SUM(e.amount), 0) FROM ledger_entries e
+        JOIN ledger_accounts a ON a.id = e.account_id
+        WHERE a.kind=:k AND a.ref_id=:r AND e.amount > 0
+    """), {'k': kind, 'r': rid}).fetchone()
+    return float(row[0]) if row else 0.0
+
+
+def _ledger_post(db: Session, posting: '_ledger.Posting', *, idempotency_key: str,
+                 actor_user_id: int = None, campaign_id: int = None,
+                 source: str = '', reference: str = '', description: str = '') -> dict:
+    """THE single writer of ledger_transactions/ledger_entries/ledger_balances.
+
+    Returns {'ok', 'idempotent', 'transaction_id', 'reason'}. `ok=False`
+    means NOTHING was written — verified by test (an insufficient-balance
+    attempt leaves ledger_transactions/entries/balances byte-for-byte
+    unchanged). Immutability (R4): this function only INSERTs and does
+    conditional additive UPDATEs to `ledger_balances`; it never UPDATEs or
+    DELETEs a `ledger_transactions`/`ledger_entries` row, and no other
+    function in this file may either.
+    """
+    if not idempotency_key:
+        raise ValueError('_ledger_post requires an idempotency_key')
+    if not posting.ok:
+        return {'ok': False, 'idempotent': False, 'transaction_id': None,
+                'reason': posting.reason}
+
+    existing = db.execute(text(
+        "SELECT id FROM ledger_transactions WHERE idempotency_key=:k"
+    ), {'k': idempotency_key}).fetchone()
+    if existing:
+        return {'ok': True, 'idempotent': True, 'transaction_id': int(existing[0]), 'reason': ''}
+
+    account_ids = {}
+    for e in posting.entries:
+        account_ids[(e.account_kind, e.account_ref)] = _ledger_get_or_create_account(
+            db, e.account_kind, e.account_ref)
+
+    # Constrained, decreasing legs FIRST — atomic conditional decrement.
+    # If ANY leg cannot be covered, roll back before touching anything
+    # else: no partial posting is ever possible (R1).
+    for e in posting.entries:
+        if e.account_kind in _ledger.CONSTRAINED_KINDS and e.amount < 0:
+            acc_id = account_ids[(e.account_kind, e.account_ref)]
+            result = db.execute(text("""
+                UPDATE ledger_balances
+                SET balance = balance + :delta, updated_at = :now
+                WHERE account_id = :aid AND balance + :delta >= :floor
+            """), {'delta': e.amount, 'aid': acc_id, 'now': datetime.utcnow(),
+                   'floor': -_ledger.EPSILON})
+            if result.rowcount == 0:
+                db.rollback()
+                return {'ok': False, 'idempotent': False, 'transaction_id': None,
+                        'reason': 'insufficient_balance'}
+
+    # Everything else (increases, and ORIGIN's unconstrained decrease).
+    for e in posting.entries:
+        if not (e.account_kind in _ledger.CONSTRAINED_KINDS and e.amount < 0):
+            acc_id = account_ids[(e.account_kind, e.account_ref)]
+            db.execute(text("""
+                UPDATE ledger_balances SET balance = balance + :delta, updated_at = :now
+                WHERE account_id = :aid
+            """), {'delta': e.amount, 'aid': acc_id, 'now': datetime.utcnow()})
+
+    now = datetime.utcnow()
+    try:
+        db.execute(text("""
+            INSERT INTO ledger_transactions
+              (idempotency_key, txn_type, value_class, actor_user_id, campaign_id,
+               source, reference, description, created_at, policy_version)
+            VALUES (:ik,:tt,:vc,:au,:cid,:src,:ref,:desc,:now,:pv)
+        """), {'ik': idempotency_key, 'tt': posting.txn_type, 'vc': posting.value_class,
+               'au': actor_user_id, 'cid': campaign_id, 'src': source, 'ref': reference,
+               'desc': description, 'now': now, 'pv': posting.policy_version})
+    except IntegrityError:
+        # CHANGE-001 remediation (§3) — a concurrent request with the SAME
+        # idempotency_key won the race and committed first (the UNIQUE
+        # constraint on ledger_transactions.idempotency_key is what
+        # actually enforces this; the SELECT above is only a fast-path).
+        # This request's own balance mutations above were never committed
+        # (no commit happened yet), so rolling back discards them cleanly
+        # — the winner's balances stand alone. Return the SAME clean
+        # idempotent result the winner got, instead of a raw 500.
+        db.rollback()
+        existing = db.execute(text(
+            "SELECT id FROM ledger_transactions WHERE idempotency_key=:k"
+        ), {'k': idempotency_key}).fetchone()
+        if existing:
+            return {'ok': True, 'idempotent': True, 'transaction_id': int(existing[0]), 'reason': ''}
+        # Someone else's key collided (shouldn't happen — UNIQUE is on the
+        # key we just tried), or the winner's row vanished. Fail closed
+        # rather than guess.
+        return {'ok': False, 'idempotent': False, 'transaction_id': None,
+                'reason': 'idempotency_conflict'}
+
+    txn_row = db.execute(text(
+        "SELECT id FROM ledger_transactions WHERE idempotency_key=:k"
+    ), {'k': idempotency_key}).fetchone()
+    txn_id = int(txn_row[0])
+
+    for e in posting.entries:
+        acc_id = account_ids[(e.account_kind, e.account_ref)]
+        db.execute(text("""
+            INSERT INTO ledger_entries (transaction_id, account_id, amount, created_at)
+            VALUES (:tid, :aid, :amt, :now)
+        """), {'tid': txn_id, 'aid': acc_id, 'amt': e.amount, 'now': now})
+
+    db.commit()
+    return {'ok': True, 'idempotent': False, 'transaction_id': txn_id, 'reason': ''}
+
+
+def _ledger_fund(db: Session, value_class: str, user_id: int, amount, *, method: str,
+                 idempotency_key: str, description: str, amount_usd: float = 0.0,
+                 legacy_tx_type: str = 'purchase') -> dict:
+    """REAL or DEMO funding entering a user's available balance (C).
+
+    REAL funding additionally mirrors into the legacy `credit_accounts`
+    cache via `payments.add_credits`, using the SAME idempotency key —
+    that function's own `payment_ref` uniqueness check makes the mirror
+    idempotent independently of the ledger's own check, so the two can
+    never drift even under a partial-failure retry. DEMO funding NEVER
+    touches `credit_accounts` — the legacy REAL-only cache must never see
+    a demo value (G).
+    """
+    posting = _ledger.build_funding(value_class, user_id, amount)
+    result = _ledger_post(db, posting, idempotency_key=idempotency_key,
+                          actor_user_id=user_id, source=method,
+                          reference=idempotency_key, description=description)
+    if result['ok'] and value_class == _ledger.REAL:
+        try:
+            add_credits(db, user_id, float(amount), method, idempotency_key,
+                       description, amount_usd=amount_usd, tx_type=legacy_tx_type)
+        except Exception as e:
+            print(f'[ledger] legacy credit_accounts mirror failed (non-fatal, '
+                 f'ledger already posted) user={user_id} key={idempotency_key}: {e}')
+    return result
+
+
+def _ledger_reserve(db: Session, campaign: 'AdCampaign', user_id: int, amount, *,
+                    idempotency_key: str, source: str = 'allocate') -> dict:
+    """Campaign funding reservation (D) — the ONLY way a campaign acquires
+    spendable balance. Value class comes from the campaign itself, never
+    from the caller, so a reservation can never mix classes (B, R3)."""
+    value_class = (getattr(campaign, 'value_class', None) or _ledger.REAL)
+    posting = _ledger.build_reservation(value_class, user_id, campaign.id, amount)
+    result = _ledger_post(db, posting, idempotency_key=idempotency_key,
+                          actor_user_id=user_id, campaign_id=campaign.id, source=source,
+                          reference=idempotency_key,
+                          description=f'Reserve {amount} {value_class} credits for campaign {campaign.id}')
+    if result['ok'] and getattr(campaign, 'ledger_status', None) != 'LEDGER_MANAGED':
+        # CHANGE-001 remediation (§5) — the ONE and ONLY place a campaign
+        # transitions out of LEGACY_UNRECONCILED, and only on a real,
+        # successful, funds-backed reservation. No fabricated funding, no
+        # startup migration: this fires exclusively when someone actually
+        # allocates real (or demo) ledger balance to this campaign.
+        db.execute(text("UPDATE ad_campaigns SET ledger_status = 'LEDGER_MANAGED' WHERE id = :cid"),
+                  {'cid': campaign.id})
+        db.commit()
+        db.expire(campaign, ['ledger_status'])
+    return result
+
+
+def _ledger_release(db: Session, campaign: 'AdCampaign', user_id: int, amount, *,
+                    idempotency_key: str, source: str = 'release') -> dict:
+    """Unused reserved funds returned to the SAME user, SAME class (F)."""
+    value_class = (getattr(campaign, 'value_class', None) or _ledger.REAL)
+    posting = _ledger.build_release(value_class, user_id, campaign.id, amount)
+    return _ledger_post(db, posting, idempotency_key=idempotency_key,
+                        actor_user_id=user_id, campaign_id=campaign.id, source=source,
+                        reference=idempotency_key,
+                        description=f'Release {amount} {value_class} credits from campaign {campaign.id}')
+
+
+def _ledger_spend(db: Session, campaign: 'AdCampaign', cost_credits, *,
+                  idempotency_key: str, source: str, reference: str = '',
+                  description: str = '') -> dict:
+    """THE canonical ad-spend function (E) — unifies what were previously
+    THREE divergent billing paths (`/ads/view`'s non-atomic Python count,
+    `_append_campaign_ad`'s atomic-but-CLP-only LEAST() update, and the
+    broken credits/remaining_budget bridge in payments.py). Every billable
+    impression, from every serving route, goes through here exactly once.
+
+    Mirrors the CLP-equivalent cost into `AdCampaign.spent_clp` atomically
+    IN THE SAME CALL, so CHANGE-002's delivery-eligibility filter
+    (`_match_campaigns`: `budget_clp > spent_clp`) keeps working unmodified
+    — CHANGE-001 adds a funds-backing gate, it does not touch matching.
+    """
+    if getattr(campaign, 'ledger_status', None) != 'LEDGER_MANAGED':
+        # CHANGE-001 remediation (§5) — a campaign that has never had a
+        # real _ledger_reserve call has no ledger-backed balance at all;
+        # spending against it would create unbacked spend out of thin
+        # air. This is DELIBERATELY distinct from 'insufficient_balance'
+        # (which means "has a reservation, but not enough left") so
+        # callers can tell "not yet reconciled" apart from "ran out of
+        # funded budget" and avoid treating legacy campaigns as normal
+        # exhaustion (e.g. auto-deactivating them — see call sites).
+        return {'ok': False, 'idempotent': False, 'transaction_id': None,
+                'reason': 'legacy_unreconciled'}
+    value_class = (getattr(campaign, 'value_class', None) or _ledger.REAL)
+    posting = _ledger.build_spend(value_class, campaign.id, cost_credits)
+    result = _ledger_post(db, posting, idempotency_key=idempotency_key,
+                          campaign_id=campaign.id, source=source, reference=reference,
+                          description=description or f'Spend {cost_credits} {value_class} credits')
+    if result['ok'] and not result['idempotent']:
+        cost_clp = int(round(float(cost_credits) * USD_TO_CLP))
+        db.execute(text("""
+            UPDATE ad_campaigns SET spent_clp = COALESCE(spent_clp,0) + :cost
+            WHERE id = :cid
+        """), {'cost': cost_clp, 'cid': campaign.id})
+        db.commit()
+        db.expire(campaign, ['spent_clp'])
+    return result
+
+
+# CHANGE-001 remediation (§7) — the ONE place the DEMO grant policy is
+# configured. `ledger.py` stays dependency-free (no os.environ reads of its
+# own); it only defines the provisional defaults and accepts overrides as
+# kwargs. Changing the policy means changing these two env vars (or, with
+# neither set, the provisional defaults in ledger.py) — never scattered
+# edits across call sites. Still PROVISIONAL — see ledger.DEMO_POLICY_APPROVED_BY_BUSINESS.
+DEMO_GRANT_AMOUNT_CREDITS = float(os.getenv('DEMO_GRANT_AMOUNT_CREDITS', _ledger.DEMO_GRANT_AMOUNT))
+DEMO_GRANT_MAX_LIFETIME_CREDITS = float(os.getenv('DEMO_GRANT_MAX_LIFETIME_CREDITS', _ledger.DEMO_GRANT_MAX_LIFETIME))
+
+
+def _ledger_demo_grant(db: Session, user_id: int) -> dict:
+    """Bounded, idempotent DEMO issuance (G). One grant per rolling UTC
+    day (idempotency key) AND a lifetime cap independent of the key —
+    two separate reasons a runaway mint cannot happen, so a clock issue
+    or a key-derivation bug alone cannot defeat the cap."""
+    day_bucket = datetime.utcnow().strftime('%Y-%m-%d')
+    idem_key = _ledger.demo_grant_idempotency_key(user_id, day_bucket)
+    issued = _ledger_lifetime_credited(db, _ledger.USER_DEMO, user_id)
+    posting = _ledger.build_demo_grant(user_id, already_issued_lifetime=issued,
+                                       grant_amount=DEMO_GRANT_AMOUNT_CREDITS,
+                                       max_lifetime=DEMO_GRANT_MAX_LIFETIME_CREDITS)
+    if not posting.ok:
+        return {'ok': False, 'idempotent': False, 'transaction_id': None, 'reason': posting.reason}
+    return _ledger_post(db, posting, idempotency_key=idem_key, actor_user_id=user_id,
+                        source='demo', reference=idem_key,
+                        description='Demo credits — testing only, never redeemable as real funds')
+
+
+def _ledger_new_idempotency_key(prefix: str) -> str:
+    """For operations without a natural external idempotency key (e.g. an
+    advertiser-initiated reservation/release). Still gives every ledger
+    transaction a unique, lookup-able key; retry-safety for THESE specific
+    calls comes from the atomic balance check in `_ledger_post`, not from
+    key reuse — see the concurrency tests."""
+    return f'{prefix}:{_uuid.uuid4().hex}'
+
+
+def _ledger_campaign_recognized_spend(db: Session, value_class: str, campaign_id: int) -> float:
+    """Read-only: total credits actually recognized as spent for ONE
+    campaign's reserved account (sum of its negative SPEND-type entries).
+    Used exclusively by the reconciliation diagnostic — kept as a named
+    adapter, like every other ledger table access, rather than inlined SQL
+    in the route, so 'only these functions touch the ledger tables' stays
+    true for reads as well as writes."""
+    row = db.execute(text("""
+        SELECT COALESCE(-SUM(e.amount), 0) FROM ledger_entries e
+        JOIN ledger_accounts a ON a.id = e.account_id
+        JOIN ledger_transactions t ON t.id = e.transaction_id
+        WHERE a.kind = :kind AND a.ref_id = :cid AND t.txn_type = :spend AND e.amount < 0
+    """), {'kind': _ledger.campaign_account_kind(value_class), 'cid': campaign_id,
+           'spend': _ledger.TXN_SPEND}).fetchone()
+    return float(row[0]) if row else 0.0
+
+
+def _ledger_all_credit_accounts(db: Session, limit: int) -> list:
+    """Read-only: (user_id, legacy balance) pairs for the reconciliation
+    diagnostic — the only place outside `_ledger_fund`'s mirror write that
+    reads `credit_accounts` for a ledger comparison."""
+    rows = db.execute(text(
+        "SELECT user_id, balance_credits FROM credit_accounts LIMIT :lim"
+    ), {'lim': limit}).fetchall()
+    return [(int(r[0]), float(r[1] or 0)) for r in rows]
 
 
 def _hnw_signals(user):
@@ -2501,14 +3004,29 @@ class CampaignCreate(BaseModel):
     target_hnw_only:     bool  = False   # True = solo usuarios verified_hnw
     min_hnw_score:       float = 0.0     # hnw_score mínimo (ej: 50.0)
     frequency_cap:       Optional[int] = None  # máx. veces que UN usuario ve este anuncio (None = sin límite)
+    # CHANGE-001 — clase de valor del ledger canónico. Fijada en creación,
+    # inmutable después: update_campaign nunca lee ni escribe este campo.
+    value_class:         str = 'REAL'    # 'REAL' | 'DEMO' — nunca ambas
 
 class AdViewInput(BaseModel):
     campaign_id: int
     debate_id:   Optional[int] = None
+    # CHANGE-001 remediation (§2) — REQUIRED, no fallback. An omitted key
+    # used to silently fall back to the newly-created AdImpressionLog row's
+    # own id, which defeats idempotency entirely: a genuine client retry
+    # gets a NEW row and thus a NEW key, so it bills twice. A missing key
+    # must fail closed instead of billing.
+    idempotency_key: str
     gender:      str = ''
     age_group:   str = ''
     county:      str = ''
     country:     str = ''
+
+    @validator('idempotency_key')
+    def _idempotency_key_not_blank(cls, v):
+        if not v or not v.strip():
+            raise ValueError('idempotency_key is required and cannot be blank')
+        return v
 
 class OrganizerRegisterInput(BaseModel):
     email:    str
@@ -5654,29 +6172,42 @@ def get_opinions(debate_id: int,
             'campaign_id': campaign.get('id'),
         }})
         orm = campaign.get('_orm')
-        if orm:
-            cpm_usd  = campaign.get('cpm') or 6.0
-            cost_clp = max(1, int(round((cpm_usd * USD_TO_CLP) / 1000.0)))
-            if user:
-                db.add(AdImpressionLog(
-                    campaign_id = orm.id,
-                    debate_id   = debate_id,
-                    user_id     = user.id,
-                    cost_clp    = cost_clp,
-                    gender      = user.gender or '',
-                    age_group   = _get_age_group(user.dob),
-                    county      = user.county or '',
-                    country     = user.country or '',
-                ))
-            # UPDATE atómico — un read-modify-write en Python aquí pierde
-            # incrementos bajo concurrencia real (confirmado empíricamente:
-            # 15 requests simultáneos → solo ~3 cobros persistidos).
-            db.execute(text("""
-                UPDATE ad_campaigns
-                SET spent_clp = LEAST(COALESCE(budget_clp, 0), COALESCE(spent_clp, 0) + :cost)
-                WHERE id = :cid
-            """), {'cost': cost_clp, 'cid': orm.id})
-            db.expire(orm, ['spent_clp'])
+        if orm and user:
+            # CHANGE-001 — esta era la TERCERA vía de facturación, distinta
+            # de /ads/view y /ads/impression: escribía spent_clp con
+            # LEAST(), que SQLite no soporta (nunca se probó fuera de
+            # Postgres), y nunca conciliaba con el ledger. Ahora las tres
+            # rutas de entrega cobran a través de la MISMA función.
+            cpm_usd = campaign.get('cpm') or 6.0
+            cost_credits = cpm_usd / 1000.0
+            db.add(AdImpressionLog(
+                campaign_id = orm.id,
+                debate_id   = debate_id,
+                user_id     = user.id,
+                cost_clp    = max(1, int(round(cost_credits * USD_TO_CLP))),
+                gender      = user.gender or '',
+                age_group   = _get_age_group(user.dob),
+                county      = user.county or '',
+                country     = user.country or '',
+            ))
+            db.flush()
+            log_id = db.execute(text(
+                "SELECT id FROM ad_impression_logs WHERE campaign_id=:cid AND user_id=:uid "
+                "ORDER BY id DESC LIMIT 1"
+            ), {'cid': orm.id, 'uid': user.id}).fetchone()[0]
+            spend_result = _ledger_spend(
+                db, orm, cost_credits, idempotency_key=f'spend:opinions:{log_id}',
+                source='opinions_ad', reference=str(log_id),
+                description=f'Impression served in debate {debate_id} opinions')
+            if not spend_result['ok']:
+                db.rollback()
+                if spend_result['reason'] == 'insufficient_balance':
+                    orm.is_active = False
+                    db.commit()
+                # No se factura y no queda registro de impresión para un
+                # anuncio no cobrado — el ad ya se agregó a `result` arriba
+                # (contenido/elegibilidad son de CHANGE-002; el dinero es
+                # de CHANGE-001, y aquí es donde se separan).
 
     for i, op in enumerate(opinions):
         result.append({'type': 'opinion', 'opinion': {
@@ -6065,6 +6596,25 @@ def _cast_vote_inner(debate_id: int, data, user, db):
     # Votar es la acción universal (todos lo hacen); escribir opinión es opcional y
     # poco frecuente, así que antes ninguna campaña gastaba presupuesto en consultas
     # nuevas hasta que alguien escribía texto. No debe romper el voto si falla.
+    #
+    # CHANGE-001 remediation (§1, BLOCKER) — este bloque era el ÚLTIMO escritor
+    # directo de spent_clp vía LEAST(), que nunca pasaba por el ledger: en
+    # SQLite fallaba (no such function: LEAST, capturado abajo y por tanto
+    # invisible en pruebas), pero en PostgreSQL de producción HABRÍA
+    # funcionado, facturando fuera del ledger canónico y divergiendo de él
+    # silenciosamente — justo lo que CHANGE-001 existe para eliminar. Ahora
+    # usa el MISMO `_ledger_spend` que /ads/view, /ads/impression y las
+    # opiniones: exige reserva real (campaign.ledger_status ==
+    # 'LEDGER_MANAGED'), respeta la clase REAL/DEMO de la campaña, nunca
+    # gasta por encima de lo reservado, y es idempotente.
+    #
+    # Aquí no hay identidad de evento provista por el cliente (a diferencia
+    # de /ads/view), así que la clave de idempotencia se deriva del lado del
+    # servidor a partir de la ÚNICA acción que dispara este cobro: el voto
+    # de ESTE usuario en ESTA consulta. `debate_has_voted` ya impide un
+    # segundo voto del mismo usuario en la misma consulta, así que este
+    # bloque no puede ejecutarse dos veces para el mismo evento — pero la
+    # clave estable es defensa adicional, no la única barrera.
     try:
         matched_campaigns = _match_campaigns(user, debate, db)
         if matched_campaigns:
@@ -6072,7 +6622,8 @@ def _cast_vote_inner(debate_id: int, data, user, db):
             orm = top.get('_orm')
             if orm:
                 cpm_usd  = top.get('cpm') or 6.0
-                cost_clp = max(1, int(round((cpm_usd * USD_TO_CLP) / 1000.0)))
+                cost_credits = cpm_usd / 1000.0
+                cost_clp = max(1, int(round(cost_credits * USD_TO_CLP)))
                 db.add(AdImpressionLog(
                     campaign_id = orm.id,
                     debate_id   = debate_id,
@@ -6083,13 +6634,21 @@ def _cast_vote_inner(debate_id: int, data, user, db):
                     county      = user.county or '',
                     country     = user.country or '',
                 ))
-                # UPDATE atómico — mismo motivo que en get_opinions (ver comentario ahí)
-                db.execute(text("""
-                    UPDATE ad_campaigns
-                    SET spent_clp = LEAST(COALESCE(budget_clp, 0), COALESCE(spent_clp, 0) + :cost)
-                    WHERE id = :cid
-                """), {'cost': cost_clp, 'cid': orm.id})
-                db.commit()
+                db.flush()
+                vote_spend_result = _ledger_spend(
+                    db, orm, cost_credits,
+                    idempotency_key=f'spend:vote:{user.id}:{debate_id}',
+                    source='vote_ad', reference=f'{user.id}:{debate_id}',
+                    description=f'Post-vote impression, debate={debate_id}')
+                if not vote_spend_result['ok']:
+                    db.rollback()
+                    if vote_spend_result['reason'] == 'insufficient_balance':
+                        orm.is_active = False
+                        db.commit()
+                    # 'legacy_unreconciled' (o cualquier otro motivo): no se
+                    # factura, no queda log de impresión, no se toca
+                    # is_active — el voto en sí ya se confirmó y comprometió
+                    # arriba, esto solo decide si hubo cobro publicitario.
     except Exception as e:
         print(f'[cast_vote] ad impression error (non-fatal): {e}')
         db.rollback()
@@ -6642,6 +7201,13 @@ def _bind_campaign_to_caller(data: CampaignCreate, user: User) -> None:
         raise HTTPException(403, 'La campaña debe crearse con tu propio email')
 
 
+def _normalize_campaign_value_class(raw: str) -> str:
+    """CHANGE-001 — a campaign is REAL or DEMO, never anything else and
+    never ambiguous. Anything not exactly 'DEMO' defaults to the safe
+    choice, REAL, rather than silently accepting an unrecognised value."""
+    return 'DEMO' if (raw or '').strip().upper() == 'DEMO' else 'REAL'
+
+
 @app.post('/advertiser/campaigns')
 def create_campaign(data: CampaignCreate, db: Session = Depends(get_db),
                     user: User = Depends(get_verified_user)):
@@ -6652,6 +7218,11 @@ def create_campaign(data: CampaignCreate, db: Session = Depends(get_db),
         advertiser_name     = data.advertiser_name,
         title               = data.campaign_title,
         budget_clp          = data.budget_clp,
+        # CHANGE-001 — budget_clp es un TOPE declarado, no fondos. La
+        # campaña no queda "financiada" por crearla: solo lo está tras un
+        # POST /payments/allocate-to-campaign exitoso, que reserva del
+        # ledger. Ver _ledger_reserve.
+        value_class         = _normalize_campaign_value_class(getattr(data, 'value_class', 'REAL')),
         ad_type             = data.ad_type,
         target_country      = data.target_country,
         target_communes     = data.target_communes,
@@ -6821,6 +7392,13 @@ def track_ad_view(data: AdViewInput,
     if not _campaign_decision(user, campaign, debate, db).allowed:
         raise HTTPException(403, 'Campaign not eligible for this user')
 
+    # CHANGE-001 — la impresión y el cobro ahora se deciden juntos, en la
+    # MISMA transacción, a través del ledger canónico. Antes: `spent` se
+    # calculaba con un COUNT(*) no atómico (ventana de carrera entre
+    # peticiones concurrentes) y nunca se conciliaba con
+    # AdCampaign.spent_clp, que sólo escribía _append_campaign_ad — la
+    # misma campaña divergía según qué ruta la sirviera (recon CHANGE-001,
+    # hallazgo E).
     log = AdImpressionLog(
         campaign_id = data.campaign_id,
         debate_id   = data.debate_id,
@@ -6832,13 +7410,41 @@ def track_ad_view(data: AdViewInput,
         country     = user.country or '',
     )
     db.add(log)
-    total_imp = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == data.campaign_id).count() + 1
-    spent     = total_imp * COST_PER_VIEW
+    db.flush()   # obtiene log.id sin comprometer todavía la transacción
+
+    cost_credits = COST_PER_VIEW / USD_TO_CLP
+    idem_key = data.idempotency_key  # CHANGE-001 remediation (§2) — required, validated non-blank above; no row-id fallback
+    result = _ledger_spend(db, campaign, cost_credits, idempotency_key=idem_key,
+                           source='ads_view', reference=str(log.id),
+                           description=f'Impression served, debate={data.debate_id}')
+    if not result['ok']:
+        db.rollback()   # descarta también el log recién flusheado — no se cobró, no se registra
+        if result['reason'] == 'insufficient_balance':
+            campaign.is_active = False
+            db.commit()
+            return {'message': 'Budget exhausted', 'budget_exhausted': True,
+                    'campaign_id': data.campaign_id}
+        if result['reason'] == 'legacy_unreconciled':
+            # CHANGE-001 remediation (§5) — this campaign has never had a
+            # real ledger reservation (either brand-new and not yet
+            # funded, or a pre-CHANGE-001 legacy campaign). Distinct from
+            # budget exhaustion: NOT an error, and the campaign is left
+            # exactly as-is (never auto-deactivated) since "no reservation
+            # yet" is not evidence the advertiser wants to stop serving.
+            return {'message': 'Campaign has no funded ledger reservation yet',
+                    'not_billable': True, 'reason': 'legacy_unreconciled',
+                    'campaign_id': data.campaign_id}
+        raise HTTPException(400, f'Could not bill impression: {result["reason"]}')
+
+    db.expire(campaign, ['spent_clp'])
+    spent = campaign.spent_clp or 0
+    total_imp = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == data.campaign_id).count()
     if spent >= (campaign.budget_clp or 0):
         campaign.is_active = False
-    db.commit()
+        db.commit()
     return {
         'message':     'Impression recorded',
+        'idempotent':  result['idempotent'],
         'impressions': total_imp,
         'spent_clp':   spent,
         'balance_clp': max(0, (campaign.budget_clp or 0) - spent),
@@ -6848,27 +7454,32 @@ def track_ad_view(data: AdViewInput,
 def record_impression(
     campaign_id: int,
     debate_id:   int,
+    idempotency_key: str,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """
-    Records a paid impression and deducts Credits from campaign budget.
-    Uses CPM from targeting matrix (commune-based).
-    Returns False if campaign ran out of budget (caller should swap to next ad).
+    """Records a paid impression and bills the campaign's reserved balance.
 
-    CHANGE-002 — esta era la SEGUNDA via de facturacion y estaba marcada
-    `# anonymous ok`: sin sesion, sin targeting y sin comprobar que el
-    usuario pudiera siquiera ver la consulta, pero descontando creditos
-    reales del presupuesto con deduct_credits_for_impression. Cerrar
-    /ads/view sin cerrar esta habria dejado el mismo abuso disponible una
-    ruta mas alla.
+    CHANGE-001 — este era el puente RETIRADO: leía `cpm`, `status` y
+    `remaining_budget` de `ad_campaigns`, ninguna de las cuales existió
+    jamás en ningún esquema (confirmado ejecutando la ruta real: fallaba
+    siempre con `no such column`, para todo usuario elegible, desde antes
+    de CHANGE-002). Era una segunda implementación de facturación, muerta,
+    coexistiendo con /ads/view.
 
-    Ahora aplica exactamente la misma barrera canonica que /ads/view:
-    sesion, elegibilidad de la consulta y elegibilidad campana<->usuario.
+    Ahora delega en el MISMO camino canónico que /ads/view
+    (`_ledger_spend`), así que una campaña factura exactamente igual sin
+    importar qué ruta la sirvió — la divergencia que motivó CHANGE-001
+    deja de ser posible por construcción.
     """
+    if not idempotency_key or not idempotency_key.strip():
+        # CHANGE-001 remediation (§2) — fail closed: no key, no charge.
+        raise HTTPException(422, 'idempotency_key is required and cannot be blank')
     _campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not _campaign:
         raise HTTPException(404, 'Campaign not found')
+    if not _campaign.is_active:
+        return {'ok': False, 'error': 'Campaign not active'}
     _debate = None
     if debate_id:
         _debate = db.query(Debate).filter(Debate.id == debate_id).first()
@@ -6879,42 +7490,56 @@ def record_impression(
     if not _campaign_decision(user, _campaign, _debate, db).allowed:
         raise HTTPException(403, 'Campaign not eligible for this user')
 
-    from sqlalchemy import text as _text
-    # Get campaign CPM — prefer campaign's negotiated CPM, else use commune rate
-    row = db.execute(
-        _text("SELECT cpm, target_country, scope_commune, remaining_budget, status FROM ad_campaigns WHERE id=:cid"),
-        {'cid': campaign_id}
-    ).fetchone()
-    if not row:
-        return {'ok': False, 'error': 'Campaign not found'}
-    if row['status'] != 'active':
-        return {'ok': False, 'error': 'Campaign not active', 'status': row['status']}
+    log = AdImpressionLog(
+        campaign_id = campaign_id, debate_id = debate_id, user_id = user.id,
+        cost_clp = COST_PER_VIEW, gender = user.gender or '',
+        age_group = _get_age_group(user.dob), county = user.county or '',
+        country = user.country or '',
+    )
+    db.add(log)
+    db.flush()
 
-    cpm = float(row['cpm'] or 6.0)
-
-    # Deduct from budget and record impression
-    charged = deduct_credits_for_impression(db, campaign_id, cpm)
-
-    if not charged:
-        return {'ok': False, 'budget_exhausted': True, 'campaign_id': campaign_id}
+    cost_credits = COST_PER_VIEW / USD_TO_CLP
+    idem_key = idempotency_key  # CHANGE-001 remediation (§2) — required, validated non-blank above; no row-id fallback
+    result = _ledger_spend(db, _campaign, cost_credits, idempotency_key=idem_key,
+                           source='ads_impression', reference=str(log.id),
+                           description=f'Impression served, debate={debate_id}')
+    if not result['ok']:
+        db.rollback()
+        if result['reason'] == 'insufficient_balance':
+            _campaign.is_active = False
+            db.commit()
+            return {'ok': False, 'budget_exhausted': True, 'campaign_id': campaign_id}
+        if result['reason'] == 'legacy_unreconciled':
+            # CHANGE-001 remediation (§5) — see /ads/view for the same
+            # distinction. Not an error; the campaign is left untouched.
+            return {'ok': False, 'not_billable': True, 'reason': 'legacy_unreconciled',
+                   'campaign_id': campaign_id}
+        return {'ok': False, 'error': result['reason']}
 
     return {
         'ok':          True,
+        'idempotent':  result['idempotent'],
         'campaign_id': campaign_id,
         'debate_id':   debate_id,
-        'cost_this_impression': round(cpm / 1000, 5),
-        'cpm':         cpm,
+        'cost_this_impression': round(cost_credits, 5),
     }
 
 
 @app.post('/ads/click')
 def record_click(campaign_id: int, debate_id: int, db: Session = Depends(get_db)):
-    """Records a click on an ad. No credit deduction — billing is per impression only."""
-    from sqlalchemy import text as _text
-    db.execute(
-        _text("UPDATE ad_campaigns SET clicks = COALESCE(clicks,0)+1 WHERE id=:cid"),
-        {'cid': campaign_id}
-    )
+    """Records a click. No billing — click-through is not a paid event.
+
+    CHANGE-001 — retired the broken write to a `clicks` column that never
+    existed (every call 500ed: `no such column: clicks`). Now writes the
+    real, migrated `AdCampaign.clicks_count` column.
+    """
+    campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
+    if not campaign:
+        raise HTTPException(404, 'Campaign not found')
+    db.execute(text(
+        "UPDATE ad_campaigns SET clicks_count = COALESCE(clicks_count,0)+1 WHERE id=:cid"
+    ), {'cid': campaign_id})
     db.commit()
     return {'ok': True}
 
@@ -10306,6 +10931,7 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         advertiser_name     = data.advertiser_name,
         title               = data.campaign_title,
         budget_clp          = data.budget_clp,
+        value_class         = _normalize_campaign_value_class(getattr(data, 'value_class', 'REAL')),
         ad_type             = data.ad_type,
         target_country      = data.target_country,
         target_communes     = auto_communes,
@@ -11278,6 +11904,7 @@ class CryptoConfirmBody(BaseModel):
 class AllocateBudgetBody(BaseModel):
     campaign_id: int
     credits:     float
+    idempotency_key: Optional[str] = None  # CHANGE-001 — REST idempotency-key pattern
 
 
 @app.get('/payments/packages')
@@ -11360,15 +11987,13 @@ async def payments_stripe_webhook(
         return _JSONResponse({'ok': False, 'error': str(e)}, status_code=400)
 
     if result.get('action') == 'add_credits':
-        add_credits(
-            db             = db,
-            user_id        = result['user_id'],
-            amount_credits = result['credits'],
-            method         = result['method'],
-            ref            = result['ref'],
-            description    = result['desc'],
-            amount_usd     = result.get('amount_usd', 0),
-        )
+        # CHANGE-001 — dinero REAL entra al ledger canónico; el mirror en
+        # credit_accounts (payments.add_credits) lo hace _ledger_fund por
+        # dentro, con la MISMA idempotency key, así que un reintento de
+        # Stripe nunca puede acreditar dos veces por ninguna de las dos vías.
+        _ledger_fund(db, _ledger.REAL, result['user_id'], result['credits'],
+                    method=result['method'], idempotency_key=result['ref'],
+                    description=result['desc'], amount_usd=result.get('amount_usd', 0))
     return {'ok': True}
 
 
@@ -11399,16 +12024,14 @@ async def payments_stripe_fulfill(
     pkg        = PACKAGE_BY_ID.get(package_id, {})
     amount_usd = pkg.get('price_usd', 0)
 
-    result = add_credits(
-        db             = db,
-        user_id        = user.id,
-        amount_credits = credits,
-        method         = 'stripe',
-        ref            = session_id,
-        description    = f'Stripe checkout — {package_id}',
-        amount_usd     = amount_usd,
-    )
-    return result
+    result = _ledger_fund(db, _ledger.REAL, user.id, credits, method='stripe',
+                          idempotency_key=session_id,
+                          description=f'Stripe checkout — {package_id}',
+                          amount_usd=amount_usd)
+    if not result['ok']:
+        return {'ok': False, 'error': result['reason']}
+    return {'ok': True, 'idempotent': result['idempotent'], 'credits_added': credits,
+            'new_balance': _ledger_balance(db, _ledger.USER_REAL, user.id)}
 
 
 @app.post('/payments/crypto/quote')
@@ -11448,19 +12071,22 @@ def payments_crypto_confirm(
     """
     result = confirm_crypto_payment(db, user.id, body.request_id, body.tx_hash)
     if result.get('action') == 'add_credits':
-        credit_result = add_credits(
-            db             = db,
-            user_id        = result['user_id'],
-            amount_credits = result['credits'],
-            method         = result['method'],
-            ref            = result['ref'],
-            description    = result['desc'],
-            amount_usd     = result.get('amount_usd', 0),
-        )
+        # CHANGE-001 — confirm_crypto_payment no re-verifica status='pending'
+        # en su propio UPDATE (una carrera concurrente real, documentada en
+        # el recon de CHANGE-001), pero result['ref'] es determinista a
+        # partir del tx_hash verificado en cadena, así que dos confirmaciones
+        # concurrentes del MISMO pago colapsan aquí en un único crédito.
+        ledger_result = _ledger_fund(db, _ledger.REAL, result['user_id'], result['credits'],
+                                     method=result['method'], idempotency_key=result['ref'],
+                                     description=result['desc'],
+                                     amount_usd=result.get('amount_usd', 0))
+        if not ledger_result['ok']:
+            return {'ok': False, 'error': ledger_result['reason']}
         return {
             'ok':             True,
+            'idempotent':     ledger_result['idempotent'],
             'credits_added':  result['credits'],
-            'new_balance':    credit_result.get('new_balance', 0),
+            'new_balance':    _ledger_balance(db, _ledger.USER_REAL, result['user_id']),
             'tx_hash':        body.tx_hash,
             'payment_method': result['method'],
         }
@@ -11473,30 +12099,81 @@ def payments_allocate_budget(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Moves Credits from user account to a campaign's running budget."""
-    # CHANGE-002 — sin esto se podia financiar la campana de otro anunciante.
+    """Reserva Credits de la cuenta disponible del usuario hacia el
+    presupuesto de una campaña (CHANGE-001 D).
+
+    Reemplaza el puente roto payments.allocate_budget_to_campaign, que
+    escribía en AdCampaign.remaining_budget — columna que nunca existió en
+    ningún esquema (confirmado ejecutando la ruta real: fallaba siempre con
+    `no such column`). Ahora pasa por el ledger canónico: atómico, rechaza
+    saldo insuficiente sin escribir nada, y respeta la clase de valor
+    (REAL/DEMO) fija de la campaña — no la del cuerpo de la petición.
+    """
     _campaign = db.query(AdCampaign).filter(AdCampaign.id == body.campaign_id).first()
     if not _campaign:
         raise HTTPException(404, 'Campaign not found')
+    # CHANGE-002 — sin esto se podia financiar la campana de otro anunciante.
     _require_campaign_owner(user, _campaign, db)
-    return allocate_budget_to_campaign(db, user.id, body.campaign_id, body.credits)
+
+    idem_key = body.idempotency_key or _ledger_new_idempotency_key(
+        f'reserve:{body.campaign_id}:{user.id}')
+    result = _ledger_reserve(db, _campaign, user.id, body.credits, idempotency_key=idem_key)
+    if not result['ok']:
+        reason = result['reason']
+        error = ('Insufficient balance for this reservation' if reason == 'insufficient_balance'
+                else f'Could not allocate: {reason}')
+        return {'ok': False, 'error': error, 'reason': reason}
+
+    value_class = _campaign.value_class or _ledger.REAL
+    return {
+        'ok': True, 'idempotent': result['idempotent'], 'allocated': body.credits,
+        'value_class': value_class,
+        'remaining_account_balance': _ledger_balance(db, _ledger.user_account_kind(value_class), user.id),
+        'campaign_reserved_balance': _ledger_balance(db, _ledger.campaign_account_kind(value_class), _campaign.id),
+    }
 
 
 @app.post('/payments/return-from-campaign/{campaign_id}')
 def payments_return_budget(
     campaign_id: int,
+    idempotency_key: Optional[str] = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Returns unspent campaign budget to user's credit account (on pause/cancel)."""
-    # CHANGE-002 — esta ruta acredita remaining_budget en la cuenta de QUIEN
-    # LLAMA. Sin comprobacion de propiedad, cualquier usuario autenticado
-    # podia vaciar el presupuesto de una campana ajena hacia su propio saldo.
+    """Devuelve el saldo reservado y no gastado de una campaña a la cuenta
+    disponible del dueño, en la MISMA clase de valor (CHANGE-001 F:
+    REAL->REAL, DEMO->DEMO, nunca cruzado — estructuralmente imposible de
+    cruzar, ver ledger.build_release).
+
+    Reemplaza el puente roto payments.return_budget_to_account (mismo
+    `remaining_budget` inexistente).
+    """
+    # CHANGE-002 — esta ruta acredita el saldo devuelto en la cuenta de
+    # QUIEN LLAMA. Sin comprobacion de propiedad, cualquier usuario
+    # autenticado podia vaciar el presupuesto de una campana ajena.
     _campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not _campaign:
         raise HTTPException(404, 'Campaign not found')
     _require_campaign_owner(user, _campaign, db)
-    return return_budget_to_account(db, user.id, campaign_id)
+
+    value_class = _campaign.value_class or _ledger.REAL
+    reserved = _ledger_balance(db, _ledger.campaign_account_kind(value_class), campaign_id)
+    if reserved <= 0:
+        return {'ok': True, 'returned': 0, 'value_class': value_class}
+
+    idem_key = idempotency_key or _ledger_new_idempotency_key(f'release:{campaign_id}')
+    result = _ledger_release(db, _campaign, user.id, reserved, idempotency_key=idem_key)
+    if not result['ok']:
+        # La única razón realista aquí es una carrera concurrente que ya
+        # vació la reserva entre la lectura de arriba y este post — nunca
+        # una pérdida de fondos, el saldo simplemente ya no estaba.
+        return {'ok': True, 'returned': 0, 'value_class': value_class, 'note': result['reason']}
+
+    return {
+        'ok': True, 'idempotent': result['idempotent'], 'returned': reserved,
+        'value_class': value_class,
+        'new_balance': _ledger_balance(db, _ledger.user_account_kind(value_class), user.id),
+    }
 
 
 @app.get('/payments/history')
@@ -11798,20 +12475,60 @@ def payments_admin_manual(
     credits:     float,
     description: str,
     secret:      str,
+    idempotency_key: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    """Admin: manually add credits for a user (promos, support refunds, etc.)."""
+    """Admin: manually credit REAL value for a user (promos, support
+    refunds, etc.) (CHANGE-001 C). Admin-secret gated, unchanged from
+    before — the only change is that it now posts through the ledger."""
     if secret != os.getenv('ADMIN_SECRET'):
         raise HTTPException(403, 'Forbidden')
-    ref = f"admin_{user_id}_{int(time.time())}"
-    return add_credits(db, user_id, credits, 'manual', ref, description, tx_type='bonus')
+    idem_key = idempotency_key or f"admin_{user_id}_{int(time.time())}"
+    result = _ledger_fund(db, _ledger.REAL, user_id, credits, method='manual',
+                          idempotency_key=idem_key, description=description,
+                          legacy_tx_type='bonus')
+    if not result['ok']:
+        return {'ok': False, 'error': result['reason']}
+    return {'ok': True, 'idempotent': result['idempotent'], 'credits_added': credits,
+            'new_balance': _ledger_balance(db, _ledger.USER_REAL, user_id)}
 
 
 @app.post('/payments/demo-credits')
 def payments_demo_credits(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Add 500 demo credits to the requesting marketer's account (for testing)."""
-    ref = f"demo_{user.id}_{int(time.time())}"
-    return add_credits(db, user.id, 500.0, 'manual', ref, 'Demo credits — testing', tx_type='bonus')
+    """Grants a bounded DEMO credit issuance for testing the full campaign
+    flow (CHANGE-001 G): demo funding -> demo campaign allocation ->
+    matching/ad delivery -> demo spend -> demo remaining balance.
+
+    Self-only (the caller's own `user.id` — same authenticated identity
+    CHANGE-002 already established, no new auth mechanism). Bounded on
+    TWO independent axes so neither alone has to be perfect: one grant per
+    rolling UTC day (idempotency key) AND a hard lifetime cap regardless of
+    the key (`ledger.DEMO_GRANT_MAX_LIFETIME`). DEMO value is posted
+    exclusively to USER_DEMO — it NEVER touches `credit_accounts` (the
+    legacy REAL-only cache), so it can never be withdrawn, refunded, or
+    read back as real purchased funds, and can never fund a REAL campaign
+    (a REAL campaign's reservation account only accepts REAL entries —
+    ledger.build_reservation derives both legs from one value_class, see
+    ledger.py R3).
+
+    Replaces the previous unconditional, once-per-second-repeatable mint
+    (`ref = f"demo_{user.id}_{int(time.time())}"`, no admin gate, no cap —
+    CHANGE-001 recon flagged this as a live production defect independent
+    of this change).
+    """
+    result = _ledger_demo_grant(db, user.id)
+    if not result['ok']:
+        reason = result['reason']
+        if reason == 'lifetime_cap_reached':
+            return {'ok': False, 'error': 'Demo credit lifetime limit reached for this account',
+                   'reason': reason}
+        return {'ok': False, 'error': f'Could not grant demo credits: {reason}', 'reason': reason}
+    return {
+        'ok': True, 'idempotent': result['idempotent'],
+        'credits_added': 0 if result['idempotent'] else _ledger.DEMO_GRANT_AMOUNT,
+        'demo_balance': _ledger_balance(db, _ledger.USER_DEMO, user.id),
+        'note': 'DEMO credits only — cannot be withdrawn as real funds, cannot fund a REAL campaign.',
+    }
 
 
 @app.get('/admin/payments/pending-crypto')
@@ -14918,6 +15635,17 @@ def admin_recompute_campaign_spend(campaign_id: int, secret: str, db: Session = 
     c = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not c:
         raise HTTPException(404, 'Campaign not found')
+    # CHANGE-001 remediation (§1) — this predates the ledger and repairs a
+    # DIFFERENT, already-fixed corruption (the old opinions-count formula).
+    # For a LEDGER_MANAGED campaign, spent_clp is exclusively the mirror
+    # `_ledger_spend` writes from real ledger postings; overwriting it here
+    # with a differently-derived number would itself create the exact
+    # ledger/cache divergence CHANGE-001 exists to prevent. Only a
+    # LEGACY_UNRECONCILED campaign (no ledger truth to diverge from) may
+    # still use this repair tool.
+    if getattr(c, 'ledger_status', None) == 'LEDGER_MANAGED':
+        raise HTTPException(409, 'Campaign is ledger-managed; spent_clp is owned by the '
+                             'canonical ledger mirror, not this legacy repair tool')
     real_impressions = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == campaign_id).count()
     cost_each = _cost_per_impression_clp(c, db)
     before = c.spent_clp
@@ -15076,6 +15804,122 @@ def admin_socioeconomic_policy(secret: str):
                  'defaults for testing the corrected mechanism, not an approved '
                  'business decision. Business approval is required before these '
                  'thresholds drive any production reclassification.'),
+    }
+
+
+@app.get('/admin/ledger/policy')
+def admin_ledger_policy(secret: str):
+    """SOLO LECTURA — política DEMO actualmente en vigor (CHANGE-001
+    remediación §7). Mismo patrón que /admin/socioeconomic/policy: hace
+    visible en tiempo de ejecución que estos números son valores
+    PROVISIONALES para pruebas, no una decisión de negocio aprobada por JC.
+    Configurables vía DEMO_GRANT_AMOUNT_CREDITS / DEMO_GRANT_MAX_LIFETIME_CREDITS
+    sin tocar código."""
+    _check_admin(secret)
+    return {
+        'ok': True,
+        'policy_version': _ledger.DEMO_POLICY_VERSION,
+        'demo_grant_amount_credits': DEMO_GRANT_AMOUNT_CREDITS,
+        'demo_grant_max_lifetime_credits': DEMO_GRANT_MAX_LIFETIME_CREDITS,
+        'demo_grant_cooldown_seconds': _ledger.DEMO_GRANT_COOLDOWN_SECONDS,
+        'policy_approved_by_business': _ledger.DEMO_POLICY_APPROVED_BY_BUSINESS,
+        'note': ('These are PROVISIONAL testing defaults for exercising the full '
+                 'demo funding -> allocation -> spend -> release flow, not an '
+                 'approved business policy. Override via the '
+                 'DEMO_GRANT_AMOUNT_CREDITS / DEMO_GRANT_MAX_LIFETIME_CREDITS env '
+                 'vars — never by editing scattered call sites.'),
+    }
+
+
+@app.get('/admin/ledger/reconciliation')
+def admin_ledger_reconciliation(secret: str, limit: int = 500, db: Session = Depends(get_db)):
+    """SOLO LECTURA — compara las representaciones de dinero preexistentes
+    contra el ledger canónico (CHANGE-001 H).
+
+    NO ESCRIBE NADA. No repara nada automáticamente. Toda ambigüedad
+    histórica se reporta como ambigua — nunca se convierte silenciosamente
+    en un valor concreto (regla 4 de la autorización de CHANGE-001).
+
+    Reporta, por usuario y por campaña:
+      - saldo legacy (credit_accounts.balance_credits) vs saldo del ledger
+      - budget_clp/spent_clp declarados vs SUM(AdImpressionLog.cost_clp)
+        vs gasto reconocido por el ledger
+      - discrepancias, sin resolverlas
+
+    Los valores de ingreso/saldo NO se registran en logs de esta ruta —
+    sólo aparecen en la respuesta JSON al admin autenticado.
+    """
+    _check_admin(secret)
+    lim = min(int(limit or 500), 5000)
+
+    user_findings = []
+    for uid, legacy_bal in _ledger_all_credit_accounts(db, lim):
+        ledger_bal = _ledger_balance(db, _ledger.USER_REAL, uid)
+        row = _ledger.reconcile_user_balance(legacy_bal, ledger_bal)
+        if row['status'] != _ledger.RECON_OK:
+            row['user_id'] = uid
+            user_findings.append(row)
+
+    campaign_findings = []
+    # CHANGE-001 remediation (§6) — rollout classification taxonomy. Every
+    # campaign is bucketed into exactly one status category so a pre-deploy
+    # operator can see, at a glance, how many campaigns are already
+    # ledger-managed vs. still legacy — and specifically that NONE of the
+    # legacy ones were silently deactivated or given fabricated funds by
+    # this diagnostic (it only reads).
+    campaign_status_summary = {
+        'ledger_managed_active':        0,
+        'ledger_managed_inactive':      0,
+        'legacy_unreconciled_active':   0,
+        'legacy_unreconciled_inactive': 0,
+    }
+    ambiguous_funding_provenance = []
+    for c in db.query(AdCampaign).limit(lim).all():
+        log_sum = db.execute(text(
+            "SELECT COALESCE(SUM(cost_clp),0) FROM ad_impression_logs WHERE campaign_id=:cid"
+        ), {'cid': c.id}).fetchone()[0]
+        value_class = c.value_class or _ledger.REAL
+        per_campaign_spend = _ledger_campaign_recognized_spend(db, value_class, c.id)
+        row = _ledger.reconcile_campaign_spend(
+            budget_clp=c.budget_clp, spent_clp=c.spent_clp,
+            impression_log_sum_clp=log_sum,
+            ledger_spend_credits=per_campaign_spend, usd_to_clp=USD_TO_CLP)
+        if row['status'] != _ledger.RECON_OK:
+            row['campaign_id'] = c.id
+            row['value_class'] = value_class
+            campaign_findings.append(row)
+
+        status = getattr(c, 'ledger_status', None) or 'LEGACY_UNRECONCILED'
+        if status == 'LEDGER_MANAGED':
+            campaign_status_summary['ledger_managed_active' if c.is_active
+                                    else 'ledger_managed_inactive'] += 1
+        else:
+            campaign_status_summary['legacy_unreconciled_active' if c.is_active
+                                    else 'legacy_unreconciled_inactive'] += 1
+            if (c.spent_clp or 0) > 0:
+                # A pre-ledger campaign that shows historical spend: CHANGE-001
+                # recon proved budget_clp/spent_clp were never verified against
+                # any real payment, so whether this spend was ever backed by
+                # real money is genuinely UNKNOWN — not assumed either way,
+                # never silently resolved to a number (JC's rule 4).
+                ambiguous_funding_provenance.append({
+                    'campaign_id': c.id, 'value_class': value_class,
+                    'budget_clp': c.budget_clp, 'spent_clp': c.spent_clp,
+                    'reason': ('legacy campaign with historical spent_clp but no '
+                              'ledger reservation was ever made for it — provenance '
+                              'of that spend cannot be verified from the ledger'),
+                })
+
+    return {
+        'ok': True, 'dry_run': True, 'wrote_nothing': True,
+        'policy_version': _ledger.POLICY_VERSION,
+        'user_balance_mismatches': user_findings,
+        'campaign_spend_mismatches': campaign_findings,
+        'campaign_status_summary': campaign_status_summary,
+        'ambiguous_funding_provenance': ambiguous_funding_provenance,
+        'note': ('Read-only diagnostic. Ambiguous or diverging historical values are '
+                'reported here for review — none of them are automatically corrected. '
+                'Any correction requires explicit separate authorization.'),
     }
 
 
