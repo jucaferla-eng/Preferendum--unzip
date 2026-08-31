@@ -1,5 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<!-- COMPLETE INTERNATIONALIZATION REMEDIATION — corrected from lang="en":
+     this portal's actual UI copy (targeting criteria, socioeconomic
+     labels, etc.) is predominantly Spanish, consistent with the rest of
+     Preferendum's Spanish-authored surfaces; a handful of English
+     fragments (e.g. "Sign out") appear to be a pre-existing partial
+     translation, not evidence the page is English-authored. -->
+<html lang="es" data-source-lang="es">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -177,7 +183,9 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
 .goog-te-banner-frame{display:none!important;}body{top:0!important;}
 .goog-te-gadget{font-size:0!important;}
 .goog-te-gadget select{font-size:11px!important;background:var(--ink3)!important;color:var(--paper)!important;border:1px solid var(--border)!important;border-radius:6px!important;padding:3px 6px!important;cursor:pointer!important;}
+#gt-widget-mktr{display:none!important;}
 </style>
+<script src="/lang.js"></script>
 <script src="/translate.js"></script>
 <style>
 #gt-float{position:fixed;top:12px;right:12px;z-index:99999;background:rgba(13,17,32,0.92);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
@@ -188,6 +196,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
 
 <!-- TRANSLATE WIDGET — always visible, even on login screen -->
 <div id="gt-float">
+  <div data-pref-lang-selector style="display:inline-block;vertical-align:middle;"></div>
   <div id="gt-widget-mktr" style="display:inline-block;vertical-align:middle;"></div>
 </div>
 
@@ -906,7 +915,8 @@ async function doRegister() {
   const country = document.getElementById('reg-country').value;
   if (!name || !email || !pass) return;
   const r = await fetch(`${API}/auth/register`, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name, email, password: pass, phone:'', country, dob:'', county:'', gender:'', national_id:''})});
+    body: JSON.stringify({name, email, password: pass, phone:'', country, dob:'', county:'', gender:'', national_id:'',
+      lang: window.PreferendumLang ? window.PreferendumLang.currentLanguage() : ''})});
   const d = await r.json();
   if (!r.ok) { showErr('reg-err', d.detail || 'Registration failed'); return; }
   if (d.token) {

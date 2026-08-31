@@ -682,13 +682,43 @@ _COMPANY_BUCKET_RANKS = {
 }
 
 
+# CHANGE-003 remediation (audit finding K) — numeric employee-count
+# boundaries, matching COMPANY_SIZE_ORDER exactly. A bare headcount (e.g.
+# 500, "500") is unambiguous — 500 employees falls numerically inside
+# 251-1000 — but was previously unrecognised by norm_company_size (fell
+# through every string-keyed alias, returned 0/unknown). This does NOT
+# change '500+': that literal string is a distinct, pre-existing legacy
+# ALIAS (see _COMPANY_SIZE_RANK's "Legacy vocabulary" entry, and
+# marketer_portal.html's own UI copy — "Empresa grande (500+ emp.)" is
+# explicitly the label for the TOP bucket), not a count, and stays mapped
+# to rank 5 exactly as before for backward compatibility with existing
+# stored records and that UI. Only a value that parses as a plain integer
+# with nothing else in the string is treated as a headcount — no fuzzy
+# extraction from free text like "approximately 500 employees".
+_COMPANY_SIZE_NUMERIC_BOUNDS = (
+    (1, 10, 1), (11, 50, 2), (51, 250, 3), (251, 1000, 4),
+)   # n > 1000 -> rank 5 (+1000 means 1000+ only); n <= 0 -> unknown
+
+
 def norm_company_size(v: Any) -> int:
     """-> ordinal 1..5, or 0 when unknown/unrecognised."""
     s = _base(v)
     if not s:
         return 0
     key = _strip_accents(s).casefold().replace(' ', '')
-    return _COMPANY_SIZE_RANK.get(key, 0)
+    rank = _COMPANY_SIZE_RANK.get(key)
+    if rank is not None:
+        return rank
+    try:
+        n = int(key)
+    except ValueError:
+        return 0
+    if n <= 0:
+        return 0
+    for lo, hi, r in _COMPANY_SIZE_NUMERIC_BOUNDS:
+        if lo <= n <= hi:
+            return r
+    return 5
 
 
 def company_size_target_ranks(v: Any) -> set:
@@ -834,7 +864,8 @@ class UserProfile:
         return {s: getattr(self, s) for s in self.__slots__}
 
 
-def profile_from_user(user: Any, country_per_capita_ppp_usd=None, today=None) -> Optional[UserProfile]:
+def profile_from_user(user: Any, country_per_capita_ppp_usd=None, today=None,
+                      occupation_override: Optional[str] = None) -> Optional[UserProfile]:
     """Adapter: ORM `User` row -> normalized snapshot.
 
     `country_per_capita_ppp_usd` is resolved by the caller and injected,
@@ -842,9 +873,22 @@ def profile_from_user(user: Any, country_per_capita_ppp_usd=None, today=None) ->
     figure (World Bank NY.GNP.PCAP.PP.CD or equivalent), never nominal GDP
     per capita — the two differ by 2-3x for most emerging markets, so
     substituting one for the other silently changes who is eligible.
+
+    `occupation_override` (GLOBAL OCCUPATION RESOLUTION HARDENING) — same
+    pattern: the caller (main.py) may have already canonicalized a
+    natural-language occupation title (e.g. "Ingeniero Industrial") to its
+    SOC code via socioeconomic.resolve_occupation_soc, exactly as income
+    estimation does. Passing that resolved value here keeps occupation
+    TARGETING consistent with occupation-based income ESTIMATION for the
+    SAME input, without this dependency-free module importing
+    socioeconomic.py itself. When omitted (None), behavior is unchanged:
+    the raw stored `user.profession` is used, so every existing legacy
+    slug ('ing_civil', 'medico', ...) still resolves exactly as before.
     """
     if user is None:
         return None
+    _occupation = (occupation_override if occupation_override is not None
+                  else _base(_g(user, 'profession', '')))
     return UserProfile(
         user_id=_g(user, 'id'),
         country=norm_country(_g(user, 'country', '')),
@@ -853,7 +897,7 @@ def profile_from_user(user: Any, country_per_capita_ppp_usd=None, today=None) ->
         age=parse_age(_g(user, 'dob', ''), today=today),
         se_tier=norm_tier(_g(user, 'se_tier', '')),
         tier_is_inherited=bool(_g(user, 'tier_pre_evaluated', False)),
-        occupation=_base(_g(user, 'profession', '')),
+        occupation=_occupation,
         cargo=norm_cargo(_g(user, 'cargo', '')),
         company_size_rank=norm_company_size(_g(user, 'company_size', '')),
         estimated_income_usd=_g(user, 'estimated_income_usd', None),

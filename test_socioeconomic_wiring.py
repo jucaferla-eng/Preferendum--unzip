@@ -261,8 +261,8 @@ class TestNoPromotionWiring(unittest.TestCase):
                     out.append((n.lineno, ast.dump(n.value)))
         return out
 
-    def test_se_tier_has_exactly_four_known_writers(self):
-        """Four are legitimate and each is a DIFFERENT kind of thing:
+    def test_se_tier_has_exactly_three_known_writers(self):
+        """Three are legitimate and each is a DIFFERENT kind of thing:
 
           1. the canonical classifier's RESOLVED result      (the decision)
           2. the canonical classifier's UNRESOLVED result,
@@ -271,14 +271,23 @@ class TestNoPromotionWiring(unittest.TestCase):
              keep granting CHANGE-002 eligibility once it
              can no longer be recomputed                     (the invalidation)
           3. the write-back that echoes it onto the ORM row  (persistence)
-          4. referral inheritance, which CHANGE-002 already
-             flags via tier_pre_evaluated                    (inherited, not computed)
 
-        A fifth writer means somebody has invented a second way to decide a
-        socioeconomic tier, which is exactly what this change removed.
+        A fourth writer used to exist: _voter_register_inner copying a
+        REFERRER's se_tier directly onto a brand-new user via raw SQL
+        whenever the new user's own tier could not be resolved
+        (tier_pre_evaluated=TRUE). FINAL SOCIOECONOMIC ASSIGNMENT HARDENING
+        Phase 1 removed it — CHANGE-002 flagging tier_pre_evaluated in a
+        diagnostic string was never a substitute for the tier itself being
+        real economic evidence. See TestReferralTierNoLongerInherited in
+        test_socioeconomic_estimator_remediation.py for the regression and
+        mutation coverage of the removal.
+
+        A fourth writer reappearing means somebody has invented a second
+        way to decide a socioeconomic tier, which is exactly what this
+        change removed.
         """
         writers = self._se_tier_writers()
-        self.assertEqual(len(writers), 4,
+        self.assertEqual(len(writers), 3,
                          f'unexpected se_tier writers at lines '
                          f'{[l for l, _ in writers]}')
 
@@ -949,14 +958,134 @@ class TestChange002NotWeakened(Base):
         for path in ('/debates', '/debates/feed'):
             self.assertIn(self.client.get(path).status_code, (401, 403), path)
 
+    # Socioeconomic-estimator remediation explicitly authorized ONE
+    # additive change to a shared helper eligibility.py owns:
+    # norm_company_size (bare numeric headcounts, e.g. 500, now resolve to
+    # the 251-1000 bucket by numeric range — see eligibility.py's own
+    # comment on _COMPANY_SIZE_NUMERIC_BOUNDS). GLOBAL OCCUPATION
+    # RESOLUTION HARDENING then added ONE more: profile_from_user grew an
+    # optional occupation_override parameter (default None -> unchanged
+    # behavior for every existing caller) so main.py can hand it an
+    # already-canonicalized SOC code without eligibility.py importing
+    # socioeconomic.py itself — still dependency-free.
+    _CHANGE003_AUTHORIZED_ELIGIBILITY_SYMBOLS = frozenset({
+        'norm_company_size', '_COMPANY_SIZE_NUMERIC_BOUNDS', 'profile_from_user',
+    })
+
     def test_canonical_evaluator_module_is_untouched_by_change003(self):
-        """CHANGE-003 adds a module; it does not edit the CHANGE-002 one."""
+        """CHANGE-003 does not edit eligibility.py, with exactly one named,
+        authorized exception: the shared company-size normalizer.
+
+        Rather than a blanket byte-diff (which the authorized change would
+        always trip), this proves the stronger, more precise invariant —
+        parse BOTH the pre-remediation commit's eligibility.py and the
+        current working-tree version, and assert every top-level
+        function/class/assignment OUTSIDE the named exception set is
+        byte-identical between the two. Any OTHER change anywhere in this
+        file — the actual thing CHANGE-002 integrity depends on — still
+        fails this test exactly as before.
+        """
         import subprocess
-        out = subprocess.run(
-            ['git', 'diff', '--name-only', 'HEAD', '--', 'eligibility.py'],
-            cwd=Path(main.__file__).parent, capture_output=True, text=True)
-        self.assertEqual(out.stdout.strip(), '',
-                         'eligibility.py was modified by CHANGE-003')
+        parent = Path(main.__file__).parent
+        # Pinned to the exact commit this remediation branched from — NOT
+        # "HEAD", which would silently start pointing at this remediation's
+        # own commit (and always trivially pass) the moment it lands.
+        _PRE_REMEDIATION_SHA = 'ac4201855e18077c6f0804f127bee3d742b0c34c'
+        old_src = subprocess.run(
+            ['git', 'show', f'{_PRE_REMEDIATION_SHA}:eligibility.py'],
+            cwd=parent, capture_output=True, text=True).stdout
+        new_src = (parent / 'eligibility.py').read_text(encoding='utf-8')
+
+        def top_level_blocks(src):
+            tree = ast.parse(src)
+            blocks = {}
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    blocks[node.name] = ast.get_source_segment(src, node)
+                elif isinstance(node, ast.Assign):
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            blocks[tgt.id] = ast.get_source_segment(src, node)
+            return blocks
+
+        old_blocks = top_level_blocks(old_src)
+        new_blocks = top_level_blocks(new_src)
+
+        allowed = self._CHANGE003_AUTHORIZED_ELIGIBILITY_SYMBOLS
+        unexpected_new = set(new_blocks) - set(old_blocks) - allowed
+        self.assertEqual(unexpected_new, set(),
+                         f'unauthorized new symbol(s) added to eligibility.py: {unexpected_new}')
+        for name in set(old_blocks) & set(new_blocks):
+            if name in allowed:
+                continue
+            self.assertEqual(old_blocks[name], new_blocks[name],
+                             f'eligibility.py symbol {name!r} was modified by CHANGE-003 '
+                             f'outside the authorized exception set')
+        removed = set(old_blocks) - set(new_blocks)
+        self.assertEqual(removed, set(), f'symbol(s) removed from eligibility.py: {removed}')
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# FINAL SOCIOECONOMIC ASSIGNMENT HARDENING Phase 9 — matching integration:
+# targeting dimensions are independent, not collapsed into se_tier.
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestTargetingDimensionsAreIndependent(unittest.TestCase):
+    """Proves the task's own worked example directly against the real
+    evaluator: 'A campaign targeted to Conchalí must still be able to
+    target Conchalí directly even if two users have the same
+    socioeconomic tier.' Uses E.UserProfile/E.CampaignTarget/
+    E.evaluate_campaign directly — no HTTP, no DB — because eligibility.py
+    is dependency-free by design (see its own module docstring)."""
+
+    def test_commune_targeting_distinguishes_two_users_with_identical_tier(self):
+        conchali_user = E.UserProfile(country='CL', commune='Conchalí', se_tier='B',
+                                      age=35, is_authenticated=True)
+        las_condes_user = E.UserProfile(country='CL', commune='Las Condes', se_tier='B',
+                                        age=35, is_authenticated=True)
+        target = E.CampaignTarget(communes={'Conchalí'}, gender='all')
+        self.assertTrue(E.evaluate_campaign(conchali_user, target).allowed,
+                        'the Conchalí user must match a Conchalí-only campaign')
+        self.assertFalse(E.evaluate_campaign(las_condes_user, target).allowed,
+                         'the Las Condes user must NOT match a Conchalí-only campaign, '
+                         'despite sharing the exact same se_tier')
+
+    def test_tier_targeting_is_independent_of_commune(self):
+        """The inverse: a tier-only campaign must not silently also
+        require any particular commune."""
+        tier_a_conchali = E.UserProfile(country='CL', commune='Conchalí', se_tier='A', age=35)
+        tier_a_las_condes = E.UserProfile(country='CL', commune='Las Condes', se_tier='A', age=35)
+        target = E.CampaignTarget(tiers={'A'}, gender='all')
+        self.assertTrue(E.evaluate_campaign(tier_a_conchali, target).allowed)
+        self.assertTrue(E.evaluate_campaign(tier_a_las_condes, target).allowed)
+
+    def test_eligible_on_every_criterion_matches(self):
+        p = E.UserProfile(country='CL', commune='Conchalí', se_tier='B', age=35,
+                          occupation='17-2112', company_size_rank=4)
+        target = E.CampaignTarget(countries={'CL'}, communes={'Conchalí'}, tiers={'B'},
+                                  age_min=18, age_max=65, gender='all')
+        self.assertTrue(E.evaluate_campaign(p, target).allowed)
+
+    def test_ineligible_by_a_single_criterion_is_excluded(self):
+        """Everything matches except age -- the whole decision must still
+        deny, proving no single dimension can be silently skipped."""
+        p = E.UserProfile(country='CL', commune='Conchalí', se_tier='B', age=70,
+                          occupation='17-2112', company_size_rank=4)
+        target = E.CampaignTarget(countries={'CL'}, communes={'Conchalí'}, tiers={'B'},
+                                  age_min=18, age_max=65, gender='all')
+        self.assertFalse(E.evaluate_campaign(p, target).allowed)
+
+    def test_unresolved_tier_is_denied_by_a_tier_restricted_campaign_never_guessed(self):
+        p = E.UserProfile(country='CL', commune='Conchalí', se_tier='', age=35)
+        target = E.CampaignTarget(tiers={'A', 'B'}, gender='all')
+        self.assertFalse(E.evaluate_campaign(p, target).allowed)
+
+    def test_unresolved_tier_does_not_block_a_campaign_that_never_asked_for_tier(self):
+        """A commune-only campaign must not incidentally require a
+        resolved tier -- se_tier is NOT_CONSTRAINED here, not UNKNOWN."""
+        p = E.UserProfile(country='CL', commune='Conchalí', se_tier='', age=35)
+        target = E.CampaignTarget(communes={'Conchalí'}, gender='all')
+        self.assertTrue(E.evaluate_campaign(p, target).allowed)
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-source-lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -91,13 +91,16 @@ section{padding:100px 80px;max-width:1200px;margin:0 auto;width:100%;}
 .goog-te-banner-frame{display:none!important;}body{top:0!important;}
 .goog-te-gadget{font-size:0!important;}
 .goog-te-gadget select{font-size:11px!important;background:var(--ink3,#151b2e)!important;color:var(--paper,#f5f3ee)!important;border:1px solid rgba(255,255,255,0.15)!important;border-radius:6px!important;padding:3px 6px!important;cursor:pointer!important;}
+#gt-widget-mktlanding{display:none!important;}
 </style>
+<script src="/lang.js"></script>
 <script src="/translate.js"></script>
 </head>
 <body>
 
 <nav class="nav">
   <div class="nav-logo">prefer<span>endum</span></div>
+  <div data-pref-lang-selector style="display:inline-block;vertical-align:middle;margin-right:12px;"></div>
   <div id="gt-widget-mktlanding" style="display:inline-block;vertical-align:middle;margin-right:12px;"></div>
   <button class="nav-cta" onclick="document.querySelector('.cta-section').scrollIntoView({behavior:'smooth'})">Start advertising →</button>
 </nav>

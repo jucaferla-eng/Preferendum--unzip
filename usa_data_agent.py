@@ -270,6 +270,106 @@ def import_bea_to_db(db) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# IMPORTACIÓN BLS SOC -> occupation_unified (FINAL SOCIOECONOMIC ASSIGNMENT
+# HARDENING, Phase 3)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# SOC major_group (2-digit BLS prefix, e.g. '17-0000') -> ISCO-08 major group.
+# Derived, not invented: cross-referenced from the two ALREADY-APPROVED
+# legacy mapping dicts in main.py (_US_PROFESSION_SOC: category -> major_group,
+# _OCC_TO_ISCO: category -> isco_group) via their shared category keys. For
+# 19 of the 21 major groups every category key sharing that major_group
+# agrees on a single ISCO value, so the value is unambiguous. Two major
+# groups carry a genuine internal split in that pre-existing mapping:
+#   '17-0000' (Architecture & Engineering): engineering/ing_civil/arquitecto/
+#     ing_otro -> 2 (Professionals), but tecnico -> 3 (Technicians) — SOC's
+#     17-0000 spans both 17-2xxx (engineers) and 17-3xxx (eng. technicians),
+#     a distinction the 2-digit major_group cannot resolve.
+#   '29-0000' (Healthcare Practitioners & Technical): medico/dentista/
+#     farmaceutico/healthcare_pro -> 2, but enfermero -> 3.
+# For both, the majority (4 of 5 keys) and the major group's own predominant
+# occupations resolve to 2 (Professionals); that value is used for the BLS
+# import below. This is a documented DATA LIMITATION inherited from the
+# pre-existing mapping, not a new approximation invented by this import —
+# see the final hardening report. It affects only occupation_unified.isco_group
+# (the fallback path a NON-US user takes when submitting a raw US SOC code),
+# never occupation_code/title/profession_score/median_annual_usd, which come
+# straight from the tracked BLS CSV with no interpretation.
+_BLS_MAJOR_GROUP_TO_ISCO: dict[str, int] = {
+    '11-0000': 1, '13-0000': 2, '15-0000': 2, '17-0000': 2, '19-0000': 2,
+    '21-0000': 2, '23-0000': 2, '25-0000': 2, '27-0000': 2, '29-0000': 2,
+    '31-0000': 3, '33-0000': 5, '35-0000': 5, '37-0000': 9, '39-0000': 5,
+    '41-0000': 5, '43-0000': 4, '45-0000': 6, '47-0000': 7, '49-0000': 7,
+    '51-0000': 8, '53-0000': 8,
+}
+
+
+def import_bls_occupations_to_db(db) -> dict:
+    """Importa las 818 ocupaciones BLS OES May 2025 (bls_occupation_scores_2025.csv,
+    ya trackeado en el repo) a occupation_unified: una fila por SOC code,
+    country_iso='US', occupation_type='SOC'.
+
+    Idempotente / re-ejecutable: hace SELECT por (occupation_code, country_iso)
+    y UPDATE si ya existe, INSERT si no — sin duplicados sin importar cuántas
+    veces se corra, y sin depender de un UNIQUE constraint en el schema (no
+    lo tiene). No fabrica ocupación ni salario: occupation_code/title/
+    profession_score/median_annual_usd vienen directo del CSV tracked;
+    isco_group viene de _BLS_MAJOR_GROUP_TO_ISCO (ver comentario arriba).
+    """
+    _load()
+    if not _bls_by_soc:
+        return {'ok': False, 'error': 'BLS CSV no cargado', 'inserted': 0, 'updated': 0}
+
+    from sqlalchemy import text as sa_text
+
+    inserted = updated = 0
+    for soc_code, row in _bls_by_soc.items():
+        major_group = row.get('major_group', '')
+        isco_grp = _BLS_MAJOR_GROUP_TO_ISCO.get(major_group)
+        title = row.get('title', '')
+        score = row.get('profession_score')
+        median = row.get('national_median_salary_usd')
+        try:
+            existing = db.execute(sa_text("""
+                SELECT id FROM occupation_unified
+                WHERE occupation_code=:code AND country_iso='US'
+            """), {'code': soc_code}).fetchone()
+            if existing:
+                db.execute(sa_text("""
+                    UPDATE occupation_unified
+                    SET occupation_type='SOC', isco_group=:ig, title=:t,
+                        profession_score=:sc, median_annual_usd=:med
+                    WHERE id=:id
+                """), {'ig': isco_grp, 't': title, 'sc': score, 'med': median, 'id': existing[0]})
+                updated += 1
+            else:
+                db.execute(sa_text("""
+                    INSERT INTO occupation_unified
+                      (occupation_code, country_iso, occupation_type, isco_group,
+                       isco_label, title, profession_score, median_annual_usd)
+                    VALUES (:code, 'US', 'SOC', :ig, NULL, :t, :sc, :med)
+                """), {'code': soc_code, 'ig': isco_grp, 't': title, 'sc': score, 'med': median})
+                inserted += 1
+        except Exception as e:
+            log.error(f"[USADataAgent] Error importando SOC {soc_code}: {e}")
+
+    try:
+        db.commit()
+    except Exception:
+        pass
+
+    log.info(f"[USADataAgent] BLS SOC import completo: {inserted} nuevas, {updated} actualizadas")
+    return {
+        'ok':        True,
+        'inserted':  inserted,
+        'updated':   updated,
+        'total':     len(_bls_by_soc),
+        'source':    'BLS OES May 2025 (bls_occupation_scores_2025.csv)',
+        'updated_at': datetime.utcnow().isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # ESTADÍSTICAS
 # ─────────────────────────────────────────────────────────────────────────────
 def get_stats() -> dict:

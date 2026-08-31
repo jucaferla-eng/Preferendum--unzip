@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-source-lang="es">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
@@ -13,7 +13,12 @@ body{top:0!important;}
 .goog-te-gadget{font-size:0!important;}
 .goog-te-gadget select{font-size:12px!important;background:#1a2332!important;color:#f0f4ff!important;border:1px solid rgba(255,255,255,0.15)!important;border-radius:6px!important;padding:4px 6px!important;cursor:pointer!important;}
 #gt-bar{display:none!important;}
+/* The raw Google dropdown is superseded by the unified selector below —
+   kept in the DOM (hidden) so google.translate.TranslateElement still
+   initializes and functions as the translation ENGINE. */
+#gt-widget{display:none!important;}
 </style>
+<script src="/lang.js"></script>
 <script src="/translate.js"></script>
 <style>
 #gt-float{position:fixed;top:10px;right:10px;z-index:99999;background:rgba(10,13,20,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
@@ -292,6 +297,7 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 
 <!-- TRANSLATE — always visible from first screen -->
 <div id="gt-float">
+  <div data-pref-lang-selector style="display:inline-block;vertical-align:middle;"></div>
   <div id="gt-widget" style="display:inline-block;vertical-align:middle;"></div>
 </div>
 
@@ -447,7 +453,7 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
                style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:rgba(255,255,255,0.07);color:#fff;font-size:15px;box-sizing:border-box;">
         <div id="occ-results" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:260px;overflow-y:auto;background:#0f1c35;border:1px solid rgba(255,255,255,0.18);border-top:none;border-radius:0 0 8px 8px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);"></div>
         <input type="hidden" id="r-profession" value="">
-        <div id="occ-hint" style="font-size:11px;color:#8899bb;margin-top:4px;">Ej: Software Developer, Civil Engineer, Registered Nurse, Lawyer…</div>
+        <div id="occ-hint" style="font-size:11px;color:#8899bb;margin-top:4px;">Ej: Médico, Ingeniero Civil, Enfermera, Abogado, Software Developer…</div>
       </div>
       <div class="field">
         <label>Número de empleados en tu empresa</label>
@@ -657,6 +663,14 @@ async function _loadOccData() {
   return _occData;
 }
 
+// GLOBAL OCCUPATION RESOLUTION HARDENING — accent-insensitive normalization
+// so a Spanish-speaking user's input ("Médico", "ingenieria") matches
+// against the (unaccented) aliases_es list the backend sends, the same way
+// socioeconomic._normalize_occupation_key does server-side.
+function _occNorm(s) {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
 function _setupOccSearch() {
   const input   = document.getElementById('occ-search');
   const results = document.getElementById('occ-results');
@@ -665,17 +679,38 @@ function _setupOccSearch() {
   input.addEventListener('focus', () => _loadOccData());
 
   input.addEventListener('input', async function() {
-    const q = this.value.trim().toLowerCase();
+    const q = _occNorm(this.value.trim());
     if (q.length < 2) { results.style.display = 'none'; return; }
     const occs = await _loadOccData();
-    const matches = occs.filter(o => o.title.toLowerCase().includes(q)).slice(0, 18);
+    // COMPLETE INTERNATIONALIZATION REMEDIATION (Section 8) — searching
+    // stays bilingual (a user may type in either language regardless of
+    // their selected UI language, which is good UX), but the DISPLAYED
+    // label now deterministically follows the resolved UI language
+    // instead of "whichever alias happened to match the typed text".
+    // Canonical occupation identity (the stored SOC `code`) never
+    // changes with display language -- only the label shown here does.
+    const viewLang = getViewerLang();
+    const matches = occs
+      .map(o => {
+        const esAliases = o.aliases_es || [];
+        const esHit = esAliases.find(a => _occNorm(a).includes(q));
+        const enHit = _occNorm(o.title).includes(q);
+        if (!esHit && !enHit) return null;
+        const preferSpanish = viewLang === 'es' && esAliases.length;
+        const label = preferSpanish
+          ? (esHit || esAliases[0]).charAt(0).toUpperCase() + (esHit || esAliases[0]).slice(1)
+          : o.title;
+        const sub = preferSpanish ? o.title : (esHit ? o.title : o.group_name);
+        return {occ: o, label, sub};
+      })
+      .filter(Boolean)
+      .slice(0, 18);
     if (!matches.length) { results.style.display = 'none'; return; }
-    results.innerHTML = matches.map(o => {
-      const hi = o.title.replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'), 'gi'), m => `<strong>${m}</strong>`);
+    results.innerHTML = matches.map(({occ: o, label, sub}) => {
       return `<div class="occ-item" data-code="${o.code}" data-title="${o.title.replace(/"/g,'&quot;')}"
                    style="padding:9px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.06);">
-                <div style="font-size:14px;color:#e8f0ff;">${hi}</div>
-                <div style="font-size:11px;color:#6677aa;margin-top:1px;">${o.group_name}</div>
+                <div style="font-size:14px;color:#e8f0ff;">${label}</div>
+                <div style="font-size:11px;color:#6677aa;margin-top:1px;">${sub}</div>
               </div>`;
     }).join('');
     results.style.display = 'block';
@@ -706,18 +741,13 @@ function _setupOccSearch() {
 window.addEventListener('DOMContentLoaded', _setupOccSearch);
 // ─────────────────────────────────────────────────────────────────────────────
 
-const LANG_BY_COUNTRY = {
-  CL:'es', AR:'es', PE:'es', MX:'es', CO:'es', ES:'es', UY:'es',
-  VE:'es', EC:'es', BO:'es', PY:'es',
-  BR:'pt', PT:'pt',
-  US:'en', GB:'en', AU:'en', CA:'en', ZA:'en', NG:'en', IN:'en',
-  DE:'de', AT:'de', CH:'de',
-  FR:'fr', BE:'fr',
-  IT:'it',
-  JP:'ja',
-  KR:'ko',
-  GL:'es',
-};
+// COMPLETE INTERNATIONALIZATION REMEDIATION — the country->language
+// fallback table (formerly LANG_BY_COUNTRY, hand-maintained here) now
+// lives in ONE place, lang.js's PreferendumLang.COUNTRY_DEFAULT_LANGUAGE,
+// shared by every portal and consulted only as precedence tier 3 (after
+// explicit choice and device language), and deliberately WITHOUT entries
+// for multilingual countries (US, GB, AU, CA, ZA, NG, IN, CH, BE...) —
+// see lang.js's own comment for why.
 
 // ── UI STRING TRANSLATIONS ────────────────────────────────────────────────────
 const UI_STRINGS = {
@@ -857,15 +887,91 @@ const UI_STRINGS = {
     commentPlaceholder: '이 상담에 대한 의견을 남겨주세요…',
     results: '결과', backBtn: '← 모든 상담',
   },
+  zh: {
+    phase1: '01 · 你的观点', phase2: '02 · 辩论', phase3: '03 · 你的投票', phase4: '04 · 结果',
+    votes: '票', closes: '截止', verifiedVotes: '已验证票数',
+    winning: '目前领先', decided: '社区已决定', shareResult: '分享结果',
+    comments: '评论', loadingComments: '正在加载评论…', submitComment: '发表评论',
+    question: '问题', changeAnswer: '修改之前的回答', selectOption: '选择一个选项',
+    shareTitle: '分享你的观点',
+    shareSub: '先阅读辩论内容，然后表达你的立场。其他人会在投票前阅读。',
+    levelFamiliar: '我了解这个话题', levelGood: '我了解得很清楚', levelExpert: '我是这个领域的专家',
+    opPlaceholder: '在此写下你的意见（至少20个字符）…',
+    submitBtn: '发布我的观点 →',
+    lockTitle: '投票前必须先参与辩论',
+    lockSub: '请先分享你的观点，之后才能投票。',
+    lockBtn: '↑ 前往你的观点',
+    commentPlaceholder: '请留下你对本次咨询的意见…',
+    results: '结果', backBtn: '← 所有咨询',
+  },
+  ar: {
+    phase1: '01 · وجهة نظرك', phase2: '02 · النقاش', phase3: '03 · تصويتك', phase4: '04 · النتائج',
+    votes: 'أصوات', closes: 'يُغلق في', verifiedVotes: 'أصوات موثقة',
+    winning: 'متصدر حالياً', decided: 'قرر المجتمع', shareResult: 'مشاركة النتيجة',
+    comments: 'التعليقات', loadingComments: 'جارٍ تحميل التعليقات…', submitComment: 'نشر تعليق',
+    question: 'السؤال', changeAnswer: 'تغيير الإجابة السابقة', selectOption: 'اختر خياراً',
+    shareTitle: 'شارك وجهة نظرك',
+    shareSub: 'اقرأ النقاش أولاً، ثم عبّر عن رأيك. سيقرأه الآخرون قبل التصويت.',
+    levelFamiliar: 'أعرف هذا الموضوع', levelGood: 'لدي معرفة جيدة', levelExpert: 'أنا خبير في هذا المجال',
+    opPlaceholder: 'اكتب رأيك هنا (20 حرفاً على الأقل)…',
+    submitBtn: 'نشر وجهة نظري ←',
+    lockTitle: 'يجب عليك المشاركة في النقاش قبل التصويت',
+    lockSub: 'شارك وجهة نظرك أولاً. عندها فقط يمكنك التصويت.',
+    lockBtn: '↑ الذهاب إلى وجهة نظرك',
+    commentPlaceholder: 'اترك رأيك حول هذا الاستطلاع…',
+    results: 'النتائج', backBtn: '← جميع الاستطلاعات',
+  },
+  ru: {
+    phase1: '01 · Ваша точка зрения', phase2: '02 · Дебаты', phase3: '03 · Ваш голос', phase4: '04 · Результаты',
+    votes: 'голосов', closes: 'Закрывается', verifiedVotes: 'подтверждённых голосов',
+    winning: 'Сейчас лидирует', decided: 'Сообщество решило', shareResult: 'Поделиться результатом',
+    comments: 'Комментарии', loadingComments: 'Загрузка комментариев…', submitComment: 'Опубликовать комментарий',
+    question: 'Вопрос', changeAnswer: 'Изменить предыдущий ответ', selectOption: 'Выберите вариант',
+    shareTitle: 'Поделитесь своей точкой зрения',
+    shareSub: 'Сначала прочитайте дебаты, затем выскажите свою позицию. Другие прочитают её перед голосованием.',
+    levelFamiliar: 'Я знаком с темой', levelGood: 'Я хорошо информирован(а)', levelExpert: 'Я эксперт в этой области',
+    opPlaceholder: 'Напишите своё мнение здесь (минимум 20 символов)…',
+    submitBtn: 'Опубликовать мою точку зрения →',
+    lockTitle: 'Вы должны поучаствовать в дебатах перед голосованием',
+    lockSub: 'Сначала поделитесь своей точкой зрения. Только тогда вы сможете проголосовать.',
+    lockBtn: '↑ Перейти к точке зрения',
+    commentPlaceholder: 'Оставьте своё мнение об этом опросе…',
+    results: 'Результаты', backBtn: '← Все опросы',
+  },
+  hi: {
+    phase1: '01 · आपका दृष्टिकोण', phase2: '02 · बहस', phase3: '03 · आपका वोट', phase4: '04 · परिणाम',
+    votes: 'वोट', closes: 'बंद होगा', verifiedVotes: 'सत्यापित वोट',
+    winning: 'फ़िलहाल आगे', decided: 'समुदाय ने निर्णय लिया', shareResult: 'परिणाम साझा करें',
+    comments: 'टिप्पणियाँ', loadingComments: 'टिप्पणियाँ लोड हो रही हैं…', submitComment: 'टिप्पणी पोस्ट करें',
+    question: 'प्रश्न', changeAnswer: 'पिछला उत्तर बदलें', selectOption: 'एक विकल्प चुनें',
+    shareTitle: 'अपना दृष्टिकोण साझा करें',
+    shareSub: 'पहले बहस पढ़ें, फिर अपनी राय व्यक्त करें। वोट करने से पहले अन्य लोग इसे पढ़ेंगे।',
+    levelFamiliar: 'मुझे इस विषय की जानकारी है', levelGood: 'मुझे अच्छी जानकारी है', levelExpert: 'मैं इस क्षेत्र का विशेषज्ञ हूँ',
+    opPlaceholder: 'यहाँ अपनी राय लिखें (कम से कम 20 अक्षर)…',
+    submitBtn: 'मेरा दृष्टिकोण प्रकाशित करें →',
+    lockTitle: 'वोट करने से पहले आपको बहस में भाग लेना होगा',
+    lockSub: 'पहले अपना दृष्टिकोण साझा करें। तभी आप वोट कर सकते हैं।',
+    lockBtn: '↑ दृष्टिकोण पर जाएँ',
+    commentPlaceholder: 'इस परामर्श पर अपनी राय दें…',
+    results: 'परिणाम', backBtn: '← सभी परामर्श',
+  },
 };
 function t(key) { return (UI_STRINGS[getViewerLang()] || UI_STRINGS.es)[key] || UI_STRINGS.es[key] || key; }
 
-// Detect viewer language from browser (most accurate — reflects actual device language)
-// Falls back to country-based mapping if browser language is not recognized
-const BROWSER_LANG = (navigator.language || navigator.userLanguage || 'es').split('-')[0].toLowerCase();
-const SUPPORTED_LANGS = ['es','en','pt','de','fr','it','ja','ko'];
+// COMPLETE INTERNATIONALIZATION REMEDIATION — the ONE authoritative
+// resolver (lang.js) replaces this file's own independent browser/country
+// detection. Every translation mechanism on this page (UI_STRINGS here,
+// Google Translate via translate.js, MyMemory below) now reads the SAME
+// decision instead of each computing its own, so they can no longer
+// disagree for the same visitor. userCountry (set elsewhere in this file
+// from the registration form / logged-in profile) is reported to the
+// resolver so it is available for precedence tier 3.
 function getViewerLang() {
-  return SUPPORTED_LANGS.includes(BROWSER_LANG) ? BROWSER_LANG : (LANG_BY_COUNTRY[userCountry] || 'es');
+  if (window.PreferendumLang) {
+    if (userCountry) window.PreferendumLang.setCountry(userCountry);
+    return window.PreferendumLang.currentLanguage();
+  }
+  return 'es'; // lang.js failed to load — safe, honest default, not a guess
 }
 
 async function translateText(text, fromLang, toLang) {
@@ -877,6 +983,29 @@ async function translateText(text, fromLang, toLang) {
     if (d.responseStatus === 200) return d.responseData.translatedText;
   } catch(e) {}
   return null;
+}
+
+// COMPLETE INTERNATIONALIZATION REMEDIATION — user-generated content
+// (debates, no per-item language metadata exists on the Debate model) no
+// longer assumes fromLang='es' unconditionally. Unicode-script detection
+// is unambiguous and reliable for non-Latin scripts; for Latin-script
+// text (the overwhelming majority of debates today, since Preferendum is
+// currently organizer-facing and Spanish-first) there is no safe way to
+// distinguish Spanish/English/Portuguese/French/German/Italian from a
+// short string without a real language-ID library, so it explicitly
+// falls back to 'es' — a documented limitation, not a silent guess dressed
+// up as detection. Never mutates or overwrites the original text; used
+// only to pick MyMemory's source-language parameter for a DISPLAY-only
+// translation.
+function detectContentLang(text) {
+  if (!text) return 'es';
+  if (/[一-鿿]/.test(text)) return 'zh';
+  if (/[぀-ヿ]/.test(text)) return 'ja';
+  if (/[가-힯]/.test(text)) return 'ko';
+  if (/[؀-ۿ]/.test(text)) return 'ar';
+  if (/[Ѐ-ӿ]/.test(text)) return 'ru';
+  if (/[ऀ-ॿ]/.test(text)) return 'hi';
+  return 'es'; // Latin script: documented limitation, see comment above
 }
 
 // Stores {opId: {text, fromLang}} for current debate — avoids data-attribute encoding issues
@@ -898,19 +1027,27 @@ async function autoTranslateOpinions(viewLang) {
 }
 
 async function translateDebatePage(viewLang) {
-  if (!viewLang || viewLang === 'es') return;
+  // NOTE: no longer short-circuits on viewLang === 'es' -- content is not
+  // assumed to already be Spanish (see detectContentLang above); a
+  // non-Spanish debate viewed by a Spanish-preferring visitor still needs
+  // translating TO Spanish. Each per-element translateText() call below
+  // already no-ops correctly when its detected source language matches
+  // viewLang, so nothing is translated needlessly.
+  if (!viewLang) return;
 
   // Translate debate title
   const titleEl = document.querySelector('.detail-title');
   if (titleEl && titleEl.textContent.trim()) {
-    const t = await translateText(titleEl.textContent.trim(), 'es', viewLang);
+    const srcText = titleEl.textContent.trim();
+    const t = await translateText(srcText, detectContentLang(srcText), viewLang);
     if (t) titleEl.textContent = t;
   }
 
   // Translate context
   const ctxEl = document.querySelector('.detail-context');
   if (ctxEl && ctxEl.textContent.trim()) {
-    const t = await translateText(ctxEl.textContent.trim(), 'es', viewLang);
+    const srcText = ctxEl.textContent.trim();
+    const t = await translateText(srcText, detectContentLang(srcText), viewLang);
     if (t) ctxEl.textContent = t;
   }
 
@@ -918,7 +1055,8 @@ async function translateDebatePage(viewLang) {
   const optSpans = document.querySelectorAll('.option-btn span');
   for (const span of optSpans) {
     if (!span.textContent.trim()) continue;
-    const t = await translateText(span.textContent.trim(), 'es', viewLang);
+    const srcText = span.textContent.trim();
+    const t = await translateText(srcText, detectContentLang(srcText), viewLang);
     if (t) span.textContent = t;
   }
 
@@ -926,7 +1064,8 @@ async function translateDebatePage(viewLang) {
   const listTitles = document.querySelectorAll('.debate-card .debate-title');
   for (const el of listTitles) {
     if (!el.textContent.trim()) continue;
-    const t = await translateText(el.textContent.trim(), 'es', viewLang);
+    const srcText = el.textContent.trim();
+    const t = await translateText(srcText, detectContentLang(srcText), viewLang);
     if (t) el.textContent = t;
   }
 }
@@ -1494,7 +1633,8 @@ async function doRegister() {
       body: JSON.stringify({name, email, password: pass, country,
         phone, national_id: rut, dob, gender, commune, profession, cargo: '', company_size, device_fp: deviceFpReg,
         ref_source: sessionStorage.getItem('pref_ref_source') || '',
-        ref_code: sessionStorage.getItem('pref_referred_by') || ''})
+        ref_code: sessionStorage.getItem('pref_referred_by') || '',
+        lang: getViewerLang()})
     });
     const d = await r.json();
     btn.disabled = false; btn.textContent = 'Create Account →';
@@ -2221,7 +2361,14 @@ function renderDebate(db, res, items) {
         html += renderAdCard(it.ad);
       } else if (it.type === 'opinion') {
         const op = it.opinion;
-        const opLang = LANG_BY_COUNTRY[op.country] || 'es';
+        // Best-effort signal only: the opinion AUTHOR's country, via the
+        // same shared table lang.js uses for precedence tier 3. This is
+        // NOT the same as knowing the opinion's actual written language
+        // (a US-country author may write in Spanish or English) — no
+        // explicit per-opinion language metadata exists to do better; see
+        // detectContentLang below for debate title/context/options, which
+        // uses actual text-based detection instead of a country guess.
+        const opLang = (window.PreferendumLang && window.PreferendumLang.COUNTRY_DEFAULT_LANGUAGE[op.country]) || 'es';
         const flag   = op.country ? countryLabel(op.country).split(' ')[0] : '';
         _opTranslationMap[op.id] = { text: op.text, fromLang: opLang };
         opBuf.push(`<div class="opinion-card">

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-source-lang="es">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
@@ -102,7 +102,9 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 #gt-widget-org select{background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:6px;font-size:12px;padding:3px 6px;}
 #gt-widget-org .goog-te-gadget{font-size:0;}
 #gt-widget-org .goog-te-gadget select{font-size:12px;}
+#gt-widget-org{display:none!important;}
 </style>
+<script src="/lang.js"></script>
 <script src="/translate.js"></script>
 <style>
 #gt-float{position:fixed;top:10px;right:10px;z-index:99999;background:rgba(10,13,20,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
@@ -112,6 +114,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 
 <!-- TRANSLATE — always visible from first screen -->
 <div id="gt-float">
+  <div data-pref-lang-selector style="display:inline-block;vertical-align:middle;"></div>
   <div id="gt-widget-org" style="display:inline-block;vertical-align:middle;font-size:12px;"></div>
 </div>
 
@@ -474,7 +477,8 @@ async function doRegister() {
   const org   = document.getElementById('r-org').value.trim();
   document.getElementById('r-err').textContent = '';
   const r = await fetch(`${API}/organizer/register`, {method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name,email,password:pass,organization:org,country:'CL'})});
+    body:JSON.stringify({name,email,password:pass,organization:org,country:'CL',
+      lang: window.PreferendumLang ? window.PreferendumLang.currentLanguage() : ''})});
   const d = await r.json();
   if (!r.ok) { document.getElementById('r-err').textContent = d.detail || 'Registration failed'; return; }
   token = d.token;

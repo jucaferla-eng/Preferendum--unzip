@@ -50,6 +50,8 @@ R8. NOTHING IS DESTROYED BY NORMALIZATION.
 from __future__ import annotations
 
 import math
+import re
+import unicodedata
 from typing import Any, Optional
 
 # Policy version. Bump when a threshold or rule below changes, so a stored
@@ -488,6 +490,26 @@ def tier_from_income(annual_usd, context: CountryEconomicContext):
 # previous implementation shifted the TIER by age (and, through a 1-based rank
 # indexed into a 0-based ladder, promoted C->A and D->B on age alone). Age is
 # an input to an income estimate; it is not a socioeconomic class.
+#
+# PROVENANCE (FINAL SOCIOECONOMIC ASSIGNMENT HARDENING Phase 5 audit) — these
+# exact bracket boundaries and multiplier values (0.55/0.72/0.87/1.00/1.08/
+# 1.05/0.85) are an APPROVED, PRE-EXISTING Preferendum business rule, not
+# copied or invented by CHANGE-003 or this hardening pass: they were authored
+# by this project a month before CHANGE-003 existed (commit 89254eb5,
+# "Complete income estimation system: company size + age multipliers +
+# low-GDP logic", 2026-07-27) and CHANGE-003 (37ca88b9) carried them forward
+# byte-for-byte when it moved them from main.py into this canonical module
+# (see TestNoPromotionWiring.test_income_estimate_multipliers_have_exactly_
+# one_implementation in test_socioeconomic_wiring.py). No commit, docstring,
+# or comment anywhere in this repository's history cites a specific external
+# dataset (BLS, Census, ILO, or otherwise) for these particular numbers — do
+# not present them as such. The general SHAPE (rising to a mid-career peak,
+# a gentle plateau and decline approaching typical retirement age) matches
+# widely-documented general age-earnings patterns in labor economics, but
+# the specific multiplier values here are this project's own approximation
+# of that shape, not a citation. Preserved as-is (an approved existing
+# business rule), documented as exactly that — not external empirical
+# evidence — per this hardening task's explicit instruction.
 AGE_INCOME_CURVE = (
     ((0, 24), 0.55),
     ((25, 29), 0.72),
@@ -542,6 +564,292 @@ def estimate_occupation_income(base_annual_usd, age=None, company_size_rank=None
     if base <= 0:
         return None
     return base * age_income_multiplier(age) * company_size_income_multiplier(company_size_rank)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# OCCUPATION TITLE RESOLUTION  (audit finding G — free-text -> canonical SOC)
+# GLOBAL OCCUPATION RESOLUTION HARDENING — consolidated, internationalized.
+# ═══════════════════════════════════════════════════════════════════════
+#
+# CHANGE-003 remediation originally found occupation resolution fragmented
+# across three incompatible vocabularies in main.py (SOC-code regex,
+# _US_PROFESSION_SOC legacy slugs, occupation_salary_agent.
+# PROFESSION_TO_ISCO legacy slugs), none of which recognised a
+# natural-language title like "Ingeniero Industrial" even though the
+# underlying reference catalog (bls_occupation_scores_2025.csv) has a real
+# row for it. GLOBAL OCCUPATION RESOLUTION HARDENING extends that same
+# single mechanism — it does NOT create a second, parallel estimator.
+#
+# CANONICAL_OCCUPATIONS is the source of truth: one entry per occupation
+# ALREADY present in the tracked BLS CSV (never invented), each carrying
+# its aliases grouped by ISO 639-1 language code. Adding a language later
+# (pt, fr, ...) means adding a key to an existing entry's `aliases` dict —
+# it never touches income estimation, matching, or any other
+# economic-calculation code, all of which only ever see the resulting SOC
+# code. _OCCUPATION_TITLE_ALIASES (the flat normalized-alias -> SOC map
+# resolve_occupation_soc actually does lookups against) is DERIVED from
+# this registry at import time, not maintained separately.
+#
+# Deliberately NOT fuzzy/automatic translation — an occupation not listed
+# here returns '' (unresolved), exactly like an occupation absent from any
+# other catalog in this codebase; it is never guessed. Every SOC code below
+# was verified present in bls_occupation_scores_2025.csv before being
+# added — the alias only lets another spelling of an occupation THAT
+# ALREADY HAS real reference data reach it; it never invents a salary.
+#
+# A bare/generic term that names a FAMILY of occupations with materially
+# different pay (e.g. "ingeniero" — industrial? civil? mechanical?
+# software?) is handled by AMBIGUOUS_OCCUPATION_TERMS below, NOT by
+# guessing one member of the family here.
+CANONICAL_OCCUPATIONS = (
+    {'soc': '17-2112', 'title_en': 'Industrial Engineers', 'aliases': {
+        'es': ['ingeniero industrial', 'ingeniera industrial'],
+        'en': ['industrial engineer', 'industrial engineers']}},
+    {'soc': '29-1215', 'title_en': 'Family Medicine Physicians', 'aliases': {
+        'es': ['medico', 'medica', 'medico general', 'medica general'],
+        'en': ['physician', 'general practitioner', 'family physician']}},
+    {'soc': '29-1141', 'title_en': 'Registered Nurses', 'aliases': {
+        'es': ['enfermero', 'enfermera'],
+        'en': ['registered nurse', 'nurse']}},
+    {'soc': '23-1011', 'title_en': 'Lawyers', 'aliases': {
+        'es': ['abogado', 'abogada'],
+        'en': ['lawyer', 'attorney']}},
+    {'soc': '13-2011', 'title_en': 'Accountants and Auditors', 'aliases': {
+        'es': ['contador', 'contadora', 'contador publico', 'contadora publica'],
+        'en': ['accountant']}},
+    {'soc': '17-1011', 'title_en': 'Architects, Except Landscape and Naval', 'aliases': {
+        'es': ['arquitecto', 'arquitecta'],
+        'en': ['architect']}},
+    {'soc': '25-2031', 'title_en': 'Secondary School Teachers', 'aliases': {
+        # "profesor/profesora" is listed WITHOUT the "only when
+        # unambiguous" caveat this task gave "maestro/tecnico/disenador/
+        # conductor" — treated as a deliberate, documented choice to
+        # resolve, not left ambiguous like those.
+        'es': ['profesor', 'profesora', 'profesor de secundaria', 'profesora de secundaria'],
+        'en': ['teacher', 'secondary school teacher']}},
+    {'soc': '25-2021', 'title_en': 'Elementary School Teachers', 'aliases': {
+        # Bare "maestro/maestra" stays AMBIGUOUS (see below) — this entry
+        # only covers the QUALIFIED form, the "sufficiently specific" case
+        # this task's own instruction allows.
+        'es': ['maestro de primaria', 'maestra de primaria',
+              'maestro de escuela', 'maestra de escuela'],
+        'en': ['elementary school teacher']}},
+    {'soc': '17-2051', 'title_en': 'Civil Engineers', 'aliases': {
+        'es': ['ingeniero civil', 'ingeniera civil'],
+        'en': ['civil engineer']}},
+    {'soc': '17-2141', 'title_en': 'Mechanical Engineers', 'aliases': {
+        'es': ['ingeniero mecanico', 'ingeniera mecanica'],
+        'en': ['mechanical engineer']}},
+    {'soc': '17-2071', 'title_en': 'Electrical Engineers', 'aliases': {
+        'es': ['ingeniero electrico', 'ingeniera electrica'],
+        'en': ['electrical engineer']}},
+    {'soc': '15-1252', 'title_en': 'Software Developers', 'aliases': {
+        'es': ['ingeniero de software', 'ingeniera de software',
+              'desarrollador de software', 'desarrolladora de software'],
+        'en': ['software developer', 'software developers', 'software engineer']}},
+    {'soc': '15-1251', 'title_en': 'Computer Programmers', 'aliases': {
+        'es': ['programador', 'programadora'],
+        'en': ['computer programmer', 'programmer']}},
+    {'soc': '19-3033', 'title_en': 'Clinical and Counseling Psychologists', 'aliases': {
+        'es': ['psicologo', 'psicologa'],
+        'en': ['psychologist']}},
+    {'soc': '29-1021', 'title_en': 'Dentists, General', 'aliases': {
+        'es': ['dentista'],
+        'en': ['dentist']}},
+    {'soc': '29-1051', 'title_en': 'Pharmacists', 'aliases': {
+        'es': ['farmaceutico', 'farmaceutica'],
+        'en': ['pharmacist']}},
+    {'soc': '29-1131', 'title_en': 'Veterinarians', 'aliases': {
+        'es': ['veterinario', 'veterinaria'],
+        'en': ['veterinarian']}},
+    {'soc': '19-3011', 'title_en': 'Economists', 'aliases': {
+        'es': ['economista'],
+        'en': ['economist']}},
+    {'soc': '11-1021', 'title_en': 'General and Operations Managers', 'aliases': {
+        'es': ['administrador de empresas', 'administradora de empresas'],
+        'en': ['business administrator']}},
+    {'soc': '27-1024', 'title_en': 'Graphic Designers', 'aliases': {
+        # Bare "disenador/disenadora" stays AMBIGUOUS — only the qualified
+        # "grafico/grafica" form is sufficiently specific.
+        'es': ['disenador grafico', 'disenadora grafica'],
+        'en': ['graphic designer']}},
+    {'soc': '47-2111', 'title_en': 'Electricians', 'aliases': {
+        'es': ['electricista'],
+        'en': ['electrician']}},
+    {'soc': '49-3023', 'title_en': 'Automotive Service Technicians and Mechanics', 'aliases': {
+        'es': ['mecanico', 'mecanica'],
+        'en': ['mechanic', 'auto mechanic']}},
+    {'soc': '27-3023', 'title_en': 'News Analysts, Reporters, and Journalists', 'aliases': {
+        'es': ['periodista'],
+        'en': ['journalist', 'reporter']}},
+    {'soc': '35-1011', 'title_en': 'Chefs and Head Cooks', 'aliases': {
+        'es': ['chef', 'cocinero', 'cocinera'],
+        'en': ['chef', 'cook']}},
+    {'soc': '53-3032', 'title_en': 'Heavy and Tractor-Trailer Truck Drivers', 'aliases': {
+        # Bare "conductor/conductora" stays AMBIGUOUS — only the qualified
+        # "de camion" form is sufficiently specific.
+        'es': ['conductor de camion', 'conductora de camion'],
+        'en': ['truck driver']}},
+)
+
+# Bare/generic terms that name a FAMILY of occupations with materially
+# different pay, not one occupation — must never resolve to a guess.
+# Each maps to the set of canonical SOC codes it could plausibly mean, for
+# a future disambiguation UI (resolve_occupation_candidates below) —
+# resolve_occupation_soc itself still returns '' for every one of these,
+# exactly like any other unrecognised input. An empty set means the term
+# is too broad even to enumerate a defensible candidate list.
+AMBIGUOUS_OCCUPATION_TERMS = {
+    'ingeniero':  frozenset({'17-2112', '17-2051', '17-2141', '17-2071', '15-1252'}),
+    'ingeniera':  frozenset({'17-2112', '17-2051', '17-2141', '17-2071', '15-1252'}),
+    'doctor':     frozenset({'29-1215'}),
+    'doctora':    frozenset({'29-1215'}),
+    'tecnico':    frozenset({'17-3021', '17-3022', '17-3023', '17-3026'}),
+    'tecnica':    frozenset({'17-3021', '17-3022', '17-3023', '17-3026'}),
+    'manager':    frozenset({'11-1021'}),
+    'analista':   frozenset(),
+    'analyst':    frozenset(),
+    'conductor':  frozenset({'53-3032', '53-3033', '53-3031'}),
+    'conductora': frozenset({'53-3032', '53-3033', '53-3031'}),
+    'disenador':  frozenset({'27-1024'}),
+    'disenadora': frozenset({'27-1024'}),
+    'maestro':    frozenset({'25-2021'}),
+    'maestra':    frozenset({'25-2021'}),
+}
+
+
+def _normalize_occupation_key(s: str) -> str:
+    """Case/whitespace/accent-insensitive normalization, shared by every
+    consumer of CANONICAL_OCCUPATIONS/AMBIGUOUS_OCCUPATION_TERMS so the
+    registry and the resolver can never silently drift apart."""
+    key = ''.join(c for c in unicodedata.normalize('NFKD', s.casefold())
+                 if not unicodedata.combining(c))
+    return ' '.join(key.split())
+
+
+def _build_occupation_title_aliases() -> dict:
+    out = {}
+    for occ in CANONICAL_OCCUPATIONS:
+        out[_normalize_occupation_key(occ['title_en'])] = occ['soc']
+        for aliases in occ['aliases'].values():
+            for alias in aliases:
+                out[_normalize_occupation_key(alias)] = occ['soc']
+    return out
+
+
+# The flat map resolve_occupation_soc actually looks up against —
+# generated from CANONICAL_OCCUPATIONS above, not maintained by hand.
+_OCCUPATION_TITLE_ALIASES = _build_occupation_title_aliases()
+
+_SOC_CODE_RE = re.compile(r'^\d{2}-\d{4}$')
+
+
+def resolve_occupation_soc(v: Any) -> str:
+    """Any supported occupation representation -> its canonical SOC code,
+    or '' if unrecognised OR genuinely ambiguous.
+
+    Accepts: a bare SOC code (returned as-is), or one of the explicit
+    multilingual titles/aliases in CANONICAL_OCCUPATIONS, matched
+    case/whitespace/accent-insensitively. A bare/generic term listed in
+    AMBIGUOUS_OCCUPATION_TERMS (e.g. "ingeniero") deliberately returns ''
+    here too — never silently picks one member of the family. Does NOT
+    attempt to resolve a Preferendum legacy slug (e.g. 'ing_civil') —
+    those already have their own established resolution path (main.py's
+    _US_PROFESSION_SOC / eligibility.norm_occupation) at the coarser
+    BLS-major-group level; this function is specifically for titles
+    precise enough to identify ONE SOC occupation, which a major-group
+    slug is not.
+    """
+    s = _base(v)
+    if not s:
+        return ''
+    if _SOC_CODE_RE.match(s):
+        return s
+    key = _normalize_occupation_key(s)
+    if key in AMBIGUOUS_OCCUPATION_TERMS:
+        return ''
+    return _OCCUPATION_TITLE_ALIASES.get(key, '')
+
+
+class OccupationResolution:
+    """Richer result for UI/diagnostic consumers (registration
+    autocomplete, admin unresolved-occupation review) that need to tell
+    "never heard of it" apart from "heard of it, but it's ambiguous" and
+    offer real candidates — WITHOUT changing what feeds income estimation.
+    resolve_occupation_soc (above) remains the ONLY function the estimator
+    calls; this is a read-only view for everything else, kept separate per
+    this task's instruction not to hard-wire alias resolution into
+    economic-calculation code."""
+
+    __slots__ = ('status', 'soc', 'candidates')
+
+    RESOLVED = 'RESOLVED'
+    AMBIGUOUS = 'AMBIGUOUS'
+    UNRESOLVED = 'UNRESOLVED'
+
+    def __init__(self, status: str, soc: str = '', candidates=()):
+        self.status = status
+        self.soc = soc
+        self.candidates = tuple(candidates)
+
+    def __repr__(self) -> str:   # pragma: no cover - debugging aid
+        return f'<OccupationResolution {self.status} soc={self.soc!r} candidates={self.candidates!r}>'
+
+
+def resolve_occupation_candidates(v: Any) -> 'OccupationResolution':
+    """Same input contract as resolve_occupation_soc, but distinguishes
+    RESOLVED / AMBIGUOUS / UNRESOLVED and surfaces candidate SOC codes for
+    an ambiguous term. Never used by income estimation (see class
+    docstring) — for registration UX and diagnostics only."""
+    s = _base(v)
+    if not s:
+        return OccupationResolution(OccupationResolution.UNRESOLVED)
+    if _SOC_CODE_RE.match(s):
+        return OccupationResolution(OccupationResolution.RESOLVED, soc=s)
+    key = _normalize_occupation_key(s)
+    if key in AMBIGUOUS_OCCUPATION_TERMS:
+        return OccupationResolution(OccupationResolution.AMBIGUOUS,
+                                    candidates=sorted(AMBIGUOUS_OCCUPATION_TERMS[key]))
+    soc = _OCCUPATION_TITLE_ALIASES.get(key, '')
+    if soc:
+        return OccupationResolution(OccupationResolution.RESOLVED, soc=soc)
+    return OccupationResolution(OccupationResolution.UNRESOLVED)
+
+
+def occupation_title_for_soc(soc: str) -> str:
+    """Canonical English title for a SOC code, or '' if not in the
+    registry (a valid SOC from the wider 818-row CSV that simply has no
+    alias entry yet is not an error — this only covers the ones with
+    declared aliases)."""
+    for occ in CANONICAL_OCCUPATIONS:
+        if occ['soc'] == soc:
+            return occ['title_en']
+    return ''
+
+
+def occupation_aliases_for_soc(soc: str, lang: str = '') -> list:
+    """Declared aliases for a SOC code, as originally spelled (accents
+    kept) — for display in a search UI. `lang` filters to one ISO 639-1
+    code ('es', 'en'); omit for every declared language. Empty list for a
+    SOC code with no registry entry, exactly like occupation_title_for_soc
+    — this is a read-only view for UX/diagnostics, never consulted by
+    income estimation (see OccupationResolution's docstring)."""
+    for occ in CANONICAL_OCCUPATIONS:
+        if occ['soc'] != soc:
+            continue
+        if lang:
+            return list(occ['aliases'].get(lang, []))
+        out = []
+        for aliases in occ['aliases'].values():
+            out.extend(aliases)
+        return out
+    return []
+
+
+def _base(v: Any) -> str:
+    if v is None:
+        return ''
+    return str(v).strip()
 
 
 # ═══════════════════════════════════════════════════════════════════════

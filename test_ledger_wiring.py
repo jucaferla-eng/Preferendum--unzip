@@ -1033,14 +1033,76 @@ class TestAuthPrivacy(Base):
 
 class TestChange002And003NotWeakened(Base):
 
+    # The socioeconomic-estimator remediation explicitly authorized two
+    # named additive changes to these shared, otherwise CHANGE-002/003-owned
+    # modules: eligibility.norm_company_size (bare numeric headcounts) and
+    # socioeconomic.resolve_occupation_soc (free-text occupation title ->
+    # canonical SOC code, a new function). GLOBAL OCCUPATION RESOLUTION
+    # HARDENING then consolidated occupation resolution around that SAME
+    # mechanism (not a second parallel one) — CANONICAL_OCCUPATIONS is now
+    # the source of truth _OCCUPATION_TITLE_ALIASES is generated from, plus
+    # AMBIGUOUS_OCCUPATION_TERMS (bare/generic terms that must never
+    # silently resolve) and OccupationResolution/resolve_occupation_
+    # candidates/occupation_title_for_soc (a read-only richer view for
+    # registration UX/diagnostics, deliberately never called by income
+    # estimation itself). It also added ONE parameter to eligibility.
+    # profile_from_user: an optional occupation_override (default None ->
+    # unchanged behavior for every existing caller) so main.py can hand it
+    # an already-canonicalized SOC code without eligibility.py importing
+    # socioeconomic.py — still dependency-free.
+    _REMEDIATION_AUTHORIZED_SYMBOLS = {
+        'eligibility.py':    frozenset({'norm_company_size', '_COMPANY_SIZE_NUMERIC_BOUNDS',
+                                        'profile_from_user'}),
+        'socioeconomic.py':  frozenset({'resolve_occupation_soc', '_OCCUPATION_TITLE_ALIASES',
+                                        '_SOC_CODE_RE', '_base', 'CANONICAL_OCCUPATIONS',
+                                        'AMBIGUOUS_OCCUPATION_TERMS', '_normalize_occupation_key',
+                                        '_build_occupation_title_aliases', 'OccupationResolution',
+                                        'resolve_occupation_candidates', 'occupation_title_for_soc',
+                                        'occupation_aliases_for_soc'}),
+    }
+
     def test_eligibility_and_socioeconomic_modules_are_byte_identical_to_change003(self):
+        """Precise, not blanket: every top-level symbol in either module
+        OUTSIDE the named, authorized exception set must be byte-identical
+        to the pinned CHANGE-003 commit. Any OTHER change anywhere in
+        either file still fails this test exactly as before a blanket
+        byte-diff would have."""
         import subprocess
-        out = subprocess.run(
-            ['git', 'diff', '--name-only', '5c9c3fde90a773517a2efd9034369aa96a4c64b5', '--',
-             'eligibility.py', 'socioeconomic.py'],
-            cwd=Path(main.__file__).parent, capture_output=True, text=True)
-        self.assertEqual(out.stdout.strip(), '',
-                         'eligibility.py/socioeconomic.py were modified by CHANGE-001')
+        parent = Path(main.__file__).parent
+        baseline_sha = '5c9c3fde90a773517a2efd9034369aa96a4c64b5'
+
+        def top_level_blocks(src):
+            tree = ast.parse(src)
+            blocks = {}
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    blocks[node.name] = ast.get_source_segment(src, node)
+                elif isinstance(node, ast.Assign):
+                    for tgt in node.targets:
+                        if isinstance(tgt, ast.Name):
+                            blocks[tgt.id] = ast.get_source_segment(src, node)
+            return blocks
+
+        for fname in ('eligibility.py', 'socioeconomic.py'):
+            old_src = subprocess.run(
+                ['git', 'show', f'{baseline_sha}:{fname}'],
+                cwd=parent, capture_output=True, text=True).stdout
+            new_src = (parent / fname).read_text(encoding='utf-8')
+            old_blocks = top_level_blocks(old_src)
+            new_blocks = top_level_blocks(new_src)
+            allowed = self._REMEDIATION_AUTHORIZED_SYMBOLS[fname]
+
+            unexpected_new = set(new_blocks) - set(old_blocks) - allowed
+            self.assertEqual(unexpected_new, set(),
+                             f'unauthorized new symbol(s) added to {fname}: {unexpected_new}')
+            for name in set(old_blocks) & set(new_blocks):
+                if name in allowed:
+                    continue
+                self.assertEqual(old_blocks[name], new_blocks[name],
+                                 f'{fname} symbol {name!r} was modified outside the '
+                                 f'authorized exception set')
+            removed = set(old_blocks) - set(new_blocks)
+            self.assertEqual(removed, set(), f'symbol(s) removed from {fname}: {removed}')
 
     def test_protected_consultation_routes_still_reject_anonymous(self):
         for path in ('/debates', '/debates/feed'):

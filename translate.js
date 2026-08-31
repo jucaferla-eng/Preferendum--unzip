@@ -1,69 +1,33 @@
 /**
- * Preferendum — Global Translation Config
- * Change LANGUAGES here to add/remove languages across ALL portals.
+ * Preferendum — Google Translate engine wiring.
  * Served at /translate.js by the backend.
  *
- * Auto-detects browser language on first visit and sets Google Translate
- * via the googtrans cookie. User can override manually with the widget.
+ * COMPLETE INTERNATIONALIZATION REMEDIATION: this file no longer decides
+ * the user's language itself (it used to auto-detect from
+ * navigator.language independently of everything else). It is now purely
+ * a TRANSLATION ENGINE — it loads the Google Translate widget and lets
+ * lang.js's PreferendumLang.currentLanguage() (the ONE authoritative
+ * resolver) set the googtrans cookie. This file only initializes the
+ * widget and, if a page includes a [data-pref-lang-selector] container
+ * itself, lets lang.js render into it.
+ *
+ * Requires lang.js to be loaded on the same page BEFORE this file for the
+ * cookie to already reflect the resolved language; if lang.js is absent
+ * (a page that hasn't been updated yet), this file still loads the widget
+ * so manual selection continues to work, just without the unified
+ * precedence.
  */
 (function() {
-  var LANGUAGES = 'en,zh-CN,fr,de,ar,pt,ru,ja,ko,hi,es';
-  var PAGE_LANG = 'es';
+  var LANGUAGES = 'en,zh-CN,fr,de,ar,pt,ru,ja,ko,hi,es,it';
 
-  // Map browser language tags → Google Translate language codes
-  var LANG_MAP = {
-    'en': 'en', 'fr': 'fr', 'de': 'de', 'pt': 'pt',
-    'ru': 'ru', 'ja': 'ja', 'ko': 'ko', 'hi': 'hi',
-    'ar': 'ar', 'zh': 'zh-CN', 'es': 'es'
-  };
-
-  // Read current googtrans cookie value
-  function getGoogtrans() {
-    var match = document.cookie.match(/(^|;)\s*googtrans=([^;]+)/);
-    return match ? decodeURIComponent(match[2]) : null;
-  }
-
-  // Set googtrans cookie on root path (required for Google Translate)
-  function setGoogtrans(targetLang) {
-    var val = '/' + PAGE_LANG + '/' + targetLang;
-    document.cookie = 'googtrans=' + val + '; path=/';
-    document.cookie = 'googtrans=' + val + '; path=/; domain=.' + location.hostname;
-  }
-
-  // Auto-detect browser language on first visit
-  function autoDetectLanguage() {
-    var stored = localStorage.getItem('pref_lang_set');
-    if (stored) return; // User already has a preference set
-
-    var existing = getGoogtrans();
-    if (existing && existing !== '/' + PAGE_LANG + '/' + PAGE_LANG) return; // Already translated
-
-    var browserLang = (navigator.language || navigator.userLanguage || 'es').toLowerCase();
-    var primary = browserLang.split('-')[0]; // e.g. "en" from "en-US"
-
-    // Special case: zh-TW, zh-HK → zh-TW; others → zh-CN
-    var targetLang;
-    if (browserLang.startsWith('zh-tw') || browserLang.startsWith('zh-hk')) {
-      targetLang = 'zh-TW';
-    } else {
-      targetLang = LANG_MAP[primary];
-    }
-
-    if (!targetLang || targetLang === PAGE_LANG) return; // Already Spanish or unsupported
-
-    localStorage.setItem('pref_lang_set', '1');
-    setGoogtrans(targetLang);
-    location.reload(); // Reload so Google Translate picks up the cookie
-  }
-
-  // Find the widget container on this page (any div with id starting with 'gt-widget')
   function initWidget() {
     var containers = document.querySelectorAll('[id^="gt-widget"]');
     if (!containers.length) return;
     var containerId = containers[0].id;
+    var pageLang = document.documentElement.getAttribute('data-source-lang') || 'es';
     if (window.google && window.google.translate) {
       new google.translate.TranslateElement({
-        pageLanguage: PAGE_LANG,
+        pageLanguage: pageLang,
         includedLanguages: LANGUAGES,
         layout: google.translate.TranslateElement.InlineLayout.SIMPLE,
         autoDisplay: false
@@ -71,12 +35,10 @@
     }
   }
 
-  // Expose callback for Google Translate CDN
   window.googleTranslateElementInit  = initWidget;
   window.googleTranslateElementInit2 = initWidget;
   window.googleTranslateElementInit3 = initWidget;
 
-  // Load Google Translate script once
   if (!document.querySelector('script[src*="translate.google.com"]')) {
     var s = document.createElement('script');
     s.src = '//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit';
@@ -84,10 +46,14 @@
     document.head.appendChild(s);
   }
 
-  // Run auto-detection when DOM is ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', autoDetectLanguage);
-  } else {
-    autoDetectLanguage();
+  // lang.js (loaded first on every updated portal) already computed the
+  // resolved language and set the googtrans cookie via
+  // PreferendumLang.currentLanguage() — nothing else to do here. On a
+  // page that does NOT yet include lang.js, PreferendumLang is undefined
+  // and Google Translate simply starts untranslated until the user picks
+  // a language from the widget itself (graceful degradation, not a
+  // crash — see the typeof guard).
+  if (typeof window.PreferendumLang === 'undefined') {
+    console.warn('[translate.js] lang.js not loaded on this page — language is not centrally resolved here.');
   }
 })();

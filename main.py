@@ -173,6 +173,17 @@ class User(Base):
     hnw_score       = Column(Float, default=0.0)
     verified_hnw    = Column(Boolean, default=False)
     hnw_source      = Column(String, default='')
+    # I18N FINAL HARDENING — the user's EXPLICIT/manual language choice
+    # only (never a device/country guess — those are recomputed fresh on
+    # every request and never persisted here). '' for every existing user
+    # (additive migration, NULL/default-safe) and for anyone who has never
+    # explicitly picked a language — that is the honest, correct state,
+    # not a value to backfill by guessing. Always one of
+    # main._SUPPORTED_LANGUAGES or ''; validated at every write site
+    # (see set_profile_language), never trusted as free-form input. Has
+    # NO effect on auth/authorization, matching/tier/financial logic —
+    # display/communication language only.
+    preferred_lang  = Column(String, default='')
     created_at      = Column(DateTime, default=datetime.utcnow)
 
 class OTPCode(Base):
@@ -983,6 +994,15 @@ def _migrate():
                 conn.commit()
             except Exception:
                 pass
+        # I18N FINAL HARDENING — additive, default-safe: every existing
+        # user gets '' (no stored preference), which is the correct,
+        # honest state, not a value to backfill by guessing their language.
+        if 'preferred_lang' not in existing_user_cols:
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN preferred_lang TEXT DEFAULT ''"))
+                conn.commit()
+            except Exception:
+                pass
         # ── CHANGE-003 — ingreso declarado individual/hogar + procedencia ──
         # Todas ADITIVAS y NULL por defecto: ningún usuario existente cambia
         # de clasificación por aplicar esta migración. La reclasificación
@@ -1066,6 +1086,51 @@ def _migrate():
                         conn.commit()
                     except Exception:
                         pass
+        except Exception:
+            pass
+
+        # ══════════════════════════════════════════════════════════════
+        # CHANGE-003 remediation (audit finding H) — occupation_unified
+        # ══════════════════════════════════════════════════════════════
+        # The socioeconomic income estimator AND /api/occupations (the
+        # registration form's occupation dropdown — its own docstring says
+        # "Lista las 818 ocupaciones BLS") both query this table via 13+
+        # SELECT statements, but no CREATE TABLE or INSERT for it existed
+        # anywhere in this repository — every one of those queries has
+        # always silently failed and been swallowed by a surrounding
+        # try/except, in EVERY environment that provisions its schema from
+        # this repo, not just this one. This adds the additive, empty
+        # schema only — every column here is one demonstrably read by an
+        # existing query, none invented — so those queries now behave
+        # correctly (a clean "no rows" result) instead of raising a caught
+        # SQL error (which, on PostgreSQL, can abort the surrounding
+        # transaction until rolled back — a strictly worse failure mode
+        # than an empty result set).
+        #
+        # This deliberately does NOT populate the table. Doing so from
+        # bls_occupation_scores_2025.csv (very plausibly the intended
+        # source — the docstring's "818" figure matches that file's row
+        # count exactly) is a real, separate data decision: it could
+        # conflict with whatever a production environment's
+        # occupation_unified may already independently contain from some
+        # undocumented out-of-band provisioning. Left for explicit
+        # separate authorization — see the remediation report.
+        _occ_pk = 'SERIAL PRIMARY KEY' if is_pg else 'INTEGER PRIMARY KEY AUTOINCREMENT'
+        try:
+            conn.execute(text(f"""
+                CREATE TABLE IF NOT EXISTS occupation_unified (
+                    id {_occ_pk},
+                    occupation_code TEXT,
+                    country_iso TEXT,
+                    occupation_type TEXT,
+                    isco_group INTEGER,
+                    isco_label TEXT,
+                    title TEXT,
+                    profession_score FLOAT,
+                    median_annual_usd FLOAT
+                )
+            """))
+            conn.commit()
         except Exception:
             pass
 
@@ -1696,7 +1761,25 @@ def _build_profile(user, db) -> Optional[_elig.UserProfile]:
         return None
     country = _elig.norm_country(getattr(user, 'country', '') or '')
     ppp, _source = _country_per_capita_ppp_usd(country, db)
-    return _elig.profile_from_user(user, country_per_capita_ppp_usd=ppp)
+    # GLOBAL OCCUPATION RESOLUTION HARDENING (Section 11) — canonicalize
+    # user.profession through the SAME resolver income estimation uses
+    # (_assign_user_tier_inner does this internally, but never persists
+    # the result back to user.profession) BEFORE building the matching
+    # profile, so occupation TARGETING recognizes the identical canonical
+    # occupation income ESTIMATION already resolved for this same user.
+    # Without this, a title like "Ingeniero Industrial" estimated income
+    # correctly via SOC 17-2112 but reached eligibility.norm_occupation as
+    # the raw, un-normalized string, which does not understand a
+    # natural-language title — a real divergence between the two
+    # dimensions this fixes. Falls back to the raw stored value when
+    # resolve_occupation_soc does not claim it (e.g. a legacy slug like
+    # 'ing_civil' or 'medico'), so no existing user's matching behavior
+    # changes — eligibility.py itself is untouched here, still
+    # dependency-free; only the value handed to it differs.
+    raw_profession = getattr(user, 'profession', '') or ''
+    occupation_override = _socio.resolve_occupation_soc(raw_profession) or raw_profession
+    return _elig.profile_from_user(user, country_per_capita_ppp_usd=ppp,
+                                   occupation_override=occupation_override)
 
 
 def _closed_list_hash(national_id: Any) -> str:
@@ -2109,6 +2192,42 @@ def get_my_declared_income(user: User = Depends(get_current_user)):
         'as_of': user.declared_income_as_of.isoformat() if user.declared_income_as_of else None,
         'confirmed': bool(user.declared_income_confirmed),
     }
+
+
+class SetLanguageInput(BaseModel):
+    lang: str
+
+
+@app.post('/profile/language')
+def set_profile_language(data: SetLanguageInput,
+                         user: User = Depends(get_current_user),
+                         db: Session = Depends(get_db)):
+    """I18N FINAL HARDENING — the user sets their EXPLICIT language
+    preference. Self-only, matching /profile/income's exact pattern:
+    `user` comes exclusively from the JWT of whoever is calling — there is
+    no user_id in the path or body, so there is structurally no way for
+    this route to change anyone else's preference, and no admin bypass
+    exists here.
+
+    Only a canonical, supported language code is accepted — an
+    unsupported, malformed, or empty value is REJECTED (400), never
+    silently stored as free-form text. Has no effect on
+    auth/authorization or on tier/matching/financial logic — display and
+    communication language only.
+    """
+    lang = (data.lang or '').strip().lower()
+    if lang not in _SUPPORTED_LANGUAGES:
+        raise HTTPException(400, f'Unsupported language {lang!r}. Supported: {sorted(_SUPPORTED_LANGUAGES)}')
+    user.preferred_lang = lang
+    db.commit()
+    return {'ok': True, 'preferred_lang': user.preferred_lang}
+
+
+@app.get('/profile/language')
+def get_profile_language(user: User = Depends(get_current_user)):
+    """Returns the CALLING user's own stored preference — never another
+    user's, for the same reason as set_profile_language above."""
+    return {'preferred_lang': user.preferred_lang or None}
 
 
 @app.post('/profile/household-income')
@@ -2715,14 +2834,131 @@ def format_debate(debate, has_voted=False, sponsor_info=None):
 # EMAIL SENDER
 # ══════════════════════════════════════════════════════════════
 
-def send_email_otp(email, code, name=''):
+# I18N FINAL HARDENING — ONE authoritative backend language resolver,
+# the server-side counterpart to lang.js's resolveLanguage(). Same 5-tier
+# precedence, same SUPPORTED_LANGUAGES set, same COUNTRY_DEFAULT_LANGUAGE
+# table — kept in sync deliberately (test_i18n_hardening.py cross-checks
+# this dict against lang.js's own table so the two can never silently
+# drift apart). Used for every backend-generated communication (email
+# today; SMS below) so an authenticated user's STORED explicit preference
+# and an anonymous registrant's request-time explicit choice both flow
+# through the exact same logic as the web UI.
+_SUPPORTED_LANGUAGES = frozenset({'es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi'})
+
+_COUNTRY_DEFAULT_LANGUAGE = {
+    'CL': 'es', 'AR': 'es', 'PE': 'es', 'MX': 'es', 'CO': 'es', 'ES': 'es', 'UY': 'es',
+    'VE': 'es', 'EC': 'es', 'BO': 'es', 'PY': 'es', 'GL': 'es', 'GQ': 'es',
+    'BR': 'pt', 'PT': 'pt', 'AO': 'pt', 'MZ': 'pt',
+    'FR': 'fr',
+    'DE': 'de', 'AT': 'de',
+    'IT': 'it',
+    'JP': 'ja',
+    'KR': 'ko',
+    'CN': 'zh',
+    'RU': 'ru',
+}
+
+_GLOBAL_FALLBACK_LANGUAGE = 'es'
+
+
+def _normalize_lang_tag(tag) -> str:
+    """Mirrors lang.js's normalizeLangTag: case/region-insensitive, 'zh'
+    for any Chinese variant. Never trusts the raw value as a supported
+    language on its own — callers must still check membership in
+    _SUPPORTED_LANGUAGES; this only normalizes SHAPE."""
+    if not tag:
+        return ''
+    primary = str(tag).strip().split('-')[0].lower()
+    return 'zh' if primary == 'zh' else primary
+
+
+def resolve_user_language(explicit='', device='', country='') -> str:
+    """The ONE backend precedence, for both authenticated users (pass
+    user.preferred_lang as `explicit` — that field only ever holds a real
+    explicit choice, see the User model comment) and anonymous
+    registration (pass the request's own `lang` field as `explicit`).
+
+    1. explicit (validated against _SUPPORTED_LANGUAGES — an arbitrary or
+       malformed value here is silently ignored, never trusted)
+    2. device (same validation)
+    3. country, via _COUNTRY_DEFAULT_LANGUAGE — deliberately excludes
+       multilingual countries (US, GB, AU, CA, ZA, NG, IN, CH, BE, ...);
+       see lang.js's own comment for why
+    4. reserved
+    5. global fallback
+    """
+    e = _normalize_lang_tag(explicit)
+    if e in _SUPPORTED_LANGUAGES:
+        return e
+    d = _normalize_lang_tag(device)
+    if d in _SUPPORTED_LANGUAGES:
+        return d
+    c = (str(country).strip().upper() if country else '')
+    if c in _COUNTRY_DEFAULT_LANGUAGE:
+        return _COUNTRY_DEFAULT_LANGUAGE[c]
+    return _GLOBAL_FALLBACK_LANGUAGE
+
+
+# COMPLETE INTERNATIONALIZATION REMEDIATION (Section 6) — the smallest
+# safe language context for user-facing backend communications. Only
+# user-visible copy is translated (greeting, instructions, subject line);
+# NEVER the OTP code itself (a digit string, language-independent), no
+# machine identifiers, no field names, no logs. Falls back to Spanish
+# ('es') for an unrecognised/absent language, matching this system's
+# pre-existing default exactly — an old caller that never sends `lang`
+# gets byte-identical behavior to before this table existed.
+_OTP_EMAIL_STRINGS = {
+    'es': {'greeting': 'Hola {name},', 'instruction': 'Tu código de verificación:',
+          'validity': 'Válido por 10 minutos. No lo compartas con nadie.',
+          'subject': 'Tu código Preferendum: {code}', 'default_name': 'Ciudadano'},
+    'en': {'greeting': 'Hi {name},', 'instruction': 'Your verification code:',
+          'validity': 'Valid for 10 minutes. Do not share it with anyone.',
+          'subject': 'Your Preferendum code: {code}', 'default_name': 'Citizen'},
+    'pt': {'greeting': 'Olá {name},', 'instruction': 'Seu código de verificação:',
+          'validity': 'Válido por 10 minutos. Não compartilhe com ninguém.',
+          'subject': 'Seu código Preferendum: {code}', 'default_name': 'Cidadão'},
+    'fr': {'greeting': 'Bonjour {name},', 'instruction': 'Votre code de vérification :',
+          'validity': 'Valable 10 minutes. Ne le partagez avec personne.',
+          'subject': 'Votre code Preferendum : {code}', 'default_name': 'Citoyen'},
+    'de': {'greeting': 'Hallo {name},', 'instruction': 'Dein Bestätigungscode:',
+          'validity': '10 Minuten gültig. Teile ihn mit niemandem.',
+          'subject': 'Dein Preferendum-Code: {code}', 'default_name': 'Bürger'},
+    'it': {'greeting': 'Ciao {name},', 'instruction': 'Il tuo codice di verifica:',
+          'validity': 'Valido per 10 minuti. Non condividerlo con nessuno.',
+          'subject': 'Il tuo codice Preferendum: {code}', 'default_name': 'Cittadino'},
+    'ja': {'greeting': '{name} 様、', 'instruction': '認証コード：',
+          'validity': '有効期限は10分間です。誰とも共有しないでください。',
+          'subject': 'Preferendumの認証コード: {code}', 'default_name': 'ご利用者'},
+    'ko': {'greeting': '{name} 님,', 'instruction': '인증 코드:',
+          'validity': '10분간 유효합니다. 누구와도 공유하지 마세요.',
+          'subject': 'Preferendum 인증 코드: {code}', 'default_name': '시민'},
+    'zh': {'greeting': '{name} 您好，', 'instruction': '您的验证码：',
+          'validity': '有效期为10分钟。请勿与任何人分享。',
+          'subject': '您的Preferendum验证码：{code}', 'default_name': '用户'},
+    'ar': {'greeting': 'مرحباً {name}،', 'instruction': 'رمز التحقق الخاص بك:',
+          'validity': 'صالح لمدة 10 دقائق. لا تشاركه مع أي شخص.',
+          'subject': 'رمز Preferendum الخاص بك: {code}', 'default_name': 'مواطن'},
+    'ru': {'greeting': 'Здравствуйте, {name},', 'instruction': 'Ваш код подтверждения:',
+          'validity': 'Действителен 10 минут. Никому его не сообщайте.',
+          'subject': 'Ваш код Preferendum: {code}', 'default_name': 'Пользователь'},
+    'hi': {'greeting': 'नमस्ते {name},', 'instruction': 'आपका सत्यापन कोड:',
+          'validity': '10 मिनट के लिए मान्य। इसे किसी के साथ साझा न करें।',
+          'subject': 'आपका Preferendum कोड: {code}', 'default_name': 'नागरिक'},
+}
+
+
+def send_email_otp(email, code, name='', lang=''):
+    strings = _OTP_EMAIL_STRINGS.get(lang, _OTP_EMAIL_STRINGS['es'])
+    display_name = name or strings['default_name']
+    greeting = strings['greeting'].format(name=display_name)
+    subject_line = strings['subject'].format(code=code)
     html = (
         f'<div style="font-family:sans-serif;padding:40px;background:#07090f;color:#fff;border-radius:12px;">'
         f'<h1 style="color:#2563eb;">prefer<span style="color:#fff">endum</span></h1>'
-        f'<p>Hola {name or "Ciudadano"},</p><p>Tu código de verificación:</p>'
+        f'<p>{greeting}</p><p>{strings["instruction"]}</p>'
         f'<div style="background:#1e2a3d;padding:24px;text-align:center;border-radius:8px;">'
         f'<span style="font-size:40px;font-weight:bold;letter-spacing:10px;color:#2563eb;">{code}</span></div>'
-        f'<p style="color:#94a3b8;">Válido por 10 minutos. No lo compartas con nadie.</p>'
+        f'<p style="color:#94a3b8;">{strings["validity"]}</p>'
         f'<p style="color:#475569;font-size:12px;">En memoria del Socio Fundador José Ignacio Fernández (1989–2024)</p>'
         f'</div>'
     )
@@ -2736,9 +2972,9 @@ def send_email_otp(email, code, name=''):
                 json={
                     'from': 'Preferendum <noreply@preferendum.com>',
                     'to': [email],
-                    'subject': f'Tu código Preferendum: {code}',
+                    'subject': subject_line,
                     'html': html,
-                    'text': f'Tu código Preferendum es: {code}. Válido 10 minutos.',
+                    'text': f'{strings["instruction"]} {code}. {strings["validity"]}',
                 },
                 headers={'Authorization': f'Bearer {resend_key}'},
                 timeout=10,
@@ -2758,10 +2994,10 @@ def send_email_otp(email, code, name=''):
         return True
     try:
         msg = MIMEMultipart('alternative')
-        msg['Subject'] = f'Tu código Preferendum: {code}'
+        msg['Subject'] = subject_line
         msg['From']    = f'Preferendum <{gmail_user}>'
         msg['To']      = email
-        msg.attach(MIMEText(f'Tu código es: {code}. Válido 10 min.', 'plain'))
+        msg.attach(MIMEText(f'{strings["instruction"]} {code}. {strings["validity"]}', 'plain'))
         msg.attach(MIMEText(html, 'html'))
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
             server.login(gmail_user, gmail_pass)
@@ -2861,15 +3097,45 @@ def send_welcome_certificate(email, name, user_id):
             print(f'[Certificate Email Error] {e}')
 
 
-def send_sms_otp(phone, code):
+# I18N FINAL HARDENING (Section 5) — kept deliberately short (well under
+# 70 characters INCLUDING the {code} placeholder) so every language here
+# fits in a SINGLE SMS segment. GSM-7-safe scripts (es/en/pt/fr/de/it) fit
+# ~160 chars/segment; ja/ko/zh/ar/ru/hi contain characters outside GSM-7
+# and are sent as UCS-2, which drops the per-segment limit to ~70 chars —
+# a real Twilio/carrier constraint, not a Preferendum choice. Every
+# message below is written to stay inside that tighter UCS-2 budget, so
+# no language here silently costs the sender extra segments or risks
+# truncation; none were shortened via transliteration to fake fit — this
+# is genuine native-script text, just concise by construction. The OTP
+# digits are never translated. No provider/rate-limit/security behavior
+# changes — only the template selected.
+_OTP_SMS_TEMPLATES = {
+    'es': 'Preferendum: tu codigo es {code}. Valido 10 min.',
+    'en': 'Preferendum: your code is {code}. Valid 10 min.',
+    'pt': 'Preferendum: seu codigo e {code}. Valido 10 min.',
+    'fr': 'Preferendum : code {code}. Valable 10 min.',
+    'de': 'Preferendum: Code {code}. 10 Min gueltig.',
+    'it': 'Preferendum: codice {code}. Valido 10 min.',
+    'ja': 'Preferendum: コード{code}。10分間有効。',
+    'ko': 'Preferendum: 코드 {code}. 10분간 유효.',
+    'zh': 'Preferendum: 验证码{code}，10分钟内有效。',
+    'ar': 'Preferendum: الرمز {code}. صالح 10 دقائق.',
+    'ru': 'Preferendum: код {code}. Действителен 10 мин.',
+    'hi': 'Preferendum: कोड {code}. 10 मिनट वैध।',
+}
+
+
+def send_sms_otp(phone, code, lang=''):
     sid = os.getenv('TWILIO_ACCOUNT_SID')
     token = os.getenv('TWILIO_AUTH_TOKEN')
     from_num = os.getenv('TWILIO_PHONE_NUMBER', '+15075027781')
+    template = _OTP_SMS_TEMPLATES.get(lang, _OTP_SMS_TEMPLATES['es'])
+    body = template.format(code=code)
     if sid and token:
         try:
             from twilio.rest import Client
             Client(sid, token).messages.create(
-                body=f'Preferendum: Tu codigo es {code}. Valido 10 min.',
+                body=body,
                 from_=from_num,
                 to=phone
             )
@@ -2893,6 +3159,8 @@ class RegisterInput(BaseModel):
     gender:      str = 'F'
     dob:         str = ''
     national_id: str = ''
+    lang:        str = ''   # I18N FINAL HARDENING — optional, additive; see
+                             # VoterRegisterInput.lang for the same contract.
 
 class LoginInput(BaseModel):
     email:     str
@@ -3137,13 +3405,15 @@ seed_demo_data()
 @app.get('/', response_class=HTMLResponse)
 def root():
     return HTMLResponse(content="""<!DOCTYPE html>
-<html lang="en" style="background:#090D18;">
+<html lang="en" data-source-lang="en" style="background:#090D18;">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <meta name="color-scheme" content="dark"/>
 <meta name="supported-color-schemes" content="dark"/>
 <title>Preferendum</title>
+<script src="/lang.js"></script>
+<script src="/translate.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -3208,9 +3478,17 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
   .roles{max-width:100%;}
   .role-card{padding:20px 22px;}
 }
+#gt-widget-root{display:none!important;}
+#lang-float-root{position:fixed;top:10px;right:10px;z-index:99999;}
 </style>
 </head>
 <body>
+
+<!-- TRANSLATE — one authoritative selector, consistent with every other portal -->
+<div id="lang-float-root">
+  <div data-pref-lang-selector></div>
+  <div id="gt-widget-root"></div>
+</div>
 
 <!-- PAGE 1: CONCEPT -->
 <div id="page1">
@@ -3455,6 +3733,21 @@ def serve_app():
     except FileNotFoundError:
         return HTMLResponse(content='<html><body>App not found</body></html>', status_code=404)
 
+@app.get('/lang.js')
+def serve_lang_js():
+    """COMPLETE INTERNATIONALIZATION REMEDIATION — the ONE authoritative
+    language resolver, shared by every portal. Served from the repo root
+    exactly like translate.js so every page can `<script src="/lang.js">`
+    it before translate.js."""
+    try:
+        with open('lang.js', 'r', encoding='utf-8') as f:
+            content = f.read()
+        return Response(content=content, media_type='application/javascript', headers={
+            'Cache-Control': 'public, max-age=86400',
+        })
+    except FileNotFoundError:
+        return Response(content='// lang.js not found', media_type='application/javascript', status_code=404)
+
 @app.get('/translate.js')
 def serve_translate_js():
     """Centralized Google Translate config — change languages in one place for all portals."""
@@ -3494,6 +3787,12 @@ class VoterRegisterInput(BaseModel):
     ref_source:   str = ''   # canal de adquisición: fb, ig, tiktok, direct, etc.
     ref_code:     str = ''   # código de referido de otro usuario (invitación persona-a-persona)
     device_fp:    str = ''
+    lang:         str = ''   # COMPLETE INTERNATIONALIZATION REMEDIATION — the
+                              # frontend's already-resolved language (lang.js
+                              # PreferendumLang.currentLanguage()), used to pick
+                              # the OTP email template. Optional and additive:
+                              # an older client that omits it gets the same
+                              # Spanish default as before this field existed.
 
 
 @app.post('/voter/register')
@@ -3531,7 +3830,7 @@ def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
             db.add(OTPCode(user_id=existing.id, email=existing.email, code=code, channel='email',
                            expires_at=datetime.utcnow() + timedelta(minutes=15)))
             db.commit()
-            bg.add_task(send_email_otp, existing.email, code, existing.name)
+            bg.add_task(send_email_otp, existing.email, code, existing.name, data.lang)
         return {'token': make_token(existing.id), 'user': {
             'id': existing.id, 'name': existing.name, 'email': existing.email,
             'email_verified': existing.email_verified, 'phone': existing.phone or ''
@@ -3562,15 +3861,22 @@ def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
         raise HTTPException(500, f'DB error al crear usuario: {str(_e)}')
     try:
         _assign_user_tier(user, db)
-        # Fallback: si no se pudo calcular un tier real (comuna sin datos), heredar
-        # el del referente — la gente invita a gente de nivel socioeconómico similar.
-        if not user.se_tier and referrer and referrer.se_tier:
-            db.execute(text(
-                "UPDATE users SET se_tier=:t, income_index=:i, tier_pre_evaluated=TRUE WHERE id=:uid"
-            ), {'t': referrer.se_tier, 'i': referrer.income_index or 0, 'uid': user.id})
-            db.commit()
-            user.se_tier = referrer.se_tier
-            user.tier_pre_evaluated = True
+        # CHANGE-003 remediation (audit finding Q, BLOCKER) — REMOVED: this
+        # used to copy the REFERRER's se_tier onto a brand-new user
+        # whenever the new user's OWN evidence did not resolve a tier
+        # ("la gente invita a gente de nivel socioeconómico similar").
+        # That assigns a real, actionable A/B/C/D based on ZERO economic
+        # evidence about the actual person — exactly the kind of
+        # characteristic -> tier shortcut CHANGE-003 exists to prevent
+        # (see socioeconomic.py R1/R7), just via a referral relationship
+        # instead of age/occupation/commune. The referral relationship
+        # itself (referred_by_user_id, above) is a legitimate growth
+        # feature and is untouched; only the tier-fabrication is removed.
+        # If this user's own income/occupation/commune evidence cannot
+        # resolve a tier, _assign_user_tier already leaves se_tier
+        # canonically empty (UNRESOLVED, R7) — CHANGE-002 already treats a
+        # missing tier as UNKNOWN, which is the correct, honest outcome
+        # here too, not a gap to paper over with someone else's data.
     except Exception as _e:
         print(f'[voter_register] _assign_user_tier non-fatal error: {_e}')
     code = gen_otp()
@@ -3581,7 +3887,7 @@ def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
         db.commit()
     except Exception as _e:
         print(f'[voter_register] OTP/device error (non-fatal): {_e}')
-    bg.add_task(send_email_otp, user.email, code, user.name)
+    bg.add_task(send_email_otp, user.email, code, user.name, data.lang)
     return {'token': make_token(user.id), 'user': {
         'id': user.id, 'name': user.name, 'email': user.email,
         'email_verified': False, 'phone': data.phone,
@@ -3839,7 +4145,7 @@ def register(data: RegisterInput, bg: BackgroundTasks, db: Session = Depends(get
         channel='email', expires_at=datetime.utcnow() + timedelta(minutes=10)
     ))
     db.commit()
-    bg.add_task(send_email_otp, user.email, code, user.name)
+    bg.add_task(send_email_otp, user.email, code, user.name, data.lang)
     bg.add_task(send_welcome_certificate, user.email, user.name, user.id)
     return {
         'token': make_token(user.id),
@@ -3882,11 +4188,23 @@ def login(data: LoginInput, request: Request, bg: BackgroundTasks, db: Session =
     db.query(OTPCode).filter(OTPCode.user_id == user.id, OTPCode.used == False).update({'used': True})
     db.commit()
 
+    # I18N FINAL HARDENING — authenticated precedence: stored explicit
+    # preference (tier 1) > this request's Accept-Language header (tier 2,
+    # the closest server-side equivalent of device/browser language) >
+    # user.country (tier 3) > global fallback. Computed once, shared by
+    # BOTH the email and SMS 2FA paths below (a user may have either or
+    # both verified).
+    _login_lang = resolve_user_language(
+        explicit=user.preferred_lang,
+        device=request.headers.get('accept-language', ''),
+        country=user.country,
+    )
+
     if user.email_verified:
         email_code = gen_otp()
         db.add(OTPCode(user_id=user.id, email=user.email, code=email_code, channel='email',
                        expires_at=datetime.utcnow() + timedelta(minutes=10)))
-        bg.add_task(send_email_otp, user.email, email_code, user.name)
+        bg.add_task(send_email_otp, user.email, email_code, user.name, _login_lang)
 
     twilio_active = bool(os.getenv('TWILIO_ACCOUNT_SID') and os.getenv('TWILIO_AUTH_TOKEN'))
     sms_required = False
@@ -3894,7 +4212,7 @@ def login(data: LoginInput, request: Request, bg: BackgroundTasks, db: Session =
         sms_code = gen_otp()
         db.add(OTPCode(user_id=user.id, email=user.email, code=sms_code, channel='sms',
                        expires_at=datetime.utcnow() + timedelta(minutes=10)))
-        bg.add_task(send_sms_otp, user.phone, sms_code)
+        bg.add_task(send_sms_otp, user.phone, sms_code, _login_lang)
         sms_required = True
 
     db.commit()
@@ -4077,7 +4395,7 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 # ══════════════════════════════════════════════════════════════
 
 @app.post('/verify/email/send')
-def send_email_code(bg: BackgroundTasks, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def send_email_code(request: Request, bg: BackgroundTasks, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if user.email_verified:
         return {'message': 'Email already verified', 'verified': True}
     db.query(OTPCode).filter(OTPCode.user_id == user.id, OTPCode.channel == 'email', OTPCode.used == False).update({'used': True})
@@ -4085,7 +4403,10 @@ def send_email_code(bg: BackgroundTasks, user: User = Depends(get_current_user),
     code = gen_otp()
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email', expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
-    bg.add_task(send_email_otp, user.email, code, user.name)
+    _lang = resolve_user_language(explicit=user.preferred_lang,
+                                  device=request.headers.get('accept-language', ''),
+                                  country=user.country)
+    bg.add_task(send_email_otp, user.email, code, user.name, _lang)
     return {'message': f'Code sent to {user.email}'}
 
 @app.post('/verify/email/confirm')
@@ -4105,13 +4426,16 @@ def confirm_email(data: OTPInput, user: User = Depends(get_current_user), db: Se
     return {'verified': True, 'verify_level': user.verify_level, 'next_step': 'verify_phone'}
 
 @app.post('/verify/phone/send')
-def send_phone_code(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def send_phone_code(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     if user.phone_verified:
         return {'verified': True}
     code = gen_otp()
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='sms', expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
-    send_sms_otp(user.phone, code)
+    _lang = resolve_user_language(explicit=user.preferred_lang,
+                                  device=request.headers.get('accept-language', ''),
+                                  country=user.country)
+    send_sms_otp(user.phone, code, _lang)
     return {'message': f'SMS sent to {user.phone[-4:].rjust(8,"*")}'}
 
 @app.post('/verify/phone/confirm')
@@ -4353,7 +4677,29 @@ def _send_supervisor_authorization_email(supervisor_email, employee_name, employ
             print(f'[SupervisorEmail] {e}')
 
 
-# Profesiones que indican ingreso alto (elevan tier a A si la comuna lo permite)
+# FINAL SOCIOECONOMIC ASSIGNMENT HARDENING (Phase 4/9 — direct-shortcut
+# search) — CORRECCIÓN: el comentario original decía "Profesiones que
+# indican ingreso alto (elevan tier a A si la comuna lo permite)", que
+# describe textualmente el patrón "occupation -> A/B/C/D" que R1/R7
+# prohíben. Se verificó exhaustivamente (grep de cada uso de la variable
+# local `profession_tier` en _assign_user_tier_inner, desde donde se
+# calcula hasta la llamada a _socio.classify()) que HOY este dict es
+# ALCANZABLE pero MUERTO: `profession_tier` se calcula (incluyendo el
+# "_static_floor" que lee este dict como piso) pero nunca se lee después
+# de calcularse — ni se asigna a user.se_tier ni a
+# user.estimated_income_usd. Sólo `user.estimated_income_usd`, escrito por
+# separado junto a `profession_tier` en cada rama con datos reales
+# (occupation_unified / ILO / occupation_salary / agentes por país),
+# sobrevive hasta classify(). Es decir: se calcula un tier directo por
+# ocupación y luego se descarta, exactamente como _CARGO_TIER (arriba en
+# este archivo). No se borra aquí — mismo criterio que con _CARGO_TIER: no
+# eliminar código alcanzable sin una decisión de negocio explícita — pero
+# queda documentado como el hallazgo que es, para que nadie lo reconecte
+# pensando que ya está en uso. TestProfessionTierNeverReachesSeTier en
+# test_socioeconomic_estimator_remediation.py prueba esto tanto
+# estructuralmente (ninguna asignación a se_tier cerca de esta variable)
+# como en comportamiento (una ocupación legacy con este dict en 'A' pero
+# sin ningún ingreso real disponible no resuelve tier).
 _PROFESSION_TIER: dict[str, str] = {
     # Códigos nuevos (22 categorías BLS universales)
     'mgmt':           'A',  # Dirección/Gerencia
@@ -4396,6 +4742,72 @@ _PROFESSION_TIER: dict[str, str] = {
     'servicios': 'D', 'hogar': 'D', 'desempleado': 'D',
 }
 
+# FINAL SOCIOECONOMIC ASSIGNMENT HARDENING Phase 4 — OCCUPATION VOCABULARY
+# CONSOLIDATION. `user.profession` reaches _assign_user_tier_inner as ONE
+# of three shapes, and is resolved through exactly this hierarchy — no
+# other occupation vocabulary exists outside of it:
+#
+#   1. socioeconomic.resolve_occupation_soc(title) — free-text TITLE
+#      ("Ingeniero Industrial", "Industrial Engineer(s)") -> canonical SOC
+#      code, via the explicit alias table socioeconomic.
+#      _OCCUPATION_TITLE_ALIASES (no fuzzy matching: a near-miss like
+#      "Ingeniero Comercial" returns '', never a guess). Runs FIRST, so a
+#      title that resolves here reaches step 2 exactly like someone who
+#      typed the SOC code directly. Today this table has ONE occupation
+#      (Industrial Engineer / SOC 17-2112) — everything else falls through
+#      to step 2 as a raw string, resolving there only if it happens to
+#      already match a legacy slug.
+#
+#   2. SOC code (`^\d{2}-\d{4}$`, either typed directly or produced by
+#      step 1) -> occupation_unified, keyed by occupation_code,
+#      country_iso='US' (populated by usa_data_agent.
+#      import_bls_occupations_to_db from the tracked
+#      bls_occupation_scores_2025.csv — Phase 3). A US user reads
+#      profession_score/median_annual_usd directly; a non-US user reads
+#      isco_group (derived via usa_data_agent._BLS_MAJOR_GROUP_TO_ISCO,
+#      documented there) and continues to step 3 with it.
+#
+#   3. Legacy Preferendum SLUG (e.g. 'medico', 'ing_civil' — assigned by
+#      the voter registration form, not free text) -> ONE of two
+#      COARSER, major-group-level dicts depending on the user's own
+#      country:
+#        - US:     _US_PROFESSION_SOC  (slug -> SOC 2-digit major_group)
+#        - non-US: _OCC_TO_ISCO        (slug -> ISCO-08 major group)
+#      Both dicts share the same ~54 slug keys and were cross-checked
+#      against each other while building the Phase 3 BLS import (see
+#      usa_data_agent._BLS_MAJOR_GROUP_TO_ISCO) — consistent for every
+#      major group except two ('17-0000' Engineering and '29-0000'
+#      Healthcare), where a handful of slugs describe a
+#      technician/associate role nested under an otherwise
+#      professional-level major group; documented there as a data
+#      limitation, not silently resolved.
+#      eligibility.norm_occupation() (CHANGE-002, major-group-level only)
+#      is a SEPARATE reconciliation used for matching/targeting
+#      eligibility checks, not for income estimation — it is not part of
+#      this income-estimation hierarchy and is intentionally left alone.
+#
+#   4. If steps 1-3 found an isco_group but no income yet: occupation_
+#      salary_agent.PROFESSION_TO_ISCO — a THIRD, independently-maintained
+#      slug->isco_group dict (45 keys, an overlapping but not identical
+#      subset of the ~54 in step 3) feeding the `occupation_salary` table
+#      (real INE ESI Chile data + published LATAM seeds).
+#
+#   5. If nothing above resolved anything: _PROFESSION_TIER, a direct
+#      slug->A/B/C/D dict. Reachable but DEAD — see the comment above its
+#      definition and TestProfessionTierNeverReachesSeTier — its result is
+#      computed and then never read; only estimated_income_usd (set
+#      separately in steps 2-4 wherever real data existed) survives to
+#      classify(). Kept, not deleted, same reasoning as _CARGO_TIER.
+#
+#   6. Unresolved -> honest fallback, never fabricated: commune, then
+#      country-median income (both occupation-independent — see the
+#      Phase 2 comment further below), then simply UNRESOLVED (R7).
+#
+# None of _US_PROFESSION_SOC / _OCC_TO_ISCO / occupation_salary_agent.
+# PROFESSION_TO_ISCO / _PROFESSION_TIER were deleted or had a legacy key
+# removed by this hardening pass — real stored users may still submit
+# these slugs, and every one of them still resolves exactly as before.
+#
 # Mapeo ocupación → BLS major_group para lookup en occupation_unified (USA)
 _US_PROFESSION_SOC: dict[str, str] = {
     # Códigos nuevos (categorías BLS)
@@ -4479,7 +4891,18 @@ _OCC_TO_ISCO: dict[str, int] = {
     'hogar': 9,
 }
 
-# Cargo jerárquico — eleva el tier independientemente de profesión o comuna
+# CHANGE-003 remediation (audit finding I) — CORRECCIÓN: este comentario
+# decía "eleva el tier independientemente de profesión o comuna". Ese es
+# exactamente el mecanismo cargo->tier que el propio CHANGE-003 documentó
+# como eliminado más abajo (_assign_user_tier_inner: "Lo que había aquí...
+# lo SUBÍA por cargo... exactamente la promoción arbitraria que R1 y R8
+# prohíben"). Confirmado por búsqueda exhaustiva: _CARGO_TIER NO se lee en
+# ningún otro punto del archivo — es el remanente muerto de ese mecanismo
+# ya retirado, no una regla vigente. No se restaura (violaría R1/R8) ni se
+# borra en esta remediación (alcance: corregir documentación engañosa, no
+# eliminar código no relacionado); si cargo/seniority debe ajustar el
+# ingreso estimado, eso requiere una decisión de negocio explícita con
+# coeficientes propios — ver el comentario en _assign_user_tier_inner.
 _CARGO_TIER: dict[str, str] = {
     'ceo':              'A',  # CEO / Dueño / Fundador
     'gerente_general':  'A',  # Gerente General
@@ -4664,6 +5087,31 @@ def _assign_user_tier(user, db):
         db.rollback()
 
 def _assign_user_tier_inner(user, db):
+    # CHANGE-003 remediation (idempotency BLOCKER) — every recomputation
+    # must derive the estimate from clean source inputs, never from a
+    # value THIS SAME function already wrote on a previous call. Without
+    # this reset, the age/company-size multiplier block below ("Aplicar
+    # multiplicadores al ingreso estimado") reads whatever is currently in
+    # user.estimated_income_usd; on a second call that value is already
+    # age/size-adjusted, so the multiplier is applied AGAIN on top of
+    # itself — compounding indefinitely on every legitimate recalculation
+    # (e.g. every /profile/income update, every admin recompute) with no
+    # real change to the person's profile. Reproduced: three unchanged
+    # calls turned $38,064 into $46,438 into $56,654, eventually flipping
+    # the tier B->A purely from re-invocation.
+    #
+    # Every write to estimated_income_usd below this point already derives
+    # its value fresh from real reference data (occupation catalogs,
+    # regional wage agents, commune data, country median) — none of them
+    # read estimated_income_usd as an INPUT signal, only as an accumulator
+    # to write into. So resetting it here, unconditionally, at the top of
+    # every call, is the complete root-cause fix: nothing downstream ever
+    # needed the previous call's value. If nothing can be freshly resolved
+    # this call, it correctly stays None (fail-closed, same R7 philosophy
+    # already applied to a stale se_tier below) rather than silently
+    # reusing a possibly-wrong prior figure.
+    user.estimated_income_usd = None
+
     commune_tier = None
     if user.county:
         country_code = _country_code(user.country)
@@ -4729,6 +5177,19 @@ def _assign_user_tier_inner(user, db):
     user_profession   = getattr(user, 'profession', '') or ''
     user_country_code = _country_code(user.country)
 
+    # CHANGE-003 remediation (audit finding G) — resolve a free-text
+    # occupation TITLE ("Ingeniero Industrial", "Industrial Engineer"/
+    # "Industrial Engineers") to its canonical SOC code before any lookup
+    # below runs, so it reaches the SAME real reference data as someone
+    # who submitted "17-2112" directly. Only affects titles explicitly
+    # listed in socioeconomic._OCCUPATION_TITLE_ALIASES (no fuzzy
+    # matching); anything else — including existing legacy slugs like
+    # 'medico' — is untouched and falls through to the resolution paths
+    # below exactly as before.
+    _resolved_soc = _socio.resolve_occupation_soc(user_profession)
+    if _resolved_soc:
+        user_profession = _resolved_soc
+
     # ── CHANGE-003: CAUSA RAÍZ DEL PROBLEMA PPP ──────────────────────────
     #
     # Este bloque leía `world_countries.gdp_per_capita_usd` y lo trataba como
@@ -4765,6 +5226,42 @@ def _assign_user_tier_inner(user, db):
     _country_median_income = _ctx.median_personal_income_usd
 
     profession_tier = None
+    # GLOBAL OCCUPATION RESOLUTION HARDENING — carries an isco_group
+    # derived earlier in this block (from occupation_unified, via a
+    # canonicalized SOC code or a legacy slug) forward to the
+    # occupation_salary/PROFESSION_TO_ISCO fallback below, which is keyed
+    # by legacy SLUGS and cannot look up a SOC-code string on its own.
+    # Before resolve_occupation_soc existed, a term like "medico" reached
+    # that fallback AS a slug and worked; now that the SAME term
+    # canonicalizes to "29-1215" earlier in this function, it would
+    # otherwise silently skip that fallback and fall all the way through
+    # to the commune/country estimate — a real regression this fixes, not
+    # a new crosswalk (the isco_group itself is the exact same value
+    # already used for the ILO/occupation_unified ISCO lookups just
+    # above; this only extends how far it is allowed to reach).
+    #
+    # Section 9 audit (SOC/ISCO consistency) — precisely re-measured the
+    # prior report's "PROFESSION_TO_ISCO missing 9 keys" finding: the real
+    # picture is a much larger, genuine vocabulary split, not 9 missing
+    # entries in an otherwise-shared list. _OCC_TO_ISCO/_US_PROFESSION_SOC
+    # (54 keys) use BLS-CATEGORY-style slugs ('engineering', 'mgmt',
+    # 'admin'...); occupation_salary_agent.PROFESSION_TO_ISCO (45 keys) is
+    # an independently-maintained, more granular OCCUPATION-style slug
+    # list ('electricista', 'programador', 'bombero', 'plomero'...) —
+    # only 16 keys are shared verbatim between them; 38 exist only in
+    # _OCC_TO_ISCO and 29 exist only in PROFESSION_TO_ISCO. No authoritative
+    # evidence resolves which category-slug a granular-slug "belongs to"
+    # (or vice versa) without guessing, so neither dict is merged or
+    # rewritten here — that remains a genuine, preserved DATA limitation
+    # (a legacy user stored under a category-style slug PROFESSION_TO_ISCO
+    # never had, e.g. 'engineering', still cannot reach occupation_salary
+    # via that dict's own key lookup). _known_isco_grp is the safe,
+    # non-fabricating mitigation: whenever _OCC_TO_ISCO (or a SOC code)
+    # already resolved a real isco_group above, that SAME value backstops
+    # the occupation_salary lookup below even when PROFESSION_TO_ISCO's
+    # own key lookup misses — no new crosswalk invented, no salary chosen
+    # from an uncertain mapping.
+    _known_isco_grp = None
     if user_profession:
         import re as _re
         _is_soc = bool(_re.match(r'^\d{2}-\d{4}$', user_profession))
@@ -4799,6 +5296,7 @@ def _assign_user_tier_inner(user, db):
                     """), {'code': user_profession}).fetchone()
                     if isco_row and isco_row[0]:
                         isco_grp = isco_row[0]
+                        _known_isco_grp = isco_grp
                         # 0. China: datos NBS PPP-adjusted (fuente primaria para CN)
                         if user_country_code == 'CN':
                             try:
@@ -4858,6 +5356,7 @@ def _assign_user_tier_inner(user, db):
                 # Legacy codes — no-USA: lookup por ISCO group
                 isco_grp = _OCC_TO_ISCO.get(user_profession)
                 if isco_grp:
+                    _known_isco_grp = isco_grp
                     # 1. ILO primero
                     try:
                         from ilo_ilostat_agent import get_ilo_income
@@ -4884,7 +5383,12 @@ def _assign_user_tier_inner(user, db):
             try:
                 from occupation_salary_agent import PROFESSION_TO_ISCO as _PROF_TO_ISCO
                 from usa_data_agent import profession_score_to_tier as _pts
-                _occ_isco = _PROF_TO_ISCO.get(user_profession)
+                # GLOBAL OCCUPATION RESOLUTION HARDENING — PROFESSION_TO_ISCO
+                # is keyed by legacy slugs ('medico'), not SOC codes
+                # ('29-1215'), so a canonicalized title falls back to the
+                # isco_group ALREADY derived above (see _known_isco_grp's
+                # own comment) instead of failing this lookup outright.
+                _occ_isco = _PROF_TO_ISCO.get(user_profession) or _known_isco_grp
                 if _occ_isco:
                     _occ_row = db.execute(text("""
                         SELECT profession_score, median_monthly_usd
@@ -4993,7 +5497,54 @@ def _assign_user_tier_inner(user, db):
             except Exception:
                 pass
 
-    # Fallback de ingreso por commune cuando no hay dato de ocupación
+    # Fallback de ingreso por commune cuando no hay dato de ocupación.
+    #
+    # CHANGE-003 remediation (audit finding J) — verificado: este orden de
+    # prioridad (ocupación específica ANTES que comuna genérica) es
+    # intencional y consistente con R1 ("occupation... describes what
+    # someone does") — un dato ocupacional específico (p. ej. mediana de
+    # ingreso de Ingenieros Industriales en Chile) es una señal económica
+    # más precisa que un proxy genérico de ubicación (índice de precio m²
+    # de la comuna), así que comuna solo rellena cuando ocupación no
+    # resuelve nada, nunca al revés. No se encontró ninguna regla R1-R8 que
+    # exija lo contrario, y esta prioridad no se cambia sin una decisión de
+    # negocio explícita.
+    # FINAL SOCIOECONOMIC ASSIGNMENT HARDENING (Phase 2) — audited whether
+    # commune_market_data can legitimately go beyond this fallback and also
+    # ADJUST an occupation-based estimate. Finding: commune_market_data is
+    # populated by three different agents with two fundamentally different
+    # KINDS of signal, and the schema does not distinguish them (no
+    # populated source/kind column — `source_name` exists but is written by
+    # none of the three agents; `portal` is set by only two of the three):
+    #   - rental_price_agent.py (CL + most other supported countries,
+    #     including every Chilean commune): income_index = 100 x
+    #     (price_m2_avg / national median price_m2). This is RENT PRICE —
+    #     cost of living — not a wage/income observation. Its own docstring
+    #     calls it "RentIndex". Using it to adjust an occupation income
+    #     estimate would be exactly "multiply salary by house prices merely
+    #     because a commune is expensive" — explicitly prohibited.
+    #   - nuts_income_agent.py (EU27 only): imports Eurostat
+    #     nama_10r_2hhinc, real household disposable income per capita by
+    #     NUTS2 region. Genuine wage/income evidence.
+    #   - usa_data_agent.py (US only): imports BEA CAINC1, real per-capita
+    #     income by county. Genuine wage/income evidence.
+    # Conchalí and Las Condes (Chile) — required by this task's own
+    # sensitivity matrix — are both in the first bucket: cost-of-living
+    # only, no genuine local wage signal. A country-conditional adjustment
+    # that only fired for the ~28 countries with real income data would be
+    # invisible across the entire mandated matrix and would not extend to
+    # this platform's primary market, while adding a second, differently-
+    # sourced income signal to reconcile against R1-R8. Per this task's own
+    # instruction ("if the repository does NOT contain defensible local
+    # wage/income evidence: do NOT invent coefficients... report that local
+    # adjustment requires an authoritative dataset"), no such adjustment is
+    # added here. Commune-derived data continues to do exactly what it did
+    # before this audit: (1) fill in an income estimate ONLY when
+    # occupation could not resolve one at all (immediately below,
+    # unchanged), and (2) remain available as its own independent
+    # CHANGE-002 targeting dimension, untouched by this finding. A real
+    # Chilean (or other non-EU/US) wage/income dataset would need to be
+    # sourced before an occupation-adjustment could be built honestly.
     if not user.estimated_income_usd and _country_median_income and user.income_index and user.income_index > 0:
         user.estimated_income_usd = round(_country_median_income * (user.income_index / 50.0), 0)
 
@@ -5007,11 +5558,27 @@ def _assign_user_tier_inner(user, db):
     # en una empresa grande terminaba en A aunque su ingreso conocido dijera
     # otra cosa: exactamente la promoción arbitraria que R1 y R8 prohíben.
     #
-    # Ahora comuna/profesión/cargo/tamaño sólo alimentan la ESTIMACIÓN de
-    # ingreso (arriba, y los multiplicadores de más abajo). El tier lo decide
+    # Ahora comuna/profesión/tamaño sólo alimentan la ESTIMACIÓN de ingreso
+    # (arriba, y los multiplicadores de más abajo). El tier lo decide
     # socioeconomic.classify comparando ese ingreso con la mediana del país
     # del propio usuario, de modo que A/B/C/D signifique "posición en su
     # mercado local" (R2) sin absorber el poder adquisitivo del país (R3).
+    #
+    # CHANGE-003 remediation (audit finding I) — CORRECCIÓN: este comentario
+    # decía "comuna/profesión/cargo/tamaño", pero `cargo` NUNCA alimentó
+    # numéricamente la estimación de ingreso: se recolecta y viaja en
+    # _professional_profile() como dato de diagnóstico/targeting (igual que
+    # `classify()` documenta para todo el dict `professional`), pero ningún
+    # multiplicador lo lee. Se buscó en el historial de git un modelo o
+    # coeficiente de cargo/seniority ya aprobado que se hubiera desconectado
+    # por accidente — no existe ninguno; el único hallazgo relacionado es un
+    # comentario explicando POR QUÉ el tamaño de empresa ajusta el pago
+    # ("empresa grande paga más por el mismo cargo"), no un coeficiente de
+    # cargo en sí. Por eso no se inventa uno aquí: `cargo` queda
+    # explícitamente marcado como recolectado-pero-no-usado para la
+    # estimación de ingreso. Si se quiere que cargo/seniority ajuste el
+    # ingreso, esa es una DECISIÓN DE NEGOCIO pendiente (coeficientes,
+    # bandas de seniority), no algo que este cambio deba decidir.
     #
     # Si el ingreso no se puede resolver, el tier queda VACÍO. CHANGE-002 ya
     # trata un tier ausente como UNKNOWN, que deniega — no se inventa una
@@ -5134,6 +5701,18 @@ def _assign_user_tier_inner(user, db):
     #   < 33 años → β_eff = 0.0   (sin ajuste: solo señal ocupacional)
     #   33-39 años → β_eff = β_base / 2
     #   ≥ 40 años → β_eff = β_base
+    #
+    # CHANGE-003 remediation (audit finding J) — verificado: `estimated_
+    # income_ppp` (el resultado de esta fórmula) NUNCA debe alimentar
+    # socioeconomic.classify()/el tier, y hoy no lo hace —
+    # _individual_income_observations() no lo lee en absoluto. Esto es
+    # consistente con R3 ("COUNTRY PURCHASING POWER IS A SEPARATE,
+    # PRESERVED DIMENSION... Collapsing them into one opaque score would
+    # destroy that"): este composite YA mezcla ocupación + comuna + PPP en
+    # un solo número, exactamente lo que R3 prohíbe para el tier. Sirve
+    # para otros propósitos (p. ej. targeting por PPP de CHANGE-002), no
+    # para clasificación socioeconómica. No se cambia sin una decisión de
+    # negocio explícita que revise R3.
     _BETA_BASE = 0.35   # punto medio entre 0.30-0.40 (JC 2026-08-01)
 
     try:
@@ -6749,7 +7328,7 @@ def get_my_vote(debate_id: int,
 
 
 @app.post('/users/request-vote-otp')
-def request_vote_otp(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def request_vote_otp(request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Sends SMS OTP to reveal vote verify codes."""
     if not user.phone:
         raise HTTPException(400, 'No tienes un número de teléfono registrado')
@@ -6757,7 +7336,10 @@ def request_vote_otp(user: User = Depends(get_current_user), db: Session = Depen
     expires = datetime.utcnow() + timedelta(minutes=10)
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='vote_reveal', used=False, expires_at=expires))
     db.commit()
-    send_sms_otp(user.phone, code)
+    _lang = resolve_user_language(explicit=user.preferred_lang,
+                                  device=request.headers.get('accept-language', ''),
+                                  country=user.country)
+    send_sms_otp(user.phone, code, _lang)
     masked = user.phone[-4:] if user.phone else '????'
     return {'ok': True, 'masked_phone': f'***{masked}'}
 
@@ -7617,6 +8199,7 @@ class OrganizerRegisterFullInput(BaseModel):
     cargo:            str = ''
     # Supervisor que lo autoriza (solo si is_supervisor=False)
     supervisor_email: str = ''
+    lang:             str = ''   # I18N FINAL HARDENING — optional, additive.
 
 
 @app.post('/organizer/register')
@@ -7696,7 +8279,7 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks,
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
                    expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
-    bg.add_task(send_email_otp, user.email, code, user.name)
+    bg.add_task(send_email_otp, user.email, code, user.name, data.lang)
 
     # Si necesita autorización de supervisor → enviar email al jefe
     if not data.is_supervisor and data.supervisor_email:
@@ -8114,6 +8697,7 @@ class MarketerRegisterInput(BaseModel):
     supervisor_name:   str = ''
     supervisor_email:  str = ''
     supervisor_phone:  str = ''
+    lang:              str = ''   # I18N FINAL HARDENING — optional, additive.
 
 
 @app.post('/marketer/register')
@@ -8200,7 +8784,7 @@ def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Sess
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
                    expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
-    bg.add_task(send_email_otp, user.email, code, user.name)
+    bg.add_task(send_email_otp, user.email, code, user.name, data.lang)
 
     # Si necesita autorización del jefe → email al jefe (con su propia cuenta verificada)
     if not data.is_supervisor and data.supervisor_email:
@@ -14360,6 +14944,20 @@ def admin_import_usa_bea(secret: str, db: Session = Depends(get_db)):
     return result_holder.get('result', {'ok': False, 'message': 'Sin respuesta'})
 
 
+@app.post('/admin/import-bls-occupations')
+def admin_import_bls_occupations(secret: str, db: Session = Depends(get_db)):
+    """FINAL SOCIOECONOMIC ASSIGNMENT HARDENING Phase 3 — importa las 818
+    ocupaciones BLS OES May 2025 (bls_occupation_scores_2025.csv, ya
+    trackeado en el repo) a occupation_unified (country_iso='US',
+    occupation_type='SOC'). Idempotente: puede correrse cualquier número de
+    veces, incluida una base de datos completamente nueva, sin depender de
+    ningún dato preexistente en producción."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    from usa_data_agent import import_bls_occupations_to_db as _import
+    return _import(db)
+
+
 @app.post('/admin/import-nuts-eurostat')
 def admin_import_nuts(secret: str, db: Session = Depends(get_db)):
     """Importa 244 regiones NUTS2 Europa desde Eurostat (ingreso disponible real EUR/hab)."""
@@ -15458,9 +16056,60 @@ def admin_oews_msa_lookup(secret: str, soc_code: str, commune: str, db: Session 
     return result
 
 
+@app.get('/admin/occupation-resolution-stats')
+def admin_occupation_resolution_stats(secret: str, db: Session = Depends(get_db)):
+    """GLOBAL OCCUPATION RESOLUTION HARDENING Section 8 — diagnostics so
+    stored legacy `profession` values that no longer/never resolve can be
+    counted and reviewed WITHOUT exposing which user holds which value:
+    grouped by the distinct profession STRING and its count only, never
+    joined to a user id/email/name. Buckets each distinct value by
+    resolve_occupation_candidates' RESOLVED/AMBIGUOUS/UNRESOLVED status —
+    RESOLVED also covers the pre-existing legacy-slug paths
+    (_US_PROFESSION_SOC/_OCC_TO_ISCO/PROFESSION_TO_ISCO), checked
+    separately since resolve_occupation_candidates only knows about the
+    CANONICAL_OCCUPATIONS registry and bare SOC codes."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    from occupation_salary_agent import PROFESSION_TO_ISCO as _PROF_TO_ISCO
+    rows = db.execute(text(
+        "SELECT profession, COUNT(*) AS cnt FROM users "
+        "WHERE profession IS NOT NULL AND profession != '' "
+        "GROUP BY profession ORDER BY cnt DESC"
+    )).fetchall()
+    resolved, ambiguous, legacy_slug, unresolved = [], [], [], []
+    for value, count in rows:
+        r = _socio.resolve_occupation_candidates(value)
+        if r.status == _socio.OccupationResolution.RESOLVED:
+            resolved.append({'value': value, 'count': count, 'soc': r.soc})
+        elif r.status == _socio.OccupationResolution.AMBIGUOUS:
+            ambiguous.append({'value': value, 'count': count, 'candidates': list(r.candidates)})
+        elif (value in _US_PROFESSION_SOC or value in _OCC_TO_ISCO
+              or value in _PROF_TO_ISCO):
+            legacy_slug.append({'value': value, 'count': count})
+        else:
+            unresolved.append({'value': value, 'count': count})
+    return {
+        'distinct_values': len(rows),
+        'total_users_with_a_profession': sum(c for _, c in rows),
+        'resolved_canonical':  {'distinct': len(resolved), 'users': sum(r['count'] for r in resolved), 'top': resolved[:20]},
+        'ambiguous':           {'distinct': len(ambiguous), 'users': sum(r['count'] for r in ambiguous), 'top': ambiguous[:20]},
+        'resolved_legacy_slug': {'distinct': len(legacy_slug), 'users': sum(r['count'] for r in legacy_slug), 'top': legacy_slug[:20]},
+        'unresolved':          {'distinct': len(unresolved), 'users': sum(r['count'] for r in unresolved), 'top': unresolved[:20]},
+    }
+
+
 @app.get('/api/occupations')
 def api_list_occupations(db: Session = Depends(get_db)):
-    """Lista las 818 ocupaciones BLS — usada por el formulario de registro."""
+    """Lista las 818 ocupaciones BLS — usada por el formulario de registro.
+
+    GLOBAL OCCUPATION RESOLUTION HARDENING — each row also carries
+    `aliases_es` (declared Spanish spellings from socioeconomic.
+    CANONICAL_OCCUPATIONS, an in-memory registry — no schema change,
+    empty list for the ~793 SOC codes without a curated Spanish alias
+    yet) so the registration search can match a Spanish-speaking user's
+    input, not only the English BLS title. Selecting a result still
+    stores the exact same canonical SOC `code` it always did.
+    """
     rows = db.execute(text("""
         SELECT occupation_code, title, isco_group, isco_label, profession_score
         FROM occupation_unified
@@ -15479,6 +16128,7 @@ def api_list_occupations(db: Session = Depends(get_db)):
             'group_name': _BLS_MAJOR_GROUP_NAMES.get(major_group, ''),
             'isco': isco_grp,
             'score': round(float(score), 1) if score else None,
+            'aliases_es': _socio.occupation_aliases_for_soc(soc, 'es'),
         })
     return result
 
