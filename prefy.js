@@ -619,11 +619,31 @@
       // way, exactly once.
       if (_voiceHooks && _voiceHooks.onFooterReady) _voiceHooks.onFooterReady(_state.dom.footer);
       var minimizedPref = safeGet(STORAGE_KEY_MINIMIZED);
-      _state.ui = minimizedPref === '0' ? 'open' : 'minimized';
+      if (minimizedPref === '0') _state.ui = 'open';
+      else if (minimizedPref === '1') _state.ui = 'minimized';
+      // else: no explicit saved preference yet. A caller may have
+      // already called setContext()/setState() before this deferred
+      // mount ran (e.g. bootstrap code that executes synchronously,
+      // before DOMContentLoaded) — its own auto-open decision already
+      // lives in _state.ui, so leave it untouched rather than
+      // unconditionally resetting it back to the 'minimized' default.
+      // When no such call happened, _state.ui is still sitting at that
+      // same 'minimized' default anyway, so this is a no-op change for
+      // every caller that never sets a context before mount.
       document.addEventListener('preferendum:langchange', onLangChange);
       _state.initialized = true;
-      if (opts.initialContext) setContext(opts.initialContext);
-      else render();
+      if (opts.initialContext) {
+        setContext(opts.initialContext);
+      } else if (_state.currentContextKey) {
+        // A context was already set before _state.dom existed — its own
+        // render call was necessarily a no-op back then, so replay it
+        // now instead of leaving the panel's title/body permanently
+        // blank the first time it's actually opened.
+        renderContent(PrefyContent.render(_state.currentContextKey, currentLang()));
+        render();
+      } else {
+        render();
+      }
     };
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', mount);

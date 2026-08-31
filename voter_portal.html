@@ -1456,7 +1456,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
 // ── INIT ──
 if (token) validateAndShowApp();
-else _showDebateBannerOnAuth();
+else {
+  // The static markup defaults to showing the login tab, but nothing
+  // previously told Prefy that — switchTab('login') makes it explicit
+  // and wires the correct context (see switchTab() above), so Prefy
+  // knows where the visitor actually is from the very first paint
+  // instead of only after some later interaction. _showDebateBannerOnAuth()
+  // itself still switches to 'register' when a shared-debate link brings
+  // someone in, correctly overriding this.
+  switchTab('login');
+  _showDebateBannerOnAuth();
+}
 
 // Ping DB every 3 min to prevent Render PostgreSQL from sleeping
 setInterval(() => fetch(`${API}/health`).catch(()=>{}), 180000);
@@ -1491,6 +1501,11 @@ function switchTab(tab) {
   document.getElementById('tab-register').style.display = tab === 'register' ? '' : 'none';
   document.getElementById('tab-login-btn').classList.toggle('active', tab === 'login');
   document.getElementById('tab-reg-btn').classList.toggle('active', tab === 'register');
+  // Single choke point for every login/register tab switch (button
+  // clicks and the two programmatic callers below) — Prefy must always
+  // know which of the two tabs is actually visible, not just which
+  // FIELD (if any) the user has focused inside it.
+  if (window.Prefy) Prefy.setContext(tab === 'register' ? 'voter.register.overview' : 'voter.auth.login');
 }
 
 async function doLogin() {
@@ -2023,6 +2038,10 @@ async function showVerifyScreen() {
   vs.style.display = 'flex';   // override any inline display:none
   vs.classList.add('visible');
   document.getElementById('verify-skip-btn').style.display = '';
+  // General landing context for this whole screen (see
+  // voter.verify.overview) — set the moment it becomes visible, not only
+  // once the user reaches the selfie/document step and focuses a field.
+  if (window.Prefy) Prefy.setContext('voter.verify.overview');
 
   // If user is already logged in, fetch their status and jump to right step
   let startStep = 1;
