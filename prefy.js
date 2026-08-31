@@ -211,6 +211,46 @@
   };
   var _transitionSeq = 0;
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // VOICE HOOKS (task: Prefy 30-Language Voice phase) — prefy.js knows
+  // NOTHING about speech synthesis, locales, or voices. It only calls a
+  // small, generic lifecycle hook set at the exact points an optional
+  // speech layer (prefy-voice.js) needs, exactly the way it already knows
+  // nothing about motion's CSS specifics beyond class names. If no voice
+  // module is loaded, every call below is a guarded no-op, so this file's
+  // own behavior and tests are byte-for-byte unchanged without it.
+  //   onTransitionStart()                — a NEW legitimate transition is
+  //     starting; cancel any obsolete in-flight speech now.
+  //   onContentVisible(rendered, state, mySeq) — the contextual message
+  //     text just became visible; speak it now if permitted. `mySeq` lets
+  //     the voice layer re-check `isStaleTransition` itself before it
+  //     actually starts talking (voice/unlock lookups are async).
+  //   onFooterReady(footerEl)            — the panel footer now exists in
+  //     the DOM; a voice module may append its own mute/unmute control
+  //     here. Fires whichever happens second: DOM mount or hook
+  //     registration — never both, never neither.
+  //   onUserGesture()                    — an explicit user tap/click on
+  //     Prefy's own chrome just occurred (bubble, help, reopen) — the one
+  //     kind of interaction eligible to satisfy a platform's "speech
+  //     needs a user gesture" requirement (task §5).
+  // ═══════════════════════════════════════════════════════════════════════
+  var _voiceHooks = null;
+  function setVoiceHooks(hooks) {
+    _voiceHooks = hooks || null;
+    if (_voiceHooks && _voiceHooks.onFooterReady && hasBrowser() && _state.dom) {
+      _voiceHooks.onFooterReady(_state.dom.footer);
+    }
+  }
+  function notifyUserGesture() {
+    if (_voiceHooks && _voiceHooks.onUserGesture) { try { _voiceHooks.onUserGesture(); } catch (e) { /* never break the app for a speech-layer error */ } }
+  }
+  function notifyTransitionStart() {
+    if (_voiceHooks && _voiceHooks.onTransitionStart) { try { _voiceHooks.onTransitionStart(); } catch (e) { /* ignore */ } }
+  }
+  function notifyContentVisible(rendered, state, mySeq) {
+    if (_voiceHooks && _voiceHooks.onContentVisible) { try { _voiceHooks.onContentVisible(rendered, state, mySeq); } catch (e) { /* ignore */ } }
+  }
+
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
     attrs = attrs || {};
@@ -255,6 +295,7 @@
         bubble.classList.add('prefy-tap-react');
         setTimeout(function () { bubble.classList.remove('prefy-tap-react'); }, 220);
       }
+      notifyUserGesture();
       open();
     });
 
@@ -287,9 +328,9 @@
 
     var footer = el('div', { class: 'prefy-panel-footer' });
     var helpBtn = el('button', { type: 'button', class: 'prefy-help-btn', text: PrefyContent.str(currentLang(), 'chrome.help') });
-    helpBtn.addEventListener('click', function () { openHelp(); });
+    helpBtn.addEventListener('click', function () { notifyUserGesture(); openHelp(); });
     var reopenBtn = el('button', { type: 'button', class: 'prefy-reopen-btn', text: PrefyContent.str(currentLang(), 'chrome.reopen') });
-    reopenBtn.addEventListener('click', function () { reopenCurrent(); });
+    reopenBtn.addEventListener('click', function () { notifyUserGesture(); reopenCurrent(); });
     footer.appendChild(helpBtn);
     footer.appendChild(reopenBtn);
 
@@ -303,7 +344,7 @@
     return {
       root: root, bubble: bubble, bubbleFloat: bubbleFloat, bubbleImg: bubbleImg, bubbleGlyph: bubbleGlyph, panel: panel,
       avatarWrap: avatarWrap, avatarImg: avatarImg, avatar: avatar, title: title, bodyText: bodyText, whyText: whyText,
-      closeBtn: closeBtn,
+      closeBtn: closeBtn, helpBtn: helpBtn, reopenBtn: reopenBtn, footer: footer,
     };
   }
 
@@ -406,6 +447,11 @@
    */
   function transitionToRendered(rendered, mySeq, opts) {
     opts = opts || {};
+    // Default true: setState/openHelp never dedupe (every call is treated
+    // as a fresh, real transition, same as their existing motion
+    // behavior) — only setContext's redundant-call path explicitly opts
+    // out via `speak: false` (task §4/§9: never speak on a no-op re-call).
+    var speak = opts.speak !== false;
     if (!hasBrowser() || !_state.dom) return;
 
     var reduced = prefersReducedMotion();
@@ -413,6 +459,7 @@
       renderContent(rendered);
       applyStateVisuals(_state.currentState);
       updatePanelVisibility();
+      if (speak) notifyContentVisible(rendered, _state.currentState, mySeq);
       return;
     }
 
@@ -427,6 +474,7 @@
       renderContent(rendered);
       applyStateVisuals(_state.currentState);
       updatePanelVisibility();
+      if (speak) notifyContentVisible(rendered, _state.currentState, mySeq);
       contentEls.forEach(function (elx) {
         elx.classList.remove('prefy-content-fade-out');
         elx.classList.add('prefy-content-fade-in');
@@ -474,7 +522,8 @@
     } else if (_state.ui !== 'open') {
       _state.ui = 'minimized';
     }
-    transitionToRendered(rendered, mySeq, { skipAnimation: !isRealChange });
+    if (isRealChange) notifyTransitionStart();
+    transitionToRendered(rendered, mySeq, { skipAnimation: !isRealChange, speak: isRealChange });
     return { applied: !guard.suppressed, state: guard.state, contextKey: effectiveKey };
   }
 
@@ -486,12 +535,14 @@
     _state.currentState = guard.state;
     if (!hasBrowser()) return { applied: !guard.suppressed, state: guard.state };
     if (opts.forceOpen) _state.ui = 'open';
+    notifyTransitionStart();
     transitionToRendered({ title: (content && content.title) || '', body: (content && content.body) || '', why: content && content.why }, mySeq, {});
     return { applied: !guard.suppressed, state: guard.state };
   }
 
   function openHelp() {
     var mySeq = ++_transitionSeq;
+    notifyTransitionStart();
     var lang = currentLang();
     var key = _state.currentContextKey || PrefyContent.UNKNOWN_CONTEXT_KEY;
     var rendered = PrefyContent.render(key, lang);
@@ -541,6 +592,14 @@
   }
 
   function onLangChange() {
+    // Stop any speech in the OLD language immediately (task §11) — reuses
+    // the same "cancel obsolete speech" hook a state transition uses, but
+    // deliberately leaves the transition sequence counter untouched and
+    // never announces new content itself: a language switch must never
+    // replay Prefy's motion, never re-open/re-close the panel, and never
+    // speak again on its own — only the NEXT genuine state/context change
+    // will speak, and it will naturally do so in the new language.
+    notifyTransitionStart();
     if (!_state.currentContextKey) return;
     var rendered = PrefyContent.render(_state.currentContextKey, currentLang());
     renderContent(rendered);
@@ -554,6 +613,11 @@
       _state.dom = buildDom();
       (opts.mountTo || document.body).appendChild(_state.dom.root);
       if (prefersReducedMotion()) _state.dom.root.classList.add('prefy-reduced-motion');
+      // Fires only if a voice module registered its hooks BEFORE this
+      // point — if it registers afterward, setVoiceHooks() itself fires
+      // this the moment it's called (see setVoiceHooks above). Either
+      // way, exactly once.
+      if (_voiceHooks && _voiceHooks.onFooterReady) _voiceHooks.onFooterReady(_state.dom.footer);
       var minimizedPref = safeGet(STORAGE_KEY_MINIMIZED);
       _state.ui = minimizedPref === '0' ? 'open' : 'minimized';
       document.addEventListener('preferendum:langchange', onLangChange);
@@ -597,6 +661,12 @@
     STATE_MOTION: STATE_MOTION,
     isStaleTransition: isStaleTransition,
     prefersReducedMotion: prefersReducedMotion,
+
+    // Voice (task: Prefy 30-Language Voice phase) — the ONLY surface
+    // prefy.js exposes for an optional speech layer. Pure lifecycle hook
+    // registration; prefy.js has no knowledge of speechSynthesis, voices,
+    // or locales beyond this.
+    setVoiceHooks: setVoiceHooks,
 
     // Introspection (tests, debugging) — never sensitive: state name and
     // context key strings only, never a user-data value.

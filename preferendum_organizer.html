@@ -109,6 +109,7 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
 <link rel="stylesheet" href="/prefy.css">
 <script src="/prefy-content.js"></script>
 <script src="/prefy.js"></script>
+<script src="/prefy-voice.js"></script>
 <style>
 #gt-float{position:fixed;top:10px;right:10px;z-index:99999;background:rgba(10,13,20,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
 </style>
@@ -450,6 +451,7 @@ let referralCode = localStorage.getItem('pref_org_referral_code') || '';
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
 if (window.Prefy) Prefy.init();
+if (window.PrefyVoice) PrefyVoice.init();
 document.addEventListener('DOMContentLoaded', function () {
   if (!window.Prefy) return;
   var fieldContextMap = {

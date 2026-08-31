@@ -23,6 +23,7 @@ body{top:0!important;}
 <link rel="stylesheet" href="/prefy.css">
 <script src="/prefy-content.js"></script>
 <script src="/prefy.js"></script>
+<script src="/prefy-voice.js"></script>
 <style>
 #gt-float{position:fixed;top:10px;right:10px;z-index:99999;background:rgba(10,13,20,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
 </style>
@@ -1432,6 +1433,7 @@ async function _showDebateBannerOnAuth() {
 // wired here, once, rather than scattered through the business logic
 // above; the actual copy lives in prefy-content.js.
 if (window.Prefy) Prefy.init();
+if (window.PrefyVoice) PrefyVoice.init();
 
 document.addEventListener('DOMContentLoaded', function () {
   if (!window.Prefy) return;

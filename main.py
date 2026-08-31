@@ -3893,6 +3893,20 @@ def serve_prefy_js():
     except FileNotFoundError:
         return Response(content='// prefy.js not found', media_type='application/javascript', status_code=404)
 
+@app.get('/prefy-voice.js')
+def serve_prefy_voice_js():
+    """Prefy's optional Web Speech (speechSynthesis) layer — 30-language
+    voice output, no external provider, no API key. See prefy-voice.js's
+    own header for the pure/browser-wiring split."""
+    try:
+        with open('prefy-voice.js', 'r', encoding='utf-8') as f:
+            content = f.read()
+        return Response(content=content, media_type='application/javascript', headers={
+            'Cache-Control': 'public, max-age=86400',
+        })
+    except FileNotFoundError:
+        return Response(content='// prefy-voice.js not found', media_type='application/javascript', status_code=404)
+
 @app.get('/prefy.css')
 def serve_prefy_css():
     """Prefy's floating-widget styles — shared by every portal."""

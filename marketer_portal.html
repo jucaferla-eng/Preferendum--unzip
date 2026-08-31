@@ -190,6 +190,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
 <link rel="stylesheet" href="/prefy.css">
 <script src="/prefy-content.js"></script>
 <script src="/prefy.js"></script>
+<script src="/prefy-voice.js"></script>
 <style>
 #gt-float{position:fixed;top:12px;right:12px;z-index:99999;background:rgba(13,17,32,0.92);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
 </style>
@@ -874,6 +875,7 @@ const COMMUNES = {
 // ── INIT ─────────────────────────────────────────────────────
 window.onload = () => {
   if (window.Prefy) Prefy.init();
+  if (window.PrefyVoice) PrefyVoice.init();
   if (token) showApp();
   else document.getElementById('auth-screen').style.display = 'flex';
   setDefaultDates();

@@ -41,16 +41,23 @@ def test_prefy_css_route_serves_css():
     assert '.prefy-root' in r.text
 
 
+def test_prefy_voice_js_route_serves_javascript():
+    r = client.get('/prefy-voice.js')
+    assert r.status_code == 200
+    assert 'javascript' in r.headers['content-type']
+    assert 'PrefyVoice' in r.text
+
+
 def test_prefy_routes_require_no_authentication():
     # Same as /lang.js and /translate.js — these are static assets, not
     # authenticated API responses.
-    for path in ('/prefy.js', '/prefy-content.js', '/prefy.css'):
+    for path in ('/prefy.js', '/prefy-content.js', '/prefy.css', '/prefy-voice.js'):
         r = client.get(path)
         assert r.status_code == 200
 
 
 def test_prefy_routes_are_cacheable_like_their_siblings():
-    for path in ('/prefy.js', '/prefy-content.js', '/prefy.css'):
+    for path in ('/prefy.js', '/prefy-content.js', '/prefy.css', '/prefy-voice.js'):
         r = client.get(path)
         assert 'max-age' in r.headers.get('cache-control', '')
 
@@ -62,6 +69,7 @@ def test_all_three_portals_reference_the_shared_prefy_files():
         assert '/prefy.js' in r.text
         assert '/prefy-content.js' in r.text
         assert '/prefy.css' in r.text
+        assert '/prefy-voice.js' in r.text
 
 
 APPROVED_ASSET_FILENAMES = [
