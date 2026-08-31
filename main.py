@@ -2885,12 +2885,15 @@ _GLOBAL_FALLBACK_LANGUAGE = 'es'
 
 def _normalize_lang_tag(tag) -> str:
     """Mirrors lang.js's normalizeLangTag: case/region-insensitive, 'zh'
-    for any Chinese variant. Never trusts the raw value as a supported
-    language on its own — callers must still check membership in
-    _SUPPORTED_LANGUAGES; this only normalizes SHAPE."""
+    for any Chinese variant, and accepts both hyphen ('nl-NL') and
+    underscore ('nl_NL', the Android Locale.toString() form) separators
+    so a genuinely supported device language is never missed and pushed
+    down to the country/global fallback tier. Never trusts the raw value
+    as a supported language on its own — callers must still check
+    membership in _SUPPORTED_LANGUAGES; this only normalizes SHAPE."""
     if not tag:
         return ''
-    primary = str(tag).strip().split('-')[0].lower()
+    primary = re.split(r'[-_]', str(tag).strip())[0].lower()
     return 'zh' if primary == 'zh' else primary
 
 

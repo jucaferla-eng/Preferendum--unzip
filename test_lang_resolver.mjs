@@ -240,6 +240,43 @@ function makeBrowserMock() {
   assertEqual(LangAfterNav.getExplicit(), 'fr', 'setExplicit rejects an unsupported language, prior choice unchanged');
 }
 
+// ── LANGUAGE EXPANSION follow-up — automatic detection re-verified for
+// all 30 canonical locale variants, both hyphen (BCP-47/browser) and
+// underscore (Android Locale.toString()) forms. This also exercises a
+// genuine, previously-latent normalizeLangTag bug found while doing this
+// check: underscore-form tags ('nl_NL') were never split correctly and
+// silently fell through to country/global fallback for EVERY language,
+// not just the newly-added ones — fixed in normalizeLangTag itself (see
+// its own updated regex), not worked around here. ──────────────────────
+const LOCALE_VARIANTS = {
+  nl: 'nl-NL', pl: 'pl-PL', tr: 'tr-TR', id: 'id-ID', vi: 'vi-VN', th: 'th-TH',
+  fil: 'fil-PH', bn: 'bn-BD', ur: 'ur-PK', fa: 'fa-IR', he: 'he-IL',
+  sv: 'sv-SE', da: 'da-DK', fi: 'fi-FI', el: 'el-GR', cs: 'cs-CZ', ro: 'ro-RO', uk: 'uk-UA',
+};
+Object.keys(LOCALE_VARIANTS).forEach(expectedLang => {
+  const hyphenTag = LOCALE_VARIANTS[expectedLang];
+  const underscoreTag = hyphenTag.replace('-', '_');
+  assertEqual(Lang.resolveLanguage({ device: hyphenTag }), { lang: expectedLang, reason: 'device' },
+    `${hyphenTag} (hyphen form) resolves to ${expectedLang} via device`);
+  assertEqual(Lang.resolveLanguage({ device: underscoreTag }), { lang: expectedLang, reason: 'device' },
+    `${underscoreTag} (underscore form) resolves to ${expectedLang} via device — regression guard for the normalizeLangTag fix`);
+});
+// Same underscore check for a sample of the ORIGINAL 12, proving this
+// wasn't a new-language-only fix — it was broken for all 30 before.
+[['de_DE', 'de'], ['pt_BR', 'pt'], ['zh_CN', 'zh'], ['ja_JP', 'ja']].forEach(([tag, expected]) => {
+  assertEqual(Lang.resolveLanguage({ device: tag }), { lang: expected, reason: 'device' },
+    `${tag} (underscore form, one of the original 12) resolves to ${expected}`);
+});
+
+// Country must never override a supported device language — re-verified
+// for the 18 new countries specifically (generic case already covered
+// above for the original table).
+Object.keys(LOCALE_VARIANTS).forEach(expectedLang => {
+  const countryCode = LOCALE_VARIANTS[expectedLang].split('-')[1];
+  assertEqual(Lang.resolveLanguage({ device: 'es-ES', country: countryCode }), { lang: 'es', reason: 'device' },
+    `a Spanish-device user in ${countryCode} keeps Spanish, not the ${countryCode} country default`);
+});
+
 // ── Report ───────────────────────────────────────────────────────────
 
 console.log(`${passed} passed, ${failed} failed`);

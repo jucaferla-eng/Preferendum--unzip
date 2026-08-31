@@ -170,6 +170,23 @@ class TestResolveUserLanguage(unittest.TestCase):
     def test_india_unsupported_device_falls_through_to_global_not_forced(self):
         self.assertEqual(main.resolve_user_language(device='ta-IN', country='IN'), 'es')
 
+    def test_underscore_locale_form_normalizes_same_as_hyphen(self):
+        """LANGUAGE EXPANSION follow-up: found while re-verifying automatic
+        detection for the 30 canonical languages — _normalize_lang_tag only
+        split on '-', so an underscore-form locale (Android
+        Locale.toString(), e.g. 'nl_NL') silently fell through to the
+        country/global fallback tier for EVERY language, not just the new
+        ones. Fixed in _normalize_lang_tag itself; this is the regression
+        guard, covering both an original-12 and a newly-added language."""
+        self.assertEqual(main.resolve_user_language(device='de_DE'), 'de')
+        self.assertEqual(main.resolve_user_language(device='nl_NL'), 'nl')
+        self.assertEqual(main.resolve_user_language(device='pt_BR'), 'pt')
+        self.assertEqual(
+            main.resolve_user_language(device='nl-NL'),
+            main.resolve_user_language(device='nl_NL'),
+            'hyphen and underscore forms of the same locale resolve identically',
+        )
+
     def test_us_spanish_preference_is_not_overridden_to_english(self):
         self.assertEqual(main.resolve_user_language(explicit='es', country='US'), 'es')
 

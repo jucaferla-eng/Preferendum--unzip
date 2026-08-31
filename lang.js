@@ -107,7 +107,13 @@
 
   function normalizeLangTag(tag) {
     if (!tag) return '';
-    var primary = String(tag).split('-')[0].toLowerCase();
+    // Browsers/navigator.language report BCP-47 with a hyphen ('nl-NL'),
+    // but some native/embedded contexts (Android Locale.toString(), a
+    // WebView bridge, some Accept-Language edge cases) report the
+    // underscore form ('nl_NL') instead — split on either so a genuinely
+    // supported device language is never missed and pushed down to the
+    // country/global fallback tier just because of separator style.
+    var primary = String(tag).split(/[-_]/)[0].toLowerCase();
     return primary === 'zh' ? 'zh' : primary;
   }
 
