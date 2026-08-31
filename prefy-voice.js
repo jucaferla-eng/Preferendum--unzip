@@ -300,23 +300,48 @@
     return e;
   }
 
+  function localizedStr(key, fallback) {
+    var lang = currentLang();
+    return window.PrefyContent ? window.PrefyContent.str(lang, key) : fallback;
+  }
+
   var _speakerBtn = null;
   function updateSpeakerBtnLabel() {
-    if (!_speakerBtn) return;
-    var lang = currentLang();
-    var label = window.PrefyContent ? window.PrefyContent.str(lang, _muted ? 'chrome.voice.unmute' : 'chrome.voice.mute') : (_muted ? 'Unmute' : 'Mute');
+    if (!_speakerBtn || _speakerBtn.disabled) return;
+    var label = localizedStr(_muted ? 'chrome.voice.unmute' : 'chrome.voice.mute', _muted ? 'Unmute' : 'Mute');
     _speakerBtn.setAttribute('aria-label', label);
     _speakerBtn.setAttribute('aria-pressed', String(!_muted));
     _speakerBtn.textContent = _muted ? '🔇' : '🔊';
   }
 
+  /**
+   * Mounts Prefy's voice control into the panel footer. Idempotent by
+   * design (task §3): if a button is already attached anywhere in the
+   * document, this is a no-op — calling it twice (e.g. from a future
+   * re-entrant hook path) can never produce a second button.
+   *
+   * Task §2: an unsupported browser/device does NOT get an invisible
+   * feature — it gets a visibly present, genuinely disabled control with
+   * a localized explanation, so voice availability is always legible
+   * instead of silently absent (which reads as "broken", not "N/A").
+   */
   function onFooterReady(footer) {
     if (!hasBrowser() || !footer) return;
-    // No speech capability at all on this device/browser: don't show a
-    // control for a feature that can never do anything (task §3/§14 —
-    // never block or clutter the app over an unavailable optional layer).
-    if (!hasSpeechSynthesis()) return;
+    if (_speakerBtn && document.body && document.body.contains(_speakerBtn)) return;
+
+    var supported = hasSpeechSynthesis();
     _speakerBtn = el('button', { type: 'button', class: 'prefy-icon-btn prefy-voice-btn' });
+
+    if (!supported) {
+      _speakerBtn.disabled = true;
+      _speakerBtn.classList.add('prefy-voice-btn-disabled');
+      _speakerBtn.textContent = '🔇';
+      _speakerBtn.setAttribute('aria-label', localizedStr('chrome.voice.unavailable', 'Voice is not available on this device or browser.'));
+      _speakerBtn.setAttribute('aria-disabled', 'true');
+      footer.insertBefore(_speakerBtn, footer.firstChild);
+      return; // genuinely inert — no click handler, no lang-change listener needed
+    }
+
     updateSpeakerBtnLabel();
     _speakerBtn.addEventListener('click', function () {
       markUnlocked();
@@ -364,9 +389,33 @@
     cancelSpeech: cancelSpeech,
     getVoicesAsync: getVoicesAsync,
     maybeSpeak: maybeSpeak,
+    // Exposed for tests only (task §5: proving the mount is idempotent
+    // means being able to call it again deliberately) — prefy.js never
+    // calls this directly itself; it only ever reaches PrefyVoice through
+    // the onFooterReady hook registered in init().
+    onFooterReady: onFooterReady,
 
     // Introspection (tests, debugging) — state name only, never spoken text
     _debugState: function () { return { muted: _muted, unlocked: _unlocked, lastAnnouncedState: _lastAnnouncedState }; },
     _resetForTests: function () { _muted = false; _unlocked = false; _lastAnnouncedState = null; _voicesCache = null; },
+
+    // Real runtime diagnostic (task §4) — a safe, read-only status
+    // snapshot the human tester can call directly from the browser
+    // console (`PrefyVoice._status()`) to see exactly why voice is or
+    // isn't working, without exposing any spoken text, localStorage
+    // content, or a way to mutate state. Not a production debug
+    // backdoor: nothing here can change behavior, only report it.
+    _status: function () {
+      return {
+        speechSynthesisSupported: hasSpeechSynthesis(),
+        typeofSpeechSynthesis: hasBrowser() ? typeof window.speechSynthesis : 'no-window',
+        typeofSpeechSynthesisUtterance: hasBrowser() ? typeof window.SpeechSynthesisUtterance : 'no-window',
+        hooksRegisteredOnPrefy: !!(hasBrowser() && window.Prefy && typeof window.Prefy.setVoiceHooks === 'function'),
+        buttonMounted: !!(_speakerBtn && hasBrowser() && document.body && document.body.contains(_speakerBtn)),
+        buttonDisabled: !!(_speakerBtn && _speakerBtn.disabled),
+        muted: _muted,
+        unlocked: _unlocked,
+      };
+    },
   };
 });

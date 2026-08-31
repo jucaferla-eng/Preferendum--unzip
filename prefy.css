@@ -208,6 +208,10 @@
    base look — see above — plus a fixed width so it never gets squeezed
    by the two flex:1 text buttons beside it. */
 .prefy-voice-btn { flex: 0 0 auto; font-size: 15px; }
+/* Task §2: an unsupported browser/device still gets a VISIBLE control
+   (never simply hidden) — genuinely inert, dimmed to read as disabled
+   rather than broken. */
+.prefy-voice-btn-disabled { opacity: 0.45; cursor: not-allowed; }
 .prefy-help-btn, .prefy-reopen-btn {
   flex: 1;
   background: rgba(255,255,255,0.08);
