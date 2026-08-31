@@ -33,23 +33,42 @@
 })(typeof window !== 'undefined' ? window : this, function () {
   'use strict';
 
-  // The 12 languages this task requires reconciling support for. Order is
-  // display order in the manual selector.
-  var SUPPORTED_LANGUAGES = ['es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi'];
+  // The 30 languages Preferendum and Prefy both resolve against — ONE
+  // canonical list, extended from the original 12 (LANGUAGE EXPANSION,
+  // 2026-08-31). Order is display order in the manual selector; the
+  // original 12 keep their original order so no existing selector index
+  // shifts underneath a returning user.
+  var SUPPORTED_LANGUAGES = [
+    'es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi',
+    'nl', 'pl', 'tr', 'id', 'vi', 'th', 'fil', 'bn', 'ur', 'fa', 'he',
+    'sv', 'da', 'fi', 'el', 'cs', 'ro', 'uk',
+  ];
 
   var LANGUAGE_NAMES = {
     es: 'Español', en: 'English', pt: 'Português', fr: 'Français',
     de: 'Deutsch', it: 'Italiano', ja: '日本語', ko: '한국어',
     zh: '简体中文', ar: 'العربية', ru: 'Русский', hi: 'हिन्दी',
+    nl: 'Nederlands', pl: 'polski', tr: 'Türkçe', id: 'Bahasa Indonesia',
+    vi: 'Tiếng Việt', th: 'ไทย', fil: 'Filipino', bn: 'বাংলা',
+    ur: 'اردو', fa: 'فارسی', he: 'עברית', sv: 'svenska', da: 'dansk',
+    fi: 'suomi', el: 'Ελληνικά', cs: 'čeština', ro: 'română', uk: 'Українська',
   };
 
-  var RTL_LANGUAGES = { ar: true };
+  // LANGUAGE EXPANSION — fa/he/ur added alongside ar. Prefy/portal CSS
+  // must never mirror the CHARACTER artwork for these; only text flow,
+  // alignment, and control order inside the Prefy panel follow this.
+  var RTL_LANGUAGES = { ar: true, fa: true, he: true, ur: true };
 
   // Genuinely single-default-language countries only. A country ABSENT
   // here is not a bug — it means no defensible single default exists
   // (US, GB, AU, CA, ZA, NG, IN, CH, BE, and any other multilingual
   // market), so resolution falls through to the device-language check
-  // above it in precedence, or the global fallback below it.
+  // above it in precedence, or the global fallback below it. This is the
+  // explicit product rule (LANGUAGE EXPANSION): a multilingual country
+  // must NEVER be collapsed to one mandatory language — India in
+  // particular is deliberately absent so Hindi/Bengali/Urdu/English/etc.
+  // users each get their own device/manual choice, never a forced
+  // national default.
   var COUNTRY_DEFAULT_LANGUAGE = {
     CL: 'es', AR: 'es', PE: 'es', MX: 'es', CO: 'es', ES: 'es', UY: 'es',
     VE: 'es', EC: 'es', BO: 'es', PY: 'es', GL: 'es', GQ: 'es',
@@ -61,6 +80,24 @@
     KR: 'ko',
     CN: 'zh',
     RU: 'ru',
+    NL: 'nl',
+    PL: 'pl',
+    TR: 'tr',
+    ID: 'id',
+    VN: 'vi',
+    TH: 'th',
+    PH: 'fil',
+    BD: 'bn',
+    PK: 'ur',
+    IR: 'fa',
+    IL: 'he',
+    SE: 'sv',
+    DK: 'da',
+    FI: 'fi',
+    GR: 'el',
+    CZ: 'cs',
+    RO: 'ro',
+    UA: 'uk',
   };
 
   var GLOBAL_FALLBACK_LANGUAGE = 'es';
@@ -181,7 +218,9 @@
     var parts = cookie.split('/'); // "/es/en" -> ['', 'es', 'en']
     var target = parts[2];
     if (!target) return;
-    var normalized = target === 'zh-CN' || target === 'zh-TW' ? 'zh' : normalizeLangTag(target);
+    var normalized = target === 'zh-CN' || target === 'zh-TW' ? 'zh'
+      : target === 'tl' ? 'fil'
+      : normalizeLangTag(target);
     if (SUPPORTED_LANGUAGES.indexOf(normalized) !== -1) {
       safeLocalStorageSet(EXPLICIT_KEY, normalized);
     }
@@ -212,7 +251,12 @@
       document.cookie = 'googtrans=' + noop + '; path=/; domain=.' + location.hostname;
       return;
     }
-    var googleTarget = targetLang === 'zh' ? 'zh-CN' : targetLang;
+    // Google Translate's own language codes diverge from ours for a
+    // couple of the LANGUAGE EXPANSION additions — 'fil' (our code,
+    // matching the browser/Android BCP-47 tag) is 'tl' in Google's own
+    // widget vocabulary. zh was already handled the same way.
+    var GOOGLE_LANG_OVERRIDES = { zh: 'zh-CN', fil: 'tl' };
+    var googleTarget = GOOGLE_LANG_OVERRIDES[targetLang] || targetLang;
     var val = '/' + sourceLang + '/' + googleTarget;
     document.cookie = 'googtrans=' + val + '; path=/';
     document.cookie = 'googtrans=' + val + '; path=/; domain=.' + location.hostname;

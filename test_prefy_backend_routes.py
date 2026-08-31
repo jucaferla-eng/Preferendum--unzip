@@ -62,3 +62,39 @@ def test_all_three_portals_reference_the_shared_prefy_files():
         assert '/prefy.js' in r.text
         assert '/prefy-content.js' in r.text
         assert '/prefy.css' in r.text
+
+
+APPROVED_ASSET_FILENAMES = [
+    'prefy-welcome.png', 'prefy-explaining.png', 'prefy-presenting.png',
+    'prefy-thinking.png', 'prefy-idea.png', 'prefy-attention.png',
+    'prefy-missing-information.png', 'prefy-error.png',
+    'prefy-possible-fraud.png', 'prefy-hacker-alert.png',
+    'prefy-good-job.png', 'prefy-success.png', 'prefy-thanks.png',
+    'prefy-help.png', 'prefy-goodbye.png',
+]
+
+
+def test_all_15_approved_assets_are_served():
+    for filename in APPROVED_ASSET_FILENAMES:
+        r = client.get(f'/assets/prefy/{filename}')
+        assert r.status_code == 200, f'{filename}: {r.status_code}'
+        assert r.headers['content-type'] == 'image/png'
+        assert len(r.content) > 1000, f'{filename}: suspiciously small response'
+
+
+def test_asset_route_rejects_a_filename_outside_the_whitelist():
+    # Path-traversal / arbitrary-file-read guard: only the 15 approved
+    # filenames are ever served, regardless of what's actually on disk.
+    for attempt in ('../main.py', 'prefy-welcome.png/../../main.py', 'random-file.png', 'prefy-welcome.svg'):
+        r = client.get(f'/assets/prefy/{attempt}')
+        assert r.status_code == 404, f'{attempt} unexpectedly served: {r.status_code}'
+
+
+def test_asset_route_requires_no_authentication():
+    r = client.get('/assets/prefy/prefy-welcome.png')
+    assert r.status_code == 200
+
+
+def test_asset_route_is_cacheable():
+    r = client.get('/assets/prefy/prefy-welcome.png')
+    assert 'max-age' in r.headers.get('cache-control', '')

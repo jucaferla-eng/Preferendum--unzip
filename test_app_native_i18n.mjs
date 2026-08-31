@@ -55,7 +55,11 @@ assertEqual(sandbox.normalizeLangTag(null), '', 'null stays empty, no crash');
 
 // ── SUPPORTED_LANGUAGES matches lang.js's list exactly (no drift) ──────
 
-const REQUIRED = ['es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi'];
+const REQUIRED = [
+  'es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi',
+  'nl', 'pl', 'tr', 'id', 'vi', 'th', 'fil', 'bn', 'ur', 'fa', 'he',
+  'sv', 'da', 'fi', 'el', 'cs', 'ro', 'uk',
+]; // LANGUAGE EXPANSION — extended from the original 12 to the full 30
 assertEqual(sandbox.SUPPORTED_LANGUAGES.slice().sort(), REQUIRED.slice().sort(),
   "App.js's SUPPORTED_LANGUAGES must match lang.js's exactly");
 

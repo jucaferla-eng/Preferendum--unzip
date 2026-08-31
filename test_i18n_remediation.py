@@ -40,7 +40,11 @@ import main                                    # noqa: E402
 import socioeconomic as S                      # noqa: E402
 
 REPO_ROOT = Path(main.__file__).parent
-REQUIRED_LANGUAGES = ['es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi']
+REQUIRED_LANGUAGES = [
+    'es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi',
+    'nl', 'pl', 'tr', 'id', 'vi', 'th', 'fil', 'bn', 'ur', 'fa', 'he',
+    'sv', 'da', 'fi', 'el', 'cs', 'ro', 'uk',
+]  # LANGUAGE EXPANSION — extended from the original 12 to the full 30
 
 
 class TestNodeResolverSuite(unittest.TestCase):
@@ -104,7 +108,7 @@ class TestPortalStructuralCoverage(unittest.TestCase):
 class TestBackendEmailLanguageTable(unittest.TestCase):
     """Section 6: backend language awareness for OTP emails."""
 
-    def test_all_12_languages_covered(self):
+    def test_all_30_languages_covered(self):
         self.assertEqual(sorted(main._OTP_EMAIL_STRINGS.keys()), sorted(REQUIRED_LANGUAGES))
 
     def test_every_language_has_every_required_field(self):

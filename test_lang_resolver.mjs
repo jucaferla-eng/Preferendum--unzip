@@ -101,11 +101,76 @@ assertEqual(Lang.resolveLanguage({ explicit: 'xx', device: 'en-US' }),
 assertEqual(Lang.resolveLanguage({ explicit: '', device: '', country: '' }),
   { lang: 'es', reason: 'global_fallback' }, 'all-empty input reaches global fallback');
 
-// ── Supported language list matches the 12 languages this task names ───
+// ── Supported language list matches the 30 languages LANGUAGE EXPANSION
+// requires (updated from the original 12 — see git history for that
+// baseline; this is the current authoritative set). ────────────────────
 
-const REQUIRED = ['es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi'];
+const REQUIRED = [
+  'es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi',
+  'nl', 'pl', 'tr', 'id', 'vi', 'th', 'fil', 'bn', 'ur', 'fa', 'he',
+  'sv', 'da', 'fi', 'el', 'cs', 'ro', 'uk',
+];
+assertEqual(REQUIRED.length, 30, 'the required-language list itself has exactly 30 entries');
 assertEqual(Lang.SUPPORTED_LANGUAGES.slice().sort(), REQUIRED.slice().sort(),
-  'SUPPORTED_LANGUAGES must be exactly the 12 required languages');
+  'SUPPORTED_LANGUAGES must be exactly the 30 required languages');
+assertEqual(Lang.SUPPORTED_LANGUAGES.length, 30, 'SUPPORTED_LANGUAGES has exactly 30 entries (no accidental duplicate)');
+assertEqual(new Set(Lang.SUPPORTED_LANGUAGES).size, 30, 'no duplicate language code in SUPPORTED_LANGUAGES');
+
+// Every supported language has a display name, and every RTL language is
+// itself a supported language (no orphaned RTL entry).
+Lang.SUPPORTED_LANGUAGES.forEach(code => {
+  assertTrue(!!Lang.LANGUAGE_NAMES[code], `LANGUAGE_NAMES has a display name for '${code}'`);
+});
+
+// ── RTL — ar/fa/he/ur, exactly (LANGUAGE EXPANSION §9) ──────────────────
+const EXPECTED_RTL = ['ar', 'fa', 'he', 'ur'];
+EXPECTED_RTL.forEach(code => assertTrue(Lang.RTL_LANGUAGES[code] === true, `${code} is marked RTL`));
+Object.keys(Lang.RTL_LANGUAGES).forEach(code => {
+  assertTrue(EXPECTED_RTL.indexOf(code) !== -1, `RTL_LANGUAGES has no unexpected entry beyond ar/fa/he/ur (found ${code})`);
+  assertTrue(Lang.SUPPORTED_LANGUAGES.indexOf(code) !== -1, `RTL language ${code} is a supported language`);
+});
+assertEqual(Object.keys(Lang.RTL_LANGUAGES).length, 4, 'exactly 4 RTL languages');
+
+// ── Multilingual countries are never collapsed to one mandatory language
+// (explicit product rule) — India above all, but the general principle
+// applies to every market already absent from the table. ───────────────
+['IN', 'US', 'GB', 'AU', 'CA', 'ZA', 'NG', 'CH', 'BE'].forEach(cc => {
+  assertTrue(!Object.prototype.hasOwnProperty.call(Lang.COUNTRY_DEFAULT_LANGUAGE, cc),
+    `${cc} (multilingual) has no forced COUNTRY_DEFAULT_LANGUAGE entry`);
+});
+// India specifically: a Hindi-device user, a Bengali-device user, and an
+// English-device user in India each keep their own device language —
+// country never overrides a supported device language, and with no
+// device signal either, India correctly falls through to something OTHER
+// than a single hardcoded Indian language.
+assertEqual(Lang.resolveLanguage({ device: 'hi-IN', country: 'IN' }), { lang: 'hi', reason: 'device' }, 'Hindi-device India user gets Hindi');
+assertEqual(Lang.resolveLanguage({ device: 'bn-IN', country: 'IN' }), { lang: 'bn', reason: 'device' }, 'Bengali-device India user gets Bengali');
+assertEqual(Lang.resolveLanguage({ device: 'ur-IN', country: 'IN' }), { lang: 'ur', reason: 'device' }, 'Urdu-device India user gets Urdu');
+assertEqual(Lang.resolveLanguage({ device: 'en-IN', country: 'IN' }), { lang: 'en', reason: 'device' }, 'English-device India user gets English');
+assertEqual(Lang.resolveLanguage({ country: 'IN' }), { lang: 'es', reason: 'global_fallback' }, 'India with no device signal reaches the GLOBAL fallback, never a forced national language');
+
+// New single-default countries resolve correctly, each only as a tier-3
+// fallback (device/explicit still win — covered generically above).
+const NEW_COUNTRY_DEFAULTS = {
+  NL: 'nl', PL: 'pl', TR: 'tr', ID: 'id', VN: 'vi', TH: 'th', PH: 'fil',
+  BD: 'bn', PK: 'ur', IR: 'fa', IL: 'he', SE: 'sv', DK: 'da', FI: 'fi',
+  GR: 'el', CZ: 'cs', RO: 'ro', UA: 'uk',
+};
+Object.keys(NEW_COUNTRY_DEFAULTS).forEach(cc => {
+  const expected = NEW_COUNTRY_DEFAULTS[cc];
+  assertEqual(Lang.resolveLanguage({ country: cc }), { lang: expected, reason: 'country' },
+    `country fallback: ${cc} -> ${expected}`);
+  // Device language, when supported, still wins over the country default.
+  assertEqual(Lang.resolveLanguage({ device: 'es-ES', country: cc }), { lang: 'es', reason: 'device' },
+    `device language beats the ${cc} country default`);
+});
+
+// Google Translate's own vocabulary diverges from ours for Filipino ('tl'
+// vs our 'fil') — confirmed structurally since applyGoogleTranslateCookie
+// is browser-only; this checks the resolver-level code itself stays 'fil'
+// (the browser/Android BCP-47 tag), not silently renamed to 'tl'.
+assertTrue(Lang.SUPPORTED_LANGUAGES.indexOf('fil') !== -1 && Lang.SUPPORTED_LANGUAGES.indexOf('tl') === -1,
+  "the resolver's own code for Filipino is 'fil' (BCP-47), not Google's internal 'tl'");
 
 // ── Persistence layer (setExplicit/getExplicit) via a minimal browser
 // mock — this is what actually backs "a manual choice ALWAYS wins and

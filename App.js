@@ -9,17 +9,21 @@ const ACCENT  = '#2d6eff';
 const APP_URL    = 'https://preferendum-unzip.onrender.com/voter';
 const APP_ORIGIN = 'preferendum-unzip.onrender.com';
 
-// COMPLETE INTERNATIONALIZATION REMEDIATION (Section 10) — the "brand" and
-// "offline error" text is rendered by NATIVE React Native components
-// OUTSIDE the WebView's DOM, so none of the web-based mechanisms
-// (lang.js/Google Translate/UI_STRINGS) can reach it. This is the
-// smallest safe native-side counterpart: a tiny 12-language string table
-// (matching lang.js's SUPPORTED_LANGUAGES exactly) plus a lightweight
-// device-locale + persisted-preference resolver. No new native
-// permissions and no new npm dependency (NativeModules is core
-// react-native; expo-secure-store is already an existing project
-// dependency, listed in app.json's plugins).
-const SUPPORTED_LANGUAGES = ['es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi'];
+// COMPLETE INTERNATIONALIZATION REMEDIATION (Section 10), extended by
+// LANGUAGE EXPANSION to 30 — the "brand" and "offline error" text is
+// rendered by NATIVE React Native components OUTSIDE the WebView's DOM,
+// so none of the web-based mechanisms (lang.js/Google Translate/
+// UI_STRINGS) can reach it. This is the smallest safe native-side
+// counterpart: a string table (matching lang.js's SUPPORTED_LANGUAGES
+// exactly) plus a lightweight device-locale + persisted-preference
+// resolver. No new native permissions and no new npm dependency
+// (NativeModules is core react-native; expo-secure-store is already an
+// existing project dependency, listed in app.json's plugins).
+const SUPPORTED_LANGUAGES = [
+  'es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi',
+  'nl', 'pl', 'tr', 'id', 'vi', 'th', 'fil', 'bn', 'ur', 'fa', 'he',
+  'sv', 'da', 'fi', 'el', 'cs', 'ro', 'uk',
+];
 const GLOBAL_FALLBACK_LANGUAGE = 'es';
 const BRIDGED_LANG_KEY = 'pref_lang_bridged_from_webview';
 
@@ -36,6 +40,24 @@ const NATIVE_STRINGS = {
   ar: { brand: 'Preferendum', offline: 'لا يوجد اتصال — تحقق من الإنترنت' },
   ru: { brand: 'Preferendum', offline: 'Нет соединения — проверьте интернет' },
   hi: { brand: 'Preferendum', offline: 'कोई कनेक्शन नहीं — अपना इंटरनेट जांचें' },
+  nl: { brand: 'Preferendum', offline: 'Geen verbinding — controleer je internet' },
+  pl: { brand: 'Preferendum', offline: 'Brak połączenia — sprawdź internet' },
+  tr: { brand: 'Preferendum', offline: 'Bağlantı yok — internetinizi kontrol edin' },
+  id: { brand: 'Preferendum', offline: 'Tidak ada koneksi — periksa internet Anda' },
+  vi: { brand: 'Preferendum', offline: 'Không có kết nối — kiểm tra internet của bạn' },
+  th: { brand: 'Preferendum', offline: 'ไม่มีการเชื่อมต่อ — โปรดตรวจสอบอินเทอร์เน็ตของคุณ' },
+  fil: { brand: 'Preferendum', offline: 'Walang koneksyon — suriin ang iyong internet' },
+  bn: { brand: 'Preferendum', offline: 'সংযোগ নেই — আপনার ইন্টারনেট পরীক্ষা করুন' },
+  ur: { brand: 'Preferendum', offline: 'کوئی کنکشن نہیں — اپنا انٹرنیٹ چیک کریں' },
+  fa: { brand: 'Preferendum', offline: 'اتصالی نیست — اینترنت خود را بررسی کنید' },
+  he: { brand: 'Preferendum', offline: 'אין חיבור — בדוק את האינטרנט שלך' },
+  sv: { brand: 'Preferendum', offline: 'Ingen anslutning — kontrollera din internetuppkoppling' },
+  da: { brand: 'Preferendum', offline: 'Ingen forbindelse — tjek din internetforbindelse' },
+  fi: { brand: 'Preferendum', offline: 'Ei yhteyttä — tarkista internet-yhteytesi' },
+  el: { brand: 'Preferendum', offline: 'Δεν υπάρχει σύνδεση — έλεγξε το internet σου' },
+  cs: { brand: 'Preferendum', offline: 'Žádné připojení — zkontrolujte internet' },
+  ro: { brand: 'Preferendum', offline: 'Fără conexiune — verifică internetul' },
+  uk: { brand: 'Preferendum', offline: "Немає з'єднання — перевірте інтернет" },
 };
 
 function normalizeLangTag(tag) {

@@ -141,11 +141,13 @@
     try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; }
   }
 
-  // Emoji glyphs are an explicitly TEMPORARY, neutral placeholder — not
-  // Prefy's final character art, which is not present in this repository
-  // (see prefy-content.js's ASSETS map for the documented final filenames).
-  // Reuses the same circular-badge visual language as voter_portal.html's
-  // pre-existing .welcome-avatar element rather than inventing a new look.
+  // Emoji glyphs are the SAFETY-NET fallback (task §13 / Phase 1 §E) —
+  // shown only if a real Prefy PNG (prefy-content.js's ASSETS map, now
+  // pointing at the 15 approved, installed images under assets/prefy/)
+  // fails to load. Reuses the same circular-badge visual language as
+  // voter_portal.html's pre-existing .welcome-avatar element rather than
+  // inventing a new look, so a failed image degrades gracefully instead
+  // of breaking the page.
   var FALLBACK_GLYPH = {
     WELCOME: '👋', EXPLAINING: '💬', PRESENTING: '📋',
     THINKING: '💭', IDEA: '💡', ATTENTION: '⚠️',
@@ -180,6 +182,12 @@
     return e;
   }
 
+  // Tracks, per canonical state name, whether that state's real image has
+  // ever failed to load — once true, we stop trying to show the broken
+  // image and just render the neutral fallback badge for that state for
+  // the rest of the session (task §13: "do not break the page").
+  var _failedAssetStates = {};
+
   function buildDom() {
     var root = el('div', { class: 'prefy-root', 'aria-live': 'polite' });
 
@@ -188,20 +196,33 @@
       'aria-label': PrefyContent.str(currentLang(), 'chrome.name'),
       'aria-expanded': 'false',
     });
+    // Real character art + emoji-badge fallback, both present; CSS/JS
+    // toggles which one is visible (see updateAssetVisibility()).
+    var bubbleImg = el('img', { class: 'prefy-bubble-img', alt: '' });
     var bubbleGlyph = el('span', { class: 'prefy-bubble-glyph', 'aria-hidden': 'true' });
+    bubbleImg.addEventListener('error', function () { onAssetError(_state.currentState); });
+    bubble.appendChild(bubbleImg);
     bubble.appendChild(bubbleGlyph);
     bubble.addEventListener('click', function () { open(); });
 
     var panel = el('div', { class: 'prefy-panel', role: 'dialog', 'aria-label': PrefyContent.str(currentLang(), 'chrome.name') });
 
     var header = el('div', { class: 'prefy-panel-header' });
+    // alt="" (decorative) — the visible, aria-live title text right next
+    // to the character already conveys the same information; giving the
+    // image its own alt text too would announce it twice to a screen
+    // reader. Character identity/expression is supplementary, not the
+    // primary information channel here.
+    var avatarImg = el('img', { class: 'prefy-avatar-img', alt: '' });
     var avatar = el('span', { class: 'prefy-avatar', 'aria-hidden': 'true' });
+    avatarImg.addEventListener('error', function () { onAssetError(_state.currentState); });
+    var avatarWrap = el('div', { class: 'prefy-avatar-wrap' }, [avatarImg, avatar]);
     var titleWrap = el('div', { class: 'prefy-title-wrap' });
     var title = el('div', { class: 'prefy-title' });
     titleWrap.appendChild(title);
     var closeBtn = el('button', { type: 'button', class: 'prefy-icon-btn prefy-minimize', 'aria-label': PrefyContent.str(currentLang(), 'chrome.minimize'), text: '–' });
     closeBtn.addEventListener('click', function () { minimize(); });
-    header.appendChild(avatar);
+    header.appendChild(avatarWrap);
     header.appendChild(titleWrap);
     header.appendChild(closeBtn);
 
@@ -227,21 +248,42 @@
     root.appendChild(panel);
 
     return {
-      root: root, bubble: bubble, bubbleGlyph: bubbleGlyph, panel: panel,
-      avatar: avatar, title: title, bodyText: bodyText, whyText: whyText,
+      root: root, bubble: bubble, bubbleImg: bubbleImg, bubbleGlyph: bubbleGlyph, panel: panel,
+      avatarImg: avatarImg, avatar: avatar, title: title, bodyText: bodyText, whyText: whyText,
       closeBtn: closeBtn,
     };
   }
 
+  function onAssetError(state) {
+    if (_failedAssetStates[state]) return;
+    _failedAssetStates[state] = true;
+    updateAssetVisibility();
+  }
+
+  function updateAssetVisibility() {
+    if (!hasBrowser() || !_state.dom) return;
+    var failed = !!_failedAssetStates[_state.currentState];
+    _state.dom.avatarImg.style.display = failed ? 'none' : '';
+    _state.dom.avatar.style.display = failed ? '' : 'none';
+    _state.dom.bubbleImg.style.display = failed ? 'none' : '';
+    _state.dom.bubbleGlyph.style.display = failed ? '' : 'none';
+  }
+
   function applyStateVisuals(state) {
     if (!hasBrowser() || !_state.dom) return;
+    var asset = PrefyContent.ASSETS[state] || PrefyContent.ASSETS[PrefyContent.DEFAULT_STATE];
     var color = FALLBACK_COLOR[state] || FALLBACK_COLOR[PrefyContent.DEFAULT_STATE];
     var glyph = FALLBACK_GLYPH[state] || FALLBACK_GLYPH[PrefyContent.DEFAULT_STATE];
+    if (asset && asset.png) {
+      _state.dom.avatarImg.src = asset.png;
+      _state.dom.bubbleImg.src = asset.png;
+    }
     _state.dom.avatar.textContent = glyph;
     _state.dom.avatar.style.background = color;
     _state.dom.bubbleGlyph.textContent = glyph;
     _state.dom.bubble.style.background = color;
     _state.dom.root.setAttribute('data-prefy-state', state);
+    updateAssetVisibility();
   }
 
   function render() {
@@ -405,5 +447,13 @@
     // Introspection (tests, debugging) — never sensitive: state name and
     // context key strings only, never a user-data value.
     _debugState: function () { return { ui: _state.ui, currentContextKey: _state.currentContextKey, currentState: _state.currentState }; },
+
+    // Asset-failure fallback (task §13) — exposed so a test can force the
+    // exact failure path (onAssetError) without needing a real browser
+    // image-load event, and inspect whether the fallback badge is what's
+    // actually showing afterward.
+    _simulateAssetError: function (state) { onAssetError(state); },
+    _hasAssetFallbackActive: function (state) { return !!_failedAssetStates[state]; },
+    _resetAssetFailures: function () { _failedAssetStates = {}; },
   };
 });

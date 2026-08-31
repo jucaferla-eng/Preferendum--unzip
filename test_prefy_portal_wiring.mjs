@@ -126,6 +126,36 @@ const prefyCallRegex = /Prefy\.[a-zA-Z]+\(([^;]*)\)/g;
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════
+// Visual asset integration (Phase 2) — real images wired in, temporary
+// fallback badge still present as a safety net, exact per-state mapping.
+// ═══════════════════════════════════════════════════════════════════════
+const APPROVED_STATE_FILES = {
+  WELCOME: 'prefy-welcome.png', EXPLAINING: 'prefy-explaining.png', PRESENTING: 'prefy-presenting.png',
+  THINKING: 'prefy-thinking.png', IDEA: 'prefy-idea.png', ATTENTION: 'prefy-attention.png',
+  MISSING_INFORMATION: 'prefy-missing-information.png', ERROR: 'prefy-error.png',
+  POSSIBLE_FRAUD: 'prefy-possible-fraud.png', HACKER_ALERT: 'prefy-hacker-alert.png',
+  GOOD_JOB: 'prefy-good-job.png', SUCCESS: 'prefy-success.png', THANKS: 'prefy-thanks.png',
+  HELP: 'prefy-help.png', GOODBYE: 'prefy-goodbye.png',
+};
+Object.keys(APPROVED_STATE_FILES).forEach(state => {
+  assertTrue(fs.existsSync(`assets/prefy/${APPROVED_STATE_FILES[state]}`), `${state}'s approved asset file exists on disk`);
+});
+assertTrue(engine.includes('avatarImg.src') && engine.includes('bubbleImg.src'), 'prefy.js sets the real character image on both the panel avatar and the minimized bubble');
+assertTrue(engine.includes('onAssetError'), 'prefy.js has an asset-load-failure handler');
+assertTrue(engine.includes('FALLBACK_GLYPH') && engine.includes('FALLBACK_COLOR'), 'the neutral fallback badge is still present as a safety net (task §13)');
+assertTrue(!/redrawn in css|hand-drawn|css-drawn character/i.test(engine + css), 'the character is not redrawn in CSS — the supplied image is used as-is');
+assertTrue(!/filter:\s*(grayscale|sepia|invert|hue-rotate)/.test(css), 'no destructive CSS filter is applied to the character image');
+assertTrue(/object-fit:\s*contain/.test(css), 'the character image uses object-fit:contain so it is never stretched or cropped');
+
+// ═══════════════════════════════════════════════════════════════════════
+// RTL (ar/fa/he/ur)
+// ═══════════════════════════════════════════════════════════════════════
+assertTrue(!/transform:\s*scaleX\(-1\)/.test(css) || css.includes('!important'), 'the character image is explicitly protected from mirroring in RTL contexts');
+assertTrue(css.includes('.prefy-avatar-img, .prefy-bubble-img') && /transform:\s*none\s*!important/.test(css), 'prefy.css explicitly pins the character image to never be transformed/mirrored');
+assertTrue(!/direction:\s*ltr/.test(css), 'prefy.css never hardcodes direction:ltr, which would break RTL text flow inside the panel');
+assertTrue(!/:\s*row-reverse/.test(css), 'prefy.css uses only logical flex row order (no row-reverse declaration), so RTL reordering follows the inherited document direction automatically');
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {
   console.log('\nFAILURES:');

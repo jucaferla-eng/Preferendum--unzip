@@ -2843,7 +2843,11 @@ def format_debate(debate, has_voted=False, sponsor_info=None):
 # today; SMS below) so an authenticated user's STORED explicit preference
 # and an anonymous registrant's request-time explicit choice both flow
 # through the exact same logic as the web UI.
-_SUPPORTED_LANGUAGES = frozenset({'es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi'})
+_SUPPORTED_LANGUAGES = frozenset({
+    'es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi',
+    'nl', 'pl', 'tr', 'id', 'vi', 'th', 'fil', 'bn', 'ur', 'fa', 'he',
+    'sv', 'da', 'fi', 'el', 'cs', 'ro', 'uk',
+})
 
 _COUNTRY_DEFAULT_LANGUAGE = {
     'CL': 'es', 'AR': 'es', 'PE': 'es', 'MX': 'es', 'CO': 'es', 'ES': 'es', 'UY': 'es',
@@ -2856,6 +2860,24 @@ _COUNTRY_DEFAULT_LANGUAGE = {
     'KR': 'ko',
     'CN': 'zh',
     'RU': 'ru',
+    'NL': 'nl',
+    'PL': 'pl',
+    'TR': 'tr',
+    'ID': 'id',
+    'VN': 'vi',
+    'TH': 'th',
+    'PH': 'fil',
+    'BD': 'bn',
+    'PK': 'ur',
+    'IR': 'fa',
+    'IL': 'he',
+    'SE': 'sv',
+    'DK': 'da',
+    'FI': 'fi',
+    'GR': 'el',
+    'CZ': 'cs',
+    'RO': 'ro',
+    'UA': 'uk',
 }
 
 _GLOBAL_FALLBACK_LANGUAGE = 'es'
@@ -2944,6 +2966,61 @@ _OTP_EMAIL_STRINGS = {
     'hi': {'greeting': 'नमस्ते {name},', 'instruction': 'आपका सत्यापन कोड:',
           'validity': '10 मिनट के लिए मान्य। इसे किसी के साथ साझा न करें।',
           'subject': 'आपका Preferendum कोड: {code}', 'default_name': 'नागरिक'},
+    # LANGUAGE EXPANSION (30 languages) additions below.
+    'nl': {'greeting': 'Hallo {name},', 'instruction': 'Je verificatiecode:',
+          'validity': 'Geldig voor 10 minuten. Deel deze met niemand.',
+          'subject': 'Je Preferendum-code: {code}', 'default_name': 'Burger'},
+    'pl': {'greeting': 'Cześć {name},', 'instruction': 'Twój kod weryfikacyjny:',
+          'validity': 'Ważny przez 10 minut. Nie udostępniaj go nikomu.',
+          'subject': 'Twój kod Preferendum: {code}', 'default_name': 'Obywatelu'},
+    'tr': {'greeting': 'Merhaba {name},', 'instruction': 'Doğrulama kodunuz:',
+          'validity': '10 dakika geçerlidir. Kimseyle paylaşmayın.',
+          'subject': 'Preferendum kodunuz: {code}', 'default_name': 'Vatandaş'},
+    'id': {'greeting': 'Halo {name},', 'instruction': 'Kode verifikasi Anda:',
+          'validity': 'Berlaku 10 menit. Jangan bagikan kepada siapa pun.',
+          'subject': 'Kode Preferendum Anda: {code}', 'default_name': 'Warga'},
+    'vi': {'greeting': 'Xin chào {name},', 'instruction': 'Mã xác minh của bạn:',
+          'validity': 'Có hiệu lực trong 10 phút. Không chia sẻ với bất kỳ ai.',
+          'subject': 'Mã Preferendum của bạn: {code}', 'default_name': 'Công dân'},
+    'th': {'greeting': 'สวัสดี {name},', 'instruction': 'รหัสยืนยันของคุณ:',
+          'validity': 'ใช้ได้ 10 นาที ห้ามแชร์กับผู้อื่น',
+          'subject': 'รหัส Preferendum ของคุณ: {code}', 'default_name': 'ผู้ใช้'},
+    'fil': {'greeting': 'Kumusta {name},', 'instruction': 'Ang iyong verification code:',
+          'validity': 'Valid sa loob ng 10 minuto. Huwag ibahagi kaninuman.',
+          'subject': 'Ang iyong Preferendum code: {code}', 'default_name': 'Mamamayan'},
+    'bn': {'greeting': 'হ্যালো {name},', 'instruction': 'আপনার যাচাইকরণ কোড:',
+          'validity': '১০ মিনিটের জন্য বৈধ। কারও সাথে শেয়ার করবেন না।',
+          'subject': 'আপনার Preferendum কোড: {code}', 'default_name': 'নাগরিক'},
+    'ur': {'greeting': 'ہیلو {name}،', 'instruction': 'آپ کا تصدیقی کوڈ:',
+          'validity': '10 منٹ کے لیے کارآمد۔ کسی کے ساتھ شیئر نہ کریں۔',
+          'subject': 'آپ کا Preferendum کوڈ: {code}', 'default_name': 'شہری'},
+    'fa': {'greeting': 'سلام {name}،', 'instruction': 'کد تأیید شما:',
+          'validity': 'به مدت ۱۰ دقیقه معتبر است. آن را با کسی به اشتراک نگذارید.',
+          'subject': 'کد Preferendum شما: {code}', 'default_name': 'کاربر'},
+    'he': {'greeting': 'שלום {name},', 'instruction': 'קוד האימות שלך:',
+          'validity': 'בתוקף למשך 10 דקות. אין לשתף עם אף אחד.',
+          'subject': 'קוד Preferendum שלך: {code}', 'default_name': 'משתמש'},
+    'sv': {'greeting': 'Hej {name},', 'instruction': 'Din verifieringskod:',
+          'validity': 'Giltig i 10 minuter. Dela den inte med någon.',
+          'subject': 'Din Preferendum-kod: {code}', 'default_name': 'Medborgare'},
+    'da': {'greeting': 'Hej {name},', 'instruction': 'Din bekræftelseskode:',
+          'validity': 'Gyldig i 10 minutter. Del den ikke med nogen.',
+          'subject': 'Din Preferendum-kode: {code}', 'default_name': 'Borger'},
+    'fi': {'greeting': 'Hei {name},', 'instruction': 'Vahvistuskoodisi:',
+          'validity': 'Voimassa 10 minuuttia. Älä jaa sitä kenellekään.',
+          'subject': 'Preferendum-koodisi: {code}', 'default_name': 'Käyttäjä'},
+    'el': {'greeting': 'Γεια σου {name},', 'instruction': 'Ο κωδικός επαλήθευσής σου:',
+          'validity': 'Ισχύει για 10 λεπτά. Μην τον μοιραστείς με κανέναν.',
+          'subject': 'Ο κωδικός σου στο Preferendum: {code}', 'default_name': 'Πολίτη'},
+    'cs': {'greeting': 'Ahoj {name},', 'instruction': 'Tvůj ověřovací kód:',
+          'validity': 'Platný 10 minut. Nikomu ho nesděluj.',
+          'subject': 'Tvůj kód Preferendum: {code}', 'default_name': 'Občane'},
+    'ro': {'greeting': 'Salut {name},', 'instruction': 'Codul tău de verificare:',
+          'validity': 'Valabil 10 minute. Nu îl împărtăși cu nimeni.',
+          'subject': 'Codul tău Preferendum: {code}', 'default_name': 'Cetățean'},
+    'uk': {'greeting': 'Привіт, {name},', 'instruction': 'Ваш код підтвердження:',
+          'validity': 'Дійсний протягом 10 хвилин. Нікому його не повідомляйте.',
+          'subject': 'Ваш код Preferendum: {code}', 'default_name': 'Користувачу'},
 }
 
 
@@ -3122,6 +3199,29 @@ _OTP_SMS_TEMPLATES = {
     'ar': 'Preferendum: الرمز {code}. صالح 10 دقائق.',
     'ru': 'Preferendum: код {code}. Действителен 10 мин.',
     'hi': 'Preferendum: कोड {code}. 10 मिनट वैध।',
+    # LANGUAGE EXPANSION (30 languages) additions below. Latin-script
+    # additions follow the same GSM-7-safe, diacritic-dropped convention
+    # as es/en/pt/fr/de/it above (e.g. Polish "wazny" not "ważny"); the
+    # remaining scripts (bn/ur/fa/he/th/el/uk) are UCS-2 like ja/ko/zh/
+    # ar/ru/hi and stay concise for the same tighter per-segment budget.
+    'nl': 'Preferendum: je code is {code}. Geldig 10 min.',
+    'pl': 'Preferendum: twoj kod to {code}. Wazny 10 min.',
+    'tr': 'Preferendum: kodunuz {code}. 10 dk gecerli.',
+    'id': 'Preferendum: kode Anda {code}. Berlaku 10 menit.',
+    'vi': 'Preferendum: ma cua ban la {code}. Hieu luc 10 phut.',
+    'th': 'Preferendum: รหัสของคุณคือ {code} ใช้ได้ 10 นาที',
+    'fil': 'Preferendum: ang code mo ay {code}. Valid sa 10 min.',
+    'bn': 'Preferendum: আপনার কোড {code}। ১০ মিনিট বৈধ।',
+    'ur': 'Preferendum: آپ کا کوڈ {code} ہے۔ 10 منٹ کارآمد۔',
+    'fa': 'Preferendum: کد شما {code} است. ۱۰ دقیقه معتبر.',
+    'he': 'Preferendum: הקוד שלך {code}. בתוקף 10 דקות.',
+    'sv': 'Preferendum: din kod ar {code}. Giltig 10 min.',
+    'da': 'Preferendum: din kode er {code}. Gyldig 10 min.',
+    'fi': 'Preferendum: koodisi on {code}. Voimassa 10 min.',
+    'el': 'Preferendum: ο κωδικός σου είναι {code}. Ισχύει 10 λεπτά.',
+    'cs': 'Preferendum: tvuj kod je {code}. Plati 10 min.',
+    'ro': 'Preferendum: codul tau este {code}. Valabil 10 min.',
+    'uk': 'Preferendum: ваш код {code}. Дійсний 10 хв.',
 }
 
 
@@ -3801,6 +3901,33 @@ def serve_prefy_css():
         })
     except FileNotFoundError:
         return Response(content='/* prefy.css not found */', media_type='text/css', status_code=404)
+
+# The 15 final Prefy character images — one file per canonical state,
+# supplied and approved for Phase 2 (visual asset integration). Filename
+# is validated against an explicit whitelist (not just os.path-joined)
+# so this route can never be used to read an arbitrary file off disk.
+_PREFY_ASSET_FILENAMES = frozenset({
+    'prefy-welcome.png', 'prefy-explaining.png', 'prefy-presenting.png',
+    'prefy-thinking.png', 'prefy-idea.png', 'prefy-attention.png',
+    'prefy-missing-information.png', 'prefy-error.png',
+    'prefy-possible-fraud.png', 'prefy-hacker-alert.png',
+    'prefy-good-job.png', 'prefy-success.png', 'prefy-thanks.png',
+    'prefy-help.png', 'prefy-goodbye.png',
+})
+
+@app.get('/assets/prefy/{filename}')
+def serve_prefy_asset(filename: str):
+    if filename not in _PREFY_ASSET_FILENAMES:
+        raise HTTPException(404, 'Not found')
+    path = os.path.join('assets', 'prefy', filename)
+    try:
+        with open(path, 'rb') as f:
+            content = f.read()
+        return Response(content=content, media_type='image/png', headers={
+            'Cache-Control': 'public, max-age=604800',
+        })
+    except FileNotFoundError:
+        raise HTTPException(404, 'Not found')
 
 @app.get('/voter', response_class=HTMLResponse)
 def serve_voter_portal():

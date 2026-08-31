@@ -5,6 +5,7 @@
 // Exits 0 on all-pass, 1 on any failure (mutation-testing friendly).
 
 import { createRequire } from 'module';
+import fs from 'fs';
 const require = createRequire(import.meta.url);
 const Content = require('./prefy-content.js');
 const Prefy = require('./prefy.js');
@@ -35,7 +36,34 @@ EXPECTED_STATES.forEach(s => assertTrue(!!Content.ASSETS[s], `state ${s} has a d
 EXPECTED_STATES.forEach(s => {
   assertTrue(typeof Content.ASSETS[s].width === 'number' && Content.ASSETS[s].width > 0, `state ${s} asset has a documented width`);
   assertTrue(typeof Content.ASSETS[s].height === 'number' && Content.ASSETS[s].height > 0, `state ${s} asset has a documented height`);
-  assertTrue(/^\/prefy-assets\/prefy-[a-z-]+\.svg$/.test(Content.ASSETS[s].svg), `state ${s} asset filename follows the documented convention`);
+  assertTrue(/^\/assets\/prefy\/prefy-[a-z-]+\.png$/.test(Content.ASSETS[s].png), `state ${s} asset filename follows the documented convention`);
+});
+
+// Every one of the 15 states maps to its OWN distinct approved image file
+// — never one image reused for two states (task requirement, Phase 2 §3).
+const assetPaths = EXPECTED_STATES.map(s => Content.ASSETS[s].png);
+assertEqual(new Set(assetPaths).size, 15, 'all 15 states map to distinct asset files (no file reused across states)');
+
+// The exact state -> filename mapping the task specified.
+const EXPECTED_ASSET_FILE = {
+  WELCOME: 'prefy-welcome.png', EXPLAINING: 'prefy-explaining.png', PRESENTING: 'prefy-presenting.png',
+  THINKING: 'prefy-thinking.png', IDEA: 'prefy-idea.png', ATTENTION: 'prefy-attention.png',
+  MISSING_INFORMATION: 'prefy-missing-information.png', ERROR: 'prefy-error.png',
+  POSSIBLE_FRAUD: 'prefy-possible-fraud.png', HACKER_ALERT: 'prefy-hacker-alert.png',
+  GOOD_JOB: 'prefy-good-job.png', SUCCESS: 'prefy-success.png', THANKS: 'prefy-thanks.png',
+  HELP: 'prefy-help.png', GOODBYE: 'prefy-goodbye.png',
+};
+EXPECTED_STATES.forEach(s => {
+  assertEqual(Content.ASSETS[s].png, '/assets/prefy/' + EXPECTED_ASSET_FILE[s], `${s} maps to the exact approved filename ${EXPECTED_ASSET_FILE[s]}`);
+});
+
+// All 15 approved image files actually exist on disk and are non-empty.
+EXPECTED_STATES.forEach(s => {
+  const diskPath = 'assets/prefy/' + EXPECTED_ASSET_FILE[s];
+  assertTrue(fs.existsSync(diskPath), `${diskPath} exists on disk`);
+  if (fs.existsSync(diskPath)) {
+    assertTrue(fs.statSync(diskPath).size > 1000, `${diskPath} is a real, non-empty image file`);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -224,28 +252,69 @@ const voterKeys = allKeys.filter(k => Content.getContext(k).surface === 'voter')
 assertTrue(voterKeys.length >= 15, `voter surface has thorough coverage (got ${voterKeys.length} contexts)`);
 
 // ═══════════════════════════════════════════════════════════════════════
-// 14. Language: unsupported-language fallback (mirrors lang.js's own
-//     fallback-to-es contract, exercised through Content.str directly
-//     since PreferendumLang itself is not re-tested here — see
-//     test_lang_resolver.mjs, which this phase does not modify).
+// 14. LANGUAGE EXPANSION — Prefy now has controlled copy in the full 30
+//      canonical Preferendum languages (not just es/en). Prove: exactly
+//      30, every one complete (no missing/blank/raw-key value for any of
+//      the 81 keys), and a genuinely unsupported code still falls back
+//      safely to Spanish rather than to a blank bubble.
 // ═══════════════════════════════════════════════════════════════════════
+const CANONICAL_30 = [
+  'es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi',
+  'nl', 'pl', 'tr', 'id', 'vi', 'th', 'fil', 'bn', 'ur', 'fa', 'he',
+  'sv', 'da', 'fi', 'el', 'cs', 'ro', 'uk',
+];
+assertEqual(CANONICAL_30.length, 30, 'the canonical language list itself has exactly 30 entries');
+assertEqual(Object.keys(Content.STRINGS).sort(), CANONICAL_30.slice().sort(), 'Prefy STRINGS has exactly the 30 canonical languages — no more, no fewer');
+
+const esKeys = Object.keys(Content.STRINGS.es).sort();
+CANONICAL_30.forEach(lang => {
+  const keys = Object.keys(Content.STRINGS[lang]).sort();
+  assertEqual(keys, esKeys, `${lang} has exactly the same 81 string keys as es (no missing/extra key)`);
+  esKeys.forEach(key => {
+    const value = Content.STRINGS[lang][key];
+    assertTrue(typeof value === 'string' && value.length > 0, `${lang}.${key} is a non-empty string`);
+    assertTrue(value !== key, `${lang}.${key} is real text, not the raw key itself`);
+  });
+});
+
+// No two languages are byte-identical copy-paste placeholders — each is
+// genuinely its own translation (spot-check a content-bearing key).
+const distinctWelcomeBodies = new Set(CANONICAL_30.map(l => Content.STRINGS[l]['ctx.voter.welcome.title']));
+assertEqual(distinctWelcomeBodies.size, 30, 'all 30 languages have a genuinely distinct welcome title (no copy-paste duplicate)');
+
+// A code OUTSIDE the canonical 30 still falls back to Spanish, never a
+// blank bubble or the raw key.
 const notReallyASupportedLang = 'xx';
 const fallbackRendered = Content.render('voter.welcome', notReallyASupportedLang);
-assertEqual(fallbackRendered.title, Content.str('es', 'ctx.voter.welcome.title'), 'an unsupported language code falls back to Spanish, never a blank string');
-
-// Every fully-authored language (es/en) must have a translation for every
-// key the OTHER one has, so the two never drift apart silently.
-const esKeys = Object.keys(Content.STRINGS.es).sort();
-const enKeys = Object.keys(Content.STRINGS.en).sort();
-assertEqual(esKeys, enKeys, 'es and en have exactly the same set of string keys (no silent drift)');
-
-// The other 10 PreferendumLang.SUPPORTED_LANGUAGES are a documented,
-// disclosed gap for this phase — confirm they degrade to Spanish rather
-// than to a blank bubble or a raw key.
-['pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi'].forEach(lang => {
-  const r = Content.str(lang, 'ctx.voter.welcome.title');
-  assertEqual(r, Content.str('es', 'ctx.voter.welcome.title'), `${lang} (not yet authored) falls back to Spanish text, never blank/raw-key`);
+assertEqual(fallbackRendered.title, Content.str('es', 'ctx.voter.welcome.title'), 'a code outside the canonical 30 falls back to Spanish, never a blank string');
+['zz', 'qq', ''].forEach(bogus => {
+  assertEqual(Content.str(bogus, 'ctx.voter.welcome.title'), Content.str('es', 'ctx.voter.welcome.title'), `bogus code '${bogus}' falls back to Spanish`);
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// 15. Prefy uses ONLY the canonical Preferendum language resolver — no
+//     competing detector. Structural: prefy.js's source never reads
+//     navigator.language and never defines its own country->language
+//     table; it only ever calls window.PreferendumLang.currentLanguage().
+// ═══════════════════════════════════════════════════════════════════════
+const prefyEngineSrc = fs.readFileSync('prefy.js', 'utf-8');
+assertTrue(!/navigator\.language/.test(prefyEngineSrc), 'prefy.js never reads navigator.language directly');
+assertTrue(!/COUNTRY_DEFAULT_LANGUAGE|resolveLanguage\s*\(/.test(prefyEngineSrc), 'prefy.js defines no competing country table or resolver function');
+assertTrue(/window\.PreferendumLang\s*&&/.test(prefyEngineSrc) && /\.currentLanguage\s*\(\s*\)/.test(prefyEngineSrc), 'prefy.js reads the language exclusively via window.PreferendumLang.currentLanguage()');
+assertTrue(!/setCountry/.test(prefyEngineSrc), 'prefy.js never calls PreferendumLang.setCountry — that stays business logic\'s responsibility, not Prefy\'s');
+
+// ═══════════════════════════════════════════════════════════════════════
+// 16. RTL languages — ar/fa/he/ur. Structural (the character image must
+//     never be mirrored; the panel's text handling is exercised via the
+//     canonical lang.js resolver, which already sets document dir= for
+//     the whole page — see test_lang_resolver.mjs's RTL assertions).
+// ═══════════════════════════════════════════════════════════════════════
+const RTL_LANGS = ['ar', 'fa', 'he', 'ur'];
+RTL_LANGS.forEach(lang => {
+  const rendered = Content.render('voter.welcome', lang);
+  assertTrue(rendered.title.length > 0 && rendered.body.length > 0, `RTL language ${lang} renders real, non-empty content`);
+});
+assertTrue(!/transform:\s*scaleX\(-1\)/.test(fs.readFileSync('prefy.css', 'utf-8')), 'prefy.css never mirrors the character image for RTL');
 
 // ═══════════════════════════════════════════════════════════════════════
 // Summary

@@ -40,7 +40,11 @@ from fastapi.testclient import TestClient      # noqa: E402
 import main                                    # noqa: E402
 
 REPO_ROOT = Path(main.__file__).parent
-REQUIRED_LANGUAGES = ['es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi']
+REQUIRED_LANGUAGES = [
+    'es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi',
+    'nl', 'pl', 'tr', 'id', 'vi', 'th', 'fil', 'bn', 'ur', 'fa', 'he',
+    'sv', 'da', 'fi', 'el', 'cs', 'ro', 'uk',
+]  # LANGUAGE EXPANSION — extended from the original 12 to the full 30
 
 _seq = {'n': 0}
 
@@ -177,13 +181,19 @@ class TestResolveUserLanguage(unittest.TestCase):
         """Cross-check: parse lang.js's COUNTRY_DEFAULT_LANGUAGE and
         SUPPORTED_LANGUAGES directly out of the file and assert byte-for-
         byte equality with the Python side."""
+        # re.DOTALL (needed since LANGUAGE EXPANSION reformatted this
+        # array across multiple lines for readability at 30 entries) and
+        # {2,3} (needed for 'fil' — the only 3-letter BCP-47 code in the
+        # LANGUAGE EXPANSION set) — both fixes are parsing-only; neither
+        # changes what this test actually verifies (no drift between the
+        # two tables).
         js_src = (REPO_ROOT / 'lang.js').read_text(encoding='utf-8')
-        js_supported = re.search(r"var SUPPORTED_LANGUAGES = \[(.*?)\];", js_src).group(1)
-        js_langs = sorted(re.findall(r"'([a-z]{2})'", js_supported))
+        js_supported = re.search(r"var SUPPORTED_LANGUAGES = \[(.*?)\];", js_src, re.DOTALL).group(1)
+        js_langs = sorted(re.findall(r"'([a-z]{2,3})'", js_supported))
         self.assertEqual(js_langs, sorted(main._SUPPORTED_LANGUAGES))
 
         js_table_block = re.search(r"var COUNTRY_DEFAULT_LANGUAGE = \{(.*?)\};", js_src, re.DOTALL).group(1)
-        js_pairs = dict(re.findall(r"([A-Z]{2}):\s*'([a-z]{2})'", js_table_block))
+        js_pairs = dict(re.findall(r"([A-Z]{2}):\s*'([a-z]{2,3})'", js_table_block))
         self.assertEqual(js_pairs, main._COUNTRY_DEFAULT_LANGUAGE,
                          'lang.js and main.py country-default tables have drifted apart')
 
