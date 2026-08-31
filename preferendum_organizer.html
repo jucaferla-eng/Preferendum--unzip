@@ -470,12 +470,17 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 if (token) showApp();
+else if (window.Prefy) Prefy.setContext('organizer.auth.login');
 
 function switchTab(tab) {
   document.getElementById('panel-login').style.display  = tab === 'login' ? '' : 'none';
   document.getElementById('panel-reg').style.display    = tab === 'register' ? '' : 'none';
   document.getElementById('tab-login').classList.toggle('active', tab === 'login');
   document.getElementById('tab-reg').classList.toggle('active', tab === 'register');
+  // The organizer auth screen previously had no Prefy context at all —
+  // single choke point for both tab buttons, mirroring the fix applied
+  // to the voter portal's own switchTab().
+  if (window.Prefy) Prefy.setContext(tab === 'register' ? 'organizer.auth.register' : 'organizer.auth.login');
 }
 
 async function doLogin() {
@@ -1327,6 +1332,7 @@ async function showResults(debateId) {
   const body  = document.getElementById('results-modal-body');
   modal.style.display = 'flex';
   body.innerHTML = '<div style="color:#a0a8c0;text-align:center;padding:40px;">Cargando resultados…</div>';
+  if (window.Prefy) Prefy.setContext('organizer.results');
 
   try {
     const r = await fetch(`${API}/organizers/debates/${debateId}/results`, {headers:{'Authorization':'Bearer '+token}});

@@ -46,7 +46,13 @@ const content = fs.readFileSync('prefy-content.js', 'utf-8');
 // Voter portal — required contexts actually wired at real call sites
 // ═══════════════════════════════════════════════════════════════════════
 const voterWiringChecks = [
-  ["Prefy.setContext('voter.auth.login')", 'login screen'],
+  // Wired inside switchTab() (a ternary, not a standalone literal call) so
+  // it's the single source of truth for BOTH auth tabs — see the
+  // "real-browser QA remediation" phase for why a separate, redundant
+  // literal call site used to exist and silently conflict with this one.
+  ["Prefy.setContext(tab === 'register' ? 'voter.register.overview' : 'voter.auth.login')", 'login/register tab switch'],
+  ["Prefy.setContext('voter.verify.overview')", 'verification screen'],
+  ["Prefy.setContext('voter.home_selection')", 'home/consultation-type selection screen'],
   ["Prefy.setContext(fieldContextMap[id])", 'registration/verification field-focus wiring'],
   ["Prefy.setContext(Prefy.hasSeen('voter.consultations') ? 'voter.consultations' : 'voter.welcome')", 'home / welcome-vs-repeat-visit logic'],
   ["Prefy.setContext('voter.consultation.detail')", 'consultation detail'],
@@ -62,20 +68,39 @@ voterWiringChecks.forEach(([needle, label]) => assertTrue(voter.includes(needle)
 ['r-country', 'r-commune', 'r-dob', 'occ-search', 'r-company-size', 'r-email', 'r-phone', 'selfie-file-input', 'doc-file-input']
   .forEach(id => assertTrue(voter.includes(`'${id}'`), `voter_portal.html's field-context map includes #${id}`));
 
+// REGRESSION LOCK (real-browser QA remediation): showAuthScreen() used
+// to call switchTab('register') and then immediately override Prefy's
+// context back to 'voter.auth.login' on the very next line — silently
+// undoing switchTab()'s own correct wiring and making Prefy claim
+// "login" while the register tab was actually visible. That specific
+// override must never come back.
+const showAuthScreenBody = voter.match(/function showAuthScreen\(\)\s*{([\s\S]*?)\n}/)[1];
+assertTrue(!/Prefy\.setContext\(\s*['"]voter\.auth\.login['"]\s*\)/.test(showAuthScreenBody), "showAuthScreen() never re-overrides Prefy's context after switchTab('register') already set it correctly");
+assertTrue(/switchTab\(\s*['"]register['"]\s*\)/.test(showAuthScreenBody), "showAuthScreen() still switches to the register tab");
+
+// Bootstrap must set an explicit context for the default (unauthenticated,
+// no shared-link) landing screen — the exact class of bug this phase fixed.
+assertTrue(/switchTab\(\s*['"]login['"]\s*\)/.test(voter), "voter_portal.html's bootstrap explicitly confirms the login tab (and its context) rather than relying on the static HTML default alone");
+
 // ═══════════════════════════════════════════════════════════════════════
 // Organizer portal
 // ═══════════════════════════════════════════════════════════════════════
 [
+  ["Prefy.setContext(tab === 'register' ? 'organizer.auth.register' : 'organizer.auth.login')", 'login/register tab switch'],
   ["Prefy.setContext('organizer.home')", 'organizer home'],
   ["Prefy.setContext('organizer.missing_field')", 'organizer missing-field validation'],
   ["Prefy.setContext('organizer.logout'", 'organizer logout GOODBYE'],
 ].forEach(([needle, label]) => assertTrue(organizer.includes(needle), `preferendum_organizer.html wires ${label}`));
+// Bootstrap: an unauthenticated visit previously had NO context at all.
+assertTrue(/if\s*\(token\)\s*showApp\(\);\s*else\s+if\s*\(window\.Prefy\)\s*Prefy\.setContext\(\s*['"]organizer\.auth\.login['"]\s*\)/.test(organizer), 'preferendum_organizer.html sets a context for the default unauthenticated landing screen');
 
 // ═══════════════════════════════════════════════════════════════════════
 // Marketer portal
 // ═══════════════════════════════════════════════════════════════════════
 [
   ["_PREFY_PANEL_CONTEXT", 'panel-to-context map'],
+  ["Prefy.setContext(tab === 'register' ? 'marketer.auth.register' : 'marketer.auth.login')", 'login/register tab switch'],
+  ["Prefy.setContext('marketer.auth.login')", 'default unauthenticated landing screen'],
   ["Prefy.setContext('marketer.missing_field')", 'marketer missing-field validation'],
   ["Prefy.setContext('marketer.logout'", 'marketer logout GOODBYE'],
 ].forEach(([needle, label]) => assertTrue(marketer.includes(needle), `marketer_portal.html wires ${label}`));

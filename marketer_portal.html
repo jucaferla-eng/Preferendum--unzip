@@ -877,7 +877,10 @@ window.onload = () => {
   if (window.Prefy) Prefy.init();
   if (window.PrefyVoice) PrefyVoice.init();
   if (token) showApp();
-  else document.getElementById('auth-screen').style.display = 'flex';
+  else {
+    document.getElementById('auth-screen').style.display = 'flex';
+    if (window.Prefy) Prefy.setContext('marketer.auth.login');
+  }
   setDefaultDates();
   loadPackages();
   loadCommunes();
@@ -896,6 +899,10 @@ function switchTab(tab) {
   document.getElementById('tab-login').style.display    = tab === 'login'    ? '' : 'none';
   document.getElementById('tab-register').style.display = tab === 'register' ? '' : 'none';
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', (i===0) === (tab==='login')));
+  // The marketer auth screen previously had no Prefy context at all —
+  // single choke point for both tab buttons, mirroring the fix applied
+  // to the voter portal's own switchTab().
+  if (window.Prefy) Prefy.setContext(tab === 'register' ? 'marketer.auth.register' : 'marketer.auth.login');
 }
 
 async function doLogin() {

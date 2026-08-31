@@ -1438,6 +1438,10 @@ if (window.PrefyVoice) PrefyVoice.init();
 document.addEventListener('DOMContentLoaded', function () {
   if (!window.Prefy) return;
   var fieldContextMap = {
+    'r-name':             'voter.register.name',
+    'r-pass':             'voter.register.password',
+    'r-rut':              'voter.register.national_id',
+    'r-gender':           'voter.register.gender',
     'r-country':          'voter.register.country',
     'r-commune':          'voter.register.commune',
     'r-dob':              'voter.register.dob',
@@ -2263,6 +2267,7 @@ function showApp() {
   // Mostrar pantalla de selección
   const hs = document.getElementById('home-selection');
   hs.style.display = 'flex';
+  if (window.Prefy) Prefy.setContext('voter.home_selection');
 }
 
 function _launchMainApp() {
@@ -2280,8 +2285,13 @@ function showAuthScreen() {
   vs.style.display = 'none';
   document.getElementById('home-selection').style.display = 'none';
   document.getElementById('auth-screen').style.display = 'flex';
+  // switchTab('register') already sets Prefy's context correctly (see
+  // switchTab() above) — a leftover explicit override to
+  // 'voter.auth.login' used to run right after it here, silently
+  // undoing that and making Prefy claim "login" while the register tab
+  // was actually visible. Removed; switchTab is the single source of
+  // truth for which auth-tab context is active.
   switchTab('register');
-  if (window.Prefy) Prefy.setContext('voter.auth.login');
 }
 
 function goToVigentes() {
