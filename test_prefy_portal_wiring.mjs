@@ -151,8 +151,16 @@ assertTrue(/object-fit:\s*contain/.test(css), 'the character image uses object-f
 // ═══════════════════════════════════════════════════════════════════════
 // RTL (ar/fa/he/ur)
 // ═══════════════════════════════════════════════════════════════════════
-assertTrue(!/transform:\s*scaleX\(-1\)/.test(css) || css.includes('!important'), 'the character image is explicitly protected from mirroring in RTL contexts');
-assertTrue(css.includes('.prefy-avatar-img, .prefy-bubble-img') && /transform:\s*none\s*!important/.test(css), 'prefy.css explicitly pins the character image to never be transformed/mirrored');
+// MOTION PHASE — no `!important` here anymore (a running CSS animation
+// already wins the cascade over a plain, non-!important declaration, and
+// the character now genuinely needs to animate transform for its motion
+// profiles — see prefy.css's own comment on this exact tradeoff). The
+// invariant that actually matters is unchanged and re-verified below:
+// zero mirroring anywhere in the file, including inside every motion
+// keyframe, and an explicit resting transform of `none`.
+assertTrue(!/scaleX\(\s*-1\s*\)/.test(css), 'no scaleX(-1) mirroring transform exists anywhere in prefy.css, including inside motion keyframes');
+assertTrue(!/scaleX\(\s*-1\s*\)/.test(engine), 'no scaleX(-1) mirroring transform exists anywhere in prefy.js');
+assertTrue(css.includes('.prefy-avatar-img, .prefy-bubble-img') && /transform:\s*none\s*;/.test(css.slice(css.indexOf('.prefy-avatar-img, .prefy-bubble-img'))), 'prefy.css declares an explicit resting transform:none for the character image');
 assertTrue(!/direction:\s*ltr/.test(css), 'prefy.css never hardcodes direction:ltr, which would break RTL text flow inside the panel');
 assertTrue(!/:\s*row-reverse/.test(css), 'prefy.css uses only logical flex row order (no row-reverse declaration), so RTL reordering follows the inherited document direction automatically');
 

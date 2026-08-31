@@ -1,24 +1,36 @@
 /**
- * prefy.css — Preferendum's shared contextual guide styling.
+ * prefy.css — Preferendum's shared contextual guide styling + motion.
  * One stylesheet for voter/organizer/marketer portals (per the Phase 1
  * "no unrelated copies" decision). Self-contained: no external fonts,
- * no external images, no CDN references.
+ * no external images, no CDN references, no animation framework.
  *
  * Placement rules (responsive UX requirement): fixed, floating, bottom
  * corner — never overlapping primary navigation/actions, respects safe
  * areas on iPhone WebView, capped to a reasonable max size, and the
  * minimized bubble stays reachable at all times.
+ *
+ * MOTION PHASE — every animation here uses only `transform`/`opacity`
+ * (GPU-compositable, no layout/paint cost) plus one narrow, one-shot
+ * `opacity`-only glow (never an animated `box-shadow`, which is
+ * paint-expensive). Every animation is either infinite-but-tiny (idle
+ * float) or explicitly one-shot (`animation-iteration-count` is a small
+ * finite number, never `infinite`, for every state-motion keyframe).
+ * Nothing here uses requestAnimationFrame, canvas, or a JS animation
+ * loop — orchestration in prefy.js only ever adds/removes class names.
  */
 
 .prefy-root {
   position: fixed;
   right: max(14px, env(safe-area-inset-right));
   bottom: max(14px, env(safe-area-inset-bottom));
+  /* Fixed footprint sized to the bubble — bubble and panel are both
+     position:absolute within this anchor (see below) so toggling either
+     one's visibility NEVER changes this box's size, which is what
+     guarantees zero page layout shift on open/close/minimize. */
+  width: 52px;
+  height: 52px;
   z-index: 2147483000; /* above app UI, but see voter_portal's #twofa-modal (99999) — Prefy must never cover an active modal; portals set data-prefy-yield when one is open */
   font-family: 'Manrope', 'Inter', -apple-system, system-ui, sans-serif;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
   pointer-events: none; /* re-enabled on the two interactive children below, so Prefy never blocks clicks/taps that pass through empty space around it */
 }
 .prefy-root > * { pointer-events: auto; }
@@ -27,6 +39,9 @@
 
 /* ── Minimized bubble ─────────────────────────────────────────────── */
 .prefy-bubble {
+  position: absolute;
+  right: 0;
+  bottom: 0;
   width: 52px;
   height: 52px;
   border-radius: 50%;
@@ -36,12 +51,35 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: transform 0.15s ease;
+  transition: transform 0.15s ease, opacity 0.16s ease, visibility 0s linear 0s;
+  opacity: 1;
+  visibility: visible;
 }
 .prefy-bubble:hover { transform: scale(1.06); }
+.prefy-bubble:active { transform: scale(0.94); }
 .prefy-bubble:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
-.prefy-bubble.prefy-hidden-while-open { display: none; }
+.prefy-bubble.prefy-hidden-while-open {
+  opacity: 0;
+  transform: scale(0.85);
+  visibility: hidden;
+  transition: transform 0.16s ease, opacity 0.16s ease, visibility 0s linear 0.16s;
+}
 .prefy-bubble-glyph { font-size: 24px; line-height: 1; }
+
+/* Idle float lives on this inner wrapper, NOT on .prefy-bubble itself —
+   .prefy-bubble already owns `transform` for hover/active/tap-react, and
+   a running CSS animation's transform always wins the cascade over a
+   plain (non-!important) rule, which would silently cancel hover/active/
+   tap feedback if they shared one element. Two elements = the two
+   transforms compose instead of fighting. */
+.prefy-bubble-float {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: prefy-idle-float 3.6s ease-in-out infinite;
+}
 /* Real Prefy artwork in the minimized bubble — object-fit:contain keeps
    the character proportional (no stretching) regardless of the small
    per-file dimension variance across the 15 supplied PNGs. */
@@ -54,9 +92,16 @@
   border-radius: 50%;
 }
 
+/* One-shot friendly reaction on deliberate tap/click (task §5) — purely
+   visual, added and removed by prefy.js, never toggles business state
+   and never fires a network request. */
+.prefy-tap-react { animation: prefy-tap-react 220ms ease-out 1; }
+
 /* ── Expanded panel ───────────────────────────────────────────────── */
 .prefy-panel {
-  display: none;
+  position: absolute;
+  right: 0;
+  bottom: 0;
   width: min(340px, calc(100vw - 28px));
   max-height: min(420px, calc(100vh - 28px));
   overflow-y: auto;
@@ -66,8 +111,24 @@
   border-radius: 16px;
   box-shadow: 0 12px 40px rgba(0,0,0,0.4);
   margin-bottom: 10px;
+  /* Closed-by-default visual state — opacity+transform+visibility, never
+     the display property, so the open/close transition can actually
+     play and so toggling it never changes .prefy-root's box (no layout
+     shift). */
+  opacity: 0;
+  transform: translateY(8px) scale(0.96);
+  visibility: hidden;
+  pointer-events: none;
+  transform-origin: bottom right;
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s linear 0.18s;
 }
-.prefy-panel.prefy-visible { display: block; }
+.prefy-panel.prefy-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s linear 0s;
+}
 
 .prefy-panel-header {
   display: flex;
@@ -81,6 +142,7 @@
   height: 44px;
   min-width: 44px;
   position: relative;
+  animation: prefy-idle-float 3.6s ease-in-out infinite;
 }
 .prefy-avatar-img {
   width: 100%;
@@ -114,6 +176,15 @@
 }
 .prefy-icon-btn:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
 
+/* Content crossfade (task §3) — the fade-out/fade-in half of the
+   transition sequence, applied to the text+image container while
+   prefy.js swaps the underlying src/copy in between. Kept to opacity
+   only (no transform) here so text reflow during swap never looks like
+   it's sliding; the character's own entrance motion (below) carries the
+   more expressive movement. */
+.prefy-content-fade-out { animation: prefy-content-fade-out 140ms ease-in 1; }
+.prefy-content-fade-in { animation: prefy-content-fade-in 160ms ease-out 1; }
+
 .prefy-body { padding: 12px 14px 8px; }
 .prefy-body-text { font-size: 13.5px; line-height: 1.55; color: #d7e0f5; }
 .prefy-why-text {
@@ -139,12 +210,14 @@
   font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
+  transition: transform 0.12s ease;
 }
 .prefy-help-btn:hover, .prefy-reopen-btn:hover { background: rgba(255,255,255,0.14); }
+.prefy-help-btn:active, .prefy-reopen-btn:active { transform: scale(0.96); }
 .prefy-help-btn:focus-visible, .prefy-reopen-btn:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
 
-/* ── State accent (fallback badge only — real Prefy art will carry its
-   own per-state illustration; this just tints the temporary glyph) ──── */
+/* ── State accent (fallback badge only — real Prefy art carries its own
+   per-state illustration; this just tints the temporary glyph/border) ── */
 .prefy-root[data-prefy-state="ERROR"] .prefy-panel,
 .prefy-root[data-prefy-state="POSSIBLE_FRAUD"] .prefy-panel,
 .prefy-root[data-prefy-state="HACKER_ALERT"] .prefy-panel {
@@ -161,11 +234,222 @@
   border-color: rgba(196,154,42,0.55);
 }
 
-/* ── Reduced motion ───────────────────────────────────────────────── */
-@media (prefers-reduced-motion: reduce) {
-  .prefy-bubble { transition: none; }
+/* ═══════════════════════════════════════════════════════════════════
+   MOTION — idle float + 15 one-shot state-entrance profiles.
+   All target ONLY .prefy-avatar-img/.prefy-avatar (panel) and
+   .prefy-bubble-img/.prefy-bubble-glyph (bubble) — never the wrapper
+   elements that already own the idle-float animation, so the two never
+   fight over the `transform` property on the same element (see comment
+   above .prefy-bubble-float). Every keyframe below is applied via a
+   short-lived class added/removed by prefy.js — never left running
+   forever, never `infinite`.
+   ═══════════════════════════════════════════════════════════════════ */
+
+@keyframes prefy-idle-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
 }
-.prefy-reduced-motion .prefy-bubble { transition: none; }
+
+@keyframes prefy-tap-react {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+
+@keyframes prefy-content-fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes prefy-content-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* WELCOME — friendly entrance, subtle wave-like body movement. */
+@keyframes prefy-m-welcome {
+  0%   { transform: scale(0.9) rotate(-4deg); opacity: 0; }
+  40%  { transform: scale(1.03) rotate(3deg); opacity: 1; }
+  70%  { transform: scale(1) rotate(-2deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+.prefy-m-welcome { animation: prefy-m-welcome 700ms ease-out 1; }
+
+/* EXPLAINING — gentle emphasis, calm movement. */
+@keyframes prefy-m-explaining {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+.prefy-m-explaining { animation: prefy-m-explaining 450ms ease-in-out 1; }
+
+/* PRESENTING — smooth reveal, confident (no bounce/overshoot). */
+@keyframes prefy-m-presenting {
+  0%   { transform: translateY(6px) scale(0.96); opacity: 0; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.prefy-m-presenting { animation: prefy-m-presenting 420ms ease-out 1; }
+
+/* THINKING — slower movement, subtle tilt oscillation, contemplative. */
+@keyframes prefy-m-thinking {
+  0%, 100% { transform: rotate(0); }
+  30% { transform: rotate(-3deg); }
+  65% { transform: rotate(2deg); }
+}
+.prefy-m-thinking { animation: prefy-m-thinking 1600ms ease-in-out 2; }
+
+/* IDEA — small positive pop, brief emphasis. */
+@keyframes prefy-m-idea {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.18); }
+  60%  { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+.prefy-m-idea { animation: prefy-m-idea 380ms ease-out 1; }
+
+/* ATTENTION — one short pulse, never continuous flashing. */
+@keyframes prefy-m-attention {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.9; }
+}
+.prefy-m-attention { animation: prefy-m-attention 450ms ease-in-out 1; }
+
+/* MISSING_INFORMATION — small questioning movement, restrained tilt. */
+@keyframes prefy-m-missing {
+  0%, 100% { transform: rotate(0); }
+  30% { transform: rotate(4deg); }
+  60% { transform: rotate(-4deg); }
+}
+.prefy-m-missing { animation: prefy-m-missing 500ms ease-in-out 1; }
+
+/* ERROR — one restrained shake, never repeated. */
+@keyframes prefy-m-error {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+.prefy-m-error { animation: prefy-m-error 350ms ease-in-out 1; }
+
+/* POSSIBLE_FRAUD — profile exists for when a future explicit contract
+   authorizes this state; NEVER auto-triggered (enforced in prefy.js's
+   guardState(), not here). Restrained pulse, no flashing. */
+@keyframes prefy-m-fraud {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+.prefy-m-fraud { animation: prefy-m-fraud 500ms ease-in-out 1; }
+
+/* HACKER_ALERT — profile exists, NEVER auto-triggered. Slow single
+   pulse, deliberately NOT a flash (no opacity strobing, no fast
+   repeats) — explicit seizure-safety requirement. */
+@keyframes prefy-m-hacker {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+.prefy-m-hacker { animation: prefy-m-hacker 700ms ease-in-out 1; }
+
+/* GOOD_JOB — positive pop/bounce once. */
+@keyframes prefy-m-good-job {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.15); }
+  55%  { transform: scale(0.95); }
+  75%  { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+.prefy-m-good-job { animation: prefy-m-good-job 450ms ease-out 1; }
+
+/* SUCCESS — brief celebratory motion, then calm idle resumes
+   automatically once this one-shot class is removed. */
+@keyframes prefy-m-success {
+  0%   { transform: scale(1) rotate(0); }
+  25%  { transform: scale(1.18) rotate(-4deg); }
+  50%  { transform: scale(0.96) rotate(3deg); }
+  75%  { transform: scale(1.08) rotate(-1deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+.prefy-m-success { animation: prefy-m-success 600ms ease-out 1; }
+
+/* THANKS — warm gentle entrance. */
+@keyframes prefy-m-thanks {
+  0%   { transform: scale(0.94) rotate(2deg); opacity: 0; }
+  60%  { transform: scale(1.02) rotate(-1deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); }
+}
+.prefy-m-thanks { animation: prefy-m-thanks 550ms ease-out 1; }
+
+/* HELP — subtle invitation motion, no repeated attention-seeking (one
+   shot only). Pairs with a one-shot, opacity-only glow on the wrapper
+   (never an animated box-shadow — see file header). */
+@keyframes prefy-m-help {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+.prefy-m-help { animation: prefy-m-help 450ms ease-in-out 1; }
+
+@keyframes prefy-glow-once { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+.prefy-avatar-wrap { position: relative; }
+.prefy-avatar-wrap::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(147,197,253,0.55) 0%, rgba(147,197,253,0) 70%);
+  opacity: 0;
+  pointer-events: none;
+}
+.prefy-glow-once::after { animation: prefy-glow-once 450ms ease-out 1; }
+
+/* GOODBYE — short farewell motion; the panel/session close/minimize
+   itself is handled by the EXISTING logout flow's own timing (each
+   portal's doLogout()), not by this animation. */
+@keyframes prefy-m-goodbye {
+  0%   { transform: scale(1) rotate(0); opacity: 1; }
+  40%  { transform: scale(1.05) rotate(4deg); opacity: 1; }
+  70%  { transform: scale(1.02) rotate(-3deg); opacity: 1; }
+  100% { transform: scale(0.98) rotate(0); opacity: 0.92; }
+}
+.prefy-m-goodbye { animation: prefy-m-goodbye 500ms ease-out 1; }
+
+/* ── Reduced motion — MANDATORY. Disables idle float, every one-shot
+   state-motion profile, the tap reaction, and the glow; replaces the
+   panel/bubble open-close transition with a near-instant opacity swap.
+   All functionality (state changes, minimize/reopen, help, language)
+   remains fully available — only the decorative animation is removed. ── */
+@media (prefers-reduced-motion: reduce) {
+  .prefy-bubble,
+  .prefy-bubble.prefy-hidden-while-open,
+  .prefy-panel,
+  .prefy-panel.prefy-visible,
+  .prefy-help-btn, .prefy-reopen-btn {
+    transition-duration: 0.01ms !important;
+  }
+  .prefy-bubble-float,
+  .prefy-avatar-wrap,
+  .prefy-tap-react,
+  .prefy-content-fade-out, .prefy-content-fade-in,
+  .prefy-m-welcome, .prefy-m-explaining, .prefy-m-presenting, .prefy-m-thinking,
+  .prefy-m-idea, .prefy-m-attention, .prefy-m-missing, .prefy-m-error,
+  .prefy-m-fraud, .prefy-m-hacker, .prefy-m-good-job, .prefy-m-success,
+  .prefy-m-thanks, .prefy-m-help, .prefy-m-goodbye,
+  .prefy-glow-once::after {
+    animation: none !important;
+  }
+}
+.prefy-reduced-motion .prefy-bubble,
+.prefy-reduced-motion .prefy-bubble.prefy-hidden-while-open,
+.prefy-reduced-motion .prefy-panel,
+.prefy-reduced-motion .prefy-panel.prefy-visible {
+  transition-duration: 0.01ms !important;
+}
+.prefy-reduced-motion .prefy-bubble-float,
+.prefy-reduced-motion .prefy-avatar-wrap,
+.prefy-reduced-motion [class*="prefy-m-"],
+.prefy-reduced-motion .prefy-tap-react,
+.prefy-reduced-motion .prefy-content-fade-out,
+.prefy-reduced-motion .prefy-content-fade-in,
+.prefy-reduced-motion .prefy-glow-once::after {
+  animation: none !important;
+}
 
 /* ── Small screens: keep the panel from ever covering a primary action
    row (vote button / form submit) by capping height and letting it
@@ -183,12 +467,16 @@
    order: `direction` is CSS-inherited, block text alignment already
    follows it by default, and every flex row in this file uses the
    logical `row` axis (never `row-reverse`), so headers/footers reorder
-   automatically. The one thing that must NEVER follow `dir` is the
-   character artwork itself — explicitly pinned below so no future
-   global RTL rule elsewhere in a portal can flip it. The floating
-   bubble's screen corner is deliberately NOT mirrored (stays
-   bottom-right in both directions) — simpler and still fully usable,
-   per the task's minimum bar for this phase. */
+   automatically. The character artwork's resting transform stays
+   `none` here (not `!important` — a running CSS animation already wins
+   the cascade over a plain declaration, so this still fully protects
+   against a hypothetical external mirroring rule targeting these image
+   classes without blocking the motion profiles above from animating the
+   very same elements). None of this file's own keyframes contain a
+   horizontal-flip transform — verified by test. The floating bubble's
+   screen corner is deliberately NOT mirrored (stays bottom-right in
+   both directions) — simpler and still fully usable, per the task's
+   minimum bar for this phase. */
 .prefy-avatar-img, .prefy-bubble-img {
-  transform: none !important;
+  transform: none;
 }

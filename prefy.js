@@ -163,6 +163,45 @@
     THANKS: '#1a7a4a', HELP: '#2d6eff', GOODBYE: '#2d6eff',
   };
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // MOTION — one profile per canonical state (task: "controlled motion
+  // profiles for all 15 states"). Every className below is a ONE-SHOT
+  // CSS animation (see prefy.css) — never `infinite`, always removed
+  // after `duration` ms. POSSIBLE_FRAUD/HACKER_ALERT have real profiles
+  // (installable/testable) but reaching them still goes through
+  // guardState() above, which is the ONLY thing that decides whether
+  // they can ever actually play — nothing here grants a new way in.
+  // ═══════════════════════════════════════════════════════════════════════
+  var STATE_MOTION = {
+    WELCOME:              { className: 'prefy-m-welcome',   duration: 700 },
+    EXPLAINING:           { className: 'prefy-m-explaining',duration: 450 },
+    PRESENTING:           { className: 'prefy-m-presenting',duration: 420 },
+    THINKING:             { className: 'prefy-m-thinking',  duration: 3200 },
+    IDEA:                 { className: 'prefy-m-idea',      duration: 380 },
+    ATTENTION:            { className: 'prefy-m-attention', duration: 450 },
+    MISSING_INFORMATION:  { className: 'prefy-m-missing',   duration: 500 },
+    ERROR:                { className: 'prefy-m-error',     duration: 350 },
+    POSSIBLE_FRAUD:       { className: 'prefy-m-fraud',     duration: 500 },
+    HACKER_ALERT:         { className: 'prefy-m-hacker',    duration: 700 },
+    GOOD_JOB:             { className: 'prefy-m-good-job',  duration: 450 },
+    SUCCESS:              { className: 'prefy-m-success',   duration: 600 },
+    THANKS:               { className: 'prefy-m-thanks',    duration: 550 },
+    HELP:                 { className: 'prefy-m-help',      duration: 450, glow: true },
+    GOODBYE:              { className: 'prefy-m-goodbye',   duration: 500 },
+  };
+  var CONTENT_FADE_OUT_MS = 140;
+  var CONTENT_FADE_IN_MS = 160;
+
+  /** Pure — the ONE check every deferred transition step makes before
+   * touching the DOM. A newer setContext/setState call always bumps the
+   * sequence counter, so a stale (superseded) timeout's `mySeq` will
+   * never match `currentSeq` again — this is what guarantees "the latest
+   * legitimate state must win" and that no timer can leave Prefy showing
+   * an obsolete state, without needing to cancel any actual timers. */
+  function isStaleTransition(mySeq, currentSeq) {
+    return mySeq !== currentSeq;
+  }
+
   var _state = {
     ui: 'minimized',          // 'open' | 'minimized'
     currentContextKey: null,
@@ -170,6 +209,7 @@
     initialized: false,
     dom: null,
   };
+  var _transitionSeq = 0;
 
   function el(tag, attrs, children) {
     var e = document.createElement(tag);
@@ -200,10 +240,23 @@
     // toggles which one is visible (see updateAssetVisibility()).
     var bubbleImg = el('img', { class: 'prefy-bubble-img', alt: '' });
     var bubbleGlyph = el('span', { class: 'prefy-bubble-glyph', 'aria-hidden': 'true' });
+    // Idle float lives on this inner wrapper, not on the button itself —
+    // see prefy.css's comment on .prefy-bubble-float for why (the button
+    // already owns `transform` for hover/active/tap-react).
+    var bubbleFloat = el('div', { class: 'prefy-bubble-float', 'aria-hidden': 'true' }, [bubbleImg, bubbleGlyph]);
     bubbleImg.addEventListener('error', function () { onAssetError(_state.currentState); });
-    bubble.appendChild(bubbleImg);
-    bubble.appendChild(bubbleGlyph);
-    bubble.addEventListener('click', function () { open(); });
+    bubble.appendChild(bubbleFloat);
+    bubble.addEventListener('click', function () {
+      // One-shot friendly reaction (task §5) — purely visual, never
+      // touches business state and never fires a network request.
+      if (!prefersReducedMotion()) {
+        bubble.classList.remove('prefy-tap-react');
+        void bubble.offsetWidth; // force reflow so a rapid repeat tap restarts the animation
+        bubble.classList.add('prefy-tap-react');
+        setTimeout(function () { bubble.classList.remove('prefy-tap-react'); }, 220);
+      }
+      open();
+    });
 
     var panel = el('div', { class: 'prefy-panel', role: 'dialog', 'aria-label': PrefyContent.str(currentLang(), 'chrome.name') });
 
@@ -248,8 +301,8 @@
     root.appendChild(panel);
 
     return {
-      root: root, bubble: bubble, bubbleImg: bubbleImg, bubbleGlyph: bubbleGlyph, panel: panel,
-      avatarImg: avatarImg, avatar: avatar, title: title, bodyText: bodyText, whyText: whyText,
+      root: root, bubble: bubble, bubbleFloat: bubbleFloat, bubbleImg: bubbleImg, bubbleGlyph: bubbleGlyph, panel: panel,
+      avatarWrap: avatarWrap, avatarImg: avatarImg, avatar: avatar, title: title, bodyText: bodyText, whyText: whyText,
       closeBtn: closeBtn,
     };
   }
@@ -286,12 +339,23 @@
     updateAssetVisibility();
   }
 
-  function render() {
+  // Panel-open-vs-minimized visibility only — CSS `transition` (not
+  // `animation`) on .prefy-panel/.prefy-bubble handles the actual smooth
+  // open/close/minimize motion purely from this class toggle, so a rapid
+  // double-toggle naturally interrupts/reverses cleanly (a browser
+  // transition always animates from its current interpolated value, not
+  // from scratch) with no JS-side race to guard against here.
+  function updatePanelVisibility() {
     if (!hasBrowser() || !_state.dom) return;
     var isOpen = _state.ui === 'open';
     _state.dom.panel.classList.toggle('prefy-visible', isOpen);
     _state.dom.bubble.classList.toggle('prefy-hidden-while-open', isOpen);
     _state.dom.bubble.setAttribute('aria-expanded', String(isOpen));
+  }
+
+  function render() {
+    if (!hasBrowser() || !_state.dom) return;
+    updatePanelVisibility();
     applyStateVisuals(_state.currentState);
   }
 
@@ -303,19 +367,101 @@
     _state.dom.whyText.style.display = rendered.why ? 'block' : 'none';
   }
 
+  var _allMotionClassNames = Object.keys(STATE_MOTION).map(function (k) { return STATE_MOTION[k].className; });
+
+  /**
+   * The one-shot "character reacts to its new state" motion (task §2).
+   * Always a FIXED, small number of iterations (see prefy.css — never
+   * `infinite`), always cleaned up after its own duration. Skipped
+   * entirely under prefers-reduced-motion (task §7).
+   */
+  function playEntranceMotion(state, mySeq) {
+    if (!hasBrowser() || !_state.dom || prefersReducedMotion()) return;
+    var profile = STATE_MOTION[state] || STATE_MOTION[PrefyContent.DEFAULT_STATE];
+    if (!profile) return;
+    var targets = [_state.dom.avatarImg, _state.dom.avatar, _state.dom.bubbleImg, _state.dom.bubbleGlyph];
+    targets.forEach(function (t) {
+      _allMotionClassNames.forEach(function (c) { t.classList.remove(c); });
+      void t.offsetWidth; // force reflow so re-adding the SAME class still restarts the animation
+      t.classList.add(profile.className);
+    });
+    if (profile.glow) _state.dom.avatarWrap.classList.add('prefy-glow-once');
+    setTimeout(function () {
+      // No staleness check needed here: this only ever removes the EXACT
+      // class name it added above. If a newer transition already started,
+      // it already stripped this class itself before adding its own —
+      // this is then a harmless no-op, never a removal of the wrong class.
+      targets.forEach(function (t) { t.classList.remove(profile.className); });
+      if (profile.glow) _state.dom.avatarWrap.classList.remove('prefy-glow-once');
+    }, profile.duration);
+  }
+
+  /**
+   * Task §3's full sequence: fade/scale out → asset+content swap → fade
+   * in → state-specific entrance → idle. Every async step is guarded by
+   * `isStaleTransition`, so if setContext/setState is called again before
+   * an earlier call's steps finish, only the LATEST call's steps ever
+   * touch the DOM — an old call simply stops silently, never overwriting
+   * newer content and never leaving a half-applied obsolete state.
+   */
+  function transitionToRendered(rendered, mySeq, opts) {
+    opts = opts || {};
+    if (!hasBrowser() || !_state.dom) return;
+
+    var reduced = prefersReducedMotion();
+    if (opts.skipAnimation || reduced) {
+      renderContent(rendered);
+      applyStateVisuals(_state.currentState);
+      updatePanelVisibility();
+      return;
+    }
+
+    var contentEls = [_state.dom.title, _state.dom.bodyText, _state.dom.whyText];
+    contentEls.forEach(function (elx) {
+      elx.classList.remove('prefy-content-fade-in');
+      elx.classList.add('prefy-content-fade-out');
+    });
+
+    setTimeout(function () {
+      if (isStaleTransition(mySeq, _transitionSeq)) return;
+      renderContent(rendered);
+      applyStateVisuals(_state.currentState);
+      updatePanelVisibility();
+      contentEls.forEach(function (elx) {
+        elx.classList.remove('prefy-content-fade-out');
+        elx.classList.add('prefy-content-fade-in');
+      });
+
+      setTimeout(function () {
+        if (isStaleTransition(mySeq, _transitionSeq)) return;
+        contentEls.forEach(function (elx) { elx.classList.remove('prefy-content-fade-in'); });
+        playEntranceMotion(_state.currentState, mySeq);
+      }, CONTENT_FADE_IN_MS);
+    }, CONTENT_FADE_OUT_MS);
+  }
+
   function setContext(contextKey, opts) {
     opts = opts || {};
+    // Bumped unconditionally, even before the hasBrowser() early-return —
+    // this counter tracks "which call is the latest legitimate one",
+    // independent of whether there's a DOM to paint into right now.
+    var mySeq = ++_transitionSeq;
     var entry = PrefyContent.getContext(contextKey);
     var effectiveKey = entry ? contextKey : PrefyContent.UNKNOWN_CONTEXT_KEY;
     var rendered = PrefyContent.render(contextKey, currentLang());
     var guard = guardState(rendered.state, _state.currentState, opts);
 
+    // Only play the fade/entrance sequence for a GENUINE change — reduces
+    // to an instant re-paint if called again with identical context+state
+    // (e.g. a redundant setContext from a caller that doesn't itself
+    // track "did this actually change"), never re-plays the entrance
+    // motion pointlessly.
+    var isRealChange = effectiveKey !== _state.currentContextKey || guard.state !== _state.currentState;
+
     _state.currentContextKey = effectiveKey;
     _state.currentState = guard.state;
 
     if (!hasBrowser()) return { applied: !guard.suppressed, state: guard.state, contextKey: effectiveKey };
-
-    renderContent(rendered);
 
     var seenBefore = hasSeen(effectiveKey);
     markSeen(effectiveKey);
@@ -328,23 +474,24 @@
     } else if (_state.ui !== 'open') {
       _state.ui = 'minimized';
     }
-    render();
+    transitionToRendered(rendered, mySeq, { skipAnimation: !isRealChange });
     return { applied: !guard.suppressed, state: guard.state, contextKey: effectiveKey };
   }
 
   function setState(state, content, opts) {
     opts = opts || {};
+    var mySeq = ++_transitionSeq;
     var guard = guardState(state, _state.currentState, opts);
     _state.currentContextKey = null;
     _state.currentState = guard.state;
     if (!hasBrowser()) return { applied: !guard.suppressed, state: guard.state };
-    renderContent({ title: (content && content.title) || '', body: (content && content.body) || '', why: content && content.why });
     if (opts.forceOpen) _state.ui = 'open';
-    render();
+    transitionToRendered({ title: (content && content.title) || '', body: (content && content.body) || '', why: content && content.why }, mySeq, {});
     return { applied: !guard.suppressed, state: guard.state };
   }
 
   function openHelp() {
+    var mySeq = ++_transitionSeq;
     var lang = currentLang();
     var key = _state.currentContextKey || PrefyContent.UNKNOWN_CONTEXT_KEY;
     var rendered = PrefyContent.render(key, lang);
@@ -358,9 +505,8 @@
     var guard = guardState('HELP', _state.currentState, {});
     _state.currentState = guard.state;
     if (!hasBrowser()) return { applied: true, state: guard.state, qa: qa };
-    renderContent({ title: PrefyContent.str(lang, 'chrome.name') + ' — ' + PrefyContent.str(lang, 'chrome.help'), body: qa.join(' ') });
     _state.ui = 'open';
-    render();
+    transitionToRendered({ title: PrefyContent.str(lang, 'chrome.name') + ' — ' + PrefyContent.str(lang, 'chrome.help'), body: qa.join(' ') }, mySeq, {});
     return { applied: true, state: guard.state, qa: qa };
   }
 
@@ -444,9 +590,18 @@
     storageKeySeen: storageKeySeen,
     STORAGE_KEY_MINIMIZED: STORAGE_KEY_MINIMIZED,
 
+    // Motion (task: Prefy Motion & Interaction phase) — pure/DOM-free
+    // pieces exposed for testing: the state→profile table (completeness
+    // + no-security-state-motion-mapping-abuse checks) and the exact
+    // race-condition guard every deferred transition step uses.
+    STATE_MOTION: STATE_MOTION,
+    isStaleTransition: isStaleTransition,
+    prefersReducedMotion: prefersReducedMotion,
+
     // Introspection (tests, debugging) — never sensitive: state name and
     // context key strings only, never a user-data value.
     _debugState: function () { return { ui: _state.ui, currentContextKey: _state.currentContextKey, currentState: _state.currentState }; },
+    _transitionSeqValue: function () { return _transitionSeq; },
 
     // Asset-failure fallback (task §13) — exposed so a test can force the
     // exact failure path (onAssetError) without needing a real browser
