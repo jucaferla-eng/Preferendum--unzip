@@ -20,6 +20,9 @@ body{top:0!important;}
 </style>
 <script src="/lang.js"></script>
 <script src="/translate.js"></script>
+<link rel="stylesheet" href="/prefy.css">
+<script src="/prefy-content.js"></script>
+<script src="/prefy.js"></script>
 <style>
 #gt-float{position:fixed;top:10px;right:10px;z-index:99999;background:rgba(10,13,20,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
 </style>
@@ -1111,6 +1114,32 @@ async function _showDebateBannerOnAuth() {
   switchTab('register');
 }
 
+// ── PREFY (contextual guide, Phase 1) ──────────────────────────────────
+// Prefy only EXPLAINS screens/fields that already exist above — it never
+// computes eligibility/tier/income/fraud/balance itself. Context keys are
+// wired here, once, rather than scattered through the business logic
+// above; the actual copy lives in prefy-content.js.
+if (window.Prefy) Prefy.init();
+
+document.addEventListener('DOMContentLoaded', function () {
+  if (!window.Prefy) return;
+  var fieldContextMap = {
+    'r-country':          'voter.register.country',
+    'r-commune':          'voter.register.commune',
+    'r-dob':              'voter.register.dob',
+    'occ-search':         'voter.register.occupation',
+    'r-company-size':     'voter.register.company_size',
+    'r-email':            'voter.register.email',
+    'r-phone':            'voter.register.phone',
+    'selfie-file-input':  'voter.verify.selfie',
+    'doc-file-input':     'voter.verify.document',
+  };
+  Object.keys(fieldContextMap).forEach(function (id) {
+    var target = document.getElementById(id);
+    if (target) target.addEventListener('focus', function () { Prefy.setContext(fieldContextMap[id]); });
+  });
+});
+
 // ── INIT ──
 if (token) validateAndShowApp();
 else _showDebateBannerOnAuth();
@@ -1160,7 +1189,13 @@ async function doLogin() {
     const r = await fetch(`${API}/auth/login`, {method:'POST',headers:{'Content-Type':'application/json'},
       body: JSON.stringify({email, password: pass, device_fp: deviceFpLogin})});
     const d = await r.json();
-    if (!r.ok) { document.getElementById('l-err').textContent = d.detail || 'Login failed'; return; }
+    if (!r.ok) {
+      document.getElementById('l-err').textContent = d.detail || 'Login failed';
+      // An ordinary wrong-password/wrong-email response is an everyday
+      // ERROR, never a fraud/security state — see prefy.js's guardState().
+      if (window.Prefy) Prefy.setContext('voter.error.generic');
+      return;
+    }
 
     if (d.pending_2fa) {
       show2FAModal(d, deviceFpLogin);
@@ -1168,7 +1203,10 @@ async function doLogin() {
     }
 
     finishLogin(d);
-  } catch(e) { document.getElementById('l-err').textContent = 'Error de conexión'; }
+  } catch(e) {
+    document.getElementById('l-err').textContent = 'Error de conexión';
+    if (window.Prefy) Prefy.setContext('voter.error.generic');
+  }
 }
 
 function finishLogin(d) {
@@ -1617,10 +1655,12 @@ async function doRegister() {
   const profession   = document.getElementById('r-profession').value;
   const company_size = document.getElementById('r-company-size').value;
 
-  if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'Nombre, email y contraseña son obligatorios'; return; }
-  if (pass.length < 6) { document.getElementById('r-err').textContent = 'La contraseña debe tener mínimo 6 caracteres'; return; }
-  if (!rut) { document.getElementById('r-err').textContent = (document.getElementById('r-id-label')?.textContent?.replace(' *','') || 'Documento de identidad') + ' es obligatorio'; return; }
-  if (!profession) { document.getElementById('r-err').textContent = 'Selecciona tu ocupación'; return; }
+  // Ordinary required-field validation — MISSING_INFORMATION, never a
+  // fraud/security state (see prefy.js's guardState()).
+  if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'Nombre, email y contraseña son obligatorios'; if (window.Prefy) Prefy.setContext('voter.missing_field'); return; }
+  if (pass.length < 6) { document.getElementById('r-err').textContent = 'La contraseña debe tener mínimo 6 caracteres'; if (window.Prefy) Prefy.setContext('voter.missing_field'); return; }
+  if (!rut) { document.getElementById('r-err').textContent = (document.getElementById('r-id-label')?.textContent?.replace(' *','') || 'Documento de identidad') + ' es obligatorio'; if (window.Prefy) Prefy.setContext('voter.missing_field'); return; }
+  if (!profession) { document.getElementById('r-err').textContent = 'Selecciona tu ocupación'; if (window.Prefy) Prefy.setContext('voter.missing_field'); return; }
   document.getElementById('r-err').textContent = '';
 
   const btn = document.querySelector('#tab-register .btn');
@@ -1638,7 +1678,11 @@ async function doRegister() {
     });
     const d = await r.json();
     btn.disabled = false; btn.textContent = 'Create Account →';
-    if (!r.ok) { document.getElementById('r-err').textContent = d.detail || 'Registration failed'; return; }
+    if (!r.ok) {
+      document.getElementById('r-err').textContent = d.detail || 'Registration failed';
+      if (window.Prefy) Prefy.setContext('voter.error.generic');
+      return;
+    }
     token = d.token;
     userName = name;
     userCountry = country;
@@ -1654,6 +1698,7 @@ async function doRegister() {
   } catch(e) {
     btn.disabled = false; btn.textContent = 'Create Account →';
     document.getElementById('r-err').textContent = 'Connection error';
+    if (window.Prefy) Prefy.setContext('voter.error.generic');
   }
 }
 
@@ -1859,7 +1904,12 @@ function doLogout() {
   token = ''; userName = ''; selectedOption = null; currentDebate = null;
   localStorage.removeItem('pref_voter_token');
   localStorage.removeItem('pref_voter_name');
-  window.location.replace('/');
+  if (window.Prefy) {
+    Prefy.setContext('voter.logout', { forceOpen: true });
+    setTimeout(() => window.location.replace('/'), 700);
+  } else {
+    window.location.replace('/');
+  }
 }
 
 // ── APP ──
@@ -1887,6 +1937,7 @@ function _launchMainApp() {
   document.getElementById('main-app').style.display = 'flex';
   document.getElementById('main-app').classList.add('visible');
   document.getElementById('user-name-display').textContent = userName;
+  if (window.Prefy) Prefy.setContext(Prefy.hasSeen('voter.consultations') ? 'voter.consultations' : 'voter.welcome');
 }
 
 function showAuthScreen() {
@@ -1897,6 +1948,7 @@ function showAuthScreen() {
   document.getElementById('home-selection').style.display = 'none';
   document.getElementById('auth-screen').style.display = 'flex';
   switchTab('register');
+  if (window.Prefy) Prefy.setContext('voter.auth.login');
 }
 
 function goToVigentes() {
@@ -1927,7 +1979,9 @@ function setActiveTab(id) {
   });
 }
 
+var _PREFY_TAB_CONTEXT = { comment: 'voter.opinion', debate: 'voter.consultations', vote: 'voter.voting_section', results: 'voter.results', profile: 'voter.profile' };
 function navTo(tab) {
+  if (window.Prefy && _PREFY_TAB_CONTEXT[tab]) Prefy.setContext(_PREFY_TAB_CONTEXT[tab]);
   if (tab === 'comment') {
     if (currentDebate) {
       showDetailView();
@@ -2163,6 +2217,7 @@ async function openDebate(id) {
   document.getElementById('debate-detail').style.display = 'block';
   document.getElementById('profile-view').style.display = 'none';
   setActiveTab('tab-comment');
+  if (window.Prefy) Prefy.setContext('voter.consultation.detail');
   window.scrollTo(0, 0);
   history.replaceState(null, '', `/voter?debate=${id}`);
   const content = document.getElementById('detail-content');
@@ -3136,6 +3191,10 @@ async function generateDeviceFingerprint() {
 
 async function castVote() {
   if (selectedOption === null || !currentDebate) return;
+  // Prefy only explains that a submission is about to happen — it never
+  // reads back or repeats the option the voter selected, and never delays
+  // or alters the actual vote below.
+  if (window.Prefy) Prefy.setContext('voter.vote.before_submit');
 
   const isQ1 = branchCurrentQ === null;
   const currentQ = isQ1
@@ -3242,6 +3301,8 @@ async function showVoteSuccess(data, optIdx) {
   setActiveTab('tab-results');
   const content = document.getElementById('detail-content');
   if (!content) return;
+  // Uses this SAME real vote-success event — never a separate/invented one.
+  if (window.Prefy) Prefy.setContext('voter.vote.success');
   const vcode  = data.verify_code || data.vcode || '';
   const option = data.option || (currentDebate?.options || [])[optIdx] || '';
   const debId  = currentDebate?.id;

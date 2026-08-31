@@ -3760,6 +3760,48 @@ def serve_translate_js():
     except FileNotFoundError:
         return Response(content='// translate.js not found', media_type='application/javascript', status_code=404)
 
+# ── PREFY CONTEXTUAL GUIDE (Phase 1) — served exactly like lang.js/
+# translate.js: one file on disk, one route, shared by every portal. Prefy
+# only explains what business logic already decided; these three routes
+# serve static, dependency-free files with no per-request computation. ──
+
+@app.get('/prefy-content.js')
+def serve_prefy_content_js():
+    """State list, context registry, and translated copy. Pure data — see
+    prefy-content.js's own header for why this is split from prefy.js."""
+    try:
+        with open('prefy-content.js', 'r', encoding='utf-8') as f:
+            content = f.read()
+        return Response(content=content, media_type='application/javascript', headers={
+            'Cache-Control': 'public, max-age=86400',
+        })
+    except FileNotFoundError:
+        return Response(content='// prefy-content.js not found', media_type='application/javascript', status_code=404)
+
+@app.get('/prefy.js')
+def serve_prefy_js():
+    """The shared Prefy engine (init/setContext/setState/show/minimize/open)."""
+    try:
+        with open('prefy.js', 'r', encoding='utf-8') as f:
+            content = f.read()
+        return Response(content=content, media_type='application/javascript', headers={
+            'Cache-Control': 'public, max-age=86400',
+        })
+    except FileNotFoundError:
+        return Response(content='// prefy.js not found', media_type='application/javascript', status_code=404)
+
+@app.get('/prefy.css')
+def serve_prefy_css():
+    """Prefy's floating-widget styles — shared by every portal."""
+    try:
+        with open('prefy.css', 'r', encoding='utf-8') as f:
+            content = f.read()
+        return Response(content=content, media_type='text/css', headers={
+            'Cache-Control': 'public, max-age=86400',
+        })
+    except FileNotFoundError:
+        return Response(content='/* prefy.css not found */', media_type='text/css', status_code=404)
+
 @app.get('/voter', response_class=HTMLResponse)
 def serve_voter_portal():
     """Portal web de votante — funciona en móvil y desktop."""

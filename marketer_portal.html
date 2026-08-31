@@ -187,6 +187,9 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
 </style>
 <script src="/lang.js"></script>
 <script src="/translate.js"></script>
+<link rel="stylesheet" href="/prefy.css">
+<script src="/prefy-content.js"></script>
+<script src="/prefy.js"></script>
 <style>
 #gt-float{position:fixed;top:12px;right:12px;z-index:99999;background:rgba(13,17,32,0.92);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
 </style>
@@ -870,6 +873,7 @@ const COMMUNES = {
 
 // ── INIT ─────────────────────────────────────────────────────
 window.onload = () => {
+  if (window.Prefy) Prefy.init();
   if (token) showApp();
   else document.getElementById('auth-screen').style.display = 'flex';
   setDefaultDates();
@@ -934,9 +938,10 @@ async function doRegister() {
 }
 
 function doLogout() {
+  if (window.Prefy) Prefy.setContext('marketer.logout', { forceOpen: true });
   token = userEmail = userName = '';
   localStorage.clear();
-  location.reload();
+  setTimeout(() => location.reload(), window.Prefy ? 700 : 0);
 }
 
 function showApp() {
@@ -1421,8 +1426,8 @@ async function createCampaign() {
   const tier        = document.getElementById('nc-tier').value;
   const perCapita   = parseFloat(document.getElementById('nc-percapita').value) || 0;
 
-  if (!title) { showAlert('newcamp-alert','error','Campaign name is required'); return; }
-  if (budget < 5) { showAlert('newcamp-alert','error','Minimum budget is $5 Credits'); return; }
+  if (!title) { showAlert('newcamp-alert','error','Campaign name is required'); if (window.Prefy) Prefy.setContext('marketer.missing_field'); return; }
+  if (budget < 5) { showAlert('newcamp-alert','error','Minimum budget is $5 Credits'); if (window.Prefy) Prefy.setContext('marketer.missing_field'); return; }
 
   // Build SE tiers from chip selection (all selected chips in mc-tier-chips)
   const tierGroup   = document.getElementById('mc-tier-chips');
@@ -1539,6 +1544,7 @@ async function verifyVote() {
 }
 
 // ── NAVIGATION ────────────────────────────────────────────────
+var _PREFY_PANEL_CONTEXT = { overview: 'marketer.panel.overview', credits: 'marketer.panel.credits', campaigns: 'marketer.panel.campaigns', 'new-campaign': 'marketer.panel.new_campaign' };
 function showPanel(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
@@ -1550,6 +1556,7 @@ function showPanel(name) {
   if (name === 'overview')     { loadOverview(); refreshBalance(); }
   if (name === 'credits')      { loadPackages(); }
   if (name === 'new-campaign') initBrandSafetyChips();
+  if (window.Prefy && _PREFY_PANEL_CONTEXT[name]) Prefy.setContext(_PREFY_PANEL_CONTEXT[name]);
 }
 
 async function loadPublicPricing() {

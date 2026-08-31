@@ -1,0 +1,153 @@
+/**
+ * prefy.css — Preferendum's shared contextual guide styling.
+ * One stylesheet for voter/organizer/marketer portals (per the Phase 1
+ * "no unrelated copies" decision). Self-contained: no external fonts,
+ * no external images, no CDN references.
+ *
+ * Placement rules (responsive UX requirement): fixed, floating, bottom
+ * corner — never overlapping primary navigation/actions, respects safe
+ * areas on iPhone WebView, capped to a reasonable max size, and the
+ * minimized bubble stays reachable at all times.
+ */
+
+.prefy-root {
+  position: fixed;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 2147483000; /* above app UI, but see voter_portal's #twofa-modal (99999) — Prefy must never cover an active modal; portals set data-prefy-yield when one is open */
+  font-family: 'Manrope', 'Inter', -apple-system, system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  pointer-events: none; /* re-enabled on the two interactive children below, so Prefy never blocks clicks/taps that pass through empty space around it */
+}
+.prefy-root > * { pointer-events: auto; }
+
+[data-prefy-yield="1"] .prefy-root { display: none; } /* a portal sets this while its own blocking modal (2FA, verification) is open */
+
+/* ── Minimized bubble ─────────────────────────────────────────────── */
+.prefy-bubble {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.prefy-bubble:hover { transform: scale(1.06); }
+.prefy-bubble:focus-visible { outline: 3px solid #93c5fd; outline-offset: 2px; }
+.prefy-bubble.prefy-hidden-while-open { display: none; }
+.prefy-bubble-glyph { font-size: 24px; line-height: 1; }
+
+/* ── Expanded panel ───────────────────────────────────────────────── */
+.prefy-panel {
+  display: none;
+  width: min(340px, calc(100vw - 28px));
+  max-height: min(420px, calc(100vh - 28px));
+  overflow-y: auto;
+  background: #0f1420;
+  color: #eef2ff;
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+  margin-bottom: 10px;
+}
+.prefy-panel.prefy-visible { display: block; }
+
+.prefy-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.prefy-avatar {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+.prefy-title-wrap { flex: 1; min-width: 0; }
+.prefy-title { font-weight: 700; font-size: 14.5px; line-height: 1.3; }
+
+.prefy-icon-btn {
+  background: rgba(255,255,255,0.08);
+  border: none;
+  color: #eef2ff;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.prefy-icon-btn:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+
+.prefy-body { padding: 12px 14px 8px; }
+.prefy-body-text { font-size: 13.5px; line-height: 1.55; color: #d7e0f5; }
+.prefy-why-text {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #93c5fd;
+  display: none;
+}
+
+.prefy-panel-footer {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px 14px;
+}
+.prefy-help-btn, .prefy-reopen-btn {
+  flex: 1;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.14);
+  color: #eef2ff;
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.prefy-help-btn:hover, .prefy-reopen-btn:hover { background: rgba(255,255,255,0.14); }
+.prefy-help-btn:focus-visible, .prefy-reopen-btn:focus-visible { outline: 2px solid #93c5fd; outline-offset: 1px; }
+
+/* ── State accent (fallback badge only — real Prefy art will carry its
+   own per-state illustration; this just tints the temporary glyph) ──── */
+.prefy-root[data-prefy-state="ERROR"] .prefy-panel,
+.prefy-root[data-prefy-state="POSSIBLE_FRAUD"] .prefy-panel,
+.prefy-root[data-prefy-state="HACKER_ALERT"] .prefy-panel {
+  border-color: rgba(192,57,43,0.55);
+}
+.prefy-root[data-prefy-state="SUCCESS"] .prefy-panel,
+.prefy-root[data-prefy-state="GOOD_JOB"] .prefy-panel,
+.prefy-root[data-prefy-state="THANKS"] .prefy-panel {
+  border-color: rgba(26,122,74,0.5);
+}
+.prefy-root[data-prefy-state="ATTENTION"] .prefy-panel,
+.prefy-root[data-prefy-state="MISSING_INFORMATION"] .prefy-panel,
+.prefy-root[data-prefy-state="IDEA"] .prefy-panel {
+  border-color: rgba(196,154,42,0.55);
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .prefy-bubble { transition: none; }
+}
+.prefy-reduced-motion .prefy-bubble { transition: none; }
+
+/* ── Small screens: keep the panel from ever covering a primary action
+   row (vote button / form submit) by capping height and letting it
+   scroll internally rather than growing over the viewport. ──────────── */
+@media (max-width: 420px) {
+  .prefy-panel { width: calc(100vw - 24px); max-height: 46vh; }
+  .prefy-root { right: max(10px, env(safe-area-inset-right)); bottom: max(10px, env(safe-area-inset-bottom)); }
+}
