@@ -20,10 +20,14 @@ body{top:0!important;}
 </style>
 <script src="/lang.js"></script>
 <script src="/translate.js"></script>
-<link rel="stylesheet" href="/prefy.css">
-<script src="/prefy-content.js"></script>
-<script src="/prefy.js"></script>
-<script src="/prefy-voice.js"></script>
+<!-- Prefy (old CSS/PNG/speechSynthesis engine AND the newer HeyGen video
+     engine) is INTENTIONALLY absent from this portal — product decision:
+     Prefy exists only on the public Welcome/Landing screen (main.py's
+     root `/` route), nowhere else in the product. Old-engine source
+     (prefy.css/prefy-content.js/prefy.js/prefy-voice.js) stays in the
+     repo for history; every "if (window.Prefy) Prefy.setContext(...)"
+     call site below is already a safe no-op since window.Prefy is never
+     defined here. -->
 <style>
 #gt-float{position:fixed;top:10px;right:10px;z-index:99999;background:rgba(10,13,20,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
 </style>

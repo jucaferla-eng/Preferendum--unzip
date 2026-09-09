@@ -107,7 +107,15 @@ assertEqual(tabContextValues.sort(), ['voter.consultations', 'voter.opinion', 'v
 const panelContextStart = marketer.indexOf('_PREFY_PANEL_CONTEXT = {');
 const panelContextEnd = marketer.indexOf('};', panelContextStart);
 const panelContextValues = [...marketer.slice(panelContextStart, panelContextEnd).matchAll(/:\s*'([a-zA-Z0-9_.]+)'/g)].map((m) => m[1]);
-assertEqual(panelContextValues.sort(), ['marketer.panel.campaigns', 'marketer.panel.credits', 'marketer.panel.new_campaign', 'marketer.panel.overview'].sort(), "marketer's panel map covers exactly the 4 real panels, each with a real context");
+assertEqual(panelContextValues.sort(), ['marketer.campaigns.overview', 'marketer.panel.credits', 'marketer.campaign.create', 'marketer.panel.overview'].sort(), "marketer's panel map covers exactly the 4 real panels, each with a real context");
+
+// Granular campaign-form field map (Prefy Campaigns Deep-Dive Revision) —
+// same shape/validation as voter's own fieldContextMap above.
+const campaignFieldMapStart = marketer.indexOf('var campaignFieldContextMap = {');
+const campaignFieldMapEnd = marketer.indexOf('};', campaignFieldMapStart);
+const campaignFieldMapValues = [...marketer.slice(campaignFieldMapStart, campaignFieldMapEnd).matchAll(/:\s*'([a-zA-Z0-9_.]+)'/g)].map((m) => m[1]);
+assertTrue(campaignFieldMapValues.length >= 15, "marketer_portal.html's campaignFieldContextMap covers at least the 15 real campaign-form fields/sections");
+campaignFieldMapValues.forEach((k) => assertTrue(REGISTERED.has(k), `campaign field map value '${k}' is a real registered context`));
 
 // ═══════════════════════════════════════════════════════════════════════
 // 4. The explicit SCREEN → CONTEXT coverage map this phase audited
@@ -160,8 +168,19 @@ const COVERAGE_MAP = {
     register: 'marketer.auth.register',
     dashboard_overview: 'marketer.panel.overview',
     credits: 'marketer.panel.credits',
-    campaigns: 'marketer.panel.campaigns',
-    new_campaign: 'marketer.panel.new_campaign',
+    campaigns: 'marketer.campaigns.overview',
+    campaign_toggle_active_paused: 'marketer.campaign.active',
+    new_campaign: 'marketer.campaign.create',
+    'new_campaign:details': 'marketer.campaign.details',
+    'new_campaign:geography': 'marketer.campaign.geography',
+    'new_campaign:socioeconomic': 'marketer.campaign.socioeconomic',
+    'new_campaign:demographics': 'marketer.campaign.demographics',
+    'new_campaign:company_size': 'marketer.campaign.company_size',
+    'new_campaign:occupation': 'marketer.campaign.occupation',
+    'new_campaign:brand_safety': 'marketer.campaign.brand_safety',
+    'new_campaign:credits': 'marketer.campaign.credits',
+    campaign_launch: 'marketer.campaign.review',
+    campaign_results: 'marketer.campaign.results',
     missing_field: 'marketer.missing_field',
     logout: 'marketer.logout',
   },

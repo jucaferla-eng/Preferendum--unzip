@@ -30,7 +30,7 @@ from email.mime.multipart import MIMEMultipart
 from fastapi import (FastAPI, HTTPException, Depends, UploadFile,
                      File, Form, Query, Request, BackgroundTasks, Header)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, Response, StreamingResponse, RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import (create_engine, Column, Integer, String, Boolean,
                         DateTime, Text, Float, func, text)
@@ -3517,6 +3517,12 @@ def root():
 <title>Preferendum</title>
 <script src="/lang.js"></script>
 <script src="/translate.js"></script>
+<!-- Prefy (HeyGen video) lives ONLY on this Welcome/Landing screen (page1
+     below) — product decision. shown/hidden via PrefyVideo.show()/hide()
+     in showPage1()/showPage2() so it never carries into page2 (role
+     selection) or any portal beyond this route. -->
+<link rel="stylesheet" href="/prefy-video.css">
+<script src="/prefy-video.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -3645,10 +3651,12 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
 function showPage2(){
   document.getElementById('page1').style.display='none';
   document.getElementById('page2').classList.add('active');
+  if (window.PrefyVideo) PrefyVideo.hide(); // stop/remove Prefy — Welcome-screen only
 }
 function showPage1(){
   document.getElementById('page2').classList.remove('active');
   document.getElementById('page1').style.display='flex';
+  if (window.PrefyVideo) PrefyVideo.show();
 }
 </script>
 
@@ -3945,6 +3953,137 @@ def serve_prefy_asset(filename: str):
         })
     except FileNotFoundError:
         raise HTTPException(404, 'Not found')
+
+# ── PREFY VIDEO (HeyGen, Phase 1 — "welcome" context only) ─────────
+# Product decision: the old CSS/PNG + Web Speech Prefy above is paused;
+# this is the new, video-based Prefy. Served the same dependency-free
+# way as prefy.css/prefy.js/etc. above.
+@app.get('/prefy-video.js')
+def serve_prefy_video_js():
+    """Floating bubble + single-instance video panel player."""
+    try:
+        with open('prefy-video.js', 'r', encoding='utf-8') as f:
+            content = f.read()
+        return Response(content=content, media_type='application/javascript', headers={
+            'Cache-Control': 'public, max-age=86400',
+        })
+    except FileNotFoundError:
+        return Response(content='// prefy-video.js not found', media_type='application/javascript', status_code=404)
+
+@app.get('/prefy-video.css')
+def serve_prefy_video_css():
+    try:
+        with open('prefy-video.css', 'r', encoding='utf-8') as f:
+            content = f.read()
+        return Response(content=content, media_type='text/css', headers={
+            'Cache-Control': 'public, max-age=86400',
+        })
+    except FileNotFoundError:
+        return Response(content='/* prefy-video.css not found */', media_type='text/css', status_code=404)
+
+# The 30 canonical Preferendum languages (see App.js's SUPPORTED_LANGUAGES
+# / lang.js's own list — same 30, never a second language list). Filename
+# is computed from this explicit whitelist plus a registered context, not
+# from raw user input, so this route can never read an arbitrary file off
+# disk regardless of storage backend. Range-request aware when serving
+# locally: iOS WKWebView/Safari require a real 206/Accept-Ranges response
+# to play <video> at all, not just a 200 with the full body.
+_PREFY_VIDEO_LANGUAGES = frozenset({
+    'es', 'en', 'pt', 'fr', 'de', 'it', 'ja', 'ko', 'zh', 'ar', 'ru', 'hi',
+    'nl', 'pl', 'tr', 'id', 'vi', 'th', 'fil', 'bn', 'ur', 'fa', 'he',
+    'sv', 'da', 'fi', 'el', 'cs', 'ro', 'uk',
+})
+# One registered context per real, verified content package — 'welcome'
+# is the only one with real files today. Do NOT add a context here ahead
+# of real uploaded video content (see task: "Do not implement videos that
+# do not exist yet"). Adding a future one (register, voting, ...) is a
+# one-line addition, not a route/player rewrite.
+_PREFY_VIDEO_CONTEXTS = frozenset({'welcome'})
+_PREFY_VIDEO_CHUNK_BYTES = 1024 * 1024
+
+# ── STORAGE ABSTRACTION — not hard-coded to Cloudflare R2, S3, or any
+# paid monthly service. Unset (default): videos are served locally from
+# disk for local dev/simulator testing only (see the local-fallback
+# branch below). Set to any static HTTP(S) host's base URL — GitHub
+# Releases, a future CDN, anything — and this route becomes a pure 302
+# redirect; Render's own bandwidth is never in the video data path
+# either way. Swapping hosting providers later is an env var change,
+# never a Prefy rewrite.
+PREFY_MEDIA_BASE_URL = os.getenv('PREFY_MEDIA_BASE_URL', '').rstrip('/')
+
+# GitHub Release mode — explicit, not a hack bolted onto PREFY_MEDIA_BASE_URL.
+# A GitHub Release's real asset download URL is FLAT under the tag
+# (https://github.com/{owner}/{repo}/releases/download/{tag}/{filename} —
+# verified live against a real release before this was written: no
+# per-context subdirectory exists in that URL shape), which does not fit
+# the generic PREFY_MEDIA_BASE_URL + "/{context}/{filename}" pattern
+# above — so this is its own precedence branch, not a reinterpretation of
+# that one. All three env vars must be set together to activate it.
+PREFY_MEDIA_GITHUB_OWNER = os.getenv('PREFY_MEDIA_GITHUB_OWNER', '')
+PREFY_MEDIA_GITHUB_REPO = os.getenv('PREFY_MEDIA_GITHUB_REPO', '')
+PREFY_MEDIA_GITHUB_TAG = os.getenv('PREFY_MEDIA_GITHUB_TAG', '')
+
+def _prefy_video_filename(context: str, lang: str) -> str:
+    return f'prefy-{context}-{lang}.mp4'
+
+def _prefy_video_github_release_url(filename: str) -> str:
+    return (f'https://github.com/{PREFY_MEDIA_GITHUB_OWNER}/{PREFY_MEDIA_GITHUB_REPO}'
+            f'/releases/download/{PREFY_MEDIA_GITHUB_TAG}/{filename}')
+
+def _prefy_video_range_response(path: str, range_header: Optional[str]):
+    file_size = os.path.getsize(path)
+    start, end, status_code = 0, file_size - 1, 200
+    if range_header:
+        try:
+            _unit, rng = range_header.split('=')
+            start_s, end_s = rng.split('-')
+            start = int(start_s) if start_s else 0
+            end = int(end_s) if end_s else file_size - 1
+            end = min(end, file_size - 1)
+            status_code = 206
+        except (ValueError, AttributeError):
+            start, end, status_code = 0, file_size - 1, 200
+
+    def _iter_chunks():
+        with open(path, 'rb') as f:
+            f.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                chunk = f.read(min(_PREFY_VIDEO_CHUNK_BYTES, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    headers = {
+        'Accept-Ranges': 'bytes',
+        'Content-Length': str(end - start + 1),
+        'Cache-Control': 'public, max-age=604800',
+    }
+    if status_code == 206:
+        headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+    return StreamingResponse(_iter_chunks(), status_code=status_code, media_type='video/mp4', headers=headers)
+
+@app.get('/prefy/video/{context}/{lang}')
+def serve_prefy_video(context: str, lang: str, range: Optional[str] = Header(None)):
+    """context+lang -> exactly one video, resolved server-side. Storage
+    location is PREFY_MEDIA_BASE_URL (see above) — the frontend never
+    knows or cares whether that's this disk or an external host."""
+    if context not in _PREFY_VIDEO_CONTEXTS or lang not in _PREFY_VIDEO_LANGUAGES:
+        raise HTTPException(404, 'Not found')
+    filename = _prefy_video_filename(context, lang)
+    # Precedence: GitHub Release (if fully configured) > generic static
+    # host > local disk. filename is always the whitelist-computed
+    # pattern above, never raw request input — no open redirect regardless
+    # of which branch fires.
+    if PREFY_MEDIA_GITHUB_OWNER and PREFY_MEDIA_GITHUB_REPO and PREFY_MEDIA_GITHUB_TAG:
+        return RedirectResponse(_prefy_video_github_release_url(filename), status_code=302)
+    if PREFY_MEDIA_BASE_URL:
+        return RedirectResponse(f'{PREFY_MEDIA_BASE_URL}/{context}/{filename}', status_code=302)
+    path = os.path.join('assets', 'prefy-media', context, filename)
+    if not os.path.isfile(path):
+        raise HTTPException(404, 'Not found')
+    return _prefy_video_range_response(path, range)
 
 @app.get('/voter', response_class=HTMLResponse)
 def serve_voter_portal():

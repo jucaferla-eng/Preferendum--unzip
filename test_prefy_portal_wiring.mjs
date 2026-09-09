@@ -14,26 +14,47 @@ function assertTrue(cond, msg) { if (cond) passed++; else { failed++; failures.p
 const voter = fs.readFileSync('voter_portal.html', 'utf-8');
 const marketer = fs.readFileSync('marketer_portal.html', 'utf-8');
 const organizer = fs.readFileSync('preferendum_organizer.html', 'utf-8');
+const mainpy = fs.readFileSync('main.py', 'utf-8');
 const css = fs.readFileSync('prefy.css', 'utf-8');
 const engine = fs.readFileSync('prefy.js', 'utf-8');
 const content = fs.readFileSync('prefy-content.js', 'utf-8');
 
 // ═══════════════════════════════════════════════════════════════════════
-// Shared module, not three copies — every portal includes the SAME three
-// files, and none of them re-declares a UI_STRINGS-shaped clone of
-// prefy-content.js.
+// Prefy Welcome-Only Implementation (product decision): Prefy (the HeyGen
+// video engine) now lives ONLY on the public Welcome/Landing screen —
+// main.py's root `/` route. NONE of the three internal portals load any
+// Prefy engine, old or new. Old-engine source (prefy.css/prefy.js/
+// prefy-content.js/prefy-voice.js) and every existing window.Prefy call
+// site inside the portals stay in the repo/source as safe no-ops (see
+// the wiring-string assertions further below, which still hold —
+// removing the <script>/<link> tags doesn't remove those call sites).
 // ═══════════════════════════════════════════════════════════════════════
 [['voter_portal.html', voter], ['marketer_portal.html', marketer], ['preferendum_organizer.html', organizer]].forEach(([name, src]) => {
-  assertTrue(src.includes('<script src="/prefy-content.js"></script>'), `${name} includes /prefy-content.js`);
-  assertTrue(src.includes('<script src="/prefy.js"></script>'), `${name} includes /prefy.js`);
-  assertTrue(src.includes('<link rel="stylesheet" href="/prefy.css">'), `${name} includes /prefy.css`);
-  assertTrue(src.includes('Prefy.init()'), `${name} calls Prefy.init()`);
-  // lang.js/translate.js must load BEFORE prefy.js so window.PreferendumLang
-  // exists by the time Prefy could read it.
-  const langIdx = src.indexOf('<script src="/lang.js">');
-  const prefyIdx = src.indexOf('<script src="/prefy.js">');
-  assertTrue(langIdx !== -1 && prefyIdx !== -1 && langIdx < prefyIdx, `${name} loads lang.js before prefy.js`);
+  assertTrue(!src.includes('<script src="/prefy.js">'), `${name} does not load the old prefy.js`);
+  assertTrue(!src.includes('<script src="/prefy-content.js">'), `${name} does not load prefy-content.js`);
+  assertTrue(!src.includes('<link rel="stylesheet" href="/prefy.css">'), `${name} does not load prefy.css`);
+  assertTrue(!src.includes('<script src="/prefy-voice.js">'), `${name} does not load prefy-voice.js`);
+  assertTrue(!src.includes('<script src="/prefy-video.js">'), `${name} does not load the video engine either — Prefy is Welcome-screen only`);
+  assertTrue(!src.includes('<link rel="stylesheet" href="/prefy-video.css">'), `${name} does not load prefy-video.css`);
 });
+
+// The Welcome/Landing screen (main.py's root `/` route) is the ONE place
+// the video engine is wired, shown only on page1 (the "concept" screen)
+// and explicitly torn down before page2 (role selection) is shown.
+assertTrue(mainpy.includes('<script src="/prefy-video.js"></script>'), "main.py's root landing page includes /prefy-video.js");
+assertTrue(mainpy.includes('<link rel="stylesheet" href="/prefy-video.css">'), "main.py's root landing page includes /prefy-video.css");
+assertTrue(mainpy.includes('PrefyVideo.hide()'), 'showPage2() hides/stops Prefy when leaving the Welcome screen');
+assertTrue(mainpy.includes('PrefyVideo.show()'), 'showPage1() re-shows Prefy when returning to the Welcome screen');
+{
+  const rootStart = mainpy.indexOf('def root():');
+  const rootEnd = mainpy.indexOf('</html>"""', rootStart);
+  const rootBody = mainpy.slice(rootStart, rootEnd);
+  const langIdx = rootBody.indexOf('<script src="/lang.js">');
+  const prefyVideoIdx = rootBody.indexOf('<script src="/prefy-video.js">');
+  assertTrue(langIdx !== -1 && prefyVideoIdx !== -1 && langIdx < prefyVideoIdx, "main.py's root route loads lang.js before prefy-video.js");
+  assertTrue(rootBody.indexOf('showPage2(){') < rootBody.indexOf('PrefyVideo.hide()') && rootBody.indexOf('PrefyVideo.hide()') < rootBody.indexOf('showPage1(){'),
+    'PrefyVideo.hide() is wired inside showPage2(), not showPage1()');
+}
 
 // No portal defines its own competing state list / context registry /
 // language resolver — there is exactly ONE of each, in the shared files.

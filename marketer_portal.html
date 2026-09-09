@@ -187,10 +187,12 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
 </style>
 <script src="/lang.js"></script>
 <script src="/translate.js"></script>
-<link rel="stylesheet" href="/prefy.css">
-<script src="/prefy-content.js"></script>
-<script src="/prefy.js"></script>
-<script src="/prefy-voice.js"></script>
+<!-- Prefy is INTENTIONALLY absent from this portal — product decision:
+     Prefy exists only on the public Welcome/Landing screen (main.py's
+     root `/` route), nowhere else in the product. Old-engine source
+     stays in the repo for history; every "if (window.Prefy) ..." call
+     site below is already a safe no-op since window.Prefy is never
+     defined here. -->
 <style>
 #gt-float{position:fixed;top:12px;right:12px;z-index:99999;background:rgba(13,17,32,0.92);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
 </style>
@@ -1148,11 +1150,13 @@ async function loadCampaigns() {
 }
 
 async function toggleCampaign(id) {
+  if (window.Prefy) Prefy.setContext('marketer.campaign.active');
   await fetch(`${API}/advertiser/campaigns/${id}/pause`, {method:'PUT'});
   loadCampaigns();
 }
 
 async function viewDeployment(id) {
+  if (window.Prefy) Prefy.setContext('marketer.campaign.results');
   showPanel('deployment');
   document.getElementById('dep-title').textContent = 'Loading…';
   document.getElementById('dep-debates-tbody').innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:32px;">Loading…</td></tr>';
@@ -1417,6 +1421,7 @@ function updateBudgetPreview() {
 }
 
 async function createCampaign() {
+  if (window.Prefy) Prefy.setContext('marketer.campaign.review');
   const title   = document.getElementById('nc-title').value.trim();
   const country = document.getElementById('nc-country').value;
   const gender  = document.getElementById('nc-gender').value;
@@ -1553,7 +1558,44 @@ async function verifyVote() {
 }
 
 // ── NAVIGATION ────────────────────────────────────────────────
-var _PREFY_PANEL_CONTEXT = { overview: 'marketer.panel.overview', credits: 'marketer.panel.credits', campaigns: 'marketer.panel.campaigns', 'new-campaign': 'marketer.panel.new_campaign' };
+var _PREFY_PANEL_CONTEXT = { overview: 'marketer.panel.overview', credits: 'marketer.panel.credits', campaigns: 'marketer.campaigns.overview', 'new-campaign': 'marketer.campaign.create' };
+
+// Granular, field-level Prefy contexts for the new-campaign form (Prefy
+// Campaigns Deep-Dive Revision) — same fieldContextMap pattern as
+// voter_portal.html: one real form control/section per real context, no
+// context for anything that isn't an actual field in this form.
+var campaignFieldContextMap = {
+  'nc-title':            'marketer.campaign.details',
+  'nc-start':            'marketer.campaign.details',
+  'nc-end':              'marketer.campaign.details',
+  'nc-copy':             'marketer.campaign.details',
+  'nc-url':              'marketer.campaign.details',
+  'nc-logo-url':         'marketer.campaign.details',
+  'nc-image-url':        'marketer.campaign.details',
+  'nc-video-url':        'marketer.campaign.details',
+  'mc-country-chips':    'marketer.campaign.geography',
+  'nc-percapita':        'marketer.campaign.geography',
+  'nc-percapita-slider': 'marketer.campaign.geography',
+  'mc-tier-chips':       'marketer.campaign.socioeconomic',
+  'mc-gender-chips':     'marketer.campaign.demographics',
+  'mc-size-chips':       'marketer.campaign.company_size',
+  'mc-archetype-chips':  'marketer.campaign.occupation',
+  'btn-optimize':        'marketer.campaign.occupation',
+  'competitor-input':    'marketer.campaign.brand_safety',
+  'exclude-chips':       'marketer.campaign.brand_safety',
+  'appear-chips':        'marketer.campaign.brand_safety',
+  'nc-budget':           'marketer.campaign.credits',
+};
+document.addEventListener('DOMContentLoaded', function () {
+  Object.keys(campaignFieldContextMap).forEach(function (id) {
+    var target = document.getElementById(id);
+    if (!target) return;
+    var evt = (target.tagName === 'INPUT' || target.tagName === 'BUTTON') ? 'focus' : 'click';
+    target.addEventListener(evt, function () {
+      if (window.Prefy) Prefy.setContext(campaignFieldContextMap[id]);
+    });
+  });
+});
 function showPanel(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));

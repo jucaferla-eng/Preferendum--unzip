@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 .venv/
 *.db
+
+# Prefy HeyGen videos — local-only static media for this phase (large
+# binaries, not yet approved for commit/push/deploy). Only used as the
+# dev-fallback storage backend when PREFY_MEDIA_BASE_URL is unset.
+assets/prefy-media/

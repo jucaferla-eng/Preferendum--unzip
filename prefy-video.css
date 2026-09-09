@@ -1,0 +1,111 @@
+/**
+ * prefy-video.css — floating bubble + video panel for the HeyGen-based
+ * Prefy (Phase 1, "welcome" context). Mirrors the placement/safe-area/
+ * z-index conventions of the previous prefy.css so it never overlaps
+ * primary navigation and stays out of the way of blocking modals
+ * (portals set [data-prefy-yield="1"] while one is open).
+ */
+
+.prefy-video-root {
+  position: fixed;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 2147483000; /* same layer previous Prefy used, below #twofa-modal (99999 is a portal z-index, this is a stacking-context-local value) */
+  font-family: 'Manrope', 'Inter', -apple-system, system-ui, sans-serif;
+}
+
+[data-prefy-yield="1"] .prefy-video-root { display: none; }
+
+.prefy-video-bubble {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: #1a2332;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  padding: 0;
+  overflow: hidden;
+  cursor: pointer;
+}
+.prefy-video-bubble img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.prefy-video-panel {
+  position: absolute;
+  right: 0;
+  bottom: 62px;
+  width: min(320px, calc(100vw - 28px));
+  background: #0f1420;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.prefy-video-panel[hidden] { display: none; }
+
+.prefy-video-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.prefy-video-title {
+  color: #f0f4ff;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.3px;
+}
+.prefy-video-close {
+  background: transparent;
+  border: none;
+  color: rgba(240, 244, 255, 0.7);
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.prefy-video-close:hover { color: #f0f4ff; }
+
+.prefy-video-stage {
+  background: #000;
+  aspect-ratio: 9 / 16;
+  max-height: 55vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.prefy-video-el {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.prefy-video-controls {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+}
+.prefy-video-btn {
+  flex: 1;
+  background: #1a2332;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f0f4ff;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.prefy-video-btn:active { background: #223049; }
+.prefy-video-play { background: #2d6eff; border-color: #2d6eff; }
+.prefy-video-play:active { background: #2559d1; }
+
+@media (max-width: 380px) {
+  .prefy-video-panel { width: calc(100vw - 20px); }
+}
