@@ -4115,7 +4115,20 @@ PREFY_CAMPAIGN_S3_KEY_BY_LANG = {
     'nl':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-nl/Guia_del_area_de_campanas_de_Preferendum.mp4',
     'pl':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-pl/Guia_del_area_de_campanas_de_Preferendum.mp4',
     'ru':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-ru/Guia_del_area_de_campanas_de_Preferendum.mp4',
-    'es':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-sp/Guía del área de campañas de Preferendum_1080p 4.mp4',
+    # BYTE-EXACT FIX (production 403 root cause): the real S3 object's
+    # filename is NOT fully NFC — í/á/ñ here are base letter + COMBINING
+    # ACCENT (U+0301 / U+0303), confirmed against a real AWS codepoint
+    # dump of the actual stored key, while this same prefix's "Campaña"
+    # (shared by all 30 campaign objects, proven working via 'fil') uses
+    # the ordinary precomposed ñ (U+00F1) — a genuinely mixed
+    # normalization, not something safe to "clean up" by reformatting or
+    # re-typing. DO NOT edit this literal by hand — copy it, or edit via
+    # explicit \uXXXX escapes verified against the codepoints below.
+    # test_prefy_s3_video.py's
+    # test_es_campaign_key_has_the_exact_mixed_unicode_normalization
+    # asserts the exact codepoint sequence [0xf1, 0x301, 0x301, 0x303] —
+    # run it after touching this line, for any reason.
+    'es':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-sp/Guía del área de campañas de Preferendum_1080p 4.mp4',
     'tr':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-tr/Guia_del_area_de_campanas_de_Preferendum.mp4',
     'vi':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-vi/Guia_del_area_de_campanas_de_Preferendum.mp4',
     'da':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_6-da/Guia_del_area_de_campanas_de_Preferendum.mp4',

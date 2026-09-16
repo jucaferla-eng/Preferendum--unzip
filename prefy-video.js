@@ -154,6 +154,16 @@
     video.addEventListener('ended', function () { setPlayLabel(false); playBtn.textContent = '↻ Replay'; });
     video.addEventListener('play', function () { setPlayLabel(true); });
     video.addEventListener('pause', function () { if (!video.ended) setPlayLabel(false); });
+    // A failed load (bad URL, network error, access denied, ...) must
+    // never leave the player silently black forever — small, isolated
+    // safeguard: reuse the same plain hardcoded-label convention already
+    // used for Play/Mute/Replay above (this player has no localized
+    // strings today, so this introduces no new i18n gap), and let the
+    // same tap that shows "Retry" actually retry.
+    video.addEventListener('error', function () {
+      setPlayLabel(false);
+      playBtn.textContent = '⚠ Retry';
+    });
 
     document.addEventListener('preferendum:langchange', onLangChange);
   }
@@ -207,6 +217,16 @@
 
   function togglePlay() {
     if (!video) return;
+    if (video.error) {
+      // Retry: force a genuine reload (a plain video.play() retry does
+      // nothing useful once the element is in an error state) of the
+      // SAME context/language that failed — not a different one.
+      loadedContext = null;
+      loadedLang = null;
+      loadSource(ACTIVE_CONTEXT, currentLang());
+      video.play().catch(function () { /* still may need another user tap on some browsers — no-op */ });
+      return;
+    }
     if (video.paused || video.ended) {
       if (video.ended) video.currentTime = 0;
       video.play().catch(function () { /* blocked without a user gesture — button click IS the gesture, so this is only a defensive no-op */ });

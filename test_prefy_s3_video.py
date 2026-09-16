@@ -61,8 +61,35 @@ class TestS3KeyTables(unittest.TestCase):
         self.assertIn('_0-sp/', main.PREFY_CAMPAIGN_S3_KEY_BY_LANG['es'])
         self.assertIn('heygen_project 3/', main.PREFY_WELCOME_S3_KEY_BY_LANG['es'])
         self.assertIn('Campaña /heygen_project/', main.PREFY_CAMPAIGN_S3_KEY_BY_LANG['es'])
-        self.assertIn('Guía del área de campañas de Preferendum_1080p 4.mp4',
-                       main.PREFY_CAMPAIGN_S3_KEY_BY_LANG['es'])
+        self.assertTrue(main.PREFY_CAMPAIGN_S3_KEY_BY_LANG['es'].endswith('.mp4'))
+        # The exact accented filename is NOT re-checked here by typing it
+        # out again — that's exactly the trap that caused the real
+        # production 403 (a visually-identical but byte-different
+        # literal). See test_es_campaign_key_has_the_exact_mixed_unicode_normalization
+        # for the actual, codepoint-integer-based protection.
+
+    def test_es_campaign_key_has_the_exact_mixed_unicode_normalization(self):
+        # Regression lock for the real production 403: the actual S3
+        # object is NOT fully NFC. Confirmed against a real AWS codepoint
+        # dump of the stored key: the shared "Campaña" folder (common to
+        # all 30 campaign objects, proven reachable via 'fil') uses the
+        # ordinary PRECOMPOSED ñ (U+00F1) — but the Spanish-only filename
+        # ("Guía del área de campañas...") uses DECOMPOSED accents
+        # (base letter + COMBINING ACUTE ACCENT U+0301 for í/á, +
+        # COMBINING TILDE U+0303 for ñ). This asserts the exact codepoint
+        # SEQUENCE (integers, not visual/typed characters), so a
+        # formatter/editor/copy-paste that silently renormalizes the
+        # string to plain NFC or NFD can never pass this test unnoticed
+        # — checking string equality against another literal wouldn't
+        # catch that, since both sides could be renormalized together.
+        key = main.PREFY_CAMPAIGN_S3_KEY_BY_LANG['es']
+        non_ascii_codepoints = [ord(c) for c in key if ord(c) > 127]
+        self.assertEqual(non_ascii_codepoints, [0xf1, 0x301, 0x301, 0x303],
+            f'Spanish Campaign key normalization has drifted from the verified AWS evidence: {[hex(c) for c in non_ascii_codepoints]!r}')
+        # And the precomposed ñ must land specifically in "Campaña" (the
+        # shared prefix), not have leaked into the filename or been lost
+        # from the prefix.
+        self.assertIn('Campaña /heygen_project/', key)
 
     def test_bn_ur_resolved_to_distinct_keys(self):
         self.assertNotEqual(main.PREFY_WELCOME_S3_KEY_BY_LANG['bn'], main.PREFY_WELCOME_S3_KEY_BY_LANG['ur'])
