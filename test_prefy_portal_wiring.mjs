@@ -29,22 +29,25 @@ const content = fs.readFileSync('prefy-content.js', 'utf-8');
 // the wiring-string assertions further below, which still hold —
 // removing the <script>/<link> tags doesn't remove those call sites).
 // ═══════════════════════════════════════════════════════════════════════
+// voter and organizer never load ANY Prefy engine — old or video, welcome
+// or campaign. Only main.py's root route (welcome) and marketer_portal.html
+// (campaign) ever load prefy-video.js/.css.
 [['voter_portal.html', voter], ['marketer_portal.html', marketer], ['preferendum_organizer.html', organizer]].forEach(([name, src]) => {
   assertTrue(!src.includes('<script src="/prefy.js">'), `${name} does not load the old prefy.js`);
   assertTrue(!src.includes('<script src="/prefy-content.js">'), `${name} does not load prefy-content.js`);
   assertTrue(!src.includes('<link rel="stylesheet" href="/prefy.css">'), `${name} does not load prefy.css`);
   assertTrue(!src.includes('<script src="/prefy-voice.js">'), `${name} does not load prefy-voice.js`);
-  assertTrue(!src.includes('<script src="/prefy-video.js">'), `${name} does not load the video engine either — Prefy is Welcome-screen only`);
+});
+[['voter_portal.html', voter], ['preferendum_organizer.html', organizer]].forEach(([name, src]) => {
+  assertTrue(!src.includes('<script src="/prefy-video.js">'), `${name} does not load the video engine — Prefy never appears here`);
   assertTrue(!src.includes('<link rel="stylesheet" href="/prefy-video.css">'), `${name} does not load prefy-video.css`);
 });
 
-// The Welcome/Landing screen (main.py's root `/` route) is the ONE place
-// the video engine is wired, shown only on page1 (the "concept" screen)
-// and explicitly torn down before page2 (role selection) is shown.
+// The Welcome/Landing screen (main.py's root `/` route) — video engine,
+// context=welcome, visible on BOTH page1 and page2 (no hide() between
+// them), gone only when the visitor actually leaves the document.
 assertTrue(mainpy.includes('<script src="/prefy-video.js"></script>'), "main.py's root landing page includes /prefy-video.js");
 assertTrue(mainpy.includes('<link rel="stylesheet" href="/prefy-video.css">'), "main.py's root landing page includes /prefy-video.css");
-assertTrue(mainpy.includes('PrefyVideo.hide()'), 'showPage2() hides/stops Prefy when leaving the Welcome screen');
-assertTrue(mainpy.includes('PrefyVideo.show()'), 'showPage1() re-shows Prefy when returning to the Welcome screen');
 {
   const rootStart = mainpy.indexOf('def root():');
   const rootEnd = mainpy.indexOf('</html>"""', rootStart);
@@ -52,9 +55,16 @@ assertTrue(mainpy.includes('PrefyVideo.show()'), 'showPage1() re-shows Prefy whe
   const langIdx = rootBody.indexOf('<script src="/lang.js">');
   const prefyVideoIdx = rootBody.indexOf('<script src="/prefy-video.js">');
   assertTrue(langIdx !== -1 && prefyVideoIdx !== -1 && langIdx < prefyVideoIdx, "main.py's root route loads lang.js before prefy-video.js");
-  assertTrue(rootBody.indexOf('showPage2(){') < rootBody.indexOf('PrefyVideo.hide()') && rootBody.indexOf('PrefyVideo.hide()') < rootBody.indexOf('showPage1(){'),
-    'PrefyVideo.hide() is wired inside showPage2(), not showPage1()');
+  const showPage2Body = rootBody.slice(rootBody.indexOf('function showPage2('), rootBody.indexOf('function showPage1('));
+  const showPage1Body = rootBody.slice(rootBody.indexOf('function showPage1('));
+  assertTrue(!showPage2Body.includes('PrefyVideo.hide()'), 'showPage2() no longer hides Welcome Prefy — it stays visible on page2 too');
+  assertTrue(showPage1Body.includes("PrefyVideo.show('welcome')"), "showPage1() shows Prefy with the 'welcome' context explicitly");
 }
+
+// marketer_portal.html — video engine, context=campaign ONLY, scoped to
+// the Campaigns workflow via showPanel().
+assertTrue(marketer.includes('<script src="/prefy-video.js"></script>'), 'marketer_portal.html includes /prefy-video.js (campaign context)');
+assertTrue(marketer.includes('<link rel="stylesheet" href="/prefy-video.css">'), 'marketer_portal.html includes /prefy-video.css');
 
 // No portal defines its own competing state list / context registry /
 // language resolver — there is exactly ONE of each, in the shared files.
@@ -209,6 +219,26 @@ assertTrue(!/scaleX\(\s*-1\s*\)/.test(engine), 'no scaleX(-1) mirroring transfor
 assertTrue(css.includes('.prefy-avatar-img, .prefy-bubble-img') && /transform:\s*none\s*;/.test(css.slice(css.indexOf('.prefy-avatar-img, .prefy-bubble-img'))), 'prefy.css declares an explicit resting transform:none for the character image');
 assertTrue(!/direction:\s*ltr/.test(css), 'prefy.css never hardcodes direction:ltr, which would break RTL text flow inside the panel');
 assertTrue(!/:\s*row-reverse/.test(css), 'prefy.css uses only logical flex row order (no row-reverse declaration), so RTL reordering follows the inherited document direction automatically');
+
+// ═══════════════════════════════════════════════════════════════════════
+// Prefy S3 integration — Campaign (marketer Campaigns workflow) UI-
+// location rules (the Welcome page1/page2 rules are already checked
+// above, in the root-route block).
+// ═══════════════════════════════════════════════════════════════════════
+assertTrue(!marketer.includes("PrefyVideo.show('welcome')") && !marketer.includes('PrefyVideo.show("welcome")'), 'marketer_portal.html never shows the welcome context — only campaign');
+assertTrue(marketer.includes("PrefyVideo.show('campaign')"), 'marketer_portal.html shows the campaign context');
+{
+  const arrStart = marketer.indexOf('_PREFY_CAMPAIGN_PANELS = [');
+  const arrEnd = marketer.indexOf('];', arrStart);
+  const arrBody = marketer.slice(arrStart, arrEnd);
+  const panels = [...arrBody.matchAll(/'([a-zA-Z0-9_-]+)'/g)].map(m => m[1]);
+  assertTrue(JSON.stringify(panels.slice().sort()) === JSON.stringify(['campaigns', 'deployment', 'new-campaign'].sort()),
+    'Campaign Prefy is scoped to exactly campaigns/new-campaign/deployment');
+  ['overview', 'credits', 'public-sector', 'blockchain'].forEach(p => {
+    assertTrue(panels.indexOf(p) === -1, `Campaign Prefy is correctly absent from the '${p}' panel group`);
+  });
+}
+assertTrue(marketer.includes('PrefyVideo.hide()'), 'marketer_portal.html hides Campaign Prefy for every panel outside the campaigns group');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {

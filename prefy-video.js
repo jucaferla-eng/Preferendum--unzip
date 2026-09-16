@@ -1,14 +1,20 @@
 /**
- * prefy-video.js — Prefy's HeyGen video-based presentation (Phase 1:
- * "welcome" context only). Product decision: replaces the paused CSS/PNG
- * + Web Speech engine (prefy.js/prefy-voice.js — kept in the repo for
- * history, no longer loaded by any portal). The HeyGen MP4 already
- * contains the animation, lip sync, and voice, so there is no
- * speechSynthesis call anywhere in this file.
+ * prefy-video.js — Prefy's HeyGen video-based presentation. Two approved
+ * contexts today: "welcome" (root landing page only) and "campaign"
+ * (marketer_portal.html's Campaigns workflow only) — each a completely
+ * separate page load, so only one context is ever active per document,
+ * but the catalog/API stay context-generic. Product decision: replaces
+ * the paused CSS/PNG + Web Speech engine (prefy.js/prefy-voice.js — kept
+ * in the repo for history, no longer loaded by any portal). The HeyGen
+ * MP4 already contains the animation, lip sync, and voice, so there is
+ * no speechSynthesis call anywhere in this file.
  *
  * One MP4 per language, fetched only once the user actually opens Prefy
  * and taps play (preload="none") — never all 30 languages, never more
- * than the active one in flight.
+ * than the active one in flight. Switching between screens that share
+ * the same context+language (e.g. campaigns -> new-campaign ->
+ * deployment, all "campaign") never re-fetches — see loadedContext/
+ * loadedLang below.
  *
  * Language comes from the SAME resolver every other Preferendum surface
  * uses (window.PreferendumLang.currentLanguage(), see lang.js) and the
@@ -24,18 +30,23 @@
   'use strict';
 
   // urlPattern points at the backend's storage-abstracted route
-  // (/prefy/video/{context}/{lang} — see main.py's PREFY_MEDIA_BASE_URL)
-  // rather than any specific host/CDN, so the actual storage provider
-  // can change without touching this file. Adding a future context
-  // (registration, voting, ...) is a one-line addition here once real
-  // files for it exist — never ahead of time.
+  // (/prefy/video/{context}/{lang} — see main.py's S3/GitHub/local-disk
+  // precedence) rather than any specific host/CDN, so the actual storage
+  // provider can change without touching this file. Adding a future
+  // context (registration, voting, ...) is a one-line addition here once
+  // real files for it exist — never ahead of time.
   var CONTEXTS = {
-    welcome: { urlPattern: '/prefy/video/welcome/{lang}' },
+    welcome:  { urlPattern: '/prefy/video/welcome/{lang}' },
+    campaign: { urlPattern: '/prefy/video/campaign/{lang}' },
   };
 
   var ACTIVE_CONTEXT = 'welcome';
   var root, bubble, panel, video, playBtn, muteBtn;
   var isOpen = false;
+  // What's actually loaded into the <video> element right now — distinct
+  // from ACTIVE_CONTEXT (which screen wants Prefy visible). Only these
+  // two changing is what should ever trigger a new fetch.
+  var loadedContext = null, loadedLang = null;
 
   function currentLang() {
     try {
@@ -59,6 +70,16 @@
     video.src = url; // preload="none" — this does not fetch the file yet
     video.load();     // resets element state to the new source, still no fetch
     setPlayLabel(false);
+    loadedContext = context;
+    loadedLang = lang;
+  }
+
+  // True only when the video element would need a different source than
+  // what's already loaded — the single idempotency check every caller
+  // below goes through, so "already showing this context+language" never
+  // re-triggers a fetch of a (possibly 100MB+) file.
+  function needsReload(context, lang) {
+    return context !== loadedContext || lang !== loadedLang;
   }
 
   function setPlayLabel(playing) {
@@ -141,8 +162,9 @@
     isOpen = true;
     panel.hidden = false;
     bubble.setAttribute('aria-expanded', 'true');
-    if (!video.getAttribute('src')) {
-      loadSource(ACTIVE_CONTEXT, currentLang());
+    var lang = currentLang();
+    if (needsReload(ACTIVE_CONTEXT, lang)) {
+      loadSource(ACTIVE_CONTEXT, lang);
     }
   }
 
@@ -165,9 +187,22 @@
     if (root) root.style.display = 'none';
   }
 
-  function show() {
+  function show(context) {
+    if (context) ACTIVE_CONTEXT = context;
     if (!root) mount();
     if (root) root.style.display = '';
+    // Only reload if the panel is already open AND the context actually
+    // changed since what's loaded — covers a host page that keeps Prefy
+    // open across a context switch. The common case (panel closed,
+    // switching between screens that share the same context, e.g.
+    // campaigns -> new-campaign -> deployment) never touches the network
+    // here at all — loading stays deferred to the next open() tap.
+    if (isOpen && video) {
+      var lang = currentLang();
+      if (needsReload(ACTIVE_CONTEXT, lang)) {
+        loadSource(ACTIVE_CONTEXT, lang);
+      }
+    }
   }
 
   function togglePlay() {
@@ -188,7 +223,9 @@
 
   function onLangChange(e) {
     var lang = (e && e.detail && e.detail.lang) || currentLang();
-    loadSource(ACTIVE_CONTEXT, lang);
+    if (needsReload(ACTIVE_CONTEXT, lang)) {
+      loadSource(ACTIVE_CONTEXT, lang);
+    }
   }
 
   function mount() {

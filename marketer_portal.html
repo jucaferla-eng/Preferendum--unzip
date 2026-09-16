@@ -187,12 +187,14 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
 </style>
 <script src="/lang.js"></script>
 <script src="/translate.js"></script>
-<!-- Prefy is INTENTIONALLY absent from this portal — product decision:
-     Prefy exists only on the public Welcome/Landing screen (main.py's
-     root `/` route), nowhere else in the product. Old-engine source
-     stays in the repo for history; every "if (window.Prefy) ..." call
-     site below is already a safe no-op since window.Prefy is never
-     defined here. -->
+<!-- Prefy (HeyGen video, context=campaign) is scoped to the Campaigns
+     workflow ONLY (campaigns / new-campaign / deployment panels — see
+     showPanel() below) — nowhere else in this portal. The old CSS/PNG
+     engine stays absent everywhere; every "if (window.Prefy) ..." call
+     site below (a different, unrelated global) is still a safe no-op
+     since that old engine is never loaded. -->
+<link rel="stylesheet" href="/prefy-video.css">
+<script src="/prefy-video.js"></script>
 <style>
 #gt-float{position:fixed;top:12px;right:12px;z-index:99999;background:rgba(13,17,32,0.92);border:1px solid rgba(255,255,255,0.15);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
 </style>
@@ -1596,6 +1598,10 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 });
+// Campaign Prefy (HeyGen video) stays visible across the whole Campaigns
+// workflow — not just the first list screen — per product decision.
+var _PREFY_CAMPAIGN_PANELS = ['campaigns', 'new-campaign', 'deployment'];
+
 function showPanel(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.sidebar-item').forEach(s => s.classList.remove('active'));
@@ -1608,6 +1614,10 @@ function showPanel(name) {
   if (name === 'credits')      { loadPackages(); }
   if (name === 'new-campaign') initBrandSafetyChips();
   if (window.Prefy && _PREFY_PANEL_CONTEXT[name]) Prefy.setContext(_PREFY_PANEL_CONTEXT[name]);
+  if (window.PrefyVideo) {
+    if (_PREFY_CAMPAIGN_PANELS.indexOf(name) !== -1) PrefyVideo.show('campaign');
+    else PrefyVideo.hide();
+  }
 }
 
 async function loadPublicPricing() {

@@ -3517,10 +3517,12 @@ def root():
 <title>Preferendum</title>
 <script src="/lang.js"></script>
 <script src="/translate.js"></script>
-<!-- Prefy (HeyGen video) lives ONLY on this Welcome/Landing screen (page1
-     below) — product decision. shown/hidden via PrefyVideo.show()/hide()
-     in showPage1()/showPage2() so it never carries into page2 (role
-     selection) or any portal beyond this route. -->
+<!-- Prefy (HeyGen video, context=welcome) lives on THIS document only —
+     visible on both page1 (concept) and page2 (role selection); it never
+     carries into page2's linked-out destinations (/voter, /organizers,
+     /marketers) or any portal, since leaving this document via those
+     links unloads this whole page (and Prefy with it) — no explicit
+     hide() needed for that transition. -->
 <link rel="stylesheet" href="/prefy-video.css">
 <script src="/prefy-video.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
@@ -3651,12 +3653,14 @@ html,body{height:100%;background:#090D18;color:#F0F4FF;
 function showPage2(){
   document.getElementById('page1').style.display='none';
   document.getElementById('page2').classList.add('active');
-  if (window.PrefyVideo) PrefyVideo.hide(); // stop/remove Prefy — Welcome-screen only
+  // WELCOME Prefy stays visible on page2 too (product decision) — no
+  // hide() here. It only disappears when the visitor actually leaves
+  // this document via one of page2's role-card links.
 }
 function showPage1(){
   document.getElementById('page2').classList.remove('active');
   document.getElementById('page1').style.display='flex';
-  if (window.PrefyVideo) PrefyVideo.show();
+  if (window.PrefyVideo) PrefyVideo.show('welcome');
 }
 </script>
 
@@ -3994,11 +3998,11 @@ _PREFY_VIDEO_LANGUAGES = frozenset({
     'sv', 'da', 'fi', 'el', 'cs', 'ro', 'uk',
 })
 # One registered context per real, verified content package — 'welcome'
-# is the only one with real files today. Do NOT add a context here ahead
-# of real uploaded video content (see task: "Do not implement videos that
-# do not exist yet"). Adding a future one (register, voting, ...) is a
-# one-line addition, not a route/player rewrite.
-_PREFY_VIDEO_CONTEXTS = frozenset({'welcome'})
+# and 'campaign' both have real, verified S3 objects for all 30 languages
+# (see PREFY_WELCOME_S3_KEY_BY_LANG / PREFY_CAMPAIGN_S3_KEY_BY_LANG below).
+# Do NOT add a context here ahead of real uploaded video content. Adding
+# a future one is a one-line addition, not a route/player rewrite.
+_PREFY_VIDEO_CONTEXTS = frozenset({'welcome', 'campaign'})
 _PREFY_VIDEO_CHUNK_BYTES = 1024 * 1024
 
 # ── STORAGE ABSTRACTION — not hard-coded to Cloudflare R2, S3, or any
@@ -4029,6 +4033,141 @@ def _prefy_video_filename(context: str, lang: str) -> str:
 def _prefy_video_github_release_url(filename: str) -> str:
     return (f'https://github.com/{PREFY_MEDIA_GITHUB_OWNER}/{PREFY_MEDIA_GITHUB_REPO}'
             f'/releases/download/{PREFY_MEDIA_GITHUB_TAG}/{filename}')
+
+# ── S3 mode (approved production delivery) — a PRIVATE bucket, accessed
+# only via short-lived presigned GetObject URLs (302 redirect; Render
+# never proxies/buffers the video bytes). Deliberately its own credential
+# pair (PREFY_AWS_*), never the existing AWS_ACCESS_KEY_ID/
+# AWS_SECRET_ACCESS_KEY already used elsewhere in this file for the
+# preferendum-images bucket and Rekognition (voter face verification) —
+# mixing those would give a public-video-serving code path the same
+# blast radius as a security-sensitive identity, for no benefit. Missing
+# config here is expected and must never break anything else: every
+# function below returns None/skips cleanly rather than raising.
+PREFY_AWS_ACCESS_KEY_ID = os.getenv('PREFY_AWS_ACCESS_KEY_ID', '')
+PREFY_AWS_SECRET_ACCESS_KEY = os.getenv('PREFY_AWS_SECRET_ACCESS_KEY', '')
+PREFY_AWS_REGION = os.getenv('PREFY_AWS_REGION', 'us-east-1')
+PREFY_MEDIA_S3_BUCKET = os.getenv('PREFY_MEDIA_S3_BUCKET', 'preferendum-prefy')
+_PREFY_S3_PRESIGN_EXPIRES_SECONDS = 3600
+
+# Literal, verified object keys — NEVER computed from a pattern. This
+# HeyGen export batch mixes direct language-code suffixes, country-code
+# suffixes (sp/IR/IL/CN/TH/BR), and two single-letter suffixes (n-IN,
+# r-IN) that carry no decodable meaning on their own; every entry here
+# was resolved against the real `aws s3 ls --recursive` listing (spaces,
+# accents, and the trailing space in "Campaña " preserved exactly as
+# uploaded — this bucket's contents are never renamed/normalized).
+_PREFY_WELCOME_S3_PREFIX = 'prefy/welcome/heygen_project 3/'
+PREFY_WELCOME_S3_KEY_BY_LANG = {
+    'fil': _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_-fil/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'es':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_-sp/Prefy_bienvenida_en_app_Preferendum_version_3.mp4',
+    'cs':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_0-cs/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'da':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_0-da/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'el':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_0-el/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'fi':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_0-fi/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'ro':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_0-ro/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'sv':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_0-sv/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'uk':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_0-uk/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'ar':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_2-ar/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'ja':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_2-ja/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'ko':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_2-ko/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'ru':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_2-ru/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'vi':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_3-vi/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'hi':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_9-hi/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'id':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_9-id/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'nl':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_9-nl/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'pl':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_9-pl/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'tr':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_9-tr/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'fa':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_a-IR/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'de':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_c-de/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'en':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_c-en/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'fr':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_c-fr/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'it':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_c-it/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'pt':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_c-pt/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'he':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_e-IL/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'zh':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_h-CN/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'th':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_h-TH/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'bn':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_n-IN/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+    'ur':  _PREFY_WELCOME_S3_PREFIX + 'Prefy_bienvenida_en_app_Preferendum_version_3_r-IN/Prefy_bienvenida_en_app_Preferendum_vers.mp4',
+}
+
+_PREFY_CAMPAIGN_S3_PREFIX = 'prefy/Campaña /heygen_project/'
+PREFY_CAMPAIGN_S3_KEY_BY_LANG = {
+    'fil': _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_-fil/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'ar':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-ar/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'hi':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-hi/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'id':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-id/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'ja':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-ja/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'ko':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-ko/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'nl':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-nl/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'pl':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-pl/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'ru':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-ru/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'es':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-sp/Guía del área de campañas de Preferendum_1080p 4.mp4',
+    'tr':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-tr/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'vi':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_0-vi/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'da':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_6-da/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'de':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_6-de/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'el':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_6-el/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'en':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_6-en/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'fi':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_6-fi/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'fr':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_6-fr/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'it':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_6-it/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'sv':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_6-sv/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'cs':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_9-cs/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'ro':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_9-ro/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'uk':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_9-uk/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'fa':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_a-IR/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'he':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_e-IL/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'zh':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_h-CN/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'th':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_h-TH/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'bn':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_n-IN/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'ur':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_r-IN/Guia_del_area_de_campanas_de_Preferendum.mp4',
+    'pt':  _PREFY_CAMPAIGN_S3_PREFIX + 'Guia_del_area_de_campanas_de_Preferendum_1080_t-BR/Guia_del_area_de_campanas_de_Preferendum.mp4',
+}
+
+_PREFY_S3_KEY_TABLES = {
+    'welcome': PREFY_WELCOME_S3_KEY_BY_LANG,
+    'campaign': PREFY_CAMPAIGN_S3_KEY_BY_LANG,
+}
+
+_prefy_s3_client_cache = None
+
+def _prefy_s3_client():
+    """Lazy, cached, and ISOLATED from the app's other AWS usage — built
+    only from PREFY_AWS_*, never AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY.
+    Returns None (never raises) if the Prefy-specific credentials aren't
+    configured, so a missing/incomplete config degrades this one route
+    only — the rest of Preferendum is unaffected."""
+    global _prefy_s3_client_cache
+    if not (PREFY_AWS_ACCESS_KEY_ID and PREFY_AWS_SECRET_ACCESS_KEY):
+        return None
+    if _prefy_s3_client_cache is None:
+        try:
+            _prefy_s3_client_cache = boto3.client(
+                's3',
+                region_name=PREFY_AWS_REGION,
+                aws_access_key_id=PREFY_AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=PREFY_AWS_SECRET_ACCESS_KEY,
+            )
+        except Exception:
+            return None
+    return _prefy_s3_client_cache
+
+def _prefy_s3_presigned_url(context: str, lang: str) -> Optional[str]:
+    key = _PREFY_S3_KEY_TABLES.get(context, {}).get(lang)
+    if not key:
+        return None
+    client = _prefy_s3_client()
+    if client is None:
+        return None
+    try:
+        return client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': PREFY_MEDIA_S3_BUCKET, 'Key': key},
+            ExpiresIn=_PREFY_S3_PRESIGN_EXPIRES_SECONDS,
+        )
+    except Exception:
+        return None
 
 def _prefy_video_range_response(path: str, range_header: Optional[str]):
     file_size = os.path.getsize(path)
@@ -4071,11 +4210,17 @@ def serve_prefy_video(context: str, lang: str, range: Optional[str] = Header(Non
     knows or cares whether that's this disk or an external host."""
     if context not in _PREFY_VIDEO_CONTEXTS or lang not in _PREFY_VIDEO_LANGUAGES:
         raise HTTPException(404, 'Not found')
+    # Precedence: S3 (approved production delivery, if PREFY_AWS_* is
+    # configured and a literal key exists for this context+lang) > GitHub
+    # Release > generic static host > local disk. The S3 branch resolves
+    # a LITERAL key from the verified table above — never a computed
+    # filename — and fails through cleanly (not a 500) to the next
+    # branch if unconfigured or the key is missing, so an absent Prefy
+    # AWS config never breaks this route, let alone the rest of the app.
+    s3_url = _prefy_s3_presigned_url(context, lang)
+    if s3_url:
+        return RedirectResponse(s3_url, status_code=302)
     filename = _prefy_video_filename(context, lang)
-    # Precedence: GitHub Release (if fully configured) > generic static
-    # host > local disk. filename is always the whitelist-computed
-    # pattern above, never raw request input — no open redirect regardless
-    # of which branch fires.
     if PREFY_MEDIA_GITHUB_OWNER and PREFY_MEDIA_GITHUB_REPO and PREFY_MEDIA_GITHUB_TAG:
         return RedirectResponse(_prefy_video_github_release_url(filename), status_code=302)
     if PREFY_MEDIA_BASE_URL:
