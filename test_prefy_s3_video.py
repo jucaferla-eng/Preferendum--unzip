@@ -102,6 +102,28 @@ class TestPrefyVideoRoute(unittest.TestCase):
         health = self.client.get('/health')
         self.assertEqual(health.status_code, 200)
 
+    def test_prefy_video_js_and_css_do_not_allow_long_unconditional_caching(self):
+        # Regression lock for the real production bug this exact policy
+        # caused: /prefy-video.js changed shape between two deploys (a
+        # 'campaign' context was added) while its URL stayed the same;
+        # a long "public, max-age=86400" Cache-Control let browsers that
+        # had fetched the pre-deploy file keep running it for up to 24h
+        # after the new version went live — the old show() silently
+        # ignored its context argument and always fell back to Welcome,
+        # so the Campaigns panel played the Welcome video. 'no-cache'
+        # still lets the browser retain the asset, but forces it to
+        # revalidate with the server before reusing it on each load, so
+        # a real deploy takes effect immediately instead of waiting out
+        # a stale cache window.
+        for path in ('/prefy-video.js', '/prefy-video.css'):
+            r = self.client.get(path)
+            self.assertEqual(r.status_code, 200)
+            cache_control = r.headers.get('cache-control', '')
+            self.assertNotIn('max-age=86400', cache_control, f'{path} still allows a 24h unconditional cache')
+            self.assertNotRegex(cache_control, r'max-age=\d{3,}',
+                                 f'{path} still allows a long (100s+ seconds) unconditional cache: {cache_control!r}')
+            self.assertIn('no-cache', cache_control, f'{path} does not use the approved revalidation policy: {cache_control!r}')
+
     def test_s3_client_helper_returns_none_without_credentials(self):
         self.assertIsNone(main._prefy_s3_client())
         self.assertIsNone(main._prefy_s3_presigned_url('welcome', 'es'))

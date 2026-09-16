@@ -3964,23 +3964,36 @@ def serve_prefy_asset(filename: str):
 # way as prefy.css/prefy.js/etc. above.
 @app.get('/prefy-video.js')
 def serve_prefy_video_js():
-    """Floating bubble + single-instance video panel player."""
+    """Floating bubble + single-instance video panel player.
+
+    Cache-Control is 'no-cache' (revalidate every load), not a
+    long max-age — this file's behavior (e.g. which Prefy contexts it
+    knows about) can change between deploys while its URL stays the
+    same, and a long unconditional cache previously let browsers keep
+    running a pre-deploy version after a real deploy (root-caused: the
+    Campaign context silently falling back to Welcome because a stale
+    cached copy of this exact file didn't know 'campaign' existed yet).
+    'no-cache' still lets the browser keep the asset, just requires it
+    to check with the server before reusing it — cheap for a file this
+    size, and it closes that gap without disabling caching outright."""
     try:
         with open('prefy-video.js', 'r', encoding='utf-8') as f:
             content = f.read()
         return Response(content=content, media_type='application/javascript', headers={
-            'Cache-Control': 'public, max-age=86400',
+            'Cache-Control': 'no-cache',
         })
     except FileNotFoundError:
         return Response(content='// prefy-video.js not found', media_type='application/javascript', status_code=404)
 
 @app.get('/prefy-video.css')
 def serve_prefy_video_css():
+    # Same reasoning as serve_prefy_video_js() above — revalidate every
+    # load rather than trust a long unconditional cache across deploys.
     try:
         with open('prefy-video.css', 'r', encoding='utf-8') as f:
             content = f.read()
         return Response(content=content, media_type='text/css', headers={
-            'Cache-Control': 'public, max-age=86400',
+            'Cache-Control': 'no-cache',
         })
     except FileNotFoundError:
         return Response(content='/* prefy-video.css not found */', media_type='text/css', status_code=404)
