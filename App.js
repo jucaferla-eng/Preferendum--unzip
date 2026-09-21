@@ -6,8 +6,8 @@ import * as SecureStore from 'expo-secure-store';
 
 const BG      = '#0a0d14';
 const ACCENT  = '#2d6eff';
-const APP_URL    = 'https://preferendum-unzip.onrender.com/voter';
-const APP_ORIGIN = 'preferendum-unzip.onrender.com';
+const APP_URL    = 'https://preferendum-unzip-d2zd.onrender.com/';
+const APP_ORIGIN = 'https://preferendum-unzip-d2zd.onrender.com';
 
 // COMPLETE INTERNATIONALIZATION REMEDIATION (Section 10), extended by
 // LANGUAGE EXPANSION to 30 — the "brand" and "offline error" text is
