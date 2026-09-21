@@ -4662,7 +4662,7 @@ def login(data: LoginInput, request: Request, bg: BackgroundTasks, db: Session =
 
     # Cuentas demo para revisión de Apple/Google y auditoría externa — sin 2FA
     # porque quien las usa no tiene acceso al correo/teléfono para completar el código.
-    APP_REVIEW_DEMO_EMAILS = {'jucaferla@gmail.com', 'chatgpt.auditor@preferendum.com'}
+    APP_REVIEW_DEMO_EMAILS = {'jucaferla@gmail.com', 'chatgpt.auditor@preferendum.com', 'googleplay.reviewer@preferendum.com'}
     is_demo_account = (user.email or '').strip().lower() in APP_REVIEW_DEMO_EMAILS
 
     needs_2fa = (not is_demo_account) and (user.email_verified or user.phone_verified or user.selfie_verified)
