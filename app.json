@@ -23,7 +23,7 @@
     },
     "android": {
       "package": "com.caip.preferendum",
-      "versionCode": 15,
+      "versionCode": 16,
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#0a0d14"
