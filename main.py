@@ -8909,12 +8909,18 @@ def organizer_login_v2(data: LoginInput, db: Session = Depends(get_db)):
     user = db.query(User).filter(func.lower(User.email) == func.lower(data.email)).first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
         raise HTTPException(401, 'Credenciales inválidas')
-    if user.role not in ('organizer', 'admin'):
+    is_review = _is_google_full_review_account(user.email)
+    if user.role not in ('organizer', 'admin') and not is_review:
         raise HTTPException(403, 'No tienes cuenta de organizador')
+    # Google Play Full Review account only — never has its stored role
+    # changed; see the same note in /organizers/login and /marketer/login.
+    # Any other account still needs role in ('organizer','admin') in the
+    # database exactly as before, unaffected by this branch.
+    effective_role = 'organizer' if is_review else user.role
     profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
     return {
-        'token':   make_token(user.id, user.role),
-        'user':    {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role,
+        'token':   make_token(user.id, effective_role),
+        'user':    {'id': user.id, 'name': user.name, 'email': user.email, 'role': effective_role,
                     'referral_code': _ensure_referral_code(user, db)},
         'profile': {
             'status':       profile.status if profile else 'pending',
