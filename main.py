@@ -94,6 +94,34 @@ def get_db():
         db.close()
 
 # ══════════════════════════════════════════════════════════════
+# APP STORE / GOOGLE PLAY REVIEW ACCOUNTS
+# ══════════════════════════════════════════════════════════════
+# Legacy demo accounts — App Store / external-audit — get ONLY the login
+# 2FA skip below (main.py `login()`), nothing else. The person using them
+# has no access to the inbox/phone that would otherwise be needed to
+# complete OTP. This set's scope has never been broader than that and
+# stays that way.
+APP_REVIEW_DEMO_EMAILS = {
+    'jucaferla@gmail.com',
+    'chatgpt.auditor@preferendum.com',
+    'googleplay.reviewer@preferendum.com',
+}
+
+def _is_review_demo_account(email) -> bool:
+    return (email or '').strip().lower() in APP_REVIEW_DEMO_EMAILS
+
+# Google Play "Full Review Mode" — deliberately a SEPARATE, narrower
+# allowlist covering exactly one account. Everything beyond the login-OTP
+# skip above (campaign visibility, consultation visibility, Organizer/
+# Marketer role-token overrides, campaign-authority override, demo
+# voting) is gated on THIS constant, not APP_REVIEW_DEMO_EMAILS, so the
+# legacy accounts above are structurally unable to reach any of it.
+GOOGLE_PLAY_FULL_REVIEW_EMAIL = 'googleplay.reviewer@preferendum.com'
+
+def _is_google_full_review_account(email) -> bool:
+    return (email or '').strip().lower() == GOOGLE_PLAY_FULL_REVIEW_EMAIL
+
+# ══════════════════════════════════════════════════════════════
 # MODELS
 # ══════════════════════════════════════════════════════════════
 
@@ -1833,7 +1861,14 @@ def _consultation_decision(user, debate, db):
 
     Todo camino de listado, acceso directo y voto llama a esto y decide sobre
     `.allowed`. Nunca sobre estado del cliente, ni sobre conocer el ID.
+
+    The Google Play Full Review account (GOOGLE_PLAY_FULL_REVIEW_EMAIL) always
+    passes — a reviewer's own demo profile shouldn't determine which
+    consultations they're allowed to browse/vote in; this changes nothing
+    for any other account, including the legacy review accounts.
     """
+    if user is not None and _is_google_full_review_account(user.email):
+        return _elig.Decision(_elig.ELIGIBLE, [_elig.Reason('google_full_review_account', _elig.PASS, True, True)])
     if user is None:
         return _elig.evaluate_consultation(None, debate)
     member = None
@@ -2654,7 +2689,14 @@ def _campaign_decision(user, campaign, debate, db):
     Dos barreras, en orden: compatibilidad campaña<->consulta, LUEGO
     elegibilidad usuario<->campaña. La asociación (target_debate_ids) no
     participa: es una señal de emplazamiento/ranking, nunca una autorización.
+
+    The Google Play Full Review account (GOOGLE_PLAY_FULL_REVIEW_EMAIL) always
+    sees every active campaign, regardless of its own demo profile — pure
+    content-visibility exception, changes nothing for any other account,
+    including the legacy review accounts.
     """
+    if user is not None and _is_google_full_review_account(user.email):
+        return _elig.Decision(_elig.ELIGIBLE, [_elig.Reason('google_full_review_account', _elig.PASS, True, True)])
     score, verified = _hnw_signals(user)
     return _elig.evaluate_campaign_for_user_in_consultation(
         _build_profile(user, db) if user is not None else None,
@@ -4662,8 +4704,7 @@ def login(data: LoginInput, request: Request, bg: BackgroundTasks, db: Session =
 
     # Cuentas demo para revisión de Apple/Google y auditoría externa — sin 2FA
     # porque quien las usa no tiene acceso al correo/teléfono para completar el código.
-    APP_REVIEW_DEMO_EMAILS = {'jucaferla@gmail.com', 'chatgpt.auditor@preferendum.com', 'googleplay.reviewer@preferendum.com'}
-    is_demo_account = (user.email or '').strip().lower() in APP_REVIEW_DEMO_EMAILS
+    is_demo_account = _is_review_demo_account(user.email)
 
     needs_2fa = (not is_demo_account) and (user.email_verified or user.phone_verified or user.selfie_verified)
     if not needs_2fa:
@@ -7585,6 +7626,39 @@ def _cast_vote_inner(debate_id: int, data, user, db):
     if data.option_index < 0 or data.option_index >= len(opts):
         raise HTTPException(400, 'Invalid option')
     option = opts[data.option_index]
+
+    # Google Play Full Review account ONLY — simulate a real vote for the UI
+    # journey WITHOUT writing anything: no DebateVote row, no dedup-log row
+    # (SIM/RUT/device/doc-serial), no tally mutation, no blockchain anchor,
+    # no reward/discount code consumption, no campaign ad-spend. Every
+    # field below is a hardcoded None/read-only value — there is no code
+    # path here that can claim a reward, a sponsor discount, write to the
+    # blockchain, spend campaign budget, or change `total_votes`/
+    # `vote_counts` (both are read directly off `debate`, never
+    # incremented). Every check above this point (consultation eligibility,
+    # live status, option validity, duplicate-vote checks) still ran for
+    # real, so the reviewer sees realistic error handling; only the actual
+    # commit is skipped. Gated on GOOGLE_PLAY_FULL_REVIEW_EMAIL specifically
+    # — the legacy review accounts in APP_REVIEW_DEMO_EMAILS do NOT reach
+    # this branch and vote through the normal path like any real user.
+    if _is_google_full_review_account(user.email):
+        current_counts = json.loads(debate.vote_counts or '{}')
+        return {
+            'success': True,
+            'verify_code': 'DEMO-' + generate_verify_code(),
+            'option': option,
+            'blockchain_tx': 'demo-not-anchored',
+            'total_votes': debate.total_votes or 0,
+            'current_results': current_counts,
+            'reward_code': None,
+            'sponsor_discount_code': None,
+            'sponsor_name': None,
+            'sponsor_discount_pct': None,
+            'sponsor_discount_text': None,
+            'demo': True,
+            'message': 'Demo vote — not counted (Google Play / App Store review account).',
+        }
+
     verify_code = generate_verify_code()
     vote_hash = hashlib.sha256(f'{debate_id}:{option}:{verify_code}'.encode()).hexdigest()
     bc_result = _blockchain.anchor_vote(debate_id, vote_hash, verify_code,
@@ -7960,12 +8034,22 @@ def organizer_panel():
 
 @app.post('/organizers/login')
 def organizer_login(data: LoginInput, db: Session = Depends(get_db)):
-    user = db.query(User).filter(func.lower(User.email) == func.lower(data.email), User.role == 'organizer').first()
+    user = db.query(User).filter(func.lower(User.email) == func.lower(data.email)).first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
         raise HTTPException(401, 'Invalid credentials')
+    is_review = _is_google_full_review_account(user.email)
+    if user.role != 'organizer' and not is_review:
+        raise HTTPException(401, 'Invalid credentials')
+    # Google Play Full Review account only — never has its stored role
+    # changed; get_current_user already gives the JWT's own role claim
+    # priority over the DB value for every request that uses this token,
+    # so this only ever affects THIS login's session, never the account's
+    # persisted base role. Legacy review accounts still need role=='organizer'
+    # in the database like any real user, unaffected by this branch.
+    effective_role = 'organizer' if is_review else user.role
     return {
-        'token': make_token(user.id, user.role),
-        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+        'token': make_token(user.id, effective_role),
+        'user': {'id': user.id, 'name': user.name, 'email': user.email, 'role': effective_role},
     }
 
 @app.get('/debates/search-similar')
@@ -8230,7 +8314,12 @@ def _require_campaign_authority(user: User, db: Session) -> Optional[MarketerPro
     """
     if user is None:
         raise HTTPException(401, 'Authentication required')
-    if user.role == 'admin':
+    if user.role == 'admin' or _is_google_full_review_account(user.email):
+        # Google Play Full Review account only — same treatment as admin:
+        # no MarketerProfile is required, so there's nothing to permanently
+        # create/approve just to let this one reviewer exercise campaign
+        # creation. Legacy review accounts still need a real, approved
+        # MarketerProfile like any real marketer.
         return None
     if user.role != 'marketer':
         raise HTTPException(403, 'Marketer role required')
@@ -9323,13 +9412,20 @@ def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Sess
 
 @app.post('/marketer/login')
 def marketer_login(data: LoginInput, db: Session = Depends(get_db)):
-    user = db.query(User).filter(func.lower(User.email) == func.lower(data.email), User.role.in_(['marketer', 'admin'])).first()
+    user = db.query(User).filter(func.lower(User.email) == func.lower(data.email)).first()
     if not user or not bcrypt.checkpw(data.password.encode(), user.password.encode()):
         raise HTTPException(401, 'Credenciales inválidas')
+    is_review = _is_google_full_review_account(user.email)
+    if user.role not in ('marketer', 'admin') and not is_review:
+        raise HTTPException(401, 'Credenciales inválidas')
+    # Google Play Full Review account only — never has its stored role
+    # changed; see the same note in /organizers/login. Legacy review
+    # accounts still need role in ('marketer','admin') like any real user.
+    effective_role = 'marketer' if is_review else user.role
     profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user.id).first()
     return {
-        'token':   make_token(user.id, user.role),
-        'user':    {'id': user.id, 'name': user.name, 'email': user.email, 'role': user.role},
+        'token':   make_token(user.id, effective_role),
+        'user':    {'id': user.id, 'name': user.name, 'email': user.email, 'role': effective_role},
         'profile': {
             'status':        profile.status if profile else 'pending',
             'org_type':      profile.org_type if profile else 'company',
