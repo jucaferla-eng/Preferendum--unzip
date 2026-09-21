@@ -880,6 +880,13 @@ const COMMUNES = {
 window.onload = () => {
   if (window.Prefy) Prefy.init();
   if (window.PrefyVoice) PrefyVoice.init();
+  // This portal is reached only via the Campaign/Advertiser journey (the
+  // root role-selection screen's third option) — Campaign Prefy is
+  // established here unconditionally, before either branch below, so
+  // it's already correct on the auth screen (not authenticated yet) and
+  // stays correct once showApp() -> showPanel('overview') runs too (see
+  // _PREFY_CAMPAIGN_PANELS below, which now includes 'overview').
+  if (window.PrefyVideo) PrefyVideo.show('campaign');
   if (token) showApp();
   else {
     document.getElementById('auth-screen').style.display = 'flex';
@@ -1598,9 +1605,14 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 });
-// Campaign Prefy (HeyGen video) stays visible across the whole Campaigns
-// workflow — not just the first list screen — per product decision.
-var _PREFY_CAMPAIGN_PANELS = ['campaigns', 'new-campaign', 'deployment'];
+// Campaign Prefy (HeyGen video) stays visible across the whole Campaign
+// journey — 'overview' is included because the very first thing a
+// marketer sees after reaching this portal (via the root role-
+// selection's third/Campaign option) IS the overview dashboard; it is
+// still part of the journey, not a "genuinely non-Campaign section".
+// Only credits/public-sector/blockchain (an explicit navigation to an
+// unrelated part of the marketer app) hides it — see showPanel() below.
+var _PREFY_CAMPAIGN_PANELS = ['overview', 'campaigns', 'new-campaign', 'deployment'];
 
 function showPanel(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));

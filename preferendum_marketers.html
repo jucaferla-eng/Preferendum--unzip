@@ -95,8 +95,15 @@ section{padding:100px 80px;max-width:1200px;margin:0 auto;width:100%;}
 </style>
 <script src="/lang.js"></script>
 <script src="/translate.js"></script>
+<!-- Prefy (HeyGen video, context=campaign) — this page is the entry
+     point of the Campaign/Advertiser journey (reached only via the
+     root role-selection screen's third option), so Prefy shows the
+     Campaign video from the moment this page loads, before any auth. -->
+<link rel="stylesheet" href="/prefy-video.css">
+<script src="/prefy-video.js"></script>
 </head>
 <body>
+<script>if (window.PrefyVideo) PrefyVideo.show('campaign');</script>
 
 <nav class="nav">
   <div class="nav-logo">prefer<span>endum</span></div>

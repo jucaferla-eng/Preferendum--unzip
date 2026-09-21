@@ -15,6 +15,7 @@ const voter = fs.readFileSync('voter_portal.html', 'utf-8');
 const marketer = fs.readFileSync('marketer_portal.html', 'utf-8');
 const organizer = fs.readFileSync('preferendum_organizer.html', 'utf-8');
 const mainpy = fs.readFileSync('main.py', 'utf-8');
+const marketersLanding = fs.readFileSync('preferendum_marketers.html', 'utf-8');
 const css = fs.readFileSync('prefy.css', 'utf-8');
 const engine = fs.readFileSync('prefy.js', 'utf-8');
 const content = fs.readFileSync('prefy-content.js', 'utf-8');
@@ -227,18 +228,44 @@ assertTrue(!/:\s*row-reverse/.test(css), 'prefy.css uses only logical flex row o
 // ═══════════════════════════════════════════════════════════════════════
 assertTrue(!marketer.includes("PrefyVideo.show('welcome')") && !marketer.includes('PrefyVideo.show("welcome")'), 'marketer_portal.html never shows the welcome context — only campaign');
 assertTrue(marketer.includes("PrefyVideo.show('campaign')"), 'marketer_portal.html shows the campaign context');
+// Panel-group scope (overview included) and the hide() call are both
+// asserted precisely further below, in the Campaign/Advertiser journey
+// section — not duplicated here.
+
+// ═══════════════════════════════════════════════════════════════════════
+// Campaign/Advertiser journey — Campaign Prefy begins the moment the
+// root role-selection screen's third option is chosen, and stays
+// established through /marketers (pre-auth) and the whole authenticated
+// /marketer-portal EXCEPT an explicit navigation to a genuinely
+// non-Campaign section (credits/public-sector/blockchain).
+// ═══════════════════════════════════════════════════════════════════════
+assertTrue(marketersLanding.includes('<script src="/prefy-video.js"></script>'), 'preferendum_marketers.html (pre-auth Campaign landing) includes /prefy-video.js');
+assertTrue(marketersLanding.includes('<link rel="stylesheet" href="/prefy-video.css">'), 'preferendum_marketers.html includes /prefy-video.css');
+assertTrue(marketersLanding.includes("PrefyVideo.show('campaign')"), 'preferendum_marketers.html establishes Campaign Prefy on load, before any authentication');
+assertTrue(!marketersLanding.includes("PrefyVideo.show('welcome')") && !marketersLanding.includes('PrefyVideo.show("welcome")'),
+  'preferendum_marketers.html never shows the welcome context');
+
+{
+  // The early onload call must run unconditionally, BEFORE the
+  // token-based branch — so it covers the (unauthenticated) auth-screen
+  // state too, not just the post-login app.
+  const onloadStart = marketer.indexOf('window.onload = () => {');
+  const onloadTokenCheck = marketer.indexOf('if (token) showApp()', onloadStart);
+  const earlyShowCampaign = marketer.indexOf("PrefyVideo.show('campaign')", onloadStart);
+  assertTrue(onloadStart !== -1 && onloadTokenCheck !== -1 && earlyShowCampaign !== -1 && earlyShowCampaign < onloadTokenCheck,
+    "marketer_portal.html's window.onload establishes Campaign Prefy before the token/auth-screen branch");
+}
 {
   const arrStart = marketer.indexOf('_PREFY_CAMPAIGN_PANELS = [');
   const arrEnd = marketer.indexOf('];', arrStart);
-  const arrBody = marketer.slice(arrStart, arrEnd);
-  const panels = [...arrBody.matchAll(/'([a-zA-Z0-9_-]+)'/g)].map(m => m[1]);
-  assertTrue(JSON.stringify(panels.slice().sort()) === JSON.stringify(['campaigns', 'deployment', 'new-campaign'].sort()),
-    'Campaign Prefy is scoped to exactly campaigns/new-campaign/deployment');
-  ['overview', 'credits', 'public-sector', 'blockchain'].forEach(p => {
-    assertTrue(panels.indexOf(p) === -1, `Campaign Prefy is correctly absent from the '${p}' panel group`);
+  const panels = [...marketer.slice(arrStart, arrEnd).matchAll(/'([a-zA-Z0-9_-]+)'/g)].map(m => m[1]);
+  assertTrue(JSON.stringify(panels.slice().sort()) === JSON.stringify(['overview', 'campaigns', 'new-campaign', 'deployment'].sort()),
+    "Campaign Prefy's panel group is exactly overview/campaigns/new-campaign/deployment (overview included: the initial post-login arrival is still part of the Campaign journey)");
+  ['credits', 'public-sector', 'blockchain'].forEach(p => {
+    assertTrue(panels.indexOf(p) === -1, `'${p}' remains a genuinely non-Campaign section — Campaign Prefy is correctly absent from it`);
   });
 }
-assertTrue(marketer.includes('PrefyVideo.hide()'), 'marketer_portal.html hides Campaign Prefy for every panel outside the campaigns group');
+assertTrue(marketer.includes('PrefyVideo.hide()'), 'marketer_portal.html still hides Campaign Prefy for genuinely non-Campaign panels');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {
