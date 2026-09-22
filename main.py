@@ -4664,9 +4664,9 @@ verify your vote was counted correctly.</p>
 <p>We do not sell or share your personal data with third parties.
 Ads are targeted using anonymous demographic data only.</p>
 <h2>Account Deletion</h2>
-<p>Request account deletion at: privacy@preferendum.com</p>
+<p>Request account deletion at: jucaferla@preferendum.com</p>
 <h2>Contact</h2>
-<p>privacy@preferendum.com — CAIP Task Force, Santiago, Chile</p>
+<p>jucaferla@preferendum.com — CAIP Task Force, Santiago, Chile</p>
 <p>See also our <a href="/safety">Child Safety Standards</a>.</p>
 <p style="margin-top:48px;color:#4a5568;font-size:13px;font-style:italic;">
 En memoria del Socio Fundador José Ignacio Fernández (1989–2024), quien demostró que era posible.</p>
