@@ -406,6 +406,19 @@ class DocSerialVoteLog(Base):
     serial_hash = Column(String, index=True, nullable=False)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
+class SafetyReport(Base):
+    """Google Play Child Safety Standards — user/public reports of unsafe
+    content or activity (CSAE and otherwise). No login required to submit,
+    by design: someone reporting abuse shouldn't need an account first."""
+    __tablename__ = 'safety_reports'
+    id             = Column(Integer, primary_key=True)
+    category       = Column(String, default='other')   # 'csae' | 'harassment' | 'other'
+    description    = Column(Text, default='')
+    content_url    = Column(String, default='')
+    reporter_email = Column(String, default='')          # optional
+    status         = Column(String, default='open')      # open | reviewed | actioned
+    created_at     = Column(DateTime, default=datetime.utcnow)
+
 class DebateAd(Base):
     __tablename__ = 'debate_ads'
     id          = Column(Integer, primary_key=True)
@@ -4654,10 +4667,175 @@ Ads are targeted using anonymous demographic data only.</p>
 <p>Request account deletion at: privacy@preferendum.com</p>
 <h2>Contact</h2>
 <p>privacy@preferendum.com — CAIP Task Force, Santiago, Chile</p>
+<p>See also our <a href="/safety">Child Safety Standards</a>.</p>
 <p style="margin-top:48px;color:#4a5568;font-size:13px;font-style:italic;">
 En memoria del Socio Fundador José Ignacio Fernández (1989–2024), quien demostró que era posible.</p>
 </body></html>"""
     return HTMLResponse(content=html)
+
+# ══════════════════════════════════════════════════════════════
+# CHILD SAFETY STANDARDS (Google Play Child Safety Standards policy)
+# ══════════════════════════════════════════════════════════════
+
+@app.get('/safety')
+def child_safety_standards():
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Preferendum Child Safety Standards</title>
+<style>body{font-family:sans-serif;max-width:800px;margin:0 auto;padding:40px 24px;
+background:#07090f;color:#b8cce0;line-height:1.8;}
+h1{color:#fff;}h2{color:#3b82f6;margin-top:32px;}
+.logo{font-size:28px;font-weight:900;color:#fff;margin-bottom:32px;}
+.logo span{color:#3b82f6;}
+a{color:#3b82f6;}
+.btn{display:inline-block;margin-top:12px;padding:12px 20px;background:#3b82f6;color:#fff;
+border-radius:8px;text-decoration:none;font-weight:600;}</style></head>
+<body>
+<div class="logo">prefer<span>endum</span></div>
+<h1>Child Safety Standards</h1>
+<p>Last updated: September 2026</p>
+<h2>Zero Tolerance</h2>
+<p>Preferendum strictly prohibits child sexual abuse and exploitation (CSAE) in any form,
+including but not limited to child sexual abuse material (CSAM), the sexualization of
+minors, grooming, trafficking, and any other content or activity that endangers children.
+This applies to all users, all content, and all features of the app, without exception.</p>
+<h2>Reporting</h2>
+<p>Anyone — including people who do not have a Preferendum account — can report suspected
+CSAE or any other safety concern directly from the app, without leaving it, using our
+<a href="/safety/report">in-app report form</a>. No login is required to submit a report.</p>
+<h2>Our Process</h2>
+<p>Preferendum reviews safety reports promptly, takes appropriate action on violating
+content or accounts, and reports child sexual abuse and exploitation matters to the
+appropriate authorities when required by applicable law.</p>
+<h2>Designated Child Safety Contact</h2>
+<p>jucaferla@preferendum.com — CAIP Task Force, Santiago, Chile</p>
+<a class="btn" href="/safety/report">Report a safety concern</a>
+<p style="margin-top:24px;">See also our <a href="/privacy">Privacy Policy</a>.</p>
+</body></html>"""
+    return HTMLResponse(content=html)
+
+
+class SafetyReportInput(BaseModel):
+    category:       str = 'other'   # 'csae' | 'harassment' | 'other'
+    description:    str
+    content_url:    str = ''
+    reporter_email: str = ''
+
+
+@app.get('/safety/report')
+def safety_report_form():
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Report a Safety Concern — Preferendum</title>
+<style>body{font-family:sans-serif;max-width:600px;margin:0 auto;padding:40px 24px;
+background:#07090f;color:#b8cce0;line-height:1.6;}
+h1{color:#fff;}
+.logo{font-size:28px;font-weight:900;color:#fff;margin-bottom:32px;}
+.logo span{color:#3b82f6;}
+label{display:block;margin-top:16px;margin-bottom:6px;font-size:14px;color:#94a3b8;}
+select,textarea,input{width:100%;box-sizing:border-box;padding:10px;border-radius:8px;
+border:1px solid #1e2d4a;background:#0d1526;color:#fff;font-family:inherit;font-size:14px;}
+textarea{min-height:120px;resize:vertical;}
+button{margin-top:20px;padding:12px 24px;background:#3b82f6;color:#fff;border:none;
+border-radius:8px;font-weight:600;font-size:15px;cursor:pointer;}
+#msg{margin-top:16px;font-size:14px;}
+a{color:#3b82f6;}</style></head>
+<body>
+<div class="logo">prefer<span>endum</span></div>
+<h1>Report a Safety Concern</h1>
+<p>This form does not require an account. For urgent, immediate danger to a child,
+contact local law enforcement directly in addition to using this form.</p>
+<form id="f">
+  <label for="category">Category</label>
+  <select id="category" name="category">
+    <option value="csae">Child sexual abuse or exploitation (CSAE)</option>
+    <option value="harassment">Harassment or abuse</option>
+    <option value="other">Other safety concern</option>
+  </select>
+  <label for="description">Description</label>
+  <textarea id="description" name="description" required></textarea>
+  <label for="content_url">Link to the content (optional)</label>
+  <input id="content_url" name="content_url" type="text">
+  <label for="reporter_email">Your email (optional, if you'd like a response)</label>
+  <input id="reporter_email" name="reporter_email" type="email">
+  <button type="submit">Submit report</button>
+</form>
+<div id="msg"></div>
+<p style="margin-top:24px;"><a href="/safety">Back to Child Safety Standards</a></p>
+<script>
+document.getElementById('f').addEventListener('submit', async function(e){
+  e.preventDefault();
+  var body = {
+    category: document.getElementById('category').value,
+    description: document.getElementById('description').value,
+    content_url: document.getElementById('content_url').value,
+    reporter_email: document.getElementById('reporter_email').value,
+  };
+  var msg = document.getElementById('msg');
+  msg.textContent = 'Submitting...';
+  try {
+    var r = await fetch('/safety/report', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    if (r.ok) {
+      msg.textContent = 'Thank you — your report has been submitted and will be reviewed.';
+      document.getElementById('f').reset();
+    } else {
+      msg.textContent = 'Something went wrong. Please try again or email jucaferla@preferendum.com directly.';
+    }
+  } catch (err) {
+    msg.textContent = 'Something went wrong. Please try again or email jucaferla@preferendum.com directly.';
+  }
+});
+</script>
+</body></html>"""
+    return HTMLResponse(content=html)
+
+
+@app.post('/safety/report')
+def submit_safety_report(data: SafetyReportInput, db: Session = Depends(get_db)):
+    description = (data.description or '').strip()
+    if not description:
+        raise HTTPException(400, 'Description is required')
+    category = data.category if data.category in ('csae', 'harassment', 'other') else 'other'
+    report = SafetyReport(
+        category=category,
+        description=description[:5000],
+        content_url=(data.content_url or '').strip()[:2000],
+        reporter_email=(data.reporter_email or '').strip()[:320],
+    )
+    db.add(report)
+    db.commit()
+    return {'ok': True, 'message': 'Report submitted. Thank you.'}
+
+
+@app.get('/admin/safety-reports')
+def admin_list_safety_reports(secret: str, status: str = '', db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    q = db.query(SafetyReport)
+    if status:
+        q = q.filter(SafetyReport.status == status)
+    reports = q.order_by(SafetyReport.created_at.desc()).limit(200).all()
+    return {'reports': [{
+        'id': r.id, 'category': r.category, 'description': r.description,
+        'content_url': r.content_url, 'reporter_email': r.reporter_email,
+        'status': r.status, 'created_at': r.created_at.isoformat() if r.created_at else None,
+    } for r in reports], 'total': len(reports)}
+
+
+@app.patch('/admin/safety-reports/{report_id}')
+def admin_update_safety_report(report_id: int, secret: str, status: str, db: Session = Depends(get_db)):
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    if status not in ('open', 'reviewed', 'actioned'):
+        raise HTTPException(400, "status must be 'open', 'reviewed' or 'actioned'")
+    report = db.query(SafetyReport).filter(SafetyReport.id == report_id).first()
+    if not report:
+        raise HTTPException(404, 'Report not found')
+    report.status = status
+    db.commit()
+    return {'ok': True, 'id': report.id, 'status': report.status}
 
 # ══════════════════════════════════════════════════════════════
 # ROUTES: AUTH
