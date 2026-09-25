@@ -29,7 +29,23 @@ body{top:0!important;}
      call site below is already a safe no-op since window.Prefy is never
      defined here. -->
 <style>
-#gt-float{position:fixed;top:10px;right:10px;z-index:99999;background:rgba(10,13,20,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
+/* Mobile-first default: second row below the sticky topbar, right-aligned.
+   Row separation makes overlap with ← Inicio/brand/username/Salir
+   structurally impossible, regardless of name length, since nothing else
+   shares this row. Only `top` differs by breakpoint — size, colors,
+   right-alignment, and the selector's own markup/behavior are unchanged. */
+#gt-float{position:fixed;top:56px;right:10px;z-index:99999;background:rgba(10,13,20,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
+@media (min-width:1200px){
+  /* Conservative desktop-only breakpoint — tablet and ordinary/narrow
+     widths stay on the second row regardless of username length, since
+     a fixed right:240px is still calibrated to one sample name and could
+     fail with a longer one. right:10px (the original value) also still
+     collides with .topbar-user at any width — both are anchored to the
+     same corner — so this needs the horizontal offset too, not just the
+     restored top. 240px clears a long real name ("Juan Carlos Fernández")
+     without reaching into the left brand/Inicio content at 1200px+. */
+  #gt-float{top:10px;right:240px;}
+}
 </style>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
