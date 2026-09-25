@@ -4690,8 +4690,10 @@ h1{color:#fff;}h2{color:#3b82f6;margin-top:32px;}
 .logo span{color:#3b82f6;}
 a{color:#3b82f6;}
 .btn{display:inline-block;margin-top:12px;padding:12px 20px;background:#3b82f6;color:#fff;
-border-radius:8px;text-decoration:none;font-weight:600;}</style></head>
+border-radius:8px;text-decoration:none;font-weight:600;}
+.back{display:inline-block;margin-bottom:16px;color:#94a3b8;text-decoration:none;font-size:14px;}</style></head>
 <body>
+<a class="back" href="/">&larr; Back to Preferendum</a>
 <div class="logo">prefer<span>endum</span></div>
 <h1>Child Safety Standards</h1>
 <p>Last updated: September 2026</p>
@@ -4741,8 +4743,10 @@ textarea{min-height:120px;resize:vertical;}
 button{margin-top:20px;padding:12px 24px;background:#3b82f6;color:#fff;border:none;
 border-radius:8px;font-weight:600;font-size:15px;cursor:pointer;}
 #msg{margin-top:16px;font-size:14px;}
-a{color:#3b82f6;}</style></head>
+a{color:#3b82f6;}
+.back{display:inline-block;margin-bottom:16px;color:#94a3b8;text-decoration:none;font-size:14px;}</style></head>
 <body>
+<a class="back" href="/">&larr; Back to Preferendum</a>
 <div class="logo">prefer<span>endum</span></div>
 <h1>Report a Safety Concern</h1>
 <p>This form does not require an account. For urgent, immediate danger to a child,
@@ -4763,7 +4767,7 @@ contact local law enforcement directly in addition to using this form.</p>
   <button type="submit">Submit report</button>
 </form>
 <div id="msg"></div>
-<p style="margin-top:24px;"><a href="/safety">Back to Child Safety Standards</a></p>
+<p style="margin-top:24px;"><a href="/safety">Back to Child Safety Standards</a> &nbsp;·&nbsp; <a href="/">Back to Preferendum</a></p>
 <script>
 document.getElementById('f').addEventListener('submit', async function(e){
   e.preventDefault();
