@@ -4693,7 +4693,14 @@ a{color:#3b82f6;}
 border-radius:8px;text-decoration:none;font-weight:600;}
 .back{display:inline-block;margin-bottom:16px;color:#94a3b8;text-decoration:none;font-size:14px;}</style></head>
 <body>
-<a class="back" href="/">&larr; Back to Preferendum</a>
+<a class="back" href="/" onclick="return prefGoBack()">&larr; Back to Preferendum</a>
+<script>
+function prefGoBack(){
+  if (window.history.length > 1) { window.history.back(); }
+  else { window.location.href = '/'; }
+  return false;
+}
+</script>
 <div class="logo">prefer<span>endum</span></div>
 <h1>Child Safety Standards</h1>
 <p>Last updated: September 2026</p>
@@ -4746,7 +4753,7 @@ border-radius:8px;font-weight:600;font-size:15px;cursor:pointer;}
 a{color:#3b82f6;}
 .back{display:inline-block;margin-bottom:16px;color:#94a3b8;text-decoration:none;font-size:14px;}</style></head>
 <body>
-<a class="back" href="/">&larr; Back to Preferendum</a>
+<a class="back" href="/" onclick="return prefGoBack()">&larr; Back to Preferendum</a>
 <div class="logo">prefer<span>endum</span></div>
 <h1>Report a Safety Concern</h1>
 <p>This form does not require an account. For urgent, immediate danger to a child,
@@ -4769,6 +4776,11 @@ contact local law enforcement directly in addition to using this form.</p>
 <div id="msg"></div>
 <p style="margin-top:24px;"><a href="/safety">Back to Child Safety Standards</a> &nbsp;·&nbsp; <a href="/">Back to Preferendum</a></p>
 <script>
+function prefGoBack(){
+  if (window.history.length > 1) { window.history.back(); }
+  else { window.location.href = '/'; }
+  return false;
+}
 document.getElementById('f').addEventListener('submit', async function(e){
   e.preventDefault();
   var body = {
