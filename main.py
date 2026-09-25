@@ -12010,6 +12010,41 @@ def get_active_brands(q: str = '', db: Session = Depends(get_db)):
 def get_marketer_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
     """Tabla de comunas con índice de ingreso y CPM — viene del agente de datos."""
     from market_data_agent import get_fallback_table
+
+    if country == 'CL':
+        # Chile: geography-first. chile_geography.py is the authoritative
+        # catalogue of all 346 official comunas (SUBDERE) — every one is
+        # always returned, whether or not CommuneMarketData has economic
+        # data for it yet. Enrichment is matched by exact comuna name and
+        # left explicitly None when absent — never omitted, never guessed.
+        import chile_geography
+        enrichment = {
+            r.commune: r for r in
+            db.query(CommuneMarketData).filter(CommuneMarketData.country == 'CL').all()
+        }
+        communes = []
+        enriched_count = 0
+        for name, comuna_code, province, region_code in chile_geography.CHILE_COMUNAS:
+            r = enrichment.get(name)
+            if r is not None:
+                enriched_count += 1
+            entry = {
+                'country': 'CL', 'commune': name, 'name': name,
+                'region': region_code, 'comuna_code': comuna_code,
+                'income_index': r.income_index if r else None,
+                'cpm_usd': r.cpm_usd if r else None,
+                'se_tier': r.se_tier if r else None,
+            }
+            if se_tier and entry['se_tier'] != se_tier:
+                continue
+            communes.append(entry)
+        # enriched_count = official geography entries that actually matched
+        # a CommuneMarketData row — NOT len(enrichment), which would also
+        # count any stale/legacy commune name in the DB with no match in
+        # chile_geography's 346 (e.g. a name that predates a naming fix).
+        return {'communes': communes, 'source': 'chile_geography+enrichment',
+                'total': len(chile_geography.CHILE_COMUNAS), 'enriched': enriched_count}
+
     rows = db.query(CommuneMarketData)
     if country: rows = rows.filter(CommuneMarketData.country == country)
     if se_tier: rows = rows.filter(CommuneMarketData.se_tier == se_tier)
@@ -12056,15 +12091,48 @@ def _optimize_campaign(budget_clp: float, target_country: str, target_communes: 
         data = [{'country': r.country, 'commune': r.commune, 'income_index': r.income_index,
                  'cpm_usd': r.cpm_usd, 'se_tier': r.se_tier} for r in rows]
 
+    # Every commune with ANY CommuneMarketData row for this country, before
+    # the tier/income filter below narrows things further — needed to tell
+    # "selected commune has no economic data at all" apart from "selected
+    # commune has data but doesn't match this campaign's tier/income".
+    all_enriched_names = {c['commune'] for c in data}
+
     # 2. Filtrar por nivel de ingreso (SE tier e índice)
     tiers = [t.strip() for t in target_se_tiers.split(',') if t.strip()]
     data = [c for c in data if c['se_tier'] in tiers]
     data = [c for c in data if target_income_min <= c['income_index'] <= target_income_max]
+
+    # Geography vs. economic-enrichment distinction (Chile only): a manually
+    # selected OFFICIAL comuna is valid targeting even with zero
+    # CommuneMarketData rows — it must never be reported as "doesn't match
+    # targeting criteria", nor silently dropped, nor given invented
+    # income/CPM/tier figures. It simply can't be optimized yet.
+    unenriched_communes = []
     if target_communes:
-        selected = [c.strip() for c in target_communes.split(',')]
+        selected = [c.strip() for c in target_communes.split(',') if c.strip()]
         data = [c for c in data if c['commune'] in selected]
+        if target_country == 'CL':
+            import chile_geography
+            official_names = {name for name, _code, _prov, _region in chile_geography.CHILE_COMUNAS}
+            unenriched_communes = sorted(
+                name for name in selected
+                if name in official_names and name not in all_enriched_names
+            )
 
     if not data:
+        if unenriched_communes:
+            return {
+                'error': None,
+                'unenriched_only': True,
+                'unenriched_communes': unenriched_communes,
+                'message': (f'{len(unenriched_communes)} comuna(s) seleccionada(s) son oficiales y '
+                            'geográficamente válidas, pero aún no tienen datos económicos '
+                            '(ingreso/CPM/tier) — no es posible optimizar el presupuesto para ellas '
+                            'todavía.'),
+                'budget_clp': int(budget_clp),
+                'total_communes': 0,
+                'allocation': [],
+            }
         return {'error': 'Ninguna comuna coincide con los criterios de targeting'}
 
     # 3. Estimar votantes alcanzables por comuna
@@ -12128,7 +12196,7 @@ def _optimize_campaign(budget_clp: float, target_country: str, target_communes: 
     allocation.sort(key=lambda x: x['contacts_est'], reverse=True)
     cost_per_contact = round((budget_clp / total_contacts), 0) if total_contacts > 0 else 0
 
-    return {
+    result = {
         'budget_clp':           int(budget_clp),
         'budget_usd':           round(budget_usd, 2),
         'total_communes':       len(allocation),
@@ -12145,6 +12213,16 @@ def _optimize_campaign(budget_clp: float, target_country: str, target_communes: 
         },
         'allocation': allocation,
     }
+    if unenriched_communes:
+        # Mixed selection: the enriched communes above still went through
+        # normal optimization untouched — this only ADDS visibility into
+        # the officially-valid selected communes that couldn't participate
+        # yet, never removes or reinterprets anything already computed.
+        result['unenriched_communes'] = unenriched_communes
+        result['message'] = (f'{len(unenriched_communes)} comuna(s) seleccionada(s) no tienen datos '
+                              'económicos todavía y no participan en esta optimización de presupuesto, '
+                              'pero siguen siendo parte válida de tu segmentación geográfica.')
+    return result
 
 
 @app.post('/marketer/estimate')
@@ -14791,8 +14869,37 @@ def purge_stale_fallback_communes(secret: str, country: str, db: Session = Depen
 
 @app.get('/communes')
 def get_communes(country: str = None, se_tier: str = None, search: str = None, limit: int = 200, db: Session = Depends(get_db)):
-    """Tabla de comunas con índice de ingreso y CPM. Usada por el motor de ads."""
+    """Tabla de comunas con índice de ingreso y CPM. Usada por el motor de ads
+    y por el autocompletado de comuna en el registro de votante."""
     from market_data_agent import get_fallback_table
+
+    if country == 'CL':
+        # Same geography-first design as /marketer/communes — see that
+        # endpoint's comment for the full rationale. Voter registration's
+        # commune autocomplete needs the same authoritative 346-comuna
+        # coverage as Campaign/Consultation targeting, not just whichever
+        # comunas happen to have economic enrichment so far.
+        import chile_geography
+        enrichment = {
+            r.commune: r for r in
+            db.query(CommuneMarketData).filter(CommuneMarketData.country == 'CL').all()
+        }
+        communes = []
+        for name, comuna_code, province, region_code in chile_geography.CHILE_COMUNAS:
+            if search and search.lower() not in name.lower():
+                continue
+            r = enrichment.get(name)
+            communes.append({
+                'country': 'CL', 'commune': name,
+                'region': region_code, 'comuna_code': comuna_code,
+                'income_index': r.income_index if r else None,
+                'cpm_usd': r.cpm_usd if r else None,
+                'se_tier': r.se_tier if r else None,
+            })
+            if len(communes) >= limit:
+                break
+        return {'communes': communes, 'source': 'chile_geography+enrichment'}
+
     q = db.query(CommuneMarketData)
     if country:
         q = q.filter(CommuneMarketData.country == country)

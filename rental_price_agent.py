@@ -199,10 +199,7 @@ CHILE_COMMUNES: list[tuple[str, str, float]] = [
     ("Lota",                  "VIII",0.110),
     ("Chiguayante",           "VIII",0.165),
     ("Los Ángeles",           "VIII",0.150),
-    ("Chillán",               "VIII",0.155),
-    ("Chillán Viejo",         "VIII",0.140),
     ("Cabrero",               "VIII",0.120),
-    ("San Carlos",            "VIII",0.120),
     # ── Región de La Araucanía ──────────────────────────────────────────────
     ("Temuco",                "IX",  0.180),
     ("Padre Las Casas",       "IX",  0.150),
@@ -273,8 +270,13 @@ CHILE_COMMUNES: list[tuple[str, str, float]] = [
     ("Panguipulli",           "XIV", 0.135),
     ("Futrono",               "XIV", 0.110),
     # ── Región de Ñuble ─────────────────────────────────────────────────────
-    ("Chillán (Ñuble)",       "XVI", 0.155),
-    ("San Carlos (Ñuble)",    "XVI", 0.120),
+    # Chillán, San Carlos and Chillán Viejo were previously assigned to the
+    # stale pre-2018 Región del Biobío (VIII); Chillán/San Carlos also had a
+    # duplicate "(Ñuble)"-suffixed entry that wasn't their real name. All
+    # three now carry their correct official name and Región de Ñuble (XVI).
+    ("Chillán",               "XVI", 0.155),
+    ("San Carlos",            "XVI", 0.120),
+    ("Chillán Viejo",         "XVI", 0.140),
     ("Bulnes",                "XVI", 0.110),
     ("Yungay",                "XVI", 0.105),
 ]

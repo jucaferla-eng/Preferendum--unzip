@@ -1376,36 +1376,42 @@ async function loadCommunes() {
       ccList.map(cc => fetch(`${API}/marketer/communes?country=${cc}`).then(r => r.json()))
     );
 
-    // Merge all communes, filter by tier
+    // Every commune the endpoint returns is shown — for Chile this is
+    // always all 346 official comunas, whether or not each one has
+    // economic enrichment yet. No separate "missing data" section: a
+    // commune with se_tier == null renders as a normal chip, just not
+    // pre-selected by the automatic income-tier filter below.
     const all = results.flatMap(d => d.communes || []);
-    const filtered = all.filter(c => tiersToShow.includes(c.se_tier));
 
-    if (!filtered.length) {
-      chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">No se encontraron comunas para estos países/tier.</span>';
+    if (!all.length) {
+      chips.innerHTML = '<span style="color:var(--muted);font-size:13px;">No se encontraron comunas para estos países.</span>';
       return;
     }
 
-    // Group by country if multi-country
-    selectedCommunes = filtered.map(c => c.commune);
+    // Automatic tier pre-selection applies ONLY to communes with a real
+    // se_tier. A commune without economic data never auto-participates
+    // in income targeting, but stays visible and manually selectable —
+    // clicking it still works via the same toggleCommune() as any other.
+    const isAutoSelected = c => c.se_tier != null && tiersToShow.includes(c.se_tier);
+    selectedCommunes = all.filter(isAutoSelected).map(c => c.commune);
+
+    const chipHtml = c => `
+      <div class="commune-chip${isAutoSelected(c) ? ' selected' : ''}" data-code="${c.commune}" onclick="toggleCommune(this,'${c.commune}')">
+        ${c.name || c.commune}${c.se_tier ? ` <span style="font-size:10px;opacity:0.7;">${c.se_tier} · ${c.cpm_usd?.toFixed(2)||'?'}$/CPM</span>` : ''}
+      </div>`;
 
     if (ccList.length > 1) {
       // Render grouped by country with a label
       const byCountry = {};
-      filtered.forEach(c => { (byCountry[c.country] = byCountry[c.country] || []).push(c); });
+      all.forEach(c => { (byCountry[c.country] = byCountry[c.country] || []).push(c); });
       chips.innerHTML = Object.entries(byCountry).map(([cc, list]) => `
         <div style="width:100%;margin-top:10px;margin-bottom:4px;">
           <span style="font-size:10px;font-weight:700;color:var(--gold);letter-spacing:.08em;text-transform:uppercase;">${_WAGE_CC_NAMES[cc] || cc}</span>
         </div>
-        ${list.map(c => `
-          <div class="commune-chip selected" data-code="${c.commune}" onclick="toggleCommune(this,'${c.commune}')">
-            ${c.name || c.commune} <span style="font-size:10px;opacity:0.7;">${c.se_tier} · ${c.cpm_usd?.toFixed(2)||'?'}$/CPM</span>
-          </div>`).join('')}
+        ${list.map(chipHtml).join('')}
       `).join('');
     } else {
-      chips.innerHTML = filtered.map(c => `
-        <div class="commune-chip selected" data-code="${c.commune}" onclick="toggleCommune(this,'${c.commune}')">
-          ${c.name || c.commune} <span style="font-size:10px;opacity:0.7;">${c.se_tier} · ${c.cpm_usd?.toFixed(2)||'?'}$/CPM</span>
-        </div>`).join('');
+      chips.innerHTML = all.map(chipHtml).join('');
     }
 
     updateBudgetPreview();

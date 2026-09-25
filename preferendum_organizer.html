@@ -941,9 +941,12 @@ function toggleCountryChip(el) {
 }
 
 // ── Comunas específicas por consulta — datos reales de la base (mismo endpoint que campañas) ──
+// Every commune the endpoint returns is offered here, regardless of
+// whether it has economic enrichment (se_tier) yet — the organizer's
+// separate income-tier target (c-se-tiers) is a different targeting
+// dimension and no longer narrows which comunas can be picked here.
 async function renderCommuneChips() {
   const countryVal = document.getElementById('c-country').value;
-  const tierVal     = document.getElementById('c-se-tiers').value || 'A,B,C,D';
   const group = document.getElementById('commune-chips');
   document.getElementById('c-communes').value = '';
 
@@ -954,23 +957,21 @@ async function renderCommuneChips() {
 
   group.innerHTML = '<span style="color:#7a7570;font-size:12px;">Cargando comunas…</span>';
   const countries = countryVal.split(',').filter(Boolean);
-  const tiers = tierVal.split(',').filter(Boolean);
 
   try {
     const results = await Promise.all(
       countries.map(cc => fetch(`${API}/marketer/communes?country=${cc}`).then(r => r.json()))
     );
     const all = results.flatMap(d => d.communes || []);
-    const filtered = all.filter(c => tiers.includes(c.se_tier));
 
-    if (!filtered.length) {
+    if (!all.length) {
       group.innerHTML = '<div class="chip selected" data-value="ALL" onclick="toggleCommuneChip(this)">Todas las comunas</div>'
-        + '<span style="color:#7a7570;font-size:12px;margin-left:8px;">No hay comunas de este nivel para el país elegido.</span>';
+        + '<span style="color:#7a7570;font-size:12px;margin-left:8px;">No hay comunas para el país elegido.</span>';
       return;
     }
 
     group.innerHTML = '<div class="chip selected" data-value="ALL" onclick="toggleCommuneChip(this)">Todas las comunas</div>'
-      + filtered.map(c => `<div class="chip" data-value="${c.commune}" onclick="toggleCommuneChip(this)">${c.name || c.commune} <span style="opacity:0.6;font-size:10px;">(${c.se_tier})</span></div>`).join('');
+      + all.map(c => `<div class="chip" data-value="${c.commune}" onclick="toggleCommuneChip(this)">${c.name || c.commune}${c.se_tier ? ` <span style="opacity:0.6;font-size:10px;">(${c.se_tier})</span>` : ''}</div>`).join('');
   } catch (e) {
     group.innerHTML = '<div class="chip selected" data-value="ALL" onclick="toggleCommuneChip(this)">Todas las comunas</div>'
       + '<span style="color:#7a7570;font-size:12px;margin-left:8px;">Error cargando comunas.</span>';
