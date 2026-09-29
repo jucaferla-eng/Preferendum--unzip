@@ -5847,63 +5847,112 @@ def _assign_user_tier_inner(user, db):
     if user.county:
         country_code = _country_code(user.country)
         raw = user.county.strip()
-        # 1. Exacto por país
-        commune_data = db.query(CommuneMarketData).filter(
-            CommuneMarketData.commune.ilike(raw),
-            CommuneMarketData.country == country_code
-        ).first()
-        # 2. Prefijos decrecientes: 6→5→4→3→2 chars (UK "SW1A"→"SW1"→"SW", ES/DE "28001"→"280"→"28")
-        if not commune_data:
-            for length in (6, 5, 4, 3, 2):
-                prefix = raw[:length].rstrip()
-                if not prefix or len(prefix) < length:
-                    continue
-                commune_data = db.query(CommuneMarketData).filter(
-                    CommuneMarketData.commune.like(f'{prefix}%'),
-                    CommuneMarketData.country == country_code
-                ).first()
-                if commune_data:
+
+        # Chile has an authoritative geography catalogue
+        # (chile_geography.CHILE_COMUNAS, 346 official comunas, SUBDERE).
+        # For an OFFICIAL Chilean comuna, none of the legacy heuristics
+        # below apply — they were built for countries that identify
+        # locations by postal code (prefix-matching) or that have no
+        # authoritative catalogue at all (substring/aggregate fallback).
+        # Applied to comuna NAMES, both heuristics produced real wrong
+        # matches (found during the STEP 5 global geography audit):
+        # prefix-matching let "Lanco" match "La Florida" (shared 2-char
+        # prefix "La") and "Calera" match "Calera de Tango" (prefix of a
+        # DIFFERENT, unrelated comuna); the old substring fallback could
+        # cross countries entirely (e.g. "Los Angeles, CL" matching a US
+        # row). None of that risk exists here: exact-after-normalization
+        # is the only rule, scoped to CL, and an official comuna with no
+        # matching row gets None/None — never another comuna's or
+        # country's economic data. user.county itself is never touched,
+        # so geographic targeting/eligibility (eligibility.py
+        # _check_commune, pure string match) is completely unaffected.
+        raw_norm = _elig.norm_commune(raw)
+        is_official_cl_comuna = False
+        if country_code == 'CL':
+            import chile_geography
+            is_official_cl_comuna = raw_norm in {
+                _elig.norm_commune(n) for n, _code, _prov, _region in chile_geography.CHILE_COMUNAS
+            }
+
+        if is_official_cl_comuna:
+            commune_data = None
+            for row in db.query(CommuneMarketData).filter(CommuneMarketData.country == 'CL').all():
+                if _elig.norm_commune(row.commune) == raw_norm:
+                    commune_data = row
                     break
-        # 3. Para UK: probar solo letras del inicio (área postal: "SW", "W", "NW"…)
-        if not commune_data and country_code == 'GB':
-            area = ''
-            for ch in raw:
-                if ch.isalpha():
-                    area += ch
-                else:
-                    break
-            if area:
-                commune_data = db.query(CommuneMarketData).filter(
-                    CommuneMarketData.commune.ilike(f'{area}%'),
-                    CommuneMarketData.country == 'GB'
-                ).first()
-        # 4. Fallback global por nombre parcial (usuarios registrados antes del ZIP)
-        if not commune_data:
+            if commune_data:
+                commune_tier      = commune_data.se_tier
+                user.income_index = commune_data.income_index
+            # else: no prefix match, no substring match, no other comuna,
+            # no country aggregate — commune_tier/income_index stay None.
+        else:
+            # ── Legacy matching sequence — UNCHANGED for every non-CL
+            # country and for any CL county value that is NOT one of the
+            # 346 official comunas (e.g. pre-catalogue free-text data).
+            # 1. Exacto por país
             commune_data = db.query(CommuneMarketData).filter(
-                CommuneMarketData.commune.ilike(f'%{raw}%')
+                CommuneMarketData.commune.ilike(raw),
+                CommuneMarketData.country == country_code
             ).first()
-        if commune_data:
-            commune_tier      = commune_data.se_tier
-            user.income_index = commune_data.income_index
-        elif country_code:
-            # 5. Fallback país — usa la moda del se_tier real de ese país (no get_se_tier(avg_index)
-            # porque rent_index y income_index tienen escalas distintas según la fuente del dato)
-            from sqlalchemy import func as _sqlfunc
-            tier_row = db.execute(text("""
-                SELECT se_tier, COUNT(*) AS cnt
-                FROM commune_market_data
-                WHERE country = :cc
-                  AND se_tier IS NOT NULL AND se_tier != ''
-                  AND LENGTH(se_tier) = 1
-                GROUP BY se_tier ORDER BY cnt DESC LIMIT 1
-            """), {'cc': country_code}).fetchone()
-            avg_index = db.query(_sqlfunc.avg(CommuneMarketData.income_index)).filter(
-                CommuneMarketData.country == country_code,
-                CommuneMarketData.income_index > 0,
-            ).scalar()
-            if tier_row:
-                commune_tier      = tier_row[0]
-                user.income_index = round(float(avg_index), 1) if avg_index else 50.0
+            # 2. Prefijos decrecientes: 6→5→4→3→2 chars (UK "SW1A"→"SW1"→"SW", ES/DE "28001"→"280"→"28")
+            if not commune_data:
+                for length in (6, 5, 4, 3, 2):
+                    prefix = raw[:length].rstrip()
+                    if not prefix or len(prefix) < length:
+                        continue
+                    commune_data = db.query(CommuneMarketData).filter(
+                        CommuneMarketData.commune.like(f'{prefix}%'),
+                        CommuneMarketData.country == country_code
+                    ).first()
+                    if commune_data:
+                        break
+            # 3. Para UK: probar solo letras del inicio (área postal: "SW", "W", "NW"…)
+            if not commune_data and country_code == 'GB':
+                area = ''
+                for ch in raw:
+                    if ch.isalpha():
+                        area += ch
+                    else:
+                        break
+                if area:
+                    commune_data = db.query(CommuneMarketData).filter(
+                        CommuneMarketData.commune.ilike(f'{area}%'),
+                        CommuneMarketData.country == 'GB'
+                    ).first()
+            # 4. Fallback exacto normalizado — SOLO dentro del mismo país
+            # (reemplaza el antiguo substring-match global sin país, que
+            # podía devolver el tier de OTRO país — ver STEP 5A).
+            if not commune_data and country_code:
+                if raw_norm:
+                    for row in db.query(CommuneMarketData).filter(
+                        CommuneMarketData.country == country_code
+                    ).all():
+                        if _elig.norm_commune(row.commune) == raw_norm:
+                            commune_data = row
+                            break
+
+            if commune_data:
+                commune_tier      = commune_data.se_tier
+                user.income_index = commune_data.income_index
+            elif country_code:
+                # 5. Fallback país — usa la moda del se_tier real de ese país (no get_se_tier(avg_index)
+                # porque rent_index y income_index tienen escalas distintas según la fuente del dato)
+                from sqlalchemy import func as _sqlfunc
+                tier_row = db.execute(text("""
+                    SELECT se_tier, COUNT(*) AS cnt
+                    FROM commune_market_data
+                    WHERE country = :cc
+                      AND se_tier IS NOT NULL AND se_tier != ''
+                      AND LENGTH(se_tier) = 1
+                    GROUP BY se_tier ORDER BY cnt DESC LIMIT 1
+                """), {'cc': country_code}).fetchone()
+                avg_index = db.query(_sqlfunc.avg(CommuneMarketData.income_index)).filter(
+                    CommuneMarketData.country == country_code,
+                    CommuneMarketData.income_index > 0,
+                ).scalar()
+                if tier_row:
+                    commune_tier      = tier_row[0]
+                    user.income_index = round(float(avg_index), 1) if avg_index else 50.0
 
     user_profession   = getattr(user, 'profession', '') or ''
     user_country_code = _country_code(user.country)
