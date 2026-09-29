@@ -33,7 +33,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response, StreamingResponse, RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import (create_engine, Column, Integer, String, Boolean,
-                        DateTime, Text, Float, func, text)
+                        DateTime, Text, Float, Date, ForeignKey, UniqueConstraint,
+                        Index, func, text)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import IntegrityError
@@ -779,6 +780,88 @@ class CommuneMarketData(Base):
     sample_count         = Column(Integer, default=0)
     scraped_at           = Column(DateTime)
     updated_at           = Column(DateTime, default=datetime.utcnow)
+
+# ══════════════════════════════════════════════════════════════
+# GEOGRAPHY REGISTRY — STEP 6/6A
+# ══════════════════════════════════════════════════════════════
+# Authoritative local-administrative-geography catalogue, separate from
+# CommuneMarketData (which is, and remains, ECONOMIC ENRICHMENT ONLY — see
+# chile_geography.py's own docstring for the same principle, now
+# generalized across countries instead of one hand-written Python module
+# per country). A country's set of official local units NEVER depends on
+# whether CommuneMarketData happens to have rows for it — GeoCountry.
+# geography_status is the single flag every caller checks to know whether
+# it's looking at real, sourced geography ('implemented'), a temporary
+# CommuneMarketData-derived stand-in that is explicitly NOT official
+# geography ('legacy'), or nothing at all yet ('unresolved').
+
+class GeoCountry(Base):
+    """One row per country Preferendum can target. This table — not a
+    hardcoded frontend list, not `DISTINCT country FROM commune_market_data`
+    — is the single source of truth for the country list both Campaigns
+    and Consultations must read from."""
+    __tablename__ = 'geo_countries'
+    country_code     = Column(String(2), primary_key=True)       # ISO 3166-1 alpha-2
+    country_name     = Column(String, nullable=False)
+    local_unit_level = Column(String, nullable=False)             # cosmetic label only ('comuna', 'LAU'...) — never used for matching logic
+    source_name      = Column(String, nullable=False)             # e.g. 'SUBDERE CUT 2018-09-06', 'Eurostat GISCO LAU 2024'
+    source_url       = Column(String)
+    source_date      = Column(Date)
+    geography_status = Column(String, nullable=False)             # 'implemented' | 'legacy' | 'unresolved'
+    unit_count       = Column(Integer, nullable=False, default=0) # cached count of geo_units rows once implemented
+    hierarchy_available = Column(Boolean, nullable=False, default=False)  # STEP 6B — True only if the source actually provided admin1/admin2 for at least one unit; set by the importer, never hand-set
+    updated_at       = Column(DateTime, default=datetime.utcnow)
+
+class GeoUnit(Base):
+    """One official local administrative unit (comuna/municipality/LAU/...).
+    Geography ONLY — no income/CPM/tier fields exist on this model; that is
+    exactly the separation this whole redesign exists to enforce.
+
+    `source_unit_id` (STEP 6A rename from the earlier design's `unit_id`)
+    is the authoritative identifier from the source dataset itself — never
+    invented. Row identity/uniqueness is (country_code, source_unit_id),
+    explicitly NOT dependent on unit_name — a country can (and, per the
+    STEP 6A France pilot, genuinely does) have multiple distinct official
+    units sharing the same display name; the source's own ID is what
+    disambiguates them, matching a real, verified case: 12 different
+    French communes are all officially named "Sainte-Colombe", each with
+    its own distinct GISCO_ID.
+
+    admin1/admin2 preserve the source's OWN hierarchy — left NULL rather
+    than invented when a source doesn't provide that level (verified: the
+    Eurostat LAU CSV used for the STEP 6A pilot has no admin1/admin2
+    columns at all; Chile's SUBDERE source does, and is loaded with real
+    región/provincia values)."""
+    __tablename__ = 'geo_units'
+    id              = Column(Integer, primary_key=True)
+    country_code    = Column(String(2), ForeignKey('geo_countries.country_code'), nullable=False)
+    source_unit_id  = Column(String, nullable=False)
+    unit_name       = Column(String, nullable=False)              # official name, Unicode-preserved exactly as published
+    unit_name_norm  = Column(String, nullable=False)               # eligibility.norm_commune(unit_name) — precomputed for search
+    admin1_id       = Column(String)
+    admin1_name     = Column(String)
+    admin2_id       = Column(String)
+    admin2_name     = Column(String)
+    population      = Column(Integer)                              # only if the source publishes it — never invented
+    source_version  = Column(String, nullable=False)                # e.g. 'SUBDERE-2018-09-06', 'GISCO-LAU-2024' — ties a row to its import vintage
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('country_code', 'source_unit_id', name='uq_geo_units_country_source_id'),
+        # STEP 6A finding: PostgreSQL's default locale collation (en_US.UTF-8
+        # on this deployment) cannot use a plain btree index for `LIKE
+        # 'prefix%'` — verified via real EXPLAIN ANALYZE (see STEP 6A audit
+        # report). varchar_pattern_ops gives genuine bounded index-range
+        # prefix search (confirmed: ~5x faster, and structurally correct —
+        # a real Index Cond bound, not a post-filter scan — at France's
+        # real 34,946-row scale). pg_trgm was explicitly NOT used, per
+        # instruction. This is deliberately the ONLY index on
+        # (country_code, unit_name_norm) — keeping a second, plain-collation
+        # index alongside it made the planner inconsistently prefer the
+        # slower plan for ORDER BY + LIMIT queries (also verified).
+        Index('ix_geo_units_country_namenorm_patternops', 'country_code',
+              text('unit_name_norm varchar_pattern_ops')),
+    )
 
 class SystemTodo(Base):
     """TO-DO real de trabajo pendiente/incompleto encontrado en auditorías.
@@ -12054,6 +12137,183 @@ def get_active_brands(q: str = '', db: Session = Depends(get_db)):
         query = query.filter(AdCampaign.advertiser_name.ilike(f'%{q}%'))
     rows = query.distinct().order_by(AdCampaign.advertiser_name).limit(10).all()
     return {'brands': [r[0] for r in rows]}
+
+@app.get('/geo/countries')
+def geo_countries(db: Session = Depends(get_db)):
+    """STEP 6/6A — the single country-list source both Campaigns and
+    Consultations are meant to read from (not yet wired in — frontend
+    changes are a separate, later step). Every country carries its
+    geography_status explicitly; a caller can never mistake a 'legacy'
+    (CommuneMarketData-derived, non-authoritative) country for an
+    'implemented' (real, sourced) one."""
+    rows = db.query(GeoCountry).filter(
+        GeoCountry.geography_status.in_(['implemented', 'legacy'])
+    ).order_by(GeoCountry.country_name).all()
+    return {'countries': [{
+        'country_code':        r.country_code,
+        'country_name':        r.country_name,
+        'local_unit_level':    r.local_unit_level,
+        'geography_status':    r.geography_status,
+        'unit_count':          r.unit_count,
+        'hierarchy_available': r.hierarchy_available,
+    } for r in rows]}
+
+
+def _geo_units_encode_cursor(unit_name_norm: str, source_unit_id: str) -> str:
+    raw = f'{unit_name_norm}\x1f{source_unit_id}'
+    return base64.urlsafe_b64encode(raw.encode('utf-8')).decode('ascii')
+
+
+def _geo_units_decode_cursor(cursor: str):
+    raw = base64.urlsafe_b64decode(cursor.encode('ascii')).decode('utf-8')
+    unit_name_norm, source_unit_id = raw.split('\x1f', 1)
+    return unit_name_norm, source_unit_id
+
+
+@app.get('/geo/units')
+def geo_units(country: str, q: str = None, limit: int = 25, cursor: str = None,
+              offset: int = 0, db: Session = Depends(get_db)):
+    """STEP 6/6A/6B — paginated local-unit search/autocomplete. Never
+    returns an entire country's catalogue in one response.
+
+    `implemented`: real geo_units catalogue, prefix-searched via the
+    accent-folded/casefolded `unit_name_norm` (same normalization
+    eligibility.norm_commune already uses for targeting — the incoming
+    `q` is folded with the identical function before querying, so a
+    search for an accented or unaccented spelling returns the same
+    results). Economic enrichment is an optional LEFT JOIN by exact
+    normalized name, scoped to this country only — never a substring,
+    never cross-country — and is explicitly None/null when absent,
+    never invented or borrowed from another unit.
+
+    Pagination is CURSOR (keyset) based, not offset — a STEP 6B decision
+    made after measuring both against a real 34,946-row country with
+    real EXPLAIN ANALYZE: offset paging at a representative deep page
+    took ~15.8ms and required an explicit sort of every matching row
+    before discarding the skipped ones; the keyset equivalent (`WHERE
+    (unit_name_norm, source_unit_id) > (cursor)`) took ~2.1ms — about
+    7x faster — and, unlike offset, cannot skip or duplicate a row if
+    the catalogue changes between page loads (e.g. a re-import running
+    concurrently with someone paging through results). The ordering key
+    is ALWAYS (unit_name_norm, source_unit_id) — source_unit_id is the
+    deterministic tiebreaker required because real duplicate names exist
+    (verified: 12 official French communes are all named exactly
+    "Sainte-Colombe"; ORDER BY unit_name_norm alone does not guarantee a
+    stable order among them across repeated queries, verified by
+    comparing repeated query output — with the source_unit_id tiebreaker
+    added, the same 3 reruns produced byte-identical ordering every
+    time). `cursor` is an opaque token (do not hand-construct it) — pass
+    the previous response's `next_cursor` to fetch the following page;
+    omit it for the first page.
+
+    Duplicate-name safety rule (no hierarchy available yet for most
+    countries — see the `disambiguation_required` note on `GET
+    /geo/countries` — STEP 6B): when 2+ returned units in the same
+    country share an identical unit_name_norm, each is still returned
+    with its own real, distinct `source_unit_id`, and each such unit
+    carries `needs_disambiguation: true` plus a `duplicate_name_count`
+    of how many siblings share that name. They are NEVER silently
+    collapsed, deduplicated, or presented as interchangeable.
+
+    `legacy`: falls back to CommuneMarketData AS a temporary inventory —
+    every row's `source_unit_id` is None (no authoritative ID exists)
+    and the response's `source` field is explicitly `legacy_market_data`,
+    never `implemented`. Kept on simple offset paging deliberately —
+    legacy country row counts are always small (never near
+    implemented-country scale), so the offset-vs-keyset performance
+    question that drove the `implemented` branch's design does not
+    apply here, and this path is meant to be temporary/phased out, not
+    optimized further.
+
+    `unresolved` (or any country not yet in geo_countries at all):
+    empty result set, `source: unresolved` — never silently treated as
+    if real geography existed."""
+    country = (country or '').strip().upper()
+    cinfo = db.query(GeoCountry).filter(GeoCountry.country_code == country).first()
+    status = cinfo.geography_status if cinfo else 'unresolved'
+
+    if status == 'implemented':
+        query = db.query(GeoUnit).filter(GeoUnit.country_code == country)
+        if q:
+            q_norm = _elig.norm_commune(q)
+            query = query.filter(GeoUnit.unit_name_norm.like(f'{q_norm}%'))
+        total_matching = query.count()
+
+        if cursor:
+            try:
+                cur_norm, cur_id = _geo_units_decode_cursor(cursor)
+            except Exception:
+                raise HTTPException(400, 'Invalid cursor')
+            query = query.filter(
+                (GeoUnit.unit_name_norm > cur_norm) |
+                ((GeoUnit.unit_name_norm == cur_norm) & (GeoUnit.source_unit_id > cur_id))
+            )
+        # Fetch limit+1 to detect has_more without a second COUNT() query —
+        # the standard cheap keyset technique. The (limit+1)-th row, if
+        # present, is only used to set has_more/next_cursor and is never
+        # included in the returned `units`.
+        fetched = query.order_by(GeoUnit.unit_name_norm, GeoUnit.source_unit_id).limit(limit + 1).all()
+        has_more = len(fetched) > limit
+        rows = fetched[:limit]
+
+        # Duplicate-name detection, scoped to the returned page — flags
+        # units sharing a name so a caller never treats them as
+        # interchangeable while no parent-region hierarchy exists yet to
+        # tell them apart for the user.
+        name_counts = {}
+        for r in rows:
+            name_counts[r.unit_name_norm] = name_counts.get(r.unit_name_norm, 0) + 1
+
+        enrichment = {}
+        if rows:
+            for er in db.query(CommuneMarketData).filter(CommuneMarketData.country == country).all():
+                enrichment[_elig.norm_commune(er.commune)] = er
+
+        units = []
+        for r in rows:
+            er = enrichment.get(r.unit_name_norm)
+            dup_count = name_counts[r.unit_name_norm]
+            units.append({
+                'country_code':          r.country_code,
+                'source_unit_id':        r.source_unit_id,
+                'unit_name':             r.unit_name,
+                'admin1_name':           r.admin1_name,
+                'admin2_name':           r.admin2_name,
+                'se_tier':               er.se_tier if er else None,
+                'income_index':          er.income_index if er else None,
+                'cpm_usd':               er.cpm_usd if er else None,
+                'needs_disambiguation':  dup_count > 1,
+                'duplicate_name_count':  dup_count if dup_count > 1 else None,
+            })
+        next_cursor = (_geo_units_encode_cursor(rows[-1].unit_name_norm, rows[-1].source_unit_id)
+                       if rows and has_more else None)
+        return {
+            'source': 'implemented', 'country_code': country, 'units': units,
+            'total_matching': total_matching, 'limit': limit,
+            'has_more': has_more, 'next_cursor': next_cursor,
+        }
+
+    elif status == 'legacy':
+        query = db.query(CommuneMarketData).filter(CommuneMarketData.country == country)
+        rows_all = query.all()
+        if q:
+            q_norm = _elig.norm_commune(q)
+            rows_all = [r for r in rows_all if _elig.norm_commune(r.commune).startswith(q_norm)]
+        page = rows_all[offset:offset + limit]
+        units = [{
+            'country_code': r.country, 'source_unit_id': None, 'unit_name': r.commune,
+            'admin1_name': None, 'admin2_name': None,
+            'se_tier': r.se_tier, 'income_index': r.income_index, 'cpm_usd': r.cpm_usd,
+        } for r in page]
+        return {
+            'source': 'legacy_market_data', 'country_code': country, 'units': units,
+            'total_matching': len(rows_all), 'limit': limit, 'offset': offset,
+            'has_more': offset + len(page) < len(rows_all),
+        }
+
+    return {'source': 'unresolved', 'country_code': country, 'units': [],
+            'total_matching': 0, 'limit': limit, 'offset': offset, 'has_more': False}
+
 
 @app.get('/marketer/communes')
 def get_marketer_communes(country: str = None, se_tier: str = None, db: Session = Depends(get_db)):
