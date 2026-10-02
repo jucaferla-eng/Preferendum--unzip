@@ -810,6 +810,24 @@ class GeoCountry(Base):
     geography_status = Column(String, nullable=False)             # 'implemented' | 'legacy' | 'unresolved'
     unit_count       = Column(Integer, nullable=False, default=0) # cached count of geo_units rows once implemented
     hierarchy_available = Column(Boolean, nullable=False, default=False)  # STEP 6B — True only if the source actually provided admin1/admin2 for at least one unit; set by the importer, never hand-set
+
+    # STEP 9 — NUTS hierarchy enrichment provenance, kept fully separate
+    # from hierarchy_available/admin1/admin2 above. NUTS is a EU statistical
+    # construct, NOT automatically a national administrative concept — STEP
+    # 8B proved this directly (Portugal's NUTS3 = Comunidades Intermunicipais,
+    # not the traditional distrito; France's NUTS3 IS verified equal to
+    # département by Eurostat's own label text). So a country having NUTS
+    # hierarchy populated says nothing about whether admin1/admin2 (true
+    # national administrative hierarchy) is or should be populated — those
+    # remain independent, and admin1/admin2 must never be silently filled
+    # from NUTS data.
+    nuts_hierarchy_available   = Column(Boolean, nullable=False, default=False)  # set by enrich_country_hierarchy(), never hand-set
+    hierarchy_source_name      = Column(String)   # e.g. 'Eurostat LAU-NUTS3 correspondence + NUTS 2024 nomenclature'
+    hierarchy_source_url       = Column(String)
+    hierarchy_correspondence_sha256 = Column(String)  # SHA-256 of the exact correspondence workbook used — this file is mutable/continuously corrected upstream, unlike the locked GISCO CSV, so every enrichment records exactly which version it read
+    hierarchy_nuts_names_sha256     = Column(String)  # SHA-256 of the exact NUTS code->name workbook used
+    hierarchy_updated_at       = Column(DateTime)  # set only on a real (non-dry-run) enrichment write — distinct from updated_at above, which tracks the geography import itself
+
     updated_at       = Column(DateTime, default=datetime.utcnow)
 
 class GeoUnit(Base):
@@ -842,6 +860,23 @@ class GeoUnit(Base):
     admin1_name     = Column(String)
     admin2_id       = Column(String)
     admin2_name     = Column(String)
+
+    # STEP 9 — NUTS hierarchy fields, deliberately separate columns from
+    # admin1/admin2 above (never reused/overloaded). NUTS1/2/3 are an EU
+    # statistical classification, not inherently a national administrative
+    # unit — STEP 8B proved the equivalence holds for some countries
+    # (France: NUTS3 label IS the official département name) and not others
+    # (Portugal: NUTS3 = Comunidades Intermunicipais, NOT distrito). Storing
+    # these separately means a UI can show "NUTS3: Hautes-Alpes" honestly
+    # without ever implying it's the country's own administrative hierarchy
+    # unless that equivalence has actually been verified for that country.
+    nuts1_code      = Column(String)
+    nuts1_name      = Column(String)
+    nuts2_code      = Column(String)
+    nuts2_name      = Column(String)
+    nuts3_code      = Column(String)
+    nuts3_name      = Column(String)
+
     population      = Column(Integer)                              # only if the source publishes it — never invented
     source_version  = Column(String, nullable=False)                # e.g. 'SUBDERE-2018-09-06', 'GISCO-LAU-2024' — ties a row to its import vintage
     created_at      = Column(DateTime, default=datetime.utcnow)
@@ -1360,6 +1395,41 @@ def _migrate():
                         pass
         except Exception:
             pass
+
+        # geo_countries / geo_units — STEP 9: NUTS hierarchy enrichment
+        # columns. These tables didn't exist before STEP 6B (created fresh
+        # via Base.metadata.create_all on that deploy — hierarchy_available
+        # was already part of the model at creation time, so it never
+        # needed an ALTER TABLE). geo_countries/geo_units now hold real
+        # production data (LU, STEP 7), so from here on a new column needs
+        # a real migration, not just create_all.
+        existing_geocountry_cols = {c['name'] for c in inspector.get_columns('geo_countries')} if inspector.has_table('geo_countries') else set()
+        for col, defn in [
+            ('nuts_hierarchy_available',       'BOOLEAN DEFAULT FALSE'),
+            ('hierarchy_source_name',          'TEXT'),
+            ('hierarchy_source_url',           'TEXT'),
+            ('hierarchy_correspondence_sha256', 'TEXT'),
+            ('hierarchy_nuts_names_sha256',    'TEXT'),
+            ('hierarchy_updated_at',           'TIMESTAMP'),
+        ]:
+            if existing_geocountry_cols and col not in existing_geocountry_cols:
+                try:
+                    conn.execute(text(f'ALTER TABLE geo_countries ADD COLUMN {col} {defn}'))
+                    conn.commit()
+                except Exception:
+                    pass
+        existing_geounit_cols = {c['name'] for c in inspector.get_columns('geo_units')} if inspector.has_table('geo_units') else set()
+        for col, defn in [
+            ('nuts1_code', 'TEXT'), ('nuts1_name', 'TEXT'),
+            ('nuts2_code', 'TEXT'), ('nuts2_name', 'TEXT'),
+            ('nuts3_code', 'TEXT'), ('nuts3_name', 'TEXT'),
+        ]:
+            if existing_geounit_cols and col not in existing_geounit_cols:
+                try:
+                    conn.execute(text(f'ALTER TABLE geo_units ADD COLUMN {col} {defn}'))
+                    conn.commit()
+                except Exception:
+                    pass
 _migrate()
 
 # ══════════════════════════════════════════════════════════════

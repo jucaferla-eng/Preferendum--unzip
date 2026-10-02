@@ -17,10 +17,13 @@ already-working path from an earlier phase and is untouched by this file.
 """
 
 import csv
+import hashlib
 import os
 import tempfile
 import urllib.request
 from datetime import datetime, date
+
+import openpyxl
 
 
 class GeoImportError(Exception):
@@ -314,3 +317,276 @@ def import_eurostat_lau_countries(db, GeoCountry, GeoUnit, norm_fn, countries,
                 os.remove(csv_path)
             except OSError:
                 pass
+
+
+# ══════════════════════════════════════════════════════════════
+# NUTS HIERARCHY ENRICHMENT — STEP 9
+# ══════════════════════════════════════════════════════════════
+# This section NEVER creates, deletes, or renames a GeoUnit. Geographic
+# identity comes exclusively from import_country_geography() above (the
+# locked GISCO CSV + source_unit_id). Everything below only UPDATEs
+# nuts1/nuts2/nuts3 code+name on GeoUnit rows that already exist, joined
+# strictly by (country_code, source_unit_id) — i.e. by the same
+# authoritative ID the geography import itself assigned. A country must
+# already be geography_status='implemented' before it can be enriched.
+#
+# STEP 8B found that Eurostat's LAU<->NUTS3 correspondence table
+# (unlike the locked GISCO CSV our importer validates against a fixed
+# expected_count) is a LIVE, continuously-corrected file — its own
+# File_info sheet showed corrections weeks apart, and its Last-Modified
+# header has been within a day of the request in this session. So unlike
+# the geography import, enrichment never silently downloads a fresh copy
+# by default: the caller must hand in an explicit local file path for
+# both the correspondence workbook and the NUTS code->name workbook, and
+# every enrichment call/report records the exact SHA-256 of both files it
+# read (see hierarchy_correspondence_sha256 / hierarchy_nuts_names_sha256
+# on GeoCountry) — so a hierarchy refresh is always a distinct, visible,
+# auditable action, never a byproduct of re-running the geography import.
+
+EUROSTAT_LAU_NUTS_CORRESPONDENCE_URL = (
+    "https://ec.europa.eu/eurostat/documents/345175/501971/"
+    "EU-27-LAU-2024-NUTS-2024.xlsx/12971f56-c035-dbab-4d9f-ff1dcc617bb3?t=1737036272863"
+)
+EUROSTAT_LAU_NUTS_CORRESPONDENCE_SOURCE_NAME = "Eurostat LAU 2024 <-> NUTS 2024 correspondence (EU-27-LAU-2024-NUTS-2024.xlsx)"
+EUROSTAT_LAU_NUTS_CORRESPONDENCE_LANDING_PAGE = "https://ec.europa.eu/eurostat/web/nuts/local-administrative-units"
+
+EUROSTAT_NUTS_NAMES_URL = (
+    "https://ec.europa.eu/eurostat/documents/345175/629341/"
+    "NUTS2021-NUTS2024.xlsx/2b35915f-9c14-6841-8197-353408c4522d?t=1717505289640"
+)
+EUROSTAT_NUTS_NAMES_SOURCE_NAME = "Eurostat NUTS 2024 nomenclature (NUTS2021-NUTS2024.xlsx, 'NUTS2024' sheet)"
+EUROSTAT_NUTS_NAMES_LANDING_PAGE = "https://ec.europa.eu/eurostat/web/nuts/database"
+
+# The correspondence workbook uses Eurostat's own sheet-name convention,
+# which differs from our EUROSTAT_LAU_EXPECTED_COUNTS ISO-alpha-2 keys in
+# exactly one case verified so far (STEP 8B): Greece is sheet 'EL', not 'GR'.
+_NUTS_SHEET_COUNTRY_CODE = {'GR': 'EL'}
+
+
+class HierarchyEnrichmentError(Exception):
+    """Raised before any database write when hierarchy enrichment can't
+    proceed safely — e.g. the target country isn't geography_status=
+    'implemented' yet, or the correspondence data itself is internally
+    inconsistent (same source_unit_id mapped to two different NUTS3
+    codes). `report` carries full diagnostic detail. Never raised for a
+    merely partial match — an incomplete join is reported, not fatal,
+    since it can never corrupt geographic identity (enrichment only ever
+    UPDATEs existing rows' nuts* columns)."""
+    def __init__(self, report):
+        self.report = report
+        super().__init__(report.get('error', 'hierarchy enrichment validation failed'))
+
+
+def sha256_file(path):
+    """SHA-256 of a local file, streamed — used to record exactly which
+    version of a (possibly mutable, upstream-changing) source file an
+    enrichment run actually read."""
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1 << 20), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def parse_nuts_2024_names(xlsx_path):
+    """Reads the 'NUTS2024' sheet of the NUTS code<->name workbook.
+    Returns {nuts_code: label} covering every NUTS1/2/3 code, for every
+    country in the file — loaded once, reusable across countries."""
+    wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
+    ws = wb['NUTS2024']
+    names = {}
+    for i, row in enumerate(ws.iter_rows(values_only=True)):
+        if i == 0:
+            continue
+        code, label = row[1], row[2]
+        if code:
+            names[code] = label
+    return names
+
+
+def parse_lau_nuts_correspondence(xlsx_path, country_code):
+    """Reads one country's sheet from the LAU<->NUTS correspondence
+    workbook. Yields (source_unit_id, nuts3_code) — source_unit_id is the
+    'EU LAU CODE' column, the SAME identifier format/value as the GISCO
+    CSV's GISCO_ID (verified 1:1-identical for LU and PT in STEP 8B), so
+    it joins directly against GeoUnit.source_unit_id with no translation."""
+    country_code = country_code.upper()
+    sheet_name = _NUTS_SHEET_COUNTRY_CODE.get(country_code, country_code)
+    wb = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
+    if sheet_name not in wb.sheetnames:
+        raise HierarchyEnrichmentError({
+            'country_code': country_code,
+            'error': f"{country_code}: no sheet '{sheet_name}' found in correspondence workbook — "
+                     f"available sheets: {wb.sheetnames}",
+        })
+    ws = wb[sheet_name]
+    for i, row in enumerate(ws.iter_rows(values_only=True)):
+        if i == 0:
+            continue
+        nuts3, eu_lau_code = row[0], row[2]
+        if eu_lau_code is None:
+            continue
+        yield (eu_lau_code, nuts3)
+
+
+def enrich_country_hierarchy(db, GeoCountry, GeoUnit, country_code, correspondence_rows, nuts_names, *,
+                              correspondence_source_name, correspondence_source_url, correspondence_sha256,
+                              nuts_names_source_name, nuts_names_source_url, nuts_names_sha256,
+                              dry_run=False):
+    """Source-agnostic NUTS hierarchy enrichment for ONE already-imported
+    country. Never creates, deletes, or renames a GeoUnit — only updates
+    nuts1/nuts2/nuts3 code+name on rows that already exist, matched
+    strictly by (country_code, source_unit_id).
+
+    `correspondence_rows` — iterable of (source_unit_id, nuts3_code),
+    typically parse_lau_nuts_correspondence()'s output, already scoped to
+    this country's sheet.
+
+    `nuts_names` — {nuts_code: label} dict from parse_nuts_2024_names(),
+    used to resolve NUTS1/2/3 codes to real official names. NUTS2/NUTS1
+    codes are derived from NUTS3 by truncation (NUTS3 code length 5 ->
+    NUTS2 length 4 -> NUTS1 length 3 -> country code length 2), per
+    Eurostat's own nesting convention, then looked up in this same dict
+    — never invented.
+
+    Requires the country to already be geography_status='implemented'
+    (raises HierarchyEnrichmentError otherwise, no write). A source_unit_id
+    that exists in GeoUnit but has no correspondence entry is reported as
+    unmatched and simply keeps its nuts* fields NULL — never treated as
+    fatal, since it cannot corrupt geographic identity. A correspondence
+    entry mapping the same source_unit_id to two different NUTS3 codes
+    IS fatal (internally inconsistent source data) and aborts with no
+    write, exactly like import_country_geography's duplicate-ID check.
+
+    dry_run=True performs every validation/join step and returns the
+    full report — including would-be match counts — without opening a
+    transaction or writing anything.
+
+    On a real write: one transaction updates every matched GeoUnit row
+    plus GeoCountry.nuts_hierarchy_available/hierarchy_source_name/
+    hierarchy_source_url/hierarchy_correspondence_sha256/
+    hierarchy_nuts_names_sha256/hierarchy_updated_at. Idempotent — rerun
+    with the same inputs produces the same end state (UPDATE, not
+    INSERT)."""
+    country_code = country_code.upper()
+
+    existing_country = db.query(GeoCountry).filter(GeoCountry.country_code == country_code).first()
+    if not existing_country or existing_country.geography_status != 'implemented':
+        report = {
+            'country_code': country_code,
+            'error': f"{country_code}: geography_status is "
+                     f"{existing_country.geography_status if existing_country else 'unresolved (no GeoCountry row)'}"
+                     f" — a country must be 'implemented' via import_country_geography() before its hierarchy "
+                     f"can be enriched. No write performed.",
+            'ok': False,
+        }
+        raise HierarchyEnrichmentError(report)
+
+    existing_units = {u.source_unit_id: u for u in
+                       db.query(GeoUnit).filter(GeoUnit.country_code == country_code).all()}
+
+    correspondence_map = {}
+    conflicting = {}
+    for source_unit_id, nuts3_code in correspondence_rows:
+        if source_unit_id in correspondence_map and correspondence_map[source_unit_id] != nuts3_code:
+            conflicting[source_unit_id] = (correspondence_map[source_unit_id], nuts3_code)
+        correspondence_map[source_unit_id] = nuts3_code
+
+    if conflicting:
+        report = {
+            'country_code': country_code,
+            'error': f"{country_code}: {len(conflicting)} source_unit_id(s) map to conflicting NUTS3 codes "
+                     f"in the correspondence data — internally inconsistent source, aborting with no write",
+            'conflicting_source_unit_ids': dict(list(conflicting.items())[:20]),
+            'ok': False,
+        }
+        raise HierarchyEnrichmentError(report)
+
+    matched = {}
+    unmatched_unit_ids = []
+    for sid in existing_units:
+        nuts3 = correspondence_map.get(sid)
+        if nuts3:
+            matched[sid] = nuts3
+        else:
+            unmatched_unit_ids.append(sid)
+
+    correspondence_ids_not_in_geounit = sorted(set(correspondence_map) - set(existing_units))
+
+    name_unresolved = set()
+    resolved = {}
+    for sid, nuts3 in matched.items():
+        nuts2 = nuts3[:4]
+        nuts1 = nuts3[:3]
+        n3name, n2name, n1name = nuts_names.get(nuts3), nuts_names.get(nuts2), nuts_names.get(nuts1)
+        for code, name in ((nuts3, n3name), (nuts2, n2name), (nuts1, n1name)):
+            if name is None:
+                name_unresolved.add(code)
+        resolved[sid] = (nuts3, n3name, nuts2, n2name, nuts1, n1name)
+
+    report = {
+        'country_code': country_code,
+        'existing_geounit_count': len(existing_units),
+        'matched_count': len(matched),
+        'unmatched_geounit_source_ids': unmatched_unit_ids[:20],
+        'unmatched_geounit_count': len(unmatched_unit_ids),
+        'correspondence_ids_not_in_geounit_count': len(correspondence_ids_not_in_geounit),
+        'correspondence_ids_not_in_geounit_sample': correspondence_ids_not_in_geounit[:20],
+        'nuts_codes_with_no_resolvable_name': sorted(name_unresolved),
+        'correspondence_source_name': correspondence_source_name,
+        'correspondence_sha256': correspondence_sha256,
+        'nuts_names_source_name': nuts_names_source_name,
+        'nuts_names_sha256': nuts_names_sha256,
+        'dry_run': dry_run,
+        'ok': False,
+    }
+
+    if dry_run:
+        report['ok'] = True
+        report['would_update'] = len(matched)
+        return report
+
+    try:
+        for sid, (nuts3, n3name, nuts2, n2name, nuts1, n1name) in resolved.items():
+            unit = existing_units[sid]
+            unit.nuts3_code, unit.nuts3_name = nuts3, n3name
+            unit.nuts2_code, unit.nuts2_name = nuts2, n2name
+            unit.nuts1_code, unit.nuts1_name = nuts1, n1name
+
+        existing_country.nuts_hierarchy_available = len(matched) > 0
+        existing_country.hierarchy_source_name = f"{correspondence_source_name} + {nuts_names_source_name}"
+        existing_country.hierarchy_source_url = correspondence_source_url or nuts_names_source_url
+        existing_country.hierarchy_correspondence_sha256 = correspondence_sha256
+        existing_country.hierarchy_nuts_names_sha256 = nuts_names_sha256
+        existing_country.hierarchy_updated_at = datetime.utcnow()
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    report['ok'] = True
+    report['updated'] = len(matched)
+    return report
+
+
+def enrich_country_hierarchy_from_files(db, GeoCountry, GeoUnit, country_code,
+                                         correspondence_xlsx_path, nuts_names_xlsx_path, dry_run=False):
+    """Convenience wrapper: reads both local xlsx files (NO default
+    auto-download — both paths are required — see the module-level note
+    above on why hierarchy refreshes are never silent/implicit), computes
+    their SHA-256, parses them, and calls enrich_country_hierarchy()."""
+    correspondence_sha256 = sha256_file(correspondence_xlsx_path)
+    nuts_names_sha256 = sha256_file(nuts_names_xlsx_path)
+    nuts_names = parse_nuts_2024_names(nuts_names_xlsx_path)
+    correspondence_rows = list(parse_lau_nuts_correspondence(correspondence_xlsx_path, country_code))
+    return enrich_country_hierarchy(
+        db, GeoCountry, GeoUnit, country_code, correspondence_rows, nuts_names,
+        correspondence_source_name=EUROSTAT_LAU_NUTS_CORRESPONDENCE_SOURCE_NAME,
+        correspondence_source_url=EUROSTAT_LAU_NUTS_CORRESPONDENCE_LANDING_PAGE,
+        correspondence_sha256=correspondence_sha256,
+        nuts_names_source_name=EUROSTAT_NUTS_NAMES_SOURCE_NAME,
+        nuts_names_source_url=EUROSTAT_NUTS_NAMES_LANDING_PAGE,
+        nuts_names_sha256=nuts_names_sha256,
+        dry_run=dry_run,
+    )
