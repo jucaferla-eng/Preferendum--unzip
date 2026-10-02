@@ -122,27 +122,36 @@ GOOGLE_PLAY_FULL_REVIEW_EMAIL = 'googleplay.reviewer@preferendum.com'
 def _is_google_full_review_account(email) -> bool:
     return (email or '').strip().lower() == GOOGLE_PLAY_FULL_REVIEW_EMAIL
 
-# JC's live product-demonstration account — semantically a DIFFERENT
-# account for a DIFFERENT purpose (JC demonstrating the real product live,
-# not an App/Play Store reviewer), but it needs the exact same shape of
-# access: organizer/marketer login + role-token override without ever
-# touching this account's stored User.role, full consultation/campaign
-# visibility, campaign-authority without a MarketerProfile, and no-write
-# demo voting. Kept as its own constant/predicate rather than being added
-# to GOOGLE_PLAY_FULL_REVIEW_EMAIL so the two identities are never
-# conflated in logs, comments, or future audits.
+# JC's live product-demonstration/presentation account — semantically a
+# DIFFERENT account for a DIFFERENT purpose than the Google Play reviewer
+# (JC demonstrating the real product live, including real audience
+# members casting real votes — not an App/Play Store reviewer poking at
+# a sandbox). It shares the Google Play account's ELEVATED AUTHORIZATION
+# (organizer/marketer login + role-token override without ever touching
+# this account's stored User.role, full consultation/campaign visibility,
+# campaign-authority without a MarketerProfile) but deliberately does
+# NOT share its demo/no-write VOTING behavior — JC's own votes must use
+# the exact same real, persisting path as any ordinary user (see the
+# dedicated _is_google_full_review_account-only gate in _cast_vote_inner).
+# Kept as its own constant/predicate rather than being added to
+# GOOGLE_PLAY_FULL_REVIEW_EMAIL so the two identities are never conflated
+# in logs, comments, or future audits.
 JC_FULL_DEMO_EMAIL = 'jucaferla24649@gmail.com'
 
 def _is_jc_full_demo_account(email) -> bool:
     return (email or '').strip().lower() == JC_FULL_DEMO_EMAIL
 
 def _is_full_demo_account(email) -> bool:
-    """Shared predicate for the two accounts entitled to full demo
-    capabilities (Google Play Full Review + JC's live demo account).
-    Every call site that already treated the Google Play account this way
-    switches to this helper so both accounts get identical treatment
-    without duplicating the check — but the two underlying identities
-    stay distinct constants/predicates above, never merged into one."""
+    """Shared predicate for the two accounts entitled to elevated
+    CREATION/VISIBILITY authorization — organizer/marketer role-token
+    override, full consultation/campaign visibility, campaign-authority
+    without a MarketerProfile (Google Play Full Review + JC's live demo
+    account). Deliberately NOT used for the demo/no-write voting branch
+    in _cast_vote_inner, which stays gated on
+    _is_google_full_review_account alone — JC votes for real; only the
+    Google Play reviewer gets simulated, non-persisting votes. The two
+    underlying identities stay distinct constants/predicates above,
+    never merged into one."""
     return _is_google_full_review_account(email) or _is_jc_full_demo_account(email)
 
 # ══════════════════════════════════════════════════════════════
@@ -8058,11 +8067,17 @@ def _cast_vote_inner(debate_id: int, data, user, db):
     # incremented). Every check above this point (consultation eligibility,
     # live status, option validity, duplicate-vote checks) still ran for
     # real, so the account sees realistic error handling; only the actual
-    # commit is skipped. Gated on _is_full_demo_account (Google Play Full
-    # Review + JC's live demo account) specifically — the legacy review
-    # accounts in APP_REVIEW_DEMO_EMAILS do NOT reach this branch and vote
-    # through the normal path like any real user.
-    if _is_full_demo_account(user.email):
+    # commit is skipped.
+    #
+    # Deliberately gated on _is_google_full_review_account ONLY, NOT on
+    # _is_full_demo_account — JC's live-demo account gets special
+    # organizer/marketer CREATION authority (see _is_full_demo_account's
+    # other call sites) but must vote through the exact same real,
+    # persisting path as any ordinary user: a live presentation needs a
+    # real vote that actually counts, not a simulated one. The legacy
+    # review accounts in APP_REVIEW_DEMO_EMAILS also do NOT reach this
+    # branch and vote through the normal path like any real user.
+    if _is_google_full_review_account(user.email):
         current_counts = json.loads(debate.vote_counts or '{}')
         return {
             'success': True,

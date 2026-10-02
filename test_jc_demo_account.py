@@ -4,9 +4,15 @@ test_jc_demo_account.py — JC live-demo account regression suite.
 Covers the extension of the existing Google Play Full Review demo
 architecture (GOOGLE_PLAY_FULL_REVIEW_EMAIL / _is_google_full_review_account)
 to also admit JC's live-demo account (JC_FULL_DEMO_EMAIL /
-_is_jc_full_demo_account), via a shared _is_full_demo_account() helper,
-without ever mutating User.role or weakening authorization for any other
-account.
+_is_jc_full_demo_account) for ELEVATED CREATION/VISIBILITY AUTHORIZATION
+ONLY, via a shared _is_full_demo_account() helper — without ever mutating
+User.role, without weakening authorization for any other account, and
+WITHOUT giving JC the Google Play reviewer's demo/no-write VOTING
+behavior. JC's own votes must use the exact same real, persisting path
+as any ordinary user; only the Google Play reviewer gets simulated,
+non-counted votes. These two concerns are deliberately split across two
+different predicates at the vote-branch call site — this suite proves
+that split is real, not just documented.
 
 STRUCTURAL tests (parse main.py's AST; no imports, no database, no AWS
 key needed — main.py cannot even be imported in this dev environment,
@@ -167,6 +173,18 @@ class TestPredicatesExtracted(unittest.TestCase):
         )
         self.assertNotIn('jucaferla24649@gmail.com', legacy_set)
 
+    def test_vote_gate_predicate_distinguishes_jc_from_google_reviewer(self):
+        """Direct behavioural proof, using the real extracted
+        _is_google_full_review_account function (the exact predicate the
+        demo-vote branch in _cast_vote_inner is gated on, per the
+        structural test above): it returns True for the Google Play
+        reviewer and False for JC. Combined with the structural proof
+        that the branch uses this predicate (not _is_full_demo_account),
+        this proves JC's votes fall through to the real, persisting
+        path while the reviewer's still don't."""
+        self.assertTrue(self.is_google_review(self.google_email))
+        self.assertFalse(self.is_google_review(self.jc_email))
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Structural — prove the wiring is real and User.role is never mutated
@@ -229,22 +247,29 @@ class TestEligibilityAndVotingAndCampaignAuthority(unittest.TestCase):
                     found = True
         self.assertTrue(found, 'campaign eligibility adapter does not call _is_full_demo_account')
 
-    def test_cast_vote_demo_branch_gated_only_on_full_demo_helper(self):
+    def test_cast_vote_demo_branch_gated_only_on_google_review_not_jc(self):
         # The route is a thin wrapper; the real logic (and the demo-vote
         # branch) lives in _cast_vote_inner.
         node = _function('_cast_vote_inner')
         self.assertIsNotNone(node)
         src = _src_of(node)
-        self.assertIn('_is_full_demo_account(user.email)', src)
+        # The demo/no-write vote branch must be gated EXCLUSIVELY on
+        # _is_google_full_review_account — never on _is_full_demo_account
+        # (which would also match JC) and never on _is_jc_full_demo_account
+        # directly. JC gets elevated creation authority but votes for real.
+        self.assertIn('_is_google_full_review_account(user.email)', src)
+        self.assertNotIn('_is_full_demo_account(user.email)', src)
+        self.assertNotIn('_is_jc_full_demo_account', src)
         # The demo-vote branch must never also commit a real vote —
         # i.e. no db.commit() call textually inside the demo return block.
-        # We check this by finding the `if _is_full_demo_account(user.email):`
-        # If-node and confirming its own body has no Call to db.commit.
+        # We check this by finding the
+        # `if _is_google_full_review_account(user.email):` If-node and
+        # confirming its own body has no Call to db.commit.
         demo_if = None
         for sub in ast.walk(node):
             if isinstance(sub, ast.If):
                 test_src = ast.get_source_segment(SRC, sub.test) or ''
-                if '_is_full_demo_account(user.email)' in test_src and 'user.role' not in test_src:
+                if '_is_google_full_review_account(user.email)' in test_src and 'user.role' not in test_src:
                     demo_if = sub
                     break
         self.assertIsNotNone(demo_if, 'could not locate the demo-vote if-branch')
@@ -270,6 +295,34 @@ class TestEligibilityAndVotingAndCampaignAuthority(unittest.TestCase):
         demo_calls = _calls_in(demo_if)
         self.assertNotIn('add', demo_calls, 'demo branch must not create a MarketerProfile row')
         self.assertNotIn('commit', demo_calls, 'demo branch must not commit anything')
+
+    def test_match_campaigns_matching_engine_has_no_demo_account_knowledge(self):
+        """Campaign targeting/delivery as seen by ORDINARY voters (and by
+        JC's audience during a real presentation) must be completely
+        unaffected by this change — the matching engine itself must not
+        know about either allowlisted email at all. Only CREATION
+        authority (_require_campaign_authority) and the two visibility
+        exceptions are allowed to reference the demo helpers; the engine
+        that decides which campaigns a real voter actually sees must not."""
+        node = _function('_match_campaigns')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        for needle in ('_is_full_demo_account', '_is_jc_full_demo_account',
+                       '_is_google_full_review_account', 'JC_FULL_DEMO_EMAIL'):
+            self.assertNotIn(needle, src, f'{needle!r} leaked into the campaign matching engine')
+
+    def test_debate_discovery_has_no_creator_or_demo_account_special_casing(self):
+        """A consultation JC creates must be discoverable by a normal
+        eligible voter exactly like any other consultation — _eligible_
+        debates_for must not filter by creator identity or reference
+        either allowlisted email anywhere."""
+        node = _function('_eligible_debates_for')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        for needle in ('creator_id ==', 'creator_id !=', '_is_full_demo_account',
+                       '_is_jc_full_demo_account', 'JC_FULL_DEMO_EMAIL',
+                       'GOOGLE_PLAY_FULL_REVIEW_EMAIL'):
+            self.assertNotIn(needle, src, f'{needle!r} found in consultation discovery — would special-case by creator/account')
 
 
 class TestNoGlobalBypassInCanonicalEvaluator(unittest.TestCase):
