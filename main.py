@@ -2048,6 +2048,39 @@ def _build_profile(user, db) -> Optional[_elig.UserProfile]:
                                    occupation_override=occupation_override)
 
 
+def _resolve_target_professions(raw: str) -> str:
+    """PROFESSION FIELD AUDIT (part 2) — mirrors _build_profile's own
+    occupation_override exactly, but for the TARGET side of a match
+    (a consultation's or campaign's target_professions) instead of the
+    user's own profession.
+
+    Without this, the asymmetry was real and reproduced: a user's
+    profession "Ingeniero Civil Industrial" already resolved correctly to
+    SOC 17-2112 for income estimation AND (via _build_profile's own
+    override) for targeting — but an organizer/marketer typing the exact
+    same natural-language phrase "ingeniero industrial" into
+    target_professions never matched that user, because
+    eligibility.norm_occupation only understands bare SOC codes and a
+    short list of legacy slugs ('ing_civil', 'medico', ...), not natural
+    language. Each comma-separated token is resolved independently and
+    falls back to its own raw text when unrecognised, so no existing
+    campaign/consultation using a legacy slug changes behavior.
+    """
+    if not raw:
+        return raw
+    tokens = [t.strip() for t in raw.split(',') if t.strip()]
+    resolved = [(_socio.resolve_occupation_soc(t) or t) for t in tokens]
+    return ','.join(resolved)
+
+
+def _resolved_campaign_target(campaign) -> _elig.CampaignTarget:
+    """Shared helper for both call sites of evaluate_campaign_for_user_in_
+    consultation (see _resolve_target_professions)."""
+    return _elig.campaign_target_from_campaign(
+        campaign,
+        occupations_override=_resolve_target_professions(getattr(campaign, 'target_professions', '') or ''))
+
+
 def _closed_list_hash(national_id: Any) -> str:
     """THE closed-list hash. One definition, used by write, read and tools.
 
@@ -2113,7 +2146,13 @@ def _consultation_decision(user, debate, db):
     member = None
     if bool(getattr(debate, 'is_closed_list', False)):
         member = _is_closed_list_member(debate, user, db)
-    return _elig.evaluate_consultation(_build_profile(user, db), debate,
+    # PROFESSION FIELD AUDIT (part 2) — resolve this consultation's own
+    # target_professions the SAME way the user's profession was already
+    # resolved above, so both sides of the occupation match normalize
+    # identically. See _resolve_target_professions's docstring.
+    target = _elig.consultation_target_from_debate(
+        debate, occupations_override=_resolve_target_professions(getattr(debate, 'target_professions', '') or ''))
+    return _elig.evaluate_consultation(_build_profile(user, db), target,
                                        closed_list_member=member)
 
 
@@ -2543,6 +2582,77 @@ def get_my_household_income(user: User = Depends(get_current_user)):
     }
 
 
+_LEGACY_SOC_CODE_RE = re.compile(r'^\d{2}-\d{4}$')
+
+
+def _profession_display(raw_profession: str, db: Session) -> dict:
+    """PROFESSION FIELD AUDIT (profile-editing phase) — turns a stored
+    profession value into what the user should actually SEE.
+
+    Most values are already free text the user typed (any language) and
+    are shown exactly as stored. A value shaped like a bare SOC code
+    (e.g. '29-1215') is a LEGACY artifact of the old forced-dropdown
+    registration flow — never something a real person typed — so instead
+    of showing that opaque code, resolve it to a real, reliable label:
+    first the curated Spanish alias if one exists, otherwise the genuine
+    BLS title for that exact code (always present, since every legacy
+    code stored here came from that same catalogue — never a guess).
+
+    Read-only: never writes anything. Bulk-migrating every legacy user to
+    their resolved label was explicitly ruled out — a user only replaces
+    their own stored code with their real profession by editing it
+    themselves via POST /profile/profession below.
+    """
+    raw = (raw_profession or '').strip()
+    if not raw:
+        return {'profession': '', 'display': '', 'is_legacy_code': False}
+    if not _LEGACY_SOC_CODE_RE.match(raw):
+        return {'profession': raw, 'display': raw, 'is_legacy_code': False}
+    alias_es = _socio.occupation_aliases_for_soc(raw, 'es')
+    if alias_es:
+        label = alias_es[0][:1].upper() + alias_es[0][1:]
+    else:
+        row = db.execute(text(
+            "SELECT title FROM occupation_unified WHERE occupation_code=:c "
+            "AND country_iso='US' AND occupation_type='SOC' LIMIT 1"
+        ), {'c': raw}).fetchone()
+        label = row[0] if row else ''
+    return {'profession': raw, 'display': label or raw, 'is_legacy_code': True}
+
+
+class ProfileProfessionInput(BaseModel):
+    profession: str
+
+
+@app.get('/profile/profession')
+def get_my_profession(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Self-only, matching /profile/language's exact pattern: `user` comes
+    exclusively from the JWT of whoever is calling — there is structurally
+    no way for this route to read anyone else's profession."""
+    return _profession_display(user.profession, db)
+
+
+@app.post('/profile/profession')
+def set_my_profession(data: ProfileProfessionInput,
+                      user: User = Depends(get_current_user),
+                      db: Session = Depends(get_db)):
+    """The user replaces their own stored profession with free text, in
+    any language — stored EXACTLY as submitted, never normalized,
+    translated, or resolved to a code. This is the ONLY path that writes
+    User.profession outside of registration, and it only ever touches the
+    calling user's own row (self-only, same as every other /profile/*
+    route) — so an existing legacy-SOC-code user can replace it with their
+    real profession, but no bulk/automatic migration ever runs."""
+    prof = (data.profession or '').strip()
+    if not prof:
+        raise HTTPException(400, 'La profesión no puede estar vacía')
+    if len(prof) > 100:
+        raise HTTPException(400, 'La profesión es demasiado larga (máximo 100 caracteres)')
+    user.profession = prof
+    db.commit()
+    return _profession_display(user.profession, db)
+
+
 # ══════════════════════════════════════════════════════════════
 # CANONICAL LEDGER — adapters (CHANGE-001)
 # ══════════════════════════════════════════════════════════════
@@ -2939,7 +3049,7 @@ def _campaign_decision(user, campaign, debate, db):
     score, verified = _hnw_signals(user)
     return _elig.evaluate_campaign_for_user_in_consultation(
         _build_profile(user, db) if user is not None else None,
-        campaign, debate, hnw_score=score, hnw_verified=verified,
+        _resolved_campaign_target(campaign), debate, hnw_score=score, hnw_verified=verified,
     )
 
 
@@ -7275,7 +7385,13 @@ def _eligible_debates_for(user, db, status: str = 'live', limit: int = 50) -> li
             member = None
             if bool(getattr(d, 'is_closed_list', False)):
                 member = _is_closed_list_member(d, user, db)
-            if not _elig.evaluate_consultation(profile, d,
+            # PROFESSION FIELD AUDIT (part 2) — same occupation-target
+            # resolution as _consultation_decision, applied here too since
+            # this listing loop calls evaluate_consultation directly
+            # rather than through that helper.
+            target = _elig.consultation_target_from_debate(
+                d, occupations_override=_resolve_target_professions(getattr(d, 'target_professions', '') or ''))
+            if not _elig.evaluate_consultation(profile, target,
                                                closed_list_member=member).allowed:
                 continue
             out.append(format_debate(d, sponsor_info=_get_sponsor_info(d.id, db)))
@@ -7603,7 +7719,7 @@ def _match_campaigns(user, debate, db) -> list:
         # ── ELEGIBILIDAD CANONICA: barrera 1 (campana<->consulta) y
         #    barrera 2 (usuario<->campana), en ese orden (regla 13) ──
         if not _elig.evaluate_campaign_for_user_in_consultation(
-                profile, c, debate,
+                profile, _resolved_campaign_target(c), debate,
                 hnw_score=hnw_score, hnw_verified=hnw_verified).allowed:
             continue
 

@@ -919,7 +919,8 @@ class ConsultationTarget:
             setattr(self, s, kw.get(s))
 
 
-def consultation_target_from_debate(debate: Any) -> ConsultationTarget:
+def consultation_target_from_debate(debate: Any,
+                                    occupations_override: Optional[str] = None) -> ConsultationTarget:
     """Adapter: ORM `Debate` row -> normalized targeting snapshot.
 
     `scope` is deliberately NOT used as a gate. Phase 0 (F-12) found that
@@ -927,6 +928,16 @@ def consultation_target_from_debate(debate: Any) -> ConsultationTarget:
     so a consultation with scope='global' and scope_commune='Las Condes' was
     completely unrestricted. Under rule 1 a set targeting field is a
     constraint; `scope` is descriptive metadata only.
+
+    `occupations_override` (PROFESSION FIELD AUDIT, target side) — same
+    pattern as profile_from_user's occupation_override: the caller
+    (main.py) may have already canonicalized each comma-separated
+    target_professions token via socioeconomic.resolve_occupation_soc,
+    exactly as it does for the USER's own profession. Without this, a
+    consultation organizer typing "ingeniero industrial" into targeting
+    never matched a user whose own profession resolves to the identical
+    SOC code — the two sides of the same match normalized differently.
+    When omitted (None), behavior is unchanged.
     """
     return ConsultationTarget(
         debate_id=_g(debate, 'id'),
@@ -937,7 +948,10 @@ def consultation_target_from_debate(debate: Any) -> ConsultationTarget:
         age_min=_g(debate, 'target_age_min', None),
         age_max=_g(debate, 'target_age_max', None),
         tiers=norm_tier_set(_g(debate, 'target_se_tiers', '')),
-        occupations=norm_occupation_set(_g(debate, 'target_professions', '')),
+        occupations=norm_occupation_set(
+            occupations_override if occupations_override is not None
+            else _g(debate, 'target_professions', '')
+        ),
         cargos=norm_cargo_set(_g(debate, 'target_cargos', '')),
         company_size_ranks=company_size_target_ranks(_g(debate, 'target_company_sizes', '')),
         min_per_capita_usd=_g(debate, 'min_per_capita_usd', None),
@@ -1011,12 +1025,17 @@ _CAMPAIGN_INCOME_MIN_SENTINEL = 0.0
 _CAMPAIGN_INCOME_MAX_SENTINEL = 9999.0
 
 
-def campaign_target_from_campaign(campaign: Any) -> CampaignTarget:
+def campaign_target_from_campaign(campaign: Any,
+                                  occupations_override: Optional[str] = None) -> CampaignTarget:
     """Adapter: ORM `AdCampaign` row -> normalized targeting snapshot.
 
     `target_debate_ids` is intentionally ABSENT. Phase 0 (G-8) found it was
     used as a total targeting bypass; rule 13 makes it a placement/ranking
     input only, so it must not be reachable from an eligibility snapshot.
+
+    `occupations_override` — same pattern as
+    consultation_target_from_debate's own parameter of the same name; see
+    its docstring. When omitted (None), behavior is unchanged.
     """
     inc_max = _g(campaign, 'target_income_max', None)
     # The 9999.0 default is the documented "no limit" sentinel. Phase 0 (F-7)
@@ -1049,7 +1068,10 @@ def campaign_target_from_campaign(campaign: Any) -> CampaignTarget:
         age_max=_g(campaign, 'target_age_max', None),
         age_ranges=parse_age_ranges(_g(campaign, 'target_age_ranges', '')),
         tiers=norm_tier_set(_g(campaign, 'target_se_tiers', '')),
-        occupations=norm_occupation_set(_g(campaign, 'target_professions', '')),
+        occupations=norm_occupation_set(
+            occupations_override if occupations_override is not None
+            else _g(campaign, 'target_professions', '')
+        ),
         cargos=norm_cargo_set(_g(campaign, 'target_cargos', '')),
         company_size_ranks=company_size_target_ranks(_g(campaign, 'target_company_sizes', '')),
         min_per_capita_usd=_g(campaign, 'min_per_capita_usd', None),

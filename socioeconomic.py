@@ -603,7 +603,19 @@ def estimate_occupation_income(base_annual_usd, age=None, company_size_rank=None
 # guessing one member of the family here.
 CANONICAL_OCCUPATIONS = (
     {'soc': '17-2112', 'title_en': 'Industrial Engineers', 'aliases': {
-        'es': ['ingeniero industrial', 'ingeniera industrial'],
+        # PROFESSION FIELD AUDIT — 'Ingeniero(a) Civil Industrial' is the
+        # standard Chilean professional title for this exact occupation.
+        # "Civil" here is the Chilean convention marking a complete
+        # university licentiate degree (as opposed to the shorter
+        # "Ingeniero de Ejecución" track) — it does NOT mean civil/
+        # construction engineering, and must not be confused with the
+        # separate 'ingeniero civil' alias below (17-2051), which DOES
+        # mean literal civil engineering. Occupationally this is the same
+        # work as plain "Industrial Engineer" already mapped here, so
+        # adding it to this existing entry (not inventing a new SOC
+        # mapping) is a well-grounded extension, not a guess.
+        'es': ['ingeniero industrial', 'ingeniera industrial',
+              'ingeniero civil industrial', 'ingeniera civil industrial'],
         'en': ['industrial engineer', 'industrial engineers']}},
     {'soc': '29-1215', 'title_en': 'Family Medicine Physicians', 'aliases': {
         'es': ['medico', 'medica', 'medico general', 'medica general'],
@@ -715,6 +727,22 @@ AMBIGUOUS_OCCUPATION_TERMS = {
     'disenadora': frozenset({'27-1024'}),
     'maestro':    frozenset({'25-2021'}),
     'maestra':    frozenset({'25-2021'}),
+    # PROFESSION FIELD AUDIT — 'Ingeniero(a) Informático/a' and its Chilean
+    # 'Civil' variant ('Ingeniería Civil en Informática/Computación' is the
+    # longer professional-licentiate track; 'Ingeniería en Informática' the
+    # shorter one) deliberately classify the SAME candidate set: the job
+    # itself — not which specific engineering-degree track someone
+    # graduated from — is what an occupation code describes, and the two
+    # tracks do the same kind of IT work. Left ambiguous rather than
+    # resolved to one code: unlike Industrial Engineering (a narrow,
+    # homogeneous occupation), "informático" work genuinely spans several
+    # SOC occupations with different pay profiles — developer (15-1252),
+    # programmer (15-1251), and systems analyst (15-1211) — so picking
+    # just one would be a guess this task explicitly asked not to make.
+    'ingeniero informatico':        frozenset({'15-1252', '15-1251', '15-1211'}),
+    'ingeniera informatica':        frozenset({'15-1252', '15-1251', '15-1211'}),
+    'ingeniero civil informatico':  frozenset({'15-1252', '15-1251', '15-1211'}),
+    'ingeniera civil informatica':  frozenset({'15-1252', '15-1251', '15-1211'}),
 }
 
 

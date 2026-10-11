@@ -399,14 +399,22 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         <div id="commune-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:#1e2535;border:1px solid rgba(255,255,255,0.15);border-radius:0 0 8px 8px;max-height:200px;overflow-y:auto;z-index:999;"></div>
       </div>
       <div class="field" style="position:relative;">
-        <label>Ocupación <span style="font-size:11px;color:#e05252;font-weight:400;">*</span></label>
-        <input type="text" id="occ-search"
-               placeholder="Escribe para buscar tu ocupación..."
+        <label>Profesión u ocupación <span style="font-size:11px;color:#e05252;font-weight:400;">*</span></label>
+        <!-- PROFESSION FIELD AUDIT — occ-search is now the field of record:
+             whatever the user types here, in any language, is what gets
+             submitted. The autocomplete below is a convenience only — it
+             can fill in a suggestion, but it can never block submission
+             or force a predefined choice (requirement: free text always
+             wins). r-profession mirrors occ-search's own value so the
+             existing submit-time read (further down this file) needs no
+             change. -->
+        <input type="text" id="occ-search" maxlength="100"
+               placeholder="Escribe tu profesión u ocupación…"
                autocomplete="off"
                style="width:100%;padding:10px 12px;border:1px solid rgba(255,255,255,0.15);border-radius:8px;background:rgba(255,255,255,0.07);color:#fff;font-size:15px;box-sizing:border-box;">
         <div id="occ-results" style="display:none;position:absolute;top:100%;left:0;right:0;max-height:260px;overflow-y:auto;background:#0f1c35;border:1px solid rgba(255,255,255,0.18);border-top:none;border-radius:0 0 8px 8px;z-index:200;box-shadow:0 8px 24px rgba(0,0,0,0.5);"></div>
         <input type="hidden" id="r-profession" value="">
-        <div id="occ-hint" style="font-size:11px;color:#8899bb;margin-top:4px;">Ej: Médico, Ingeniero Civil, Enfermera, Abogado, Software Developer…</div>
+        <div id="occ-hint" style="font-size:11px;color:#8899bb;margin-top:4px;">Escribe tu profesión exactamente como la usas — ej: Ingeniero Civil Industrial, Psicóloga, Enfermero, Software Engineer… Las sugerencias son solo una ayuda, no es obligatorio elegir una.</div>
       </div>
       <div class="field">
         <label>Número de empleados en tu empresa</label>
@@ -591,6 +599,18 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         <div style="font-size:12px;color:#7a7570;margin-bottom:12px;" id="verify-identity-status">Sube tu cédula y una selfie para habilitar la verificación facial al votar.</div>
         <button class="btn" onclick="openSelfieVerifyModal()" id="verify-identity-btn" style="width:100%;">Verificar identidad →</button>
       </div>
+      <!-- PROFESSION FIELD AUDIT — profile-editing phase. View/edit the
+           user's own profession; always submits free text, never a code. -->
+      <div class="detail-card" style="margin-top:12px;">
+        <div style="font-size:14px;font-weight:600;color:#060810;margin-bottom:4px;">Profesión u ocupación</div>
+        <div id="profession-legacy-notice" style="display:none;font-size:11.5px;color:#b45309;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-bottom:10px;">
+          Esto quedó guardado como un código antiguo del formulario anterior — escribe tu profesión real para reemplazarlo.
+        </div>
+        <input type="text" id="profession-edit-input" maxlength="100" placeholder="Escribe tu profesión u ocupación…"
+          style="width:100%;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;color:#060810;font-size:14px;box-sizing:border-box;margin-bottom:8px;">
+        <div id="profession-save-msg" style="font-size:12px;margin-bottom:8px;"></div>
+        <button class="btn" onclick="saveMyProfession()" style="width:100%;">Guardar profesión</button>
+      </div>
       <div class="detail-card" style="margin-top:12px;">
         <div style="font-size:14px;font-weight:600;color:#060810;margin-bottom:4px;">Seguridad y reportes</div>
         <div style="font-size:12px;color:#7a7570;margin-bottom:12px;">Consulta nuestros estándares de seguridad infantil o reporta un problema, sin salir de la app.</div>
@@ -637,6 +657,11 @@ function _setupOccSearch() {
   input.addEventListener('focus', () => _loadOccData());
 
   input.addEventListener('input', async function() {
+    // PROFESSION FIELD AUDIT — the field of record is now whatever the
+    // user actually types here, mirrored on every keystroke so free text
+    // is captured even if no suggestion is ever clicked (requirement:
+    // never force a predefined choice).
+    document.getElementById('r-profession').value = this.value.trim();
     const q = _occNorm(this.value.trim());
     if (q.length < 2) { results.style.display = 'none'; return; }
     const occs = await _loadOccData();
@@ -665,7 +690,11 @@ function _setupOccSearch() {
       .slice(0, 18);
     if (!matches.length) { results.style.display = 'none'; return; }
     results.innerHTML = matches.map(({occ: o, label, sub}) => {
-      return `<div class="occ-item" data-code="${o.code}" data-title="${o.title.replace(/"/g,'&quot;')}"
+      // PROFESSION FIELD AUDIT — data-label carries the label actually
+      // shown (already language-aware: the Spanish alias when searching
+      // in Spanish, per the logic above) so clicking it never swaps the
+      // user's own language for the English BLS title.
+      return `<div class="occ-item" data-label="${label.replace(/"/g,'&quot;')}"
                    style="padding:9px 14px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.06);">
                 <div style="font-size:14px;color:#e8f0ff;">${label}</div>
                 <div style="font-size:11px;color:#6677aa;margin-top:1px;">${sub}</div>
@@ -677,8 +706,12 @@ function _setupOccSearch() {
   results.addEventListener('click', function(e) {
     const item = e.target.closest('.occ-item');
     if (!item) return;
-    document.getElementById('r-profession').value = item.dataset.code;
-    input.value = item.dataset.title;
+    // PROFESSION FIELD AUDIT — a suggestion only pre-fills the field in
+    // the user's own language; it's still free text afterward (the user
+    // can keep editing it), and it's never a locked/coded value distinct
+    // from what's visibly shown.
+    input.value = item.dataset.label;
+    document.getElementById('r-profession').value = item.dataset.label;
     results.style.display = 'none';
     document.getElementById('occ-hint').style.display = 'none';
   });
@@ -1975,7 +2008,7 @@ async function doRegister() {
   const gender  = document.getElementById('r-gender').value;
   const country = document.getElementById('r-country').value;
   const commune    = document.getElementById('r-commune').value.trim();
-  const profession   = document.getElementById('r-profession').value;
+  const profession   = document.getElementById('r-profession').value.trim();
   const company_size = document.getElementById('r-company-size').value;
 
   // Ordinary required-field validation — MISSING_INFORMATION, never a
@@ -1983,7 +2016,9 @@ async function doRegister() {
   if (!name || !email || !pass) { document.getElementById('r-err').textContent = 'Nombre, email y contraseña son obligatorios'; if (window.Prefy) Prefy.setContext('voter.missing_field'); return; }
   if (pass.length < 6) { document.getElementById('r-err').textContent = 'La contraseña debe tener mínimo 6 caracteres'; if (window.Prefy) Prefy.setContext('voter.missing_field'); return; }
   if (!rut) { document.getElementById('r-err').textContent = (document.getElementById('r-id-label')?.textContent?.replace(' *','') || 'Documento de identidad') + ' es obligatorio'; if (window.Prefy) Prefy.setContext('voter.missing_field'); return; }
-  if (!profession) { document.getElementById('r-err').textContent = 'Selecciona tu ocupación'; if (window.Prefy) Prefy.setContext('voter.missing_field'); return; }
+  // PROFESSION FIELD AUDIT — required to be non-empty, but never required
+  // to match a predefined option: any text the user typed satisfies this.
+  if (!profession) { document.getElementById('r-err').textContent = 'Escribe tu profesión u ocupación'; if (window.Prefy) Prefy.setContext('voter.missing_field'); return; }
   document.getElementById('r-err').textContent = '';
 
   const btn = document.querySelector('#tab-register .btn');
@@ -2362,6 +2397,7 @@ function navTo(tab) {
     document.getElementById('profile-email').textContent = localStorage.getItem('pref_voter_email') || '';
     setActiveTab('tab-profile');
     loadMyVotes();
+    loadMyProfession();
     // Update verification card status
     const verifyStatus = document.getElementById('verify-identity-status');
     const verifyBtn = document.getElementById('verify-identity-btn');
@@ -2445,6 +2481,51 @@ async function requestVoteOTP() {
     }
   } catch(e) {
     alert('Error de conexión');
+  }
+}
+
+// PROFESSION FIELD AUDIT — profile view/edit. Always submits exactly
+// what's in the input, in any language — never a code, never forced
+// into a predefined choice.
+async function loadMyProfession() {
+  const input  = document.getElementById('profession-edit-input');
+  const notice = document.getElementById('profession-legacy-notice');
+  const msg    = document.getElementById('profession-save-msg');
+  if (!input || !token) return;
+  msg.textContent = '';
+  try {
+    const r = await fetch(`${API}/profile/profession`, {headers: {'Authorization': 'Bearer ' + token}});
+    const d = await r.json();
+    input.value = d.display || '';
+    notice.style.display = d.is_legacy_code ? 'block' : 'none';
+  } catch(e) {
+    // Leave the field blank rather than show stale/incorrect data.
+  }
+}
+
+async function saveMyProfession() {
+  const input = document.getElementById('profession-edit-input');
+  const notice = document.getElementById('profession-legacy-notice');
+  const msg = document.getElementById('profession-save-msg');
+  const value = (input?.value || '').trim();
+  if (!value) { msg.style.color = '#dc2626'; msg.textContent = 'Escribe tu profesión u ocupación.'; return; }
+  msg.style.color = '#7a7570';
+  msg.textContent = 'Guardando…';
+  try {
+    const r = await fetch(`${API}/profile/profession`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({profession: value})
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.style.color = '#dc2626'; msg.textContent = d.detail || 'Error al guardar.'; return; }
+    input.value = d.display || value;
+    notice.style.display = d.is_legacy_code ? 'block' : 'none';
+    msg.style.color = '#16a34a';
+    msg.textContent = '✓ Profesión actualizada.';
+  } catch(e) {
+    msg.style.color = '#dc2626';
+    msg.textContent = 'Error de conexión.';
   }
 }
 
