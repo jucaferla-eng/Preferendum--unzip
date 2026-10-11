@@ -385,6 +385,20 @@ class DebateVote(Base):
     vote_hash       = Column(String)
     encrypted_vote  = Column(Text)
     blockchain_tx   = Column(String, default='')
+    # PRODUCTION READINESS AUDIT — blockchain.anchor_vote() never raises;
+    # on any failure (RPC down, no wallet configured, contract error) it
+    # returns a dict with a DELIBERATELY "realistic-looking mock
+    # transaction hash" (its own docstring's words) and success=False/
+    # live=False. _cast_vote_inner used to store/return that mock hash on
+    # blockchain_tx with no way to tell it apart from a real on-chain tx
+    # — the voter's success screen and this column were indistinguishable
+    # from a genuine anchor. blockchain_anchored is the real, computed
+    # truth (bc_result['success'] and bc_result['live']), stored
+    # alongside the existing blockchain_tx column rather than replacing
+    # it, so nothing that already reads blockchain_tx breaks. NULL means
+    # "recorded before this column existed — unknown", never asserted
+    # True or False for historical rows we have no real evidence for.
+    blockchain_anchored = Column(Boolean, nullable=True, default=None)
     gender          = Column(String, default='')
     age_group       = Column(String, default='')
     commune         = Column(String, default='')
@@ -1021,6 +1035,16 @@ def _migrate():
         if 'vote_chain' not in existing_vote_cols:
             try:
                 conn.execute(text("ALTER TABLE debate_votes ADD COLUMN vote_chain TEXT DEFAULT '[]'"))
+                conn.commit()
+            except Exception:
+                pass
+        # PRODUCTION READINESS AUDIT — blockchain_anchored: NULL for every
+        # existing row (we have no real evidence either way for votes
+        # recorded before this column existed — never backfilled to True
+        # or False by guessing).
+        if 'blockchain_anchored' not in existing_vote_cols:
+            try:
+                conn.execute(text("ALTER TABLE debate_votes ADD COLUMN blockchain_anchored BOOLEAN"))
                 conn.commit()
             except Exception:
                 pass
@@ -1974,7 +1998,23 @@ def _country_per_capita_ppp_usd(country_code: str, db) -> Optional[float]:
         if row and row[0] is not None:
             return float(row[0]), _elig.PPP_SOURCE_DB
     except Exception:
-        pass
+        # PRODUCTION READINESS AUDIT — CRITICAL FIX. world_countries isn't
+        # declared as a SQLAlchemy model anywhere in this codebase (it's
+        # created out-of-band, outside any migration here) — if it's
+        # ever missing (fresh environment, disaster recovery, local dev),
+        # this except swallowed the error but never rolled back, leaving
+        # the session's transaction ABORTED. Every subsequent query on
+        # the SAME session in the SAME request (e.g. the debates listing
+        # query right after this function returns, inside
+        # _eligible_debates_for) then failed with
+        # psycopg2.errors.InFailedSqlTransaction — a completely unrelated-
+        # looking 500 on /debates and /debates/feed for EVERY user, with
+        # no clue pointing back to this function. Reproduced and
+        # confirmed locally: a fresh DB without world_countries 500s on
+        # the very first GET /debates after a registration. The fallback
+        # behavior (falling through to the static PPP reference table)
+        # was already correct — only the missing rollback was the bug.
+        db.rollback()
     ref = _ppp_reference_table().get(country_code)
     if ref:
         return float(ref), _elig.PPP_SOURCE_REFERENCE
@@ -3310,9 +3350,19 @@ def send_email_otp(email, code, name='', lang=''):
     # Fallback: Gmail SMTP
     gmail_user = os.getenv('GMAIL_USER', 'jucaferla@gmail.com')
     gmail_pass = os.getenv('GMAIL_APP_PASSWORD')
+    # PRODUCTION READINESS AUDIT — this branch used to `return True` even
+    # though NO email provider (neither Resend nor Gmail) is configured —
+    # a genuinely missing production credential, not a dev-mode choice
+    # this function should silently paper over. The '[DEV EMAIL]' console
+    # line is kept for local-development visibility, but no longer
+    # implies success. Note: every current caller of send_email_otp uses
+    # bg.add_task (fire-and-forget, response already sent), so this
+    # return value isn't yet observed by any endpoint's HTTP response —
+    # fixed for correctness and for any future/synchronous caller, not
+    # because an existing response changes today.
     if not gmail_pass:
         print(f'[DEV EMAIL] To: {email} | Code: {code}')
-        return True
+        return False
     try:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject_line
@@ -3348,9 +3398,11 @@ def _send_html_email(to_email: str, subject: str, html_body: str) -> bool:
             print(f'[Resend Error] {e}')
     gmail_user = os.getenv('GMAIL_USER', 'jucaferla@gmail.com')
     gmail_pass = os.getenv('GMAIL_APP_PASSWORD')
+    # PRODUCTION READINESS AUDIT — same fix as send_email_otp: a genuinely
+    # unconfigured provider must report failure, not fabricate success.
     if not gmail_pass:
         print(f'[DEV EMAIL] To: {to_email} | Subject: {subject}')
-        return True
+        return False
     try:
         msg = MIMEMultipart('alternative')
         msg['Subject'] = subject
@@ -3469,25 +3521,35 @@ _OTP_SMS_TEMPLATES = {
 }
 
 
-def send_sms_otp(phone, code, lang=''):
+def send_sms_otp(phone, code, lang='') -> bool:
+    """Returns True only if the SMS was actually handed to Twilio
+    successfully. PRODUCTION READINESS AUDIT — this used to `return True`
+    unconditionally even when TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN were
+    both unset (a genuinely missing production credential, not a dev-mode
+    choice this function should silently paper over) or when the real
+    Client.messages.create() call raised. Callers that check this value
+    can now fail clearly instead of telling the voter 'SMS sent' when
+    nothing was sent. The '[DEV SMS]' console line is kept — useful for
+    local development — but no longer implies success on its own."""
     sid = os.getenv('TWILIO_ACCOUNT_SID')
     token = os.getenv('TWILIO_AUTH_TOKEN')
     from_num = os.getenv('TWILIO_PHONE_NUMBER', '+15075027781')
     template = _OTP_SMS_TEMPLATES.get(lang, _OTP_SMS_TEMPLATES['es'])
     body = template.format(code=code)
-    if sid and token:
-        try:
-            from twilio.rest import Client
-            Client(sid, token).messages.create(
-                body=body,
-                from_=from_num,
-                to=phone
-            )
-            return True
-        except Exception as e:
-            print(f'[Twilio Error] {e}')
     print(f'[DEV SMS] To: {phone} | Code: {code}')
-    return True
+    if not (sid and token):
+        return False
+    try:
+        from twilio.rest import Client
+        Client(sid, token).messages.create(
+            body=body,
+            from_=from_num,
+            to=phone
+        )
+        return True
+    except Exception as e:
+        print(f'[Twilio Error] {e}')
+        return False
 
 # ══════════════════════════════════════════════════════════════
 # SCHEMAS
@@ -4561,17 +4623,22 @@ def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
         if not bcrypt.checkpw(data.password.encode(), existing.password.encode()):
             raise HTTPException(400, 'Email ya registrado con contraseña diferente')
         # Re-send OTP if not yet verified
+        # PRODUCTION READINESS AUDIT — synchronous now (was bg.add_task,
+        # fire-and-forget): the response can only truthfully report
+        # delivery status if it waits for the real attempt. Does not
+        # expose the OTP code itself, only whether sending succeeded.
+        email_sent = None
         if not existing.email_verified:
             code = gen_otp()
             db.query(OTPCode).filter(OTPCode.user_id == existing.id, OTPCode.channel == 'email', OTPCode.used == False).update({'used': True})
             db.add(OTPCode(user_id=existing.id, email=existing.email, code=code, channel='email',
                            expires_at=datetime.utcnow() + timedelta(minutes=15)))
             db.commit()
-            bg.add_task(send_email_otp, existing.email, code, existing.name, data.lang)
+            email_sent = send_email_otp(existing.email, code, existing.name, data.lang)
         return {'token': make_token(existing.id), 'user': {
             'id': existing.id, 'name': existing.name, 'email': existing.email,
             'email_verified': existing.email_verified, 'phone': existing.phone or ''
-        }}
+        }, 'email_sent': email_sent}
     hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
     import secrets as _secrets_ref
     referrer = None
@@ -4624,13 +4691,19 @@ def _voter_register_inner(data: VoterRegisterInput, bg: BackgroundTasks, db):
         db.commit()
     except Exception as _e:
         print(f'[voter_register] OTP/device error (non-fatal): {_e}')
-    bg.add_task(send_email_otp, user.email, code, user.name, data.lang)
+    # PRODUCTION READINESS AUDIT — synchronous now (was bg.add_task): the
+    # account itself is already created and real either way (never rolled
+    # back merely because the verification email failed — the user can
+    # still retry via /verify/email/send), but the response now truthfully
+    # says whether the code actually went out, instead of always implying
+    # it did.
+    email_sent = send_email_otp(user.email, code, user.name, data.lang)
     return {'token': make_token(user.id), 'user': {
         'id': user.id, 'name': user.name, 'email': user.email,
         'email_verified': False, 'phone': data.phone,
         'se_tier': user.se_tier or '',
         'referral_code': user.referral_code or '',
-    }}
+    }, 'email_sent': email_sent}
 
 
 @app.get('/r/{debate_id}', response_class=HTMLResponse)
@@ -5063,13 +5136,20 @@ def register(data: RegisterInput, bg: BackgroundTasks, db: Session = Depends(get
         channel='email', expires_at=datetime.utcnow() + timedelta(minutes=10)
     ))
     db.commit()
-    bg.add_task(send_email_otp, user.email, code, user.name, data.lang)
+    # PRODUCTION READINESS AUDIT — the OTP send is now synchronous and
+    # truthfully reported (was bg.add_task, always claimed "sent"). The
+    # welcome certificate stays fire-and-forget deliberately — it's a
+    # non-blocking nice-to-have, not something the user needs to act on
+    # to proceed, so adding latency for it here isn't warranted.
+    email_sent = send_email_otp(user.email, code, user.name, data.lang)
     bg.add_task(send_welcome_certificate, user.email, user.name, user.id)
     return {
         'token': make_token(user.id),
         'user': {'id': user.id, 'name': user.name, 'email': user.email, 'verify_level': 0},
         'next_step': 'verify_email',
-        'message': f'Verification code sent to {user.email}'
+        'email_sent': email_sent,
+        'message': (f'Verification code sent to {user.email}' if email_sent
+                    else 'We could not send your verification code right now — try again shortly, or use /verify/email/send to retry.'),
     }
 
 @app.post('/auth/login')
@@ -5117,22 +5197,36 @@ def login(data: LoginInput, request: Request, bg: BackgroundTasks, db: Session =
         country=user.country,
     )
 
-    if user.email_verified:
+    # PRODUCTION READINESS AUDIT — both sends below are now synchronous
+    # (were bg.add_task, fire-and-forget) and `requires.email`/
+    # `requires.sms` now report whether a code ACTUALLY went out, not
+    # merely whether that channel is verified. A verified-but-undeliverable
+    # channel must never be advertised to the client as available.
+    attempted_email = bool(user.email_verified)
+    email_sent = False
+    if attempted_email:
         email_code = gen_otp()
         db.add(OTPCode(user_id=user.id, email=user.email, code=email_code, channel='email',
                        expires_at=datetime.utcnow() + timedelta(minutes=10)))
-        bg.add_task(send_email_otp, user.email, email_code, user.name, _login_lang)
+        db.commit()
+        email_sent = send_email_otp(user.email, email_code, user.name, _login_lang)
 
     twilio_active = bool(os.getenv('TWILIO_ACCOUNT_SID') and os.getenv('TWILIO_AUTH_TOKEN'))
-    sms_required = False
-    if user.phone_verified and user.phone and twilio_active:
+    attempted_sms = bool(user.phone_verified and user.phone and twilio_active)
+    sms_sent = False
+    if attempted_sms:
         sms_code = gen_otp()
         db.add(OTPCode(user_id=user.id, email=user.email, code=sms_code, channel='sms',
                        expires_at=datetime.utcnow() + timedelta(minutes=10)))
-        bg.add_task(send_sms_otp, user.phone, sms_code, _login_lang)
-        sms_required = True
+        db.commit()
+        sms_sent = send_sms_otp(user.phone, sms_code, _login_lang)
 
-    db.commit()
+    # A channel we actually tried (because it's verified) but that failed
+    # to deliver, with no other way in (no other channel attempted, and
+    # no face fallback either) is a genuine lockout — fail clearly rather
+    # than returning pending_2fa for codes that were never sent anywhere.
+    if (attempted_email or attempted_sms) and not email_sent and not sms_sent and not user.selfie_verified:
+        raise HTTPException(503, 'No pudimos enviar tu código de verificación por ningún canal disponible. Intenta de nuevo en unos minutos.')
 
     pre_auth = jwt.encode({
         'sub': user.id, 'type': 'pre_auth',
@@ -5143,8 +5237,8 @@ def login(data: LoginInput, request: Request, bg: BackgroundTasks, db: Session =
         'pending_2fa': True,
         'pre_auth_token': pre_auth,
         'requires': {
-            'email': bool(user.email_verified),
-            'sms':   sms_required,
+            'email': email_sent,
+            'sms':   sms_sent,
             'face':  bool(user.selfie_verified),
         },
         'email_hint': user.email[:3] + '***' + user.email[user.email.find('@'):] if user.email else '',
@@ -5323,7 +5417,14 @@ def send_email_code(request: Request, bg: BackgroundTasks, user: User = Depends(
     _lang = resolve_user_language(explicit=user.preferred_lang,
                                   device=request.headers.get('accept-language', ''),
                                   country=user.country)
-    bg.add_task(send_email_otp, user.email, code, user.name, _lang)
+    # PRODUCTION READINESS AUDIT — this endpoint's entire purpose is
+    # sending a code, so unlike registration (where the account is
+    # already real either way) a failed send here means the request
+    # genuinely did not accomplish anything — fail clearly, same pattern
+    # as /verify/phone/send, instead of claiming "Code sent".
+    sent = send_email_otp(user.email, code, user.name, _lang)
+    if not sent:
+        raise HTTPException(503, 'No pudimos enviar el código por email en este momento. Intenta de nuevo en unos minutos.')
     return {'message': f'Code sent to {user.email}'}
 
 @app.post('/verify/email/confirm')
@@ -5352,7 +5453,15 @@ def send_phone_code(request: Request, user: User = Depends(get_current_user), db
     _lang = resolve_user_language(explicit=user.preferred_lang,
                                   device=request.headers.get('accept-language', ''),
                                   country=user.country)
-    send_sms_otp(user.phone, code, _lang)
+    # PRODUCTION READINESS AUDIT — this call is synchronous (unlike the
+    # email OTP paths, which are always fire-and-forget BackgroundTasks),
+    # so the real send result IS available here. Previously the response
+    # claimed success unconditionally; now a genuinely failed/unconfigured
+    # send is reported clearly instead of leaving the voter waiting on a
+    # code that was never sent.
+    sent = send_sms_otp(user.phone, code, _lang)
+    if not sent:
+        raise HTTPException(503, 'No pudimos enviar el SMS en este momento. Intenta de nuevo en unos minutos.')
     return {'message': f'SMS sent to {user.phone[-4:].rjust(8,"*")}'}
 
 @app.post('/verify/phone/confirm')
@@ -6707,6 +6816,12 @@ def _assign_user_tier_inner(user, db):
                         FROM commune_market_data WHERE country=:cc AND price_m2_avg > 0
                     """), {'cc': user_country_code, 'fx': _m2_factor}).fetchone()
                 except Exception:
+                    # PRODUCTION READINESS AUDIT — rollback before the
+                    # retry: without it, a failed PERCENTILE_CONT (e.g. on
+                    # a backend that doesn't support it) would leave the
+                    # session's transaction aborted and the very next
+                    # db.execute() below would itself fail.
+                    db.rollback()
                     _med_r = db.execute(text("""
                         SELECT AVG(price_m2_avg * :fx) FROM commune_market_data
                         WHERE country=:cc AND price_m2_avg > 0
@@ -6716,7 +6831,10 @@ def _assign_user_tier_inner(user, db):
                     _commune_price_usd = float(commune_data.price_m2_avg) * _m2_factor
                     _comm_index = (_commune_price_usd / _nat_m2) * 100.0
             except Exception:
-                pass
+                # PRODUCTION READINESS AUDIT — rollback: this function
+                # (socioeconomic tier assignment) runs during registration
+                # and keeps going afterward in the same request/session.
+                db.rollback()
 
         # β efectivo según edad (dob = 'YYYY-MM-DD')
         _user_age = None
@@ -7574,6 +7692,18 @@ def _match_campaigns(user, debate, db) -> list:
         _gni_by_country = {row[0]: float(row[1]) for row in _gni_rows}
         matrix = build_matrix_from_db(_row_dicts, _gni_by_country)
     except Exception as _e:
+        # PRODUCTION READINESS AUDIT — CRITICAL FIX. world_countries isn't
+        # a SQLAlchemy-managed table (created out-of-band) — if it's
+        # missing, the query above raised and this except caught it, but
+        # without a rollback the session's transaction stayed ABORTED.
+        # _match_campaigns runs on nearly every consultation view AND
+        # every vote (ad billing) — any later query in the SAME request
+        # after this function returns (e.g. saving AdImpressionLog, or
+        # the vote's own DebateVote insert) would then fail with
+        # psycopg2.errors.InFailedSqlTransaction, a seemingly unrelated
+        # 500. The fallback to the cached matrix file was already
+        # correct; only the missing rollback was the bug.
+        db.rollback()
         print(f'[_match_campaigns] live matrix build failed, falling back to cached file: {_e}')
         matrix = load_matrix()
     ranked = optimize_campaigns_for_debate(debate_dict, campaigns_dicts, matrix, max_ads=5)
@@ -8084,6 +8214,7 @@ def _cast_vote_inner(debate_id: int, data, user, db):
             'verify_code': 'DEMO-' + generate_verify_code(),
             'option': option,
             'blockchain_tx': 'demo-not-anchored',
+            'blockchain_anchored': False,
             'total_votes': debate.total_votes or 0,
             'current_results': current_counts,
             'reward_code': None,
@@ -8100,12 +8231,21 @@ def _cast_vote_inner(debate_id: int, data, user, db):
     bc_result = _blockchain.anchor_vote(debate_id, vote_hash, verify_code,
                                         debate_title=debate.title)
     blockchain_tx = bc_result['tx_hash']
+    # PRODUCTION READINESS AUDIT — bc_result['tx_hash'] is a deliberately
+    # "realistic-looking mock transaction hash" (blockchain.py's own
+    # docstring) whenever the real anchor didn't happen (RPC down, no
+    # wallet configured, contract error) — anchor_vote() never raises,
+    # it just sets success=False/live=False and still returns a
+    # same-shaped fake hash. blockchain_anchored is the real truth,
+    # computed here and never silently assumed True.
+    blockchain_anchored = bool(bc_result.get('success')) and bool(bc_result.get('live'))
     encrypted = encrypt_vote_aes(debate_id, option, {'country': 'CL'})
     vote = DebateVote(
         debate_id=debate_id, voter_id=None,
         option_index=data.option_index, option_text=option,
         verify_code=verify_code, vote_hash=vote_hash,
         encrypted_vote=encrypted, blockchain_tx=blockchain_tx,
+        blockchain_anchored=blockchain_anchored,
         vote_chain=json.dumps(data.vote_chain),
     )
     db.add(vote)
@@ -8243,6 +8383,11 @@ def _cast_vote_inner(debate_id: int, data, user, db):
         'verify_code': verify_code,
         'option': option,
         'blockchain_tx': blockchain_tx,
+        # PRODUCTION READINESS AUDIT — additive, truthful field. The
+        # frontend must check THIS before telling the voter their vote
+        # was anchored on-chain or linking to a block explorer — never
+        # infer it from blockchain_tx merely being present.
+        'blockchain_anchored': blockchain_anchored,
         'total_votes': debate.total_votes,
         'current_results': counts,
         'reward_code': reward_code,
@@ -8268,6 +8413,9 @@ def verify_vote(debate_id: int, data: VerifyVoteRequest, db: Session = Depends(g
         'your_vote': vote.option_text,
         'debate_title': debate.title if debate else '',
         'blockchain_tx': vote.blockchain_tx,
+        # NULL for any vote recorded before this column existed — never
+        # asserted True for historical rows we have no real evidence for.
+        'blockchain_anchored': vote.blockchain_anchored,
         'recorded_at': vote.created_at.isoformat(),
         'already_verified': vote.verified is not None,
         'legitimacy_score': debate.legitimacy_score if debate else 0,
@@ -8345,7 +8493,12 @@ def request_vote_otp(request: Request, user: User = Depends(get_current_user), d
     _lang = resolve_user_language(explicit=user.preferred_lang,
                                   device=request.headers.get('accept-language', ''),
                                   country=user.country)
-    send_sms_otp(user.phone, code, _lang)
+    # PRODUCTION READINESS AUDIT — same fix as /verify/phone/send: this
+    # call is synchronous, so report a real failure instead of claiming
+    # 'ok' unconditionally.
+    sent = send_sms_otp(user.phone, code, _lang)
+    if not sent:
+        raise HTTPException(503, 'No pudimos enviar el SMS en este momento. Intenta de nuevo en unos minutos.')
     masked = user.phone[-4:] if user.phone else '????'
     return {'ok': True, 'masked_phone': f'***{masked}'}
 
@@ -9302,7 +9455,10 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks,
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
                    expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
-    bg.add_task(send_email_otp, user.email, code, user.name, data.lang)
+    # PRODUCTION READINESS AUDIT — synchronous now (was bg.add_task); the
+    # 'email_sent' field below used to be a hardcoded True regardless of
+    # whether anything was actually sent.
+    email_sent = send_email_otp(user.email, code, user.name, data.lang)
 
     # Si necesita autorización de supervisor → enviar email al jefe
     if not data.is_supervisor and data.supervisor_email:
@@ -9325,7 +9481,7 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks,
         )
 
     verifications = {
-        'email_sent':   True,
+        'email_sent':   email_sent,
         'rut_verified': rut_ok,
         'rut_name':     rut_info.get('razon_social', ''),
         'domain_ok':    domain_ok,
@@ -9814,7 +9970,10 @@ def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Sess
     db.add(OTPCode(user_id=user.id, email=user.email, code=code, channel='email',
                    expires_at=datetime.utcnow() + timedelta(minutes=10)))
     db.commit()
-    bg.add_task(send_email_otp, user.email, code, user.name, data.lang)
+    # PRODUCTION READINESS AUDIT — synchronous now (was bg.add_task); the
+    # 'email_sent' field below used to be a hardcoded True regardless of
+    # whether anything was actually sent.
+    email_sent = send_email_otp(user.email, code, user.name, data.lang)
 
     # Si necesita autorización del jefe → email al jefe (con su propia cuenta verificada)
     if not data.is_supervisor and data.supervisor_email:
@@ -9838,7 +9997,7 @@ def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Sess
         )
 
     verifications = {
-        'email_sent':   True,
+        'email_sent':   email_sent,
         'category_ok':  cat_check['allowed'],
         'rut_verified': rut_ok,
         'rut_name':     rut_info.get('razon_social', ''),
@@ -15976,7 +16135,30 @@ COUNTRY_NAMES = {
     'BG':'Bulgaria','CY':'Cyprus','DK':'Denmark','EE':'Estonia','FI':'Finland',
     'HR':'Croatia','IE':'Ireland','LT':'Lithuania','LU':'Luxembourg','LV':'Latvia',
     'MT':'Malta','NO':'Norway','SE':'Sweden','SI':'Slovenia','SK':'Slovakia',
+    # PRODUCTION READINESS AUDIT — KE was present in voter_portal.html's
+    # old static registration dropdown but missing from this, the actual
+    # canonical country catalogue; adding it here (never removing it from
+    # the dropdown) is what keeps it from disappearing now that
+    # registration reads from this dict instead of its own static list.
+    'KE':'Kenya',
 }
+
+@app.get('/countries')
+def list_supported_countries():
+    """PRODUCTION READINESS AUDIT — the single canonical country
+    catalogue for VOTER REGISTRATION specifically. Deliberately exposes
+    COUNTRY_NAMES directly (not /marketer/countries, which is scoped to
+    whichever countries currently have CommuneMarketData rows — a data-
+    availability signal that has nothing to do with whether registration
+    should offer a country). No auth required: the registration screen
+    needs this before a user has any token. This does not touch, expand,
+    or reopen the paused GeoCountry/GeoUnit municipality-import project —
+    it is unrelated to geography; it only answers 'which countries can a
+    new voter pick at registration'."""
+    return {'countries': [
+        {'code': cc, 'name': name}
+        for cc, name in sorted(COUNTRY_NAMES.items(), key=lambda kv: kv[1])
+    ]}
 
 @app.get('/admin/audience-dashboard')
 def admin_audience_dashboard(secret: str, db: Session = Depends(get_db)):
@@ -16810,6 +16992,11 @@ def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
                         FROM commune_market_data WHERE country=:cc AND price_m2_avg > 0
                     """), {'cc': cc_, 'fx': _fx}).fetchone()
                 except Exception:
+                    # PRODUCTION READINESS AUDIT — rollback before retry:
+                    # without it, a failed PERCENTILE_CONT poisons the
+                    # session for the retry query below AND for every
+                    # later iteration of this same per-country loop.
+                    db.rollback()
                     r = db.execute(text("""
                         SELECT AVG(price_m2_avg * :fx) FROM commune_market_data
                         WHERE country=:cc AND price_m2_avg > 0
@@ -16817,7 +17004,10 @@ def admin_recompute_composite_income(secret: str, db: Session = Depends(get_db),
                 if r and r[0]:
                     nat_medians[cc_] = round(float(r[0]), 2)
             except Exception:
-                pass
+                # PRODUCTION READINESS AUDIT — rollback: this loop runs
+                # once per country; an unrolled-back failure here would
+                # cascade and break every remaining country's iteration.
+                db.rollback()
     except Exception:
         pass
 
@@ -17944,6 +18134,11 @@ def _reference_old_value(field: str, country: str, db) -> Optional[float]:
         ), {'cc': (country or '').upper()}).fetchone()
         return float(row[0]) if row and row[0] is not None else None
     except Exception:
+        # PRODUCTION READINESS AUDIT — same class of bug as
+        # _country_per_capita_ppp_usd: world_countries isn't guaranteed
+        # to exist, and returning without rollback would leave this
+        # caller's session poisoned for any later query in the same request.
+        db.rollback()
         return None
 
 
@@ -18281,6 +18476,11 @@ def admin_ppp_audit(secret: str, db: Session = Depends(get_db)):
         # La tabla puede no existir en un despliegue dado. Eso NO invalida la
         # auditoria: el resolvedor cae en la tabla PPP de referencia, asi que
         # el informe sigue describiendo el termometro realmente en uso.
+        # PRODUCTION READINESS AUDIT — rollback added: without it, this
+        # swallowed exception left the session's transaction aborted for
+        # any later query in the same request (same root cause found and
+        # fixed in _country_per_capita_ppp_usd).
+        db.rollback()
         table_error = f'world_countries unavailable: {e}'
     report = _diag.ppp_audit(stored, _ppp_reference_table())
     report['ok'] = True

@@ -382,84 +382,13 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
       <div class="field"><label>País</label>
         <select id="r-country" onchange="toggleCommuneField()">
           <option value="">— Selecciona tu país —</option>
-          <optgroup label="América Latina">
-            <option value="CL">🇨🇱 Chile</option>
-            <option value="AR">🇦🇷 Argentina</option>
-            <option value="MX">🇲🇽 México</option>
-            <option value="CO">🇨🇴 Colombia</option>
-            <option value="BR">🇧🇷 Brasil</option>
-            <option value="PE">🇵🇪 Perú</option>
-            <option value="EC">🇪🇨 Ecuador</option>
-            <option value="VE">🇻🇪 Venezuela</option>
-            <option value="UY">🇺🇾 Uruguay</option>
-            <option value="BO">🇧🇴 Bolivia</option>
-            <option value="PY">🇵🇾 Paraguay</option>
-            <option value="DO">🇩🇴 Rep. Dominicana</option>
-          </optgroup>
-          <optgroup label="Norteamérica">
-            <option value="US">🇺🇸 Estados Unidos</option>
-            <option value="CA">🇨🇦 Canadá</option>
-          </optgroup>
-          <optgroup label="Europa">
-            <option value="ES">🇪🇸 España</option>
-            <option value="GB">🇬🇧 Reino Unido</option>
-            <option value="FR">🇫🇷 Francia</option>
-            <option value="DE">🇩🇪 Alemania</option>
-            <option value="IT">🇮🇹 Italia</option>
-            <option value="PT">🇵🇹 Portugal</option>
-            <option value="NL">🇳🇱 Países Bajos</option>
-            <option value="CH">🇨🇭 Suiza</option>
-            <option value="SE">🇸🇪 Suecia</option>
-            <option value="NO">🇳🇴 Noruega</option>
-            <option value="BE">🇧🇪 Bélgica</option>
-            <option value="AT">🇦🇹 Austria</option>
-            <option value="PL">🇵🇱 Polonia</option>
-            <option value="CZ">🇨🇿 República Checa</option>
-            <option value="RO">🇷🇴 Rumanía</option>
-            <option value="GR">🇬🇷 Grecia</option>
-            <option value="HU">🇭🇺 Hungría</option>
-            <option value="FI">🇫🇮 Finlandia</option>
-            <option value="DK">🇩🇰 Dinamarca</option>
-            <option value="IE">🇮🇪 Irlanda</option>
-            <option value="SK">🇸🇰 Eslovaquia</option>
-            <option value="RU">🇷🇺 Rusia</option>
-          </optgroup>
-          <optgroup label="Asia &amp; Oceanía">
-            <option value="CN">🇨🇳 China</option>
-            <option value="JP">🇯🇵 Japón</option>
-            <option value="IN">🇮🇳 India</option>
-            <option value="KR">🇰🇷 Corea del Sur</option>
-            <option value="AU">🇦🇺 Australia</option>
-            <option value="NZ">🇳🇿 Nueva Zelanda</option>
-            <option value="SG">🇸🇬 Singapur</option>
-            <option value="HK">🇭🇰 Hong Kong</option>
-            <option value="TW">🇹🇼 Taiwán</option>
-            <option value="MY">🇲🇾 Malasia</option>
-            <option value="TH">🇹🇭 Tailandia</option>
-            <option value="ID">🇮🇩 Indonesia</option>
-            <option value="PH">🇵🇭 Filipinas</option>
-            <option value="VN">🇻🇳 Vietnam</option>
-          </optgroup>
-          <optgroup label="Medio Oriente">
-            <option value="AE">🇦🇪 Emiratos Árabes</option>
-            <option value="SA">🇸🇦 Arabia Saudita</option>
-            <option value="QA">🇶🇦 Qatar</option>
-            <option value="KW">🇰🇼 Kuwait</option>
-            <option value="IL">🇮🇱 Israel</option>
-            <option value="JO">🇯🇴 Jordania</option>
-            <option value="IQ">🇮🇶 Irak</option>
-            <option value="IR">🇮🇷 Irán</option>
-          </optgroup>
-          <optgroup label="África">
-            <option value="ZA">🇿🇦 Sudáfrica</option>
-            <option value="NG">🇳🇬 Nigeria</option>
-            <option value="KE">🇰🇪 Kenia</option>
-            <option value="EG">🇪🇬 Egipto</option>
-            <option value="MA">🇲🇦 Marruecos</option>
-            <option value="SN">🇸🇳 Senegal</option>
-            <option value="CI">🇨🇮 Costa de Marfil</option>
-            <option value="CM">🇨🇲 Camerún</option>
-          </optgroup>
+          <!-- PRODUCTION READINESS AUDIT — options populated dynamically
+               by loadRegistrationCountries() from GET /countries (backed
+               by main.py's COUNTRY_NAMES, the canonical catalogue), not
+               hand-maintained here. This fixes the audit finding that
+               this static list disagreed with the canonical catalogue
+               (e.g. Luxembourg was missing) and would silently regress
+               again if maintained by hand in two places. -->
         </select>
       </div>
       <div class="field" id="commune-field" style="position:relative;">
@@ -1964,6 +1893,42 @@ function communeSearch(val) {
     } catch(e) { box.style.display = 'none'; }
   }, 250);
 }
+
+// PRODUCTION READINESS AUDIT — registration's country list now comes
+// from the canonical catalogue (GET /countries, backed by main.py's
+// COUNTRY_NAMES) instead of a hand-maintained static <option> list that
+// had silently drifted out of sync with it (e.g. Luxembourg was missing
+// even though it's a fully supported country elsewhere in the product).
+function countryFlagEmoji(code) {
+  if (!code || code.length !== 2) return '🏳️';
+  return String.fromCodePoint(...[...code.toUpperCase()].map(c => 127397 + c.charCodeAt(0)));
+}
+async function loadRegistrationCountries() {
+  const sel = document.getElementById('r-country');
+  if (!sel) return;
+  try {
+    const r = await fetch(`${API}/countries`);
+    const d = await r.json();
+    const countries = d.countries || [];
+    if (!countries.length) return;
+    const placeholder = sel.querySelector('option[value=""]');
+    sel.innerHTML = '';
+    if (placeholder) sel.appendChild(placeholder);
+    countries.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.code;
+      opt.textContent = `${countryFlagEmoji(c.code)} ${c.name}`;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    // Network/API failure — leave whatever the placeholder option already
+    // offers rather than leaving the field completely empty; registration
+    // for the majority of users (CL default elsewhere in this file) is
+    // unaffected since the rest of the form doesn't require this to have
+    // loaded successfully.
+  }
+}
+document.addEventListener('DOMContentLoaded', loadRegistrationCountries);
 
 function selectCommune(name) {
   const input = document.getElementById('r-commune');
@@ -3702,10 +3667,16 @@ async function showVoteSuccess(data, optIdx) {
     }
   } catch(_) {}
 
-  // Accuracy stats: % of votes anchored on blockchain
+  // Accuracy stats: % of votes anchored on blockchain.
+  // PRODUCTION READINESS AUDIT — this used to read `data.blockchain_tx
+  // ? '100%' : 'N/A'`, but blockchain_tx is ALWAYS present (anchor_vote()
+  // fabricates a same-shaped mock hash on any failure) — it always
+  // showed "100%" regardless of whether anchoring actually happened.
+  // Must check blockchain_anchored, the real computed truth, not merely
+  // whether a tx string exists.
   const accuracy = data.blockchain_accuracy != null
     ? `${Math.round(data.blockchain_accuracy * 100)}%`
-    : data.blockchain_tx ? '100%' : 'N/A';
+    : data.blockchain_anchored ? '100%' : 'N/A';
 
   // Premio/descuento de la marca — código único del pool + descripción del debate
   const rewardCode = data.reward_code || '';
@@ -3753,15 +3724,30 @@ async function showVoteSuccess(data, optIdx) {
     ? `shareViaWhatsAppWithReward('${esc(currentDebate?.title||'')}','${esc(currentDebate?.inst_name||'')}',${debId},'${esc(rewardDesc)}')`
     : `shareViaWhatsApp('${esc(currentDebate?.title||'')}','${esc(currentDebate?.inst_name||'')}',${debId})`;
 
+  // PRODUCTION READINESS AUDIT — this card used to unconditionally claim
+  // "Voto registrado en blockchain" / "fue anclado en Polygon Mainnet"
+  // and link to a real PolygonScan URL, even when blockchain_tx was a
+  // mock hash (anchor_vote() returns one, in the exact same format as a
+  // real tx, on any RPC/wallet/contract failure — never raises). The
+  // vote itself is always real and persisted either way; only the
+  // on-chain anchoring claim must now match reality.
+  const isAnchored = !!data.blockchain_anchored;
+  const successTitle = isAnchored ? 'Voto registrado en blockchain' : 'Voto registrado';
+  const successBody = isAnchored
+    ? `Tu voto por <strong>"${esc(option)}"</strong> fue anclado en Polygon Mainnet. Tu identidad está verificada — tu privacidad protegida.`
+    : `Tu voto por <strong>"${esc(option)}"</strong> fue registrado. El anclaje en blockchain está pendiente de confirmación — tu voto ya quedó guardado y cuenta igual.`;
+  const explorerLink = (isAnchored && data.blockchain_tx)
+    ? `<a class="verify-link" href="https://polygonscan.com/tx/${data.blockchain_tx}" target="_blank" rel="noopener">Ver en Polygon blockchain ↗</a>`
+    : '';
   content.innerHTML = `
     <div class="success-card">
       <div class="success-icon">✓</div>
-      <div class="success-title">Voto registrado en blockchain</div>
-      <div class="success-text">Tu voto por <strong>"${esc(option)}"</strong> fue anclado en Polygon Mainnet. Tu identidad está verificada — tu privacidad protegida.</div>
+      <div class="success-title">${successTitle}</div>
+      <div class="success-text">${successBody}</div>
       ${rewardHtml}
       <div class="vcode-box">${esc(vcode)}</div>
       <div class="vcode-label">Guarda este código — te permitirá verificar cómo fue contabilizado tu voto cuando termine el período de votación</div>
-      ${data.blockchain_tx ? `<a class="verify-link" href="https://polygonscan.com/tx/${data.blockchain_tx}" target="_blank" rel="noopener">Ver en Polygon blockchain ↗</a>` : ''}
+      ${explorerLink}
       <div style="display:flex;gap:10px;margin-top:14px;">
         <button onclick="${waShareFn}"
           class="share-btn share-btn-wa" style="flex:1;padding:13px;">
