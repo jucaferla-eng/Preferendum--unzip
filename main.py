@@ -8473,11 +8473,19 @@ def get_my_vote(debate_id: int,
     vote = db.query(DebateVote).filter(
         DebateVote.verify_code == log.verify_code
     ).first()
+    # VOTE-VERIFICATION AUDIT — removed a dead 'reward_code' field. DebateVote
+    # has no reward_code column (reward codes live on DebateRewardCode,
+    # claimed at vote-casting time but never linked back to the specific
+    # vote/voter that claimed them), so `hasattr(vote, 'reward_code')` was
+    # always False and this field always returned '' regardless of whether
+    # a reward was actually issued — a false "no reward" rather than an
+    # honest "not tracked here". No current frontend reads this endpoint
+    # (confirmed via repo-wide search), so removing it changes no observed
+    # behavior; keeping a field that can never report the truth would.
     return {
         'has_voted': True,
         'verify_code': log.verify_code,
         'option': vote.option_text if vote else '',
-        'reward_code': vote.reward_code if vote and hasattr(vote, 'reward_code') else '',
     }
 
 

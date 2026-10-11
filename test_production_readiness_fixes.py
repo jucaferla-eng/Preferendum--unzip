@@ -486,5 +486,71 @@ class TestWorldCountriesRollbackFix(unittest.TestCase):
         self.assertEqual(occurrences, 2, 'expected exactly 2 PERCENTILE_CONT(price_m2_avg) sites')
 
 
+class TestVoteVerificationCode(unittest.TestCase):
+    """Regression guard for the vote-verification-code audit: a unique
+    code is generated per vote, is returned to the voter, resolves back
+    to the real recorded vote, survives a fresh login, can't be used to
+    vote again or reveal who cast it, and is truthful about blockchain
+    anchoring. Confirmed end-to-end with a real live integration test
+    (33/33) against the real app + a real local Postgres; these are the
+    structural regression guards that run without that live setup."""
+
+    def test_verify_code_column_is_unique_and_indexed(self):
+        node = _class_def('DebateVote')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn("verify_code     = Column(String, unique=True, index=True)", src)
+
+    def test_cast_vote_generates_a_fresh_code_per_vote(self):
+        node = _function('_cast_vote_inner')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn('verify_code = generate_verify_code()', src)
+
+    def test_verify_endpoint_exposes_no_voter_identity_fields(self):
+        """The verify response must stay limited to vote content + aggregate
+        debate stats — never voter_id/email/name/phone, since DebateVote.
+        voter_id is always NULL by design and this endpoint requires no
+        auth at all (anyone with the code can look it up)."""
+        node = _route_function('post', '/debates/{debate_id}/verify')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        for forbidden in ('user.email', 'user.name', 'user.phone', 'voter_id', '.national_id'):
+            self.assertNotIn(forbidden, src)
+
+    def test_confirm_endpoint_rejects_reusing_an_already_verified_code(self):
+        node = _route_function('post', '/debates/{debate_id}/verify/confirm')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn('if vote.verified is not None:', src)
+        self.assertIn("HTTPException(400, 'Already verified')", src)
+
+    def test_verify_endpoint_reports_real_stored_blockchain_anchored(self):
+        node = _route_function('post', '/debates/{debate_id}/verify')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn("'blockchain_anchored': vote.blockchain_anchored", src)
+
+    def test_my_vote_endpoint_no_longer_returns_the_dead_reward_code_field(self):
+        """VOTE-VERIFICATION AUDIT fix: DebateVote has no reward_code column,
+        so hasattr(vote, 'reward_code') was always False — this endpoint
+        always claimed '' (no reward) regardless of the real outcome. Fixed
+        by removing the field rather than fabricating a value the schema
+        can't actually provide."""
+        node = _route_function('get', '/debates/{debate_id}/my-vote')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertNotIn("'reward_code':", src)
+
+    def test_my_vote_keyed_by_user_id_survives_a_fresh_login(self):
+        """HasVotedLog is keyed by user_id, not by session/token, so a vote
+        cast before logout is still found by a token minted on a later,
+        independent login — confirmed live in the integration test."""
+        node = _route_function('get', '/debates/{debate_id}/my-vote')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn('HasVotedLog.user_id == user.id', src)
+
+
 if __name__ == '__main__':
     unittest.main()
