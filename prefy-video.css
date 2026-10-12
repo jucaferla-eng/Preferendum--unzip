@@ -72,6 +72,7 @@
 .prefy-video-close:hover { color: #f0f4ff; }
 
 .prefy-video-stage {
+  position: relative;
   background: #000;
   aspect-ratio: 9 / 16;
   max-height: 55vh;
@@ -85,6 +86,73 @@
   object-fit: contain;
   background: #000;
 }
+
+/* Shown only while actively buffering toward a play attempt (not merely
+   while the panel is open and idle — the <video poster> attribute alone
+   covers that resting state). */
+.prefy-video-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.45);
+}
+.prefy-video-loading[hidden] { display: none; }
+
+.prefy-video-spinner {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #2d6eff;
+  animation: prefy-video-spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .prefy-video-spinner { animation: none; }
+}
+@keyframes prefy-video-spin {
+  to { transform: rotate(360deg); }
+}
+
+.prefy-video-progress-track {
+  width: 70%;
+  max-width: 180px;
+  height: 5px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.2);
+  overflow: hidden;
+}
+.prefy-video-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: #2d6eff;
+  transition: width 0.2s ease;
+}
+.prefy-video-progress-label {
+  color: #f0f4ff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.prefy-video-conn-notice {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(45, 30, 10, 0.85);
+  border: 1px solid rgba(255, 180, 80, 0.4);
+  color: #ffd9a0;
+  font-size: 11px;
+  line-height: 1.3;
+  text-align: center;
+}
+.prefy-video-conn-notice[hidden] { display: none; }
 
 .prefy-video-controls {
   display: flex;
@@ -103,6 +171,7 @@
   cursor: pointer;
 }
 .prefy-video-btn:active { background: #223049; }
+.prefy-video-btn:disabled { opacity: 0.6; cursor: default; }
 .prefy-video-play { background: #2d6eff; border-color: #2d6eff; }
 .prefy-video-play:active { background: #2559d1; }
 
