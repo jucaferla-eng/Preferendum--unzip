@@ -32,6 +32,9 @@ TREE = ast.parse(SRC)
 VOTER_HTML = Path(__file__).with_name('voter_portal.html')
 VOTER_SRC = VOTER_HTML.read_text(encoding='utf-8')
 
+APP_JS_SRC = Path(__file__).with_name('App.js').read_text(encoding='utf-8')
+APP_JSON_SRC = Path(__file__).with_name('app.json').read_text(encoding='utf-8')
+
 
 def _function(name):
     for node in ast.walk(TREE):
@@ -1129,6 +1132,225 @@ class TestFaceDuplicateCheckFailsClosed(unittest.TestCase):
         finally:
             conn_a.close()
             conn_b.close()
+class TestConsultationNotificationsDesign(unittest.TestCase):
+    """Regression guard for the approved consultation-notifications design:
+    opt-in (off by default), email (reusing the REAL existing provider,
+    not the stale 'SendGrid' mentioned only in this file's own top-of-file
+    docstring) + Expo push for iOS/Android, daily/weekly frequency, no
+    duplicate notifications, no leaked targeting criteria, and complete
+    structural separation from the sponsored-campaign invitation system."""
+
+    def test_notify_columns_opt_in_off_by_default(self):
+        node = _class_def('User')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn("notify_new_consultations = Column(Boolean, default=False)", src)
+        self.assertIn("notify_frequency", src)
+
+    def test_notify_columns_have_idempotent_migration_entries(self):
+        self.assertIn("('notify_new_consultations', 'BOOLEAN DEFAULT FALSE')", SRC)
+        self.assertIn("('notify_frequency', \"TEXT DEFAULT 'daily'\")", SRC)
+
+    def test_device_push_token_and_notification_log_tables_exist(self):
+        self.assertIsNotNone(_class_def('DevicePushToken'))
+        self.assertIsNotNone(_class_def('ConsultationNotificationLog'))
+
+    def test_notification_prefs_endpoints_are_self_only(self):
+        get_node = _route_function('get', '/profile/notifications')
+        post_node = _route_function('post', '/profile/notifications')
+        self.assertIsNotNone(get_node)
+        self.assertIsNotNone(post_node)
+        self.assertIn('get_current_user', _src_of(get_node))
+        self.assertIn('get_current_user', _src_of(post_node))
+
+    def test_notification_prefs_rejects_invalid_frequency(self):
+        node = _route_function('post', '/profile/notifications')
+        self.assertIn("not in ('daily', 'weekly')", _src_of(node))
+
+    def test_push_token_registration_is_self_only(self):
+        node = _route_function('post', '/devices/register-push-token')
+        self.assertIsNotNone(node)
+        self.assertIn('get_current_user', _src_of(node))
+
+    def test_unsubscribe_token_is_structurally_distinct_from_login_tokens(self):
+        """The whole point of NOT reusing make_token: a stolen/forwarded
+        unsubscribe link must never work as a bearer auth token, even
+        though both are signed with the same SECRET."""
+        make_fn = _function('make_unsubscribe_token')
+        verify_fn = _function('_verify_unsubscribe_token')
+        self.assertIsNotNone(make_fn)
+        self.assertIsNotNone(verify_fn)
+        self.assertIn("'purpose': 'unsubscribe_notifications'", _src_of(make_fn))
+        self.assertIn("payload.get('purpose') != 'unsubscribe_notifications'", _src_of(verify_fn))
+
+    def test_unsubscribe_endpoint_requires_no_login(self):
+        node = _route_function('get', '/notifications/unsubscribe')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertNotIn('get_current_user', src)
+        self.assertIn('_verify_unsubscribe_token', src)
+        self.assertIn('user.notify_new_consultations = False', src)
+
+    def test_unsubscribe_token_behaves_correctly_end_to_end(self):
+        """Real behavioral check (not just structural): a token minted by
+        make_unsubscribe_token actually verifies, a tampered/foreign token
+        does not, and the SAME-looking real login token (make_token) is
+        correctly rejected by the unsubscribe verifier."""
+        import jwt as _jwt
+        SECRET_FOR_TEST = 'test-secret-only'
+        ns = {
+            'jwt': _jwt, 'datetime': __import__('datetime').datetime,
+            'timedelta': __import__('datetime').timedelta, 'SECRET': SECRET_FOR_TEST,
+        }
+        exec(_src_of(_function('make_unsubscribe_token')), ns)
+        exec(_src_of(_function('_verify_unsubscribe_token')), ns)
+        exec(_src_of(_function('make_token')), ns)
+        good_token = ns['make_unsubscribe_token'](42)
+        self.assertEqual(ns['_verify_unsubscribe_token'](good_token), 42)
+        login_token = ns['make_token'](42)
+        self.assertIsNone(ns['_verify_unsubscribe_token'](login_token))
+        self.assertIsNone(ns['_verify_unsubscribe_token']('not-a-real-token'))
+
+    def test_email_sender_reuses_the_real_working_provider_not_sendgrid(self):
+        """Every mention of "SendGrid" in this file is a comment (the
+        stale top-of-file docstring, plus this new feature's own comment
+        explaining why it deliberately does NOT use it) — never an actual
+        import or API call. This new feature must reuse _send_html_email
+        (the real, working Resend+Gmail path), not invent a dependency on
+        a provider that was never integrated."""
+        self.assertNotIn('import sendgrid', SRC)
+        self.assertNotIn('SendGridAPIClient', SRC)
+        self.assertNotIn('SENDGRID_API_KEY', SRC)
+        node = _function('send_consultation_notification_email')
+        self.assertIsNotNone(node)
+        self.assertIn('_send_html_email(', _src_of(node))
+
+    def test_notification_email_never_leaks_targeting_criteria(self):
+        """Privacy requirement: the email may name consultations by title,
+        but must never explain WHY the recipient matched (age/income/
+        occupation/commune) — that logic lives only in eligibility.py and
+        must never be echoed back to the user."""
+        node = _function('send_consultation_notification_email')
+        src = _src_of(node)
+        for leaky_term in ('target_age', 'target_se_tiers', 'target_professions',
+                           'income_min_usd', 'income_max_usd', 'scope_commune'):
+            self.assertNotIn(leaky_term, src)
+
+    def test_notification_email_includes_unsubscribe_link(self):
+        node = _function('send_consultation_notification_email')
+        self.assertIn('/notifications/unsubscribe?token=', _src_of(node))
+
+    def test_push_sender_uses_expo_unified_api_for_both_platforms(self):
+        node = _function('send_consultation_push_notification')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn('https://exp.host/--/api/v2/push/send', src)
+
+    def test_push_notification_body_never_leaks_targeting_criteria(self):
+        node = _function('send_consultation_push_notification')
+        src = _src_of(node)
+        for leaky_term in ('target_age', 'target_se_tiers', 'target_professions', 'income_min_usd'):
+            self.assertNotIn(leaky_term, src)
+
+    def test_digest_reuses_the_single_discovery_path(self):
+        """Must call _eligible_debates_for — the SAME function the in-app
+        feed uses (CHANGE-002) — never a separate/duplicate matching
+        query that could silently diverge from what the feed shows."""
+        node = _function('_notify_consultation_digest_for_user')
+        self.assertIsNotNone(node)
+        self.assertIn('_eligible_debates_for(user, db', _src_of(node))
+
+    def test_digest_checks_notification_log_before_sending(self):
+        node = _function('_notify_consultation_digest_for_user')
+        src = _src_of(node)
+        self.assertIn('already_notified', src)
+        self.assertIn("if d.get('id') not in already_notified", src)
+
+    def test_digest_respects_weekly_frequency_gate(self):
+        node = _function('_notify_consultation_digest_for_user')
+        src = _src_of(node)
+        self.assertIn("freq == 'weekly'", src)
+        self.assertIn('timedelta(days=7)', src)
+
+    def test_digest_writes_notification_log_only_after_actually_sending(self):
+        """The log entry (which prevents ever re-notifying about this
+        debate) must only be written once a send actually succeeded —
+        never written speculatively before the attempt, and never
+        skipped silently after a successful send."""
+        node = _function('_notify_consultation_digest_for_user')
+        src = _src_of(node)
+        self.assertIn('if not (email_sent or push_sent):\n        return False', src)
+        self.assertIn('ConsultationNotificationLog(user_id=user.id,', src)
+
+    def test_sweep_job_only_queries_opted_in_users(self):
+        node = _function('_run_consultation_notifications_job')
+        self.assertIsNotNone(node)
+        self.assertIn('User.notify_new_consultations == True', _src_of(node))
+
+    def test_sweep_job_never_touches_sponsored_campaign_tables(self):
+        """Structural proof of the required separation: the sweep job and
+        its digest helper must never actually QUERY AdCampaign/
+        SponsorInvitee (explanatory comments are free to name them, as
+        this file's own docstrings do, to document the separation) —
+        those stay on their own, completely separate, already-existing
+        invitation path."""
+        for fn_name in ('_run_consultation_notifications_job', '_notify_consultation_digest_for_user'):
+            src = _src_of(_function(fn_name))
+            for forbidden in ('db.query(AdCampaign', 'db.query(SponsorInvitee',
+                              'FROM ad_campaigns', 'FROM sponsor_invitees'):
+                self.assertNotIn(forbidden, src, f'{fn_name} must never query {forbidden}')
+
+    def test_scheduler_registers_the_new_job_at_a_distinct_time(self):
+        self.assertIn("_run_consultation_notifications_job,", SRC)
+        self.assertIn("CronTrigger(hour=7, minute=30)", SRC)
+        self.assertIn("id='consultation_notifications'", SRC)
+
+    def test_push_token_endpoint_reassigns_existing_token_without_duplicating(self):
+        node = _route_function('post', '/devices/register-push-token')
+        src = _src_of(node)
+        self.assertIn('existing = db.query(DevicePushToken)', src)
+        self.assertIn('existing.user_id = user.id', src)
+
+    def test_voter_portal_notifications_card_defaults_unchecked(self):
+        """The checkbox markup itself carries no `checked` attribute —
+        the ONLY source of truth for its state is loadMyNotificationPrefs
+        reading the real backend value, never an HTML default."""
+        self.assertIn('id="notify-enabled-input" onchange="onNotifyEnabledChange()"', VOTER_SRC)
+        self.assertNotIn('id="notify-enabled-input" checked', VOTER_SRC)
+
+    def test_voter_portal_loads_real_prefs_not_an_optimistic_default(self):
+        node_src = VOTER_SRC[VOTER_SRC.index('async function loadMyNotificationPrefs'):
+                              VOTER_SRC.index('function onNotifyEnabledChange')]
+        self.assertIn("enabled.checked = !!d.notify_new_consultations;", node_src)
+
+    def test_voter_portal_wired_into_profile_tab_load(self):
+        self.assertIn('loadMyNotificationPrefs();', VOTER_SRC)
+
+    def test_voter_portal_only_requests_push_permission_after_explicit_opt_in(self):
+        """The ReactNativeWebView bridge call must be gated on the
+        checkbox being newly checked AND the save having succeeded —
+        never fired unconditionally on page load."""
+        node_src = VOTER_SRC[VOTER_SRC.index('async function saveMyNotificationPrefs'):
+                              VOTER_SRC.index("window.addEventListener('message'")]
+        self.assertIn('if (enabled.checked && window.ReactNativeWebView)', node_src)
+
+    def test_app_js_only_requests_permission_on_explicit_bridge_message(self):
+        self.assertIn("msg.type === 'request_push_permission'", APP_JS_SRC)
+        self.assertIn('_requestExpoPushTokenAndBridgeBack(webRef)', APP_JS_SRC)
+
+    def test_app_js_never_requests_permission_on_mount_or_app_open(self):
+        """Regression guard against the easiest way to violate consent:
+        calling the permission function from a useEffect (app-open) path
+        instead of only from the onMessage bridge handler. The function
+        NAME appears exactly twice in the whole file — its own
+        definition, and the single call site inside onMessage — proving
+        there is no second (e.g. useEffect) call site anywhere."""
+        self.assertEqual(APP_JS_SRC.count('_requestExpoPushTokenAndBridgeBack'), 2)
+        for effect_block in re.findall(r'useEffect\(\(\) => \{.*?\n  \}, \[\]\);', APP_JS_SRC, re.DOTALL):
+            self.assertNotIn('_requestExpoPushTokenAndBridgeBack', effect_block)
+
+    def test_app_json_declares_the_notifications_plugin(self):
+        self.assertIn('"expo-notifications"', APP_JSON_SRC)
 
 
 if __name__ == '__main__':

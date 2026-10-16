@@ -246,6 +246,12 @@ class User(Base):
     # display/communication language only.
     preferred_lang  = Column(String, default='')
     created_at      = Column(DateTime, default=datetime.utcnow)
+    # CONSULTATION NOTIFICATIONS DESIGN — opt-in, OFF by default (explicit
+    # consent requirement). Only ever changed by the user themselves via
+    # POST /profile/notifications, the same self-only pattern already used
+    # by /profile/profession. frequency only matters when the flag is True.
+    notify_new_consultations = Column(Boolean, default=False)
+    notify_frequency         = Column(String, default='daily')  # 'daily' | 'weekly'
 
 class OTPCode(Base):
     __tablename__ = 'otp_codes'
@@ -452,6 +458,39 @@ class DocSerialVoteLog(Base):
     debate_id   = Column(Integer, index=True, nullable=False)
     serial_hash = Column(String, index=True, nullable=False)
     created_at  = Column(DateTime, default=datetime.utcnow)
+
+class DevicePushToken(Base):
+    """CONSULTATION NOTIFICATIONS DESIGN — one Expo push token per
+    registered device, so a backend sweep can reach the native iOS/Android
+    app (both platforms share one Expo push API — no separate APNs/FCM
+    handling here). A user with no row here simply gets no push, email
+    only; registering is independent of (and never required for) the
+    email channel."""
+    __tablename__ = 'device_push_tokens'
+    id              = Column(Integer, primary_key=True)
+    user_id         = Column(Integer, index=True, nullable=False)
+    expo_push_token = Column(String, unique=True, index=True, nullable=False)
+    platform        = Column(String, default='')  # 'ios' | 'android'
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    last_seen_at    = Column(DateTime, default=datetime.utcnow)
+
+class ConsultationNotificationLog(Base):
+    """CONSULTATION NOTIFICATIONS DESIGN — one row per (user, debate) ever
+    notified about, across either channel. Checked BEFORE sending (never
+    notify the same person about the same consultation twice) and written
+    AFTER sending — same "keyed by user, checked before acting" shape
+    already proven by HasVotedLog/SimVoteLog above, applied here to avoid
+    duplicate/mass notifications instead of duplicate votes. Sponsored
+    campaigns are a completely separate table (ad_campaigns/SponsorInvitee)
+    never read by the sweep that writes here, so the two invitation
+    systems structurally cannot double-notify the same person about the
+    same thing."""
+    __tablename__ = 'consultation_notification_log'
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, index=True, nullable=False)
+    debate_id  = Column(Integer, index=True, nullable=False)
+    channel    = Column(String, default='email')  # 'email' | 'push'
+    sent_at    = Column(DateTime, default=datetime.utcnow)
 
 class SafetyReport(Base):
     """Google Play Child Safety Standards — user/public reports of unsafe
@@ -1069,7 +1108,10 @@ def _migrate():
                           ('hnw_source', "TEXT DEFAULT ''"),
                           ('referral_code', 'TEXT'),
                           ('referred_by_user_id', 'INTEGER'),
-                          ('tier_pre_evaluated', 'BOOLEAN DEFAULT FALSE')]:
+                          ('tier_pre_evaluated', 'BOOLEAN DEFAULT FALSE'),
+                          # CONSULTATION NOTIFICATIONS DESIGN — opt-in, off by default.
+                          ('notify_new_consultations', 'BOOLEAN DEFAULT FALSE'),
+                          ('notify_frequency', "TEXT DEFAULT 'daily'")]:
             if col not in existing_user_cols:
                 try:
                     conn.execute(text(f'ALTER TABLE users ADD COLUMN {col} {defn}'))
@@ -1865,8 +1907,15 @@ try:
         replace_existing=True,
         misfire_grace_time=3600,
     )
+    _scheduler.add_job(
+        _run_consultation_notifications_job,
+        CronTrigger(hour=7, minute=30),  # 7:30 AM UTC todos los días — distinto de los otros 3 horarios
+        id='consultation_notifications',
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
     _scheduler.start()
-    print('[Scheduler] ✅ Scheduler activo — debates diarios 7:00 AM UTC | lifestyle lunes 8:00 AM | precios 2 enero')
+    print('[Scheduler] ✅ Scheduler activo — debates diarios 7:00 AM UTC | avisos de consultas 7:30 AM UTC | lifestyle lunes 8:00 AM | precios 2 enero')
 except Exception as _sched_err:
     print(f'[Scheduler] ⚠️ No se pudo iniciar scheduler: {_sched_err}')
 
@@ -2651,6 +2700,242 @@ def set_my_profession(data: ProfileProfessionInput,
     user.profession = prof
     db.commit()
     return _profession_display(user.profession, db)
+
+
+# ══════════════════════════════════════════════════════════════
+# CONSULTATION NOTIFICATIONS DESIGN — opt-in digest of newly-eligible
+# consultations, by email (always) and Expo push (if a device token is
+# registered). Approved design: discovery stays available in-app
+# (unchanged, _eligible_debates_for below); this is an ADDITIONAL channel,
+# never a replacement, and never a bypass of cast_vote's own eligibility
+# re-check. Off by default — a user only ever sees this because they
+# turned it on themselves, from their own profile (self-only, same shape
+# as /profile/profession above).
+# ══════════════════════════════════════════════════════════════
+
+class ProfileNotificationsInput(BaseModel):
+    notify_new_consultations: bool
+    notify_frequency: str = 'daily'
+
+
+@app.get('/profile/notifications')
+def get_my_notification_prefs(user: User = Depends(get_current_user)):
+    """Self-only — matches /profile/profession's exact shape."""
+    return {
+        'notify_new_consultations': bool(user.notify_new_consultations),
+        'notify_frequency': user.notify_frequency or 'daily',
+    }
+
+
+@app.post('/profile/notifications')
+def set_my_notification_prefs(data: ProfileNotificationsInput,
+                               user: User = Depends(get_current_user),
+                               db: Session = Depends(get_db)):
+    """The ONLY write path for these two columns (besides the unsubscribe
+    link below, which only ever turns the flag OFF) — self-only, exactly
+    like set_my_profession. Turning this on is the explicit consent
+    requirement; there is no other way it becomes True."""
+    if data.notify_frequency not in ('daily', 'weekly'):
+        raise HTTPException(400, "notify_frequency debe ser 'daily' o 'weekly'")
+    user.notify_new_consultations = bool(data.notify_new_consultations)
+    user.notify_frequency = data.notify_frequency
+    db.commit()
+    return {
+        'notify_new_consultations': user.notify_new_consultations,
+        'notify_frequency': user.notify_frequency,
+    }
+
+
+class RegisterPushTokenInput(BaseModel):
+    expo_push_token: str
+    platform: str = ''
+
+
+@app.post('/devices/register-push-token')
+def register_push_token(data: RegisterPushTokenInput,
+                         user: User = Depends(get_current_user),
+                         db: Session = Depends(get_db)):
+    """Called by the app ONLY after the user has already opted in via
+    /profile/notifications and granted the native OS permission — the
+    backend never requests a token proactively. A token already on file
+    (e.g. a reinstalled app, or a device that changed owner) is simply
+    reassigned to whoever is calling now, which is how Expo itself expects
+    tokens to be handled."""
+    token = (data.expo_push_token or '').strip()
+    if not token:
+        raise HTTPException(400, 'expo_push_token requerido')
+    existing = db.query(DevicePushToken).filter(DevicePushToken.expo_push_token == token).first()
+    if existing:
+        existing.user_id = user.id
+        existing.platform = data.platform or existing.platform
+        existing.last_seen_at = datetime.utcnow()
+    else:
+        db.add(DevicePushToken(user_id=user.id, expo_push_token=token, platform=data.platform or ''))
+    db.commit()
+    return {'ok': True}
+
+
+def make_unsubscribe_token(user_id: int) -> str:
+    """Deliberately NOT make_token: an unsubscribe link needs no login,
+    sits in an email inbox far longer than any session should, and must
+    never double as a general bearer token even though it is signed with
+    the same SECRET. The 'purpose' claim is what makes that structurally
+    impossible — _verify_unsubscribe_token below rejects anything that
+    isn't exactly this, including a real, valid, unexpired login token."""
+    payload = {
+        'sub': str(user_id),
+        'purpose': 'unsubscribe_notifications',
+        'exp': datetime.utcnow() + timedelta(days=90),
+    }
+    return jwt.encode(payload, SECRET, algorithm='HS256')
+
+
+def _verify_unsubscribe_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET, algorithms=['HS256'])
+    except Exception:
+        return None
+    if payload.get('purpose') != 'unsubscribe_notifications':
+        return None
+    try:
+        return int(payload['sub'])
+    except Exception:
+        return None
+
+
+@app.get('/notifications/unsubscribe')
+def unsubscribe_from_consultation_notifications(token: str, db: Session = Depends(get_db)):
+    """No login required by design — this is a link clicked from an
+    email, exactly like every other one-click-unsubscribe. Can only ever
+    turn notify_new_consultations OFF; never any other field."""
+    user_id = _verify_unsubscribe_token(token)
+    if not user_id:
+        raise HTTPException(400, 'Enlace inválido o vencido')
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, 'Usuario no encontrado')
+    user.notify_new_consultations = False
+    db.commit()
+    return HTMLResponse(
+        '<html><body style="font-family:sans-serif;text-align:center;padding:60px;color:#0f172a;">'
+        '<h2>Listo</h2><p>Ya no recibirás avisos de nuevas consultas por correo ni notificación push.</p>'
+        '<p style="color:#64748b;font-size:13px;">Puedes volver a activarlos en cualquier momento desde tu perfil.</p>'
+        '</body></html>'
+    )
+
+
+def send_consultation_notification_email(user, debates: list, unsubscribe_token: str) -> bool:
+    """Reuses _send_html_email — the SAME Resend-then-Gmail delivery path
+    already configured and working for OTP/sponsor emails. There is no
+    SendGrid integration actually wired up anywhere in this codebase (only
+    a stale mention in this file's own top-of-file docstring, from before
+    Resend replaced it) — this intentionally reuses what is REALLY
+    configured today rather than a provider that was never integrated."""
+    titles = [d.get('title', '') for d in debates if d.get('title')][:10]
+    items_html = ''.join(f'<li style="margin-bottom:6px;">{t}</li>' for t in titles)
+    unsubscribe_url = f'https://preferendum-unzip-d2zd.onrender.com/notifications/unsubscribe?token={unsubscribe_token}'
+    subject = ('Nueva consulta en Preferendum' if len(debates) == 1
+               else f'{len(debates)} nuevas consultas en Preferendum')
+    html = (
+        f'<div style="font-family:sans-serif;padding:40px;background:#07090f;color:#fff;border-radius:12px;">'
+        f'<h1 style="color:#2563eb;">prefer<span style="color:#fff">endum</span></h1>'
+        f'<p>Hola{f" {user.name}" if user.name else ""}, hay consulta(s) nueva(s) en las que podrías participar:</p>'
+        f'<ul style="color:#e2e8f0;">{items_html}</ul>'
+        f'<p style="color:#94a3b8;">Abre la app para revisar — tu elegibilidad siempre se confirma de nuevo al momento de votar.</p>'
+        f'<p style="color:#475569;font-size:12px;"><a href="{unsubscribe_url}" style="color:#64748b;">Dejar de recibir estos avisos</a></p>'
+        f'</div>'
+    )
+    return _send_html_email(user.email, subject, html)
+
+
+def send_consultation_push_notification(expo_push_token: str, debates: list) -> bool:
+    """Expo's unified push API — one HTTP call reaches BOTH iOS and
+    Android, no separate APNs/FCM handling in this codebase. Body text
+    stays generic (count only, never WHY the person matched) for the same
+    privacy reason the email omits targeting criteria."""
+    title = 'Preferendum'
+    body = ('Hay una nueva consulta en la que podrías participar' if len(debates) == 1
+            else f'Hay {len(debates)} nuevas consultas en las que podrías participar')
+    try:
+        resp = _requests.post(
+            'https://exp.host/--/api/v2/push/send',
+            json={'to': expo_push_token, 'title': title, 'body': body, 'sound': 'default'},
+            headers={'Content-Type': 'application/json', 'Accept': 'application/json'},
+            timeout=10,
+        )
+        return resp.status_code == 200
+    except Exception as e:
+        print(f'[Expo Push Error] {e}')
+        return False
+
+
+def _notify_consultation_digest_for_user(user, db) -> bool:
+    """Returns True only if a digest was actually sent (email and/or
+    push) — the caller uses this to decide whether to log anything at
+    all. Reuses _eligible_debates_for (CHANGE-002's single discovery
+    path) so a user is never notified about a consultation the in-app
+    feed itself would not show them."""
+    freq = user.notify_frequency or 'daily'
+    if freq == 'weekly':
+        last_row = (db.query(ConsultationNotificationLog.sent_at)
+                    .filter(ConsultationNotificationLog.user_id == user.id)
+                    .order_by(ConsultationNotificationLog.sent_at.desc()).first())
+        if last_row and (datetime.utcnow() - last_row[0]) < timedelta(days=7):
+            return False  # not due yet this week
+
+    already_notified = {row[0] for row in db.query(ConsultationNotificationLog.debate_id)
+                         .filter(ConsultationNotificationLog.user_id == user.id).all()}
+    eligible = _eligible_debates_for(user, db, status='live', limit=50)
+    new_ones = [d for d in eligible if d.get('id') not in already_notified]
+    if not new_ones:
+        return False
+
+    unsub_token = make_unsubscribe_token(user.id)
+    email_sent = send_consultation_notification_email(user, new_ones, unsub_token)
+
+    push_sent = False
+    device = db.query(DevicePushToken).filter(DevicePushToken.user_id == user.id).first()
+    if device:
+        push_sent = send_consultation_push_notification(device.expo_push_token, new_ones)
+
+    if not (email_sent or push_sent):
+        return False
+    now = datetime.utcnow()
+    for d in new_ones:
+        if email_sent:
+            db.add(ConsultationNotificationLog(user_id=user.id, debate_id=d['id'], channel='email', sent_at=now))
+        if push_sent:
+            db.add(ConsultationNotificationLog(user_id=user.id, debate_id=d['id'], channel='push', sent_at=now))
+    db.commit()
+    return True
+
+
+def _run_consultation_notifications_job():
+    """Scheduled job (see the scheduler block) — runs once daily; each
+    user's OWN notify_frequency decides whether this particular run
+    actually sends them anything (see _notify_consultation_digest_for_user).
+    Reads ONLY the Debate table via _eligible_debates_for — sponsored
+    campaigns (ad_campaigns/SponsorInvitee) are a completely separate
+    table and invitation system this function never touches, so the two
+    cannot double-notify the same person about the same thing."""
+    try:
+        from database import SessionLocal as _SL
+    except Exception as e:
+        print(f'[Scheduler] consultation_notifications: no DB session factory: {e}')
+        return
+    db = _SL()
+    try:
+        users = db.query(User).filter(User.notify_new_consultations == True).all()
+        sent_count = 0
+        for user in users:
+            try:
+                if _notify_consultation_digest_for_user(user, db):
+                    sent_count += 1
+            except Exception as e:
+                print(f'[Scheduler] consultation_notifications: error for user {user.id}: {e}')
+        print(f'[Scheduler] consultation_notifications: {sent_count} digest(s) enviado(s) de {len(users)} usuario(s) suscrito(s)')
+    finally:
+        db.close()
 
 
 # ══════════════════════════════════════════════════════════════

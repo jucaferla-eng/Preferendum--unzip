@@ -3,6 +3,8 @@ import { SafeAreaView, StyleSheet, ActivityIndicator, View, Text, AppState, Link
 import { WebView } from 'react-native-webview';
 import { useState, useRef, useEffect } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 
 const BG      = '#0a0d14';
 const ACCENT  = '#2d6eff';
@@ -104,6 +106,41 @@ function resolveNativeLanguage(bridgedLang, deviceTag) {
   return GLOBAL_FALLBACK_LANGUAGE;
 }
 
+// CONSULTATION NOTIFICATIONS DESIGN — only ever called in response to the
+// web page's OWN request_push_permission message, which it only sends
+// right after the user has explicitly turned the setting on in their
+// profile. Never requested on app open, never requested proactively —
+// the OS permission prompt and the app's own consent are the same
+// moment, not two separate asks.
+async function _requestExpoPushTokenAndBridgeBack(webRef) {
+  try {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let finalStatus = existing;
+    if (existing !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') return;  // user declined — email channel still works regardless
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    const tokenResponse = await Notifications.getExpoPushTokenAsync(
+      projectId ? { projectId } : undefined
+    );
+    const token = tokenResponse?.data;
+    if (!token || !webRef.current) return;
+    // Platform.OS is a NATIVE value — resolved here, before building the
+    // string that gets injected INTO the WebView's own JS engine (which
+    // has no react-native module access at all).
+    const payload = JSON.stringify({ type: 'expo_push_token', token, platform: Platform.OS });
+    webRef.current.injectJavaScript(`
+      window.postMessage(${JSON.stringify(payload)}, '*');
+      true;
+    `);
+  } catch (e) {
+    // Best-effort — the email channel is the primary, always-working path;
+    // a push-token failure here must never surface as an app error.
+  }
+}
+
 export default function App() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState(false);
@@ -187,6 +224,12 @@ export default function App() {
             if (msg && msg.type === 'preferendum:langchange' && msg.lang) {
               setNativeLang(resolveNativeLanguage(msg.lang, getDeviceLanguageTag()));
               SecureStore.setItemAsync(BRIDGED_LANG_KEY, msg.lang).catch(() => {});
+            }
+            // CONSULTATION NOTIFICATIONS DESIGN — sent by voter_portal.html
+            // immediately after the user turns the setting ON in their
+            // profile (never before, never on app open).
+            if (msg && msg.type === 'request_push_permission') {
+              _requestExpoPushTokenAndBridgeBack(webRef);
             }
           } catch (err) { /* not our message shape — ignore */ }
         }}

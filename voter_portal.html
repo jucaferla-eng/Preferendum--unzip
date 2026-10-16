@@ -612,6 +612,26 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
         <div id="profession-save-msg" style="font-size:12px;margin-bottom:8px;"></div>
         <button class="btn" onclick="saveMyProfession()" style="width:100%;">Guardar profesión</button>
       </div>
+      <!-- CONSULTATION NOTIFICATIONS DESIGN — off by default; this card is
+           the ONLY place that turns it on (besides the unsubscribe link in
+           the email itself, which only ever turns it off). -->
+      <div class="detail-card" style="margin-top:12px;">
+        <div style="font-size:14px;font-weight:600;color:#060810;margin-bottom:4px;">Avisos de nuevas consultas</div>
+        <div style="font-size:12px;color:#7a7570;margin-bottom:12px;">Recibe un aviso cuando aparezca una consulta nueva en la que puedas participar. Siempre puedes desactivarlo.</div>
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer;">
+          <input type="checkbox" id="notify-enabled-input" onchange="onNotifyEnabledChange()">
+          <span style="font-size:14px;color:#060810;">Avisarme por correo y notificación push</span>
+        </label>
+        <div id="notify-frequency-row" style="display:none;margin-bottom:10px;">
+          <label style="font-size:12px;color:#7a7570;display:block;margin-bottom:4px;">Frecuencia</label>
+          <select id="notify-frequency-select" style="width:100%;padding:8px 10px;border:1.5px solid #e5e7eb;border-radius:8px;background:#fff;color:#060810;font-size:14px;box-sizing:border-box;">
+            <option value="daily">Diaria (como máximo un resumen al día)</option>
+            <option value="weekly">Semanal (como máximo un resumen a la semana)</option>
+          </select>
+        </div>
+        <div id="notify-save-msg" style="font-size:12px;margin-bottom:8px;"></div>
+        <button class="btn" onclick="saveMyNotificationPrefs()" style="width:100%;">Guardar preferencia</button>
+      </div>
       <div class="detail-card" style="margin-top:12px;">
         <div style="font-size:14px;font-weight:600;color:#060810;margin-bottom:4px;">Seguridad y reportes</div>
         <div style="font-size:12px;color:#7a7570;margin-bottom:12px;">Consulta nuestros estándares de seguridad infantil o reporta un problema, sin salir de la app.</div>
@@ -2478,6 +2498,7 @@ function navTo(tab) {
     setActiveTab('tab-profile');
     loadMyVotes();
     loadMyProfession();
+    loadMyNotificationPrefs();
     // Update verification card status
     const verifyStatus = document.getElementById('verify-identity-status');
     const verifyBtn = document.getElementById('verify-identity-btn');
@@ -2608,6 +2629,78 @@ async function saveMyProfession() {
     msg.textContent = 'Error de conexión.';
   }
 }
+
+// CONSULTATION NOTIFICATIONS DESIGN — same load/save shape as
+// loadMyProfession/saveMyProfession above. Off by default: the checkbox
+// only ever reflects what the backend actually has stored, never an
+// optimistic guess.
+async function loadMyNotificationPrefs() {
+  const enabled = document.getElementById('notify-enabled-input');
+  const freqRow = document.getElementById('notify-frequency-row');
+  const freqSel = document.getElementById('notify-frequency-select');
+  if (!enabled || !token) return;
+  try {
+    const r = await fetch(`${API}/profile/notifications`, {headers: {'Authorization': 'Bearer ' + token}});
+    const d = await r.json();
+    enabled.checked = !!d.notify_new_consultations;
+    freqSel.value = d.notify_frequency || 'daily';
+    freqRow.style.display = enabled.checked ? 'block' : 'none';
+  } catch(e) {
+    // Leave the default (unchecked) rather than show stale/incorrect data.
+  }
+}
+
+function onNotifyEnabledChange() {
+  const enabled = document.getElementById('notify-enabled-input');
+  document.getElementById('notify-frequency-row').style.display = enabled.checked ? 'block' : 'none';
+}
+
+async function saveMyNotificationPrefs() {
+  const enabled = document.getElementById('notify-enabled-input');
+  const freqSel = document.getElementById('notify-frequency-select');
+  const msg = document.getElementById('notify-save-msg');
+  msg.style.color = '#7a7570';
+  msg.textContent = 'Guardando…';
+  try {
+    const r = await fetch(`${API}/profile/notifications`, {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: JSON.stringify({notify_new_consultations: enabled.checked, notify_frequency: freqSel.value})
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.style.color = '#dc2626'; msg.textContent = d.detail || 'Error al guardar.'; return; }
+    msg.style.color = '#16a34a';
+    msg.textContent = '✓ Preferencia guardada.';
+    // MOBILE PUSH BRIDGE — only ever requested AFTER the user has just
+    // explicitly turned this on, never on app open. window.ReactNativeWebView
+    // only exists inside the wrapped iOS/Android app (undefined on plain
+    // web), so this is a no-op there by construction.
+    if (enabled.checked && window.ReactNativeWebView) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({type: 'request_push_permission'}));
+    }
+  } catch(e) {
+    msg.style.color = '#dc2626';
+    msg.textContent = 'Error de conexión.';
+  }
+}
+
+window.addEventListener('message', async function(e) {
+  // MOBILE PUSH BRIDGE — the native side replies here with the Expo push
+  // token once the user has granted the OS permission (see App.js). Only
+  // ever registers it if the user is actually logged in; silently ignored
+  // otherwise (e.g. the message arrives before login finishes).
+  let data;
+  try { data = JSON.parse(e.data); } catch(err) { return; }
+  if (data && data.type === 'expo_push_token' && data.token && token) {
+    try {
+      await fetch(`${API}/devices/register-push-token`, {
+        method: 'POST',
+        headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+        body: JSON.stringify({expo_push_token: data.token, platform: data.platform || ''})
+      });
+    } catch(err) { /* best-effort — email channel still works regardless */ }
+  }
+});
 
 function showDetailView() {
   document.getElementById('debates-view').style.display = 'none';
