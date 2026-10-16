@@ -891,6 +891,94 @@ class TestPrefy480pSwitchover(unittest.TestCase):
         src = _src_of(node)
         self.assertIn('_prefy_s3_presigned_url(context, lang)', src)
         self.assertIn('_prefy_video_github_release_url', src)
+class TestStudentOccupationSuggestion(unittest.TestCase):
+    """Regression guard for the "Estudiante"/"Student" suggestion added to
+    the occupation/profession autocomplete (registration AND profile
+    editing). Being a student is not a BLS paid occupation, so this must
+    stay a purely client-side, cosmetic suggestion — never added to the
+    backend BLS catalog, and never resolvable to a SOC code/income tier.
+    Real browser-interaction behavior (typing, clicking, both fields, both
+    languages, BLS-search regression) is covered separately by a jsdom
+    harness run manually this session, not part of this dependency-free
+    suite — see the PR description / session notes for that run's output."""
+
+    def test_estudiante_and_student_never_resolve_to_a_soc_code(self):
+        """The single most important invariant: selecting/typing the
+        student suggestion must NEVER fabricate an income tier. Covers
+        both languages, both genders' Spanish spelling habits, and
+        case-insensitivity, matching how resolve_occupation_soc is
+        actually invoked elsewhere (raw, unnormalized user text)."""
+        for term in ('Estudiante', 'estudiante', 'ESTUDIANTE', 'Student', 'student', 'STUDENT'):
+            self.assertEqual(socioeconomic.resolve_occupation_soc(term), '', term)
+            res = socioeconomic.resolve_occupation_candidates(term)
+            self.assertEqual(res.status, socioeconomic.OccupationResolution.UNRESOLVED, term)
+
+    def test_student_pseudo_entry_is_client_side_only_never_in_backend_catalog(self):
+        """api_list_occupations (the backend catalog /api/occupations
+        itself feeds) must never gain a hardcoded student/pseudo entry —
+        it is strictly occupation_unified's real BLS rows. The pseudo
+        entry lives ONLY in voter_portal.html's client-side _loadOccData,
+        appended AFTER the real fetch, never sent to or sourced from the
+        server."""
+        node = _route_function('get', '/api/occupations')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertNotIn('Estudiante', src)
+        self.assertNotIn('Student', src)
+        self.assertIn('occupation_unified', src)
+
+    def test_voter_portal_appends_student_entry_client_side_with_null_code(self):
+        """code: null (not a real/fabricated SOC code) is what makes this
+        structurally impossible to accidentally feed into income
+        estimation downstream — occupation_unified rows always carry a
+        real, non-null SOC code; this entry deliberately never does."""
+        self.assertIn("_occData = _occData.concat([{", VOTER_SRC)
+        self.assertIn("code: null,", VOTER_SRC)
+        self.assertIn("title: 'Student',", VOTER_SRC)
+        self.assertIn("aliases_es: ['estudiante'],", VOTER_SRC)
+
+    def test_profession_edit_field_gained_its_own_search_wiring(self):
+        """The profile-editing field (previously a bare text input with no
+        suggestions at all) now has the same catalog available, via its
+        own self-contained function — kept separate from _setupOccSearch
+        so the registration field's existing, already-tested behavior is
+        never put at risk by this change."""
+        self.assertIn('function _setupProfessionEditSearch()', VOTER_SRC)
+        self.assertIn("window.addEventListener('DOMContentLoaded', _setupProfessionEditSearch);", VOTER_SRC)
+        self.assertIn('profession-edit-results', VOTER_SRC)
+
+    def test_profession_edit_suggestion_click_only_fills_free_text(self):
+        """Mirrors the registration field's own guarantee: a clicked
+        suggestion in profile editing can only ever set the visible,
+        human-readable label text — never a code, never something hidden
+        the user can't see and keep editing."""
+        node_src = VOTER_SRC[VOTER_SRC.index('function _setupProfessionEditSearch()'):
+                              VOTER_SRC.index('window.addEventListener', VOTER_SRC.index('function _setupProfessionEditSearch()'))]
+        self.assertIn('input.value = item.dataset.label;', node_src)
+        self.assertNotIn('item.dataset.code', node_src)
+
+    def test_existing_registration_search_function_untouched_by_this_change(self):
+        """_setupOccSearch's own body (registration field) must still
+        contain every literal line TestProfessionFieldFreeText already
+        pins — this change added a NEW function instead of modifying the
+        existing one, specifically to keep that guarantee trivially true."""
+        self.assertIn("document.getElementById('r-profession').value = this.value.trim();", VOTER_SRC)
+        self.assertIn("document.getElementById('r-profession').value = item.dataset.label;", VOTER_SRC)
+        self.assertIn("input.value = item.dataset.label;", VOTER_SRC)
+
+    def test_student_suggestion_reachable_via_shared_occ_data_loader(self):
+        """Both fields share ONE _loadOccData()/_occNorm() pair — the
+        student entry is appended exactly once, so both the registration
+        and profile-edit suggestion lists stay in sync automatically
+        (no separate catalog to maintain, no risk of one field getting
+        the suggestion and the other silently not)."""
+        self.assertEqual(VOTER_SRC.count("_occData = _occData.concat([{"), 1)
+        occ_search_body = VOTER_SRC[VOTER_SRC.index('function _setupOccSearch()'):
+                                     VOTER_SRC.index('window.addEventListener', VOTER_SRC.index('function _setupOccSearch()'))]
+        self.assertIn('_loadOccData()', occ_search_body)
+        edit_body = VOTER_SRC[VOTER_SRC.index('function _setupProfessionEditSearch()'):
+                               VOTER_SRC.index('window.addEventListener', VOTER_SRC.index('function _setupProfessionEditSearch()'))]
+        self.assertIn('_loadOccData()', edit_body)
 
 
 if __name__ == '__main__':
