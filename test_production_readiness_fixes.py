@@ -981,5 +981,113 @@ class TestStudentOccupationSuggestion(unittest.TestCase):
         self.assertIn('_loadOccData()', edit_body)
 
 
+class TestFaceDuplicateCheckFailsClosed(unittest.TestCase):
+    """SECURITY POLICY CHANGE: if identity can't be verified OR the
+    duplicate-face check can't be completed, the face-vote token must
+    NOT be issued (and therefore the vote can never be counted — cast_vote
+    requires this exact token for every selfie_verified user). Previously
+    this path was fail-OPEN (an error was logged but the token was issued
+    anyway). Must also be retryable with no permanent lock/data loss, and
+    safe under near-simultaneous requests for the same consultation."""
+
+    def test_duplicate_check_now_raises_instead_of_silently_continuing(self):
+        node = _function('get_face_vote_token')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertNotIn('non-fatal error (not blocking vote)', src)
+        self.assertIn("raise HTTPException(503, 'No pudimos confirmar que tu rostro sea único", src)
+
+    def test_no_database_write_happens_before_the_fail_closed_point(self):
+        """Proves this is genuinely retryable with zero data loss: nothing
+        in this function is persisted to the DB (no db.add/db.commit) —
+        the only side effects are the Rekognition calls themselves and a
+        pure, local JWT encode at the very end. A failure here leaves
+        nothing behind to clean up or that blocks a fresh attempt."""
+        node = _function('get_face_vote_token')
+        src = _src_of(node)
+        self.assertNotIn('db.add(', src)
+        self.assertNotIn('db.commit(', src)
+
+    def test_duplicate_check_sequence_is_serialized_per_debate(self):
+        node = _function('get_face_vote_token')
+        src = _src_of(node)
+        self.assertIn('with _voter_face_debate_lock(debate_id):', src)
+
+    def test_lock_helper_real_concurrency_behavior(self):
+        """REAL concurrency test (actual threads, not simulated) against
+        the extracted real lock-acquisition function: two threads racing
+        for the SAME debate_id must never execute their critical section
+        at the same time; two threads for DIFFERENT debate_ids must NOT
+        block each other (so one slow consultation can't stall voting on
+        every other consultation)."""
+        import threading
+        import time
+        ns = {'threading': threading}
+        exec(_src_of(_function('_voter_face_debate_lock')), ns)
+        # The function reads/writes the two module-level globals that sit
+        # right above it in the real file — recreate them in this
+        # namespace exactly as the real module does.
+        ns['_VOTER_FACE_DEBATE_LOCKS'] = {}
+        ns['_VOTER_FACE_DEBATE_LOCKS_GUARD'] = threading.Lock()
+        get_lock = ns['_voter_face_debate_lock']
+
+        overlap_detected = []
+        in_critical_section = {'count': 0}
+        cs_guard = threading.Lock()
+
+        def worker(debate_id, barrier):
+            barrier.wait()
+            with get_lock(debate_id):
+                with cs_guard:
+                    in_critical_section['count'] += 1
+                    if in_critical_section['count'] > 1:
+                        overlap_detected.append(True)
+                time.sleep(0.05)
+                with cs_guard:
+                    in_critical_section['count'] -= 1
+
+        # Same debate_id — must never overlap.
+        barrier = threading.Barrier(2)
+        threads = [threading.Thread(target=worker, args=(42, barrier)) for _ in range(2)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+        self.assertEqual(overlap_detected, [], 'two requests for the SAME debate overlapped in the critical section')
+
+        # Different debate_ids — must NOT serialize against each other.
+        start = time.time()
+        barrier2 = threading.Barrier(2)
+        threads2 = [threading.Thread(target=worker, args=(i, barrier2)) for i in (100, 200)]
+        for t in threads2: t.start()
+        for t in threads2: t.join()
+        elapsed = time.time() - start
+        self.assertLess(elapsed, 0.09, 'different debates should run concurrently (~0.05s), not serialized (~0.10s)')
+
+    def test_lock_releases_even_after_an_exception_inside_it(self):
+        """RECOVERY: a failure mid-check must never leave the lock held
+        forever (which would permanently block every future attempt to
+        vote on that same consultation, for everyone) — Python's `with`
+        statement already guarantees release-on-exception, but this
+        proves it concretely for THIS specific lock helper rather than
+        trusting the language feature blindly."""
+        import threading
+        ns = {'threading': threading}
+        exec(_src_of(_function('_voter_face_debate_lock')), ns)
+        ns['_VOTER_FACE_DEBATE_LOCKS'] = {}
+        ns['_VOTER_FACE_DEBATE_LOCKS_GUARD'] = threading.Lock()
+        get_lock = ns['_voter_face_debate_lock']
+
+        lock = get_lock(7)
+        try:
+            with lock:
+                raise RuntimeError('simulated Rekognition failure mid-check')
+        except RuntimeError:
+            pass
+        # A fresh attempt for the SAME debate must acquire immediately —
+        # no deadlock, no permanent block.
+        acquired = get_lock(7).acquire(timeout=1.0)
+        self.assertTrue(acquired, 'lock was not released after the exception — this would permanently block voting on this consultation')
+        get_lock(7).release()
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -7018,6 +7018,28 @@ def _rekognition_client():
 _VOTER_FACE_COLLECTION = 'preferendum-voters'
 _voter_face_collection_ready = False
 
+import threading
+_VOTER_FACE_DEBATE_LOCKS: dict = {}
+_VOTER_FACE_DEBATE_LOCKS_GUARD = threading.Lock()
+
+def _voter_face_debate_lock(debate_id: int) -> threading.Lock:
+    """FACE-DUPLICATE-CHECK SECURITY HARDENING — serializes the
+    search-then-index sequence (below) per debate, so two near-
+    simultaneous requests for the SAME consultation can never both pass
+    the duplicate-face search before either has indexed, which would let
+    the same real face vote twice under two different accounts. Only
+    covers concurrency WITHIN one process — this app currently runs as a
+    single uvicorn worker (see Procfile/render.yaml, no --workers flag),
+    so this is real protection today; if that ever changes to multiple
+    processes/instances, this in-process lock would need to become a
+    distributed one (e.g. a Postgres advisory lock) to keep covering it."""
+    with _VOTER_FACE_DEBATE_LOCKS_GUARD:
+        lock = _VOTER_FACE_DEBATE_LOCKS.get(debate_id)
+        if lock is None:
+            lock = threading.Lock()
+            _VOTER_FACE_DEBATE_LOCKS[debate_id] = lock
+        return lock
+
 def _ensure_voter_face_collection(rek):
     """Crea la colección de caras de votantes si no existe todavía — idempotente.
     ExternalImageId de cada cara indexada = '{debate_id}_{user_id}', para poder
@@ -8156,36 +8178,53 @@ async def get_face_vote_token(
             rekognition_mode = 'no_match'
             raise HTTPException(400, 'Tu cara no coincide con la registrada. Intenta con mejor iluminación.')
 
-        # Bloqueo por cara duplicada: ¿esta misma cara ya votó en esta consulta,
-        # bajo una cuenta distinta? Usa una Face Collection de Rekognition —
-        # busca la cara contra todas las ya indexadas, en vez de comparar una por una.
-        try:
-            _ensure_voter_face_collection(rek)
-            search = rek.search_faces_by_image(
-                CollectionId=_VOTER_FACE_COLLECTION,
-                Image={'Bytes': contents},
-                FaceMatchThreshold=90.0,
-                MaxFaces=20,
-            )
-            for m in search.get('FaceMatches', []):
-                ext_id = m.get('Face', {}).get('ExternalImageId', '')
-                if '_' not in ext_id:
-                    continue
-                ext_debate, ext_user = ext_id.split('_', 1)
-                if ext_debate == str(debate_id) and ext_user != str(user.id):
-                    raise HTTPException(409, 'Esta cara ya fue usada para votar en esta consulta, con otra cuenta.')
-            rek.index_faces(
-                CollectionId=_VOTER_FACE_COLLECTION,
-                Image={'Bytes': contents},
-                ExternalImageId=f'{debate_id}_{user.id}',
-                MaxFaces=1,
-                QualityFilter='NONE',
-                DetectionAttributes=[],
-            )
-        except HTTPException:
-            raise
-        except Exception as _e:
-            print(f'[face-dup-check] non-fatal error (not blocking vote): {_e}')
+        # SECURITY POLICY (fail-closed) — ¿esta misma cara ya votó en esta
+        # consulta, bajo una cuenta distinta? Usa una Face Collection de
+        # Rekognition — busca la cara contra todas las ya indexadas, en vez
+        # de comparar una por una.
+        #
+        # Si la identidad no se puede verificar O el chequeo de duplicados
+        # no se puede completar (por cualquier motivo — AWS caído,
+        # throttling, error de permisos), NO se emite el token de voto. Esto
+        # reemplaza el comportamiento anterior (fail-OPEN: un error aquí
+        # dejaba votar igual, solo con un log). No se persiste nada en la
+        # base de datos en ningún punto de esta función — fallar aquí es
+        # 100% reintentable sin pérdida de datos ni bloqueo permanente: el
+        # usuario simplemente vuelve a intentar.
+        #
+        # El candado por debate_id serializa esta secuencia (buscar ->
+        # indexar) para que dos solicitudes casi simultáneas de la MISMA
+        # consulta nunca puedan pasar ambas la búsqueda antes de que
+        # cualquiera haya indexado — ver _voter_face_debate_lock.
+        with _voter_face_debate_lock(debate_id):
+            try:
+                _ensure_voter_face_collection(rek)
+                search = rek.search_faces_by_image(
+                    CollectionId=_VOTER_FACE_COLLECTION,
+                    Image={'Bytes': contents},
+                    FaceMatchThreshold=90.0,
+                    MaxFaces=20,
+                )
+                for m in search.get('FaceMatches', []):
+                    ext_id = m.get('Face', {}).get('ExternalImageId', '')
+                    if '_' not in ext_id:
+                        continue
+                    ext_debate, ext_user = ext_id.split('_', 1)
+                    if ext_debate == str(debate_id) and ext_user != str(user.id):
+                        raise HTTPException(409, 'Esta cara ya fue usada para votar en esta consulta, con otra cuenta.')
+                rek.index_faces(
+                    CollectionId=_VOTER_FACE_COLLECTION,
+                    Image={'Bytes': contents},
+                    ExternalImageId=f'{debate_id}_{user.id}',
+                    MaxFaces=1,
+                    QualityFilter='NONE',
+                    DetectionAttributes=[],
+                )
+            except HTTPException:
+                raise
+            except Exception as _e:
+                print(f'[face-dup-check] error — blocking face-token issuance (fail-closed, safe to retry): {_e}')
+                raise HTTPException(503, 'No pudimos confirmar que tu rostro sea único para esta consulta en este momento. Intenta de nuevo en unos segundos.')
     except HTTPException:
         raise
     except ClientError:
