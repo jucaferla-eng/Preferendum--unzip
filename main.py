@@ -1907,15 +1907,8 @@ try:
         replace_existing=True,
         misfire_grace_time=3600,
     )
-    _scheduler.add_job(
-        _run_consultation_notifications_job,
-        CronTrigger(hour=7, minute=30),  # 7:30 AM UTC todos los días — distinto de los otros 3 horarios
-        id='consultation_notifications',
-        replace_existing=True,
-        misfire_grace_time=3600,
-    )
     _scheduler.start()
-    print('[Scheduler] ✅ Scheduler activo — debates diarios 7:00 AM UTC | avisos de consultas 7:30 AM UTC | lifestyle lunes 8:00 AM | precios 2 enero')
+    print('[Scheduler] ✅ Scheduler activo — debates diarios 7:00 AM UTC | lifestyle lunes 8:00 AM | precios 2 enero')
 except Exception as _sched_err:
     print(f'[Scheduler] ⚠️ No se pudo iniciar scheduler: {_sched_err}')
 
@@ -2917,13 +2910,17 @@ def _run_consultation_notifications_job():
     Reads ONLY the Debate table via _eligible_debates_for — sponsored
     campaigns (ad_campaigns/SponsorInvitee) are a completely separate
     table and invitation system this function never touches, so the two
-    cannot double-notify the same person about the same thing."""
-    try:
-        from database import SessionLocal as _SL
-    except Exception as e:
-        print(f'[Scheduler] consultation_notifications: no DB session factory: {e}')
-        return
-    db = _SL()
+    cannot double-notify the same person about the same thing.
+
+    BUG FOUND BY THE INTEGRATION TEST (fixed here): this originally wrote
+    `from database import SessionLocal as _SL`, copying
+    _run_annual_rental_prices_job's pattern — but no `database` module
+    exists anywhere in this repo (confirmed: ModuleNotFoundError). The
+    real SessionLocal is defined at module level in THIS file (line 88),
+    already in scope here with no import needed. (The older job this was
+    copied from has the same bug, pre-existing and out of scope for this
+    change — worth a separate look.)"""
+    db = SessionLocal()
     try:
         users = db.query(User).filter(User.notify_new_consultations == True).all()
         sent_count = 0
@@ -2936,6 +2933,24 @@ def _run_consultation_notifications_job():
         print(f'[Scheduler] consultation_notifications: {sent_count} digest(s) enviado(s) de {len(users)} usuario(s) suscrito(s)')
     finally:
         db.close()
+
+# Registered HERE, after the function exists, rather than inside the
+# AUTO-SCHEDULER block above — adding it there referenced this function
+# before it was defined (NameError), which silently killed the ENTIRE
+# scheduler, including the three pre-existing jobs. Caught by a local
+# integration test; `_scheduler` is still the same module-level object
+# started above, just extended once it has something valid to add.
+try:
+    _scheduler.add_job(
+        _run_consultation_notifications_job,
+        CronTrigger(hour=7, minute=30),  # 7:30 AM UTC todos los días — distinto de los otros 3 horarios
+        id='consultation_notifications',
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    print('[Scheduler] ✅ consultation_notifications añadido — avisos de consultas 7:30 AM UTC')
+except NameError:
+    print('[Scheduler] ⚠️ consultation_notifications no añadido — el scheduler no llegó a iniciarse')
 
 
 # ══════════════════════════════════════════════════════════════

@@ -1287,6 +1287,41 @@ class TestConsultationNotificationsDesign(unittest.TestCase):
         self.assertIsNotNone(node)
         self.assertIn('User.notify_new_consultations == True', _src_of(node))
 
+    def test_sweep_job_uses_the_real_module_level_session_local_not_a_fake_import(self):
+        """BUG FOUND BY A LOCAL INTEGRATION TEST: this originally imported
+        a `database` module that doesn't exist anywhere in this repo —
+        the scheduled job would have silently done nothing, forever. The
+        real SessionLocal is module-level in main.py itself (confirmed:
+        `SessionLocal = sessionmaker(bind=engine)` near the top of the
+        file) — no import needed."""
+        self.assertIn('SessionLocal = sessionmaker(bind=engine)', SRC)
+        node = _function('_run_consultation_notifications_job')
+        src = _src_of(node)
+        # The old bug is only mentioned in the DOCSTRING now (explaining
+        # WHY the fix was needed) — check there's no actual AST import
+        # node, not just a text substring (which would also match prose).
+        real_imports = [n for n in ast.walk(node) if isinstance(n, (ast.Import, ast.ImportFrom))]
+        self.assertEqual(real_imports, [], f'found real import statement(s) in the function body: {real_imports}')
+        self.assertIn('db = SessionLocal()', src)
+
+    def test_scheduler_job_registered_after_its_function_is_defined(self):
+        """BUG FOUND BY A LOCAL INTEGRATION TEST: registering this job
+        INSIDE the try/except scheduler-setup block (which runs before
+        `_run_consultation_notifications_job` is defined later in the
+        file) raised a NameError that silently killed the ENTIRE
+        scheduler — not just this job, but the three pre-existing
+        production cron jobs too. Must be registered only after the
+        function exists."""
+        job_def_idx = SRC.index('def _run_consultation_notifications_job():')
+        registration_idx = SRC.index("id='consultation_notifications'")
+        self.assertGreater(registration_idx, job_def_idx,
+                            "the job must be registered AFTER its function is defined, not before")
+        # And the registration must be OUTSIDE the original scheduler
+        # try/except block, which starts well before the function and
+        # ends right at '_scheduler.start()'.
+        scheduler_start_idx = SRC.index('_scheduler.start()')
+        self.assertGreater(registration_idx, scheduler_start_idx)
+
     def test_sweep_job_never_touches_sponsored_campaign_tables(self):
         """Structural proof of the required separation: the sweep job and
         its digest helper must never actually QUERY AdCampaign/
