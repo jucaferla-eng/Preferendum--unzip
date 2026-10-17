@@ -7018,27 +7018,46 @@ def _rekognition_client():
 _VOTER_FACE_COLLECTION = 'preferendum-voters'
 _voter_face_collection_ready = False
 
-import threading
-_VOTER_FACE_DEBATE_LOCKS: dict = {}
-_VOTER_FACE_DEBATE_LOCKS_GUARD = threading.Lock()
+# FACE-DUPLICATE-CHECK SECURITY HARDENING (cross-process/cross-instance) —
+# a threading.Lock only serializes requests inside ONE Python process. If
+# Render ever runs more than one uvicorn worker or more than one instance
+# of this service, two near-simultaneous requests for the SAME
+# consultation on DIFFERENT processes could both pass the duplicate-face
+# search before either has indexed — letting the same real face vote
+# twice under two different accounts. A Postgres advisory lock is held by
+# the DATABASE, not by any one process, so every process/instance talking
+# to the same production Postgres is serialized together, regardless of
+# how many there are or which machine they run on.
+#
+# Deliberately explicit lock/unlock (pg_try_advisory_lock /
+# pg_advisory_unlock) rather than relying on the session closing to
+# release it: SQLAlchemy connection pooling means "closing" a session
+# often just returns the underlying DB connection to the pool for reuse,
+# WITHOUT actually disconnecting from Postgres — and a session-level
+# advisory lock stays held by that physical connection until it is
+# explicitly unlocked or the connection is truly closed. Relying on pool
+# behavior here could leave a consultation's lock stuck, permanently
+# blocking voting on it — exactly what this change must never do.
+_VOTER_FACE_LOCK_NAMESPACE = 1947283  # arbitrary fixed int, keeps this lock's key-space separate from any future unrelated advisory-lock use
 
-def _voter_face_debate_lock(debate_id: int) -> threading.Lock:
-    """FACE-DUPLICATE-CHECK SECURITY HARDENING — serializes the
-    search-then-index sequence (below) per debate, so two near-
-    simultaneous requests for the SAME consultation can never both pass
-    the duplicate-face search before either has indexed, which would let
-    the same real face vote twice under two different accounts. Only
-    covers concurrency WITHIN one process — this app currently runs as a
-    single uvicorn worker (see Procfile/render.yaml, no --workers flag),
-    so this is real protection today; if that ever changes to multiple
-    processes/instances, this in-process lock would need to become a
-    distributed one (e.g. a Postgres advisory lock) to keep covering it."""
-    with _VOTER_FACE_DEBATE_LOCKS_GUARD:
-        lock = _VOTER_FACE_DEBATE_LOCKS.get(debate_id)
-        if lock is None:
-            lock = threading.Lock()
-            _VOTER_FACE_DEBATE_LOCKS[debate_id] = lock
-        return lock
+def _pg_try_advisory_lock(db: Session, debate_id: int) -> bool:
+    """Non-blocking — returns False immediately if another
+    process/instance already holds this consultation's lock, rather than
+    waiting indefinitely (which could hang a request). The caller treats
+    False as "try again shortly," never as a permanent block."""
+    return bool(db.execute(
+        text('SELECT pg_try_advisory_lock(:ns, :debate_id)'),
+        {'ns': _VOTER_FACE_LOCK_NAMESPACE, 'debate_id': debate_id},
+    ).scalar())
+
+def _pg_advisory_unlock(db: Session, debate_id: int):
+    try:
+        db.execute(
+            text('SELECT pg_advisory_unlock(:ns, :debate_id)'),
+            {'ns': _VOTER_FACE_LOCK_NAMESPACE, 'debate_id': debate_id},
+        )
+    except Exception as _e:
+        print(f'[face-dup-check] warning: could not release advisory lock for debate {debate_id}: {_e}')
 
 def _ensure_voter_face_collection(rek):
     """Crea la colección de caras de votantes si no existe todavía — idempotente.
@@ -8192,11 +8211,16 @@ async def get_face_vote_token(
         # 100% reintentable sin pérdida de datos ni bloqueo permanente: el
         # usuario simplemente vuelve a intentar.
         #
-        # El candado por debate_id serializa esta secuencia (buscar ->
-        # indexar) para que dos solicitudes casi simultáneas de la MISMA
+        # El candado de Postgres (pg_try_advisory_lock, por debate_id)
+        # serializa esta secuencia (buscar -> indexar) ENTRE CUALQUIER
+        # NÚMERO de procesos o instancias — no solo hilos de un mismo
+        # proceso — para que dos solicitudes casi simultáneas de la MISMA
         # consulta nunca puedan pasar ambas la búsqueda antes de que
-        # cualquiera haya indexado — ver _voter_face_debate_lock.
-        with _voter_face_debate_lock(debate_id):
+        # cualquiera haya indexado. No bloqueante: si otro proceso ya tiene
+        # el candado, falla cerrado (503, reintentable) en vez de esperar.
+        if not _pg_try_advisory_lock(db, debate_id):
+            raise HTTPException(503, 'Hay otra verificación en curso para esta consulta. Intenta de nuevo en unos segundos.')
+        try:
             try:
                 _ensure_voter_face_collection(rek)
                 search = rek.search_faces_by_image(
@@ -8225,6 +8249,10 @@ async def get_face_vote_token(
             except Exception as _e:
                 print(f'[face-dup-check] error — blocking face-token issuance (fail-closed, safe to retry): {_e}')
                 raise HTTPException(503, 'No pudimos confirmar que tu rostro sea único para esta consulta en este momento. Intenta de nuevo en unos segundos.')
+        finally:
+            # Liberación EXPLÍCITA siempre — nunca depender de que la
+            # sesión se cierre (ver el comentario de _pg_advisory_unlock).
+            _pg_advisory_unlock(db, debate_id)
     except HTTPException:
         raise
     except ClientError:

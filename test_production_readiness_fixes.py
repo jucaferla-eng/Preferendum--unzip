@@ -1008,85 +1008,127 @@ class TestFaceDuplicateCheckFailsClosed(unittest.TestCase):
         self.assertNotIn('db.add(', src)
         self.assertNotIn('db.commit(', src)
 
-    def test_duplicate_check_sequence_is_serialized_per_debate(self):
+    def test_duplicate_check_uses_a_postgres_advisory_lock_not_an_in_process_one(self):
+        """CROSS-PROCESS/CROSS-INSTANCE HARDENING: an earlier version of
+        this fix used a plain threading.Lock, which only serializes
+        requests inside ONE Python process — insufficient if Render ever
+        runs more than one uvicorn worker or more than one instance. A
+        Postgres advisory lock is held by the shared DATABASE, so every
+        process/instance talking to the same production Postgres is
+        serialized together regardless of how many there are."""
         node = _function('get_face_vote_token')
         src = _src_of(node)
-        self.assertIn('with _voter_face_debate_lock(debate_id):', src)
+        self.assertIn('_pg_try_advisory_lock(db, debate_id)', src)
+        self.assertNotIn('_voter_face_debate_lock', src)
+        self.assertIn('_pg_advisory_unlock(db, debate_id)', src)
 
-    def test_lock_helper_real_concurrency_behavior(self):
-        """REAL concurrency test (actual threads, not simulated) against
-        the extracted real lock-acquisition function: two threads racing
-        for the SAME debate_id must never execute their critical section
-        at the same time; two threads for DIFFERENT debate_ids must NOT
-        block each other (so one slow consultation can't stall voting on
-        every other consultation)."""
-        import threading
-        import time
-        ns = {'threading': threading}
-        exec(_src_of(_function('_voter_face_debate_lock')), ns)
-        # The function reads/writes the two module-level globals that sit
-        # right above it in the real file — recreate them in this
-        # namespace exactly as the real module does.
-        ns['_VOTER_FACE_DEBATE_LOCKS'] = {}
-        ns['_VOTER_FACE_DEBATE_LOCKS_GUARD'] = threading.Lock()
-        get_lock = ns['_voter_face_debate_lock']
+    def test_lock_acquisition_is_non_blocking_fail_closed_not_a_hang(self):
+        node = _function('get_face_vote_token')
+        src = _src_of(node)
+        self.assertIn("if not _pg_try_advisory_lock(db, debate_id):", src)
+        self.assertIn("raise HTTPException(503, 'Hay otra verificación en curso", src)
 
-        overlap_detected = []
-        in_critical_section = {'count': 0}
-        cs_guard = threading.Lock()
+    def test_lock_is_released_in_a_finally_block_not_only_on_success(self):
+        """RECOVERY: the release call must be reachable on every exit path
+        (success, a confirmed duplicate, or an AWS error) — a `finally`
+        around the whole search+index attempt, not just at the end of the
+        happy path, which would leak the lock on any error and
+        permanently block every future attempt to vote on that
+        consultation for everyone, not just the failing request."""
+        node = _function('get_face_vote_token')
+        src = _src_of(node)
+        idx = src.index('_pg_try_advisory_lock(db, debate_id)')
+        tail = src[idx:]
+        self.assertIn('finally:', tail)
+        finally_idx = tail.index('finally:')
+        self.assertIn('_pg_advisory_unlock(db, debate_id)', tail[finally_idx:finally_idx + 200])
 
-        def worker(debate_id, barrier):
-            barrier.wait()
-            with get_lock(debate_id):
-                with cs_guard:
-                    in_critical_section['count'] += 1
-                    if in_critical_section['count'] > 1:
-                        overlap_detected.append(True)
-                time.sleep(0.05)
-                with cs_guard:
-                    in_critical_section['count'] -= 1
+    def test_advisory_lock_helpers_use_a_fixed_namespace_key(self):
+        """A 2-integer advisory lock key (fixed namespace + debate_id)
+        keeps this lock's key-space separate from any unrelated future
+        use of Postgres advisory locks in this codebase."""
+        self.assertIn('_VOTER_FACE_LOCK_NAMESPACE = 1947283', SRC)
+        lock_node = _function('_pg_try_advisory_lock')
+        unlock_node = _function('_pg_advisory_unlock')
+        self.assertIsNotNone(lock_node)
+        self.assertIsNotNone(unlock_node)
+        self.assertIn('pg_try_advisory_lock', _src_of(lock_node))
+        self.assertIn('pg_advisory_unlock', _src_of(unlock_node))
 
-        # Same debate_id — must never overlap.
-        barrier = threading.Barrier(2)
-        threads = [threading.Thread(target=worker, args=(42, barrier)) for _ in range(2)]
-        for t in threads: t.start()
-        for t in threads: t.join()
-        self.assertEqual(overlap_detected, [], 'two requests for the SAME debate overlapped in the critical section')
-
-        # Different debate_ids — must NOT serialize against each other.
-        start = time.time()
-        barrier2 = threading.Barrier(2)
-        threads2 = [threading.Thread(target=worker, args=(i, barrier2)) for i in (100, 200)]
-        for t in threads2: t.start()
-        for t in threads2: t.join()
-        elapsed = time.time() - start
-        self.assertLess(elapsed, 0.09, 'different debates should run concurrently (~0.05s), not serialized (~0.10s)')
-
-    def test_lock_releases_even_after_an_exception_inside_it(self):
-        """RECOVERY: a failure mid-check must never leave the lock held
-        forever (which would permanently block every future attempt to
-        vote on that same consultation, for everyone) — Python's `with`
-        statement already guarantees release-on-exception, but this
-        proves it concretely for THIS specific lock helper rather than
-        trusting the language feature blindly."""
-        import threading
-        ns = {'threading': threading}
-        exec(_src_of(_function('_voter_face_debate_lock')), ns)
-        ns['_VOTER_FACE_DEBATE_LOCKS'] = {}
-        ns['_VOTER_FACE_DEBATE_LOCKS_GUARD'] = threading.Lock()
-        get_lock = ns['_voter_face_debate_lock']
-
-        lock = get_lock(7)
+    def test_real_cross_connection_exclusion_against_a_live_local_postgres(self):
+        """REAL behavioral proof, not just structural: runs the ACTUAL
+        extracted _pg_try_advisory_lock/_pg_advisory_unlock source against
+        a real local Postgres, using TWO INDEPENDENT raw connections.
+        Postgres advisory locks are scoped to the CONNECTION, not to the
+        OS process or Python thread that issued them — so two independent
+        connections are exactly as good a test of "two different
+        processes/instances" as actually running two processes would be.
+        Skips cleanly (does not fail the suite) if no local Postgres is
+        reachable on the expected test port, so this dependency-free
+        suite still runs everywhere else without one."""
         try:
-            with lock:
-                raise RuntimeError('simulated Rekognition failure mid-check')
-        except RuntimeError:
-            pass
-        # A fresh attempt for the SAME debate must acquire immediately —
-        # no deadlock, no permanent block.
-        acquired = get_lock(7).acquire(timeout=1.0)
-        self.assertTrue(acquired, 'lock was not released after the exception — this would permanently block voting on this consultation')
-        get_lock(7).release()
+            import psycopg2
+        except ImportError:
+            self.skipTest('psycopg2 not installed in this environment')
+        dsn = os.environ.get('PREFY_TEST_PG_DSN', 'host=localhost port=5546 user=testuser dbname=prefytest')
+        try:
+            conn_a = psycopg2.connect(dsn)
+            conn_b = psycopg2.connect(dsn)
+        except Exception as e:
+            self.skipTest(f'no local test Postgres reachable ({dsn}): {e}')
+
+        try:
+            import re as _re
+
+            def _text(s):
+                """Stand-in for sqlalchemy.text — the real function source
+                calls text('...') purely to mark a raw SQL string; here it
+                just returns the string unchanged."""
+                return s
+
+            class _FakeSession:
+                """Thin shim so the REAL, UNMODIFIED function source
+                (which calls db.execute(text('...:name...'), {'name': ...})
+                .scalar()) runs against a raw psycopg2 connection instead
+                of a SQLAlchemy Session — only the :name -> %(name)s
+                parameter-style conversion happens here, in the shim,
+                never in the function source under test."""
+                def __init__(self, conn):
+                    self.conn = conn
+                def execute(self, stmt, params):
+                    pg_stmt = _re.sub(r':(\w+)', r'%(\1)s', str(stmt))
+                    cur = self.conn.cursor()
+                    cur.execute(pg_stmt, params)
+                    row = cur.fetchone()
+                    class _Result:
+                        def scalar(self_inner):
+                            return row[0] if row else None
+                    return _Result()
+
+            ns = {'text': _text, 'Session': object}
+            exec(_src_of(_function('_pg_try_advisory_lock')), ns)
+            exec(_src_of(_function('_pg_advisory_unlock')), ns)
+            ns['_VOTER_FACE_LOCK_NAMESPACE'] = 1947283
+            try_lock = ns['_pg_try_advisory_lock']
+            unlock = ns['_pg_advisory_unlock']
+
+            sess_a, sess_b = _FakeSession(conn_a), _FakeSession(conn_b)
+            debate_id = 909090
+
+            self.assertTrue(try_lock(sess_a, debate_id), 'connection A should acquire a free lock')
+            self.assertFalse(try_lock(sess_b, debate_id),
+                              'connection B acquired the SAME debate\'s lock while A still holds it — '
+                              'this is the exact cross-process race this change exists to close')
+            self.assertTrue(try_lock(sess_b, debate_id + 1),
+                             'a DIFFERENT debate_id must not be blocked by an unrelated one')
+            unlock(sess_a, debate_id)
+            self.assertTrue(try_lock(sess_b, debate_id),
+                             'B should acquire the lock immediately after A explicitly released it — no stuck lock')
+            unlock(sess_b, debate_id)
+            unlock(sess_b, debate_id + 1)
+        finally:
+            conn_a.close()
+            conn_b.close()
 
 
 if __name__ == '__main__':
