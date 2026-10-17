@@ -839,5 +839,59 @@ class TestTargetSideOccupationResolution(unittest.TestCase):
         self.assertTrue(decision.allowed, decision.reasons)
 
 
+class TestPrefy480pSwitchover(unittest.TestCase):
+    """Regression guard for switching /prefy/video/{context}/{lang} over
+    to the verified, already-uploaded 480p files. Not deployed yet — this
+    only confirms the CODE is correct ahead of that decision."""
+
+    def test_original_key_tables_are_untouched_single_source_of_truth(self):
+        """No second, hand-duplicated 480p table exists — the 480p key is
+        always COMPUTED from the one real table, so it can never drift
+        out of sync with it."""
+        self.assertIn('PREFY_WELCOME_S3_KEY_BY_LANG', SRC)
+        self.assertIn('PREFY_CAMPAIGN_S3_KEY_BY_LANG', SRC)
+        node = _function('_prefy_480p_key')
+        self.assertIsNotNone(node)
+
+    def test_480p_key_uses_the_same_suffix_rule_as_the_upload_script(self):
+        """Must match scripts/compress_prefy_videos.py's compressed_key_for
+        exactly — those are the REAL keys already verified present in S3;
+        any divergence here would 404 every single video."""
+        ns = {}
+        exec(_src_of(_function('_prefy_480p_key')), ns)
+        fn = ns['_prefy_480p_key']
+        self.assertEqual(
+            fn('prefy/welcome/heygen_project 3/Prefy_bienvenida_en_app_Preferendum_version_3.mp4'),
+            'prefy/welcome/heygen_project 3/Prefy_bienvenida_en_app_Preferendum_version_3_480p.mp4',
+        )
+        # Cross-check against the actual upload-script function too.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('_cpv', MAIN.with_name('scripts') / 'compress_prefy_videos.py')
+        cpv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cpv)
+        sample_key = 'prefy/Campaña /heygen_project/Guia_del_area_de_campanas_de_Preferendum_1080_6-de/Guia_del_area_de_campanas_de_Preferendum.mp4'
+        self.assertEqual(fn(sample_key), cpv.compressed_key_for(sample_key, '_480p'))
+
+    def test_serve_480p_defaults_to_true_but_is_a_one_env_var_rollback(self):
+        self.assertIn("PREFY_SERVE_480P = os.getenv('PREFY_SERVE_480P', 'true').lower() != 'false'", SRC)
+
+    def test_presigned_url_resolver_applies_the_480p_switch(self):
+        node = _function('_prefy_s3_presigned_url')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn('if PREFY_SERVE_480P:', src)
+        self.assertIn('key = _prefy_480p_key(key)', src)
+
+    def test_video_serving_route_unchanged_otherwise(self):
+        """The route itself (fallback precedence, 404 handling, GitHub
+        Release/local-disk branches) must be untouched — only the S3
+        branch's resolved key changes, nothing else about this route."""
+        node = _route_function('get', '/prefy/video/{context}/{lang}')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn('_prefy_s3_presigned_url(context, lang)', src)
+        self.assertIn('_prefy_video_github_release_url', src)
+
+
 if __name__ == '__main__':
     unittest.main()

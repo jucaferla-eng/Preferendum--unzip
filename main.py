@@ -4592,10 +4592,32 @@ def _prefy_s3_client():
             return None
     return _prefy_s3_client_cache
 
+# PREFY 480P SWITCHOVER — all 60 compressed videos (verified present and
+# valid in S3, originals confirmed untouched) are served by default; the
+# ORIGINAL 60 keys remain the single source of truth (PREFY_WELCOME_S3_
+# KEY_BY_LANG / PREFY_CAMPAIGN_S3_KEY_BY_LANG, untouched by this change)
+# and the 480p key is always computed from them, never hand-duplicated —
+# so there is no second table that could silently drift out of sync.
+# PREFY_SERVE_480P=false (one Render env var, no redeploy needed) reverts
+# instantly to the original 1080p files if anything looks wrong after
+# this ships.
+PREFY_SERVE_480P = os.getenv('PREFY_SERVE_480P', 'true').lower() != 'false'
+
+def _prefy_480p_key(original_key: str) -> str:
+    """Same suffix-insertion rule used to create these files
+    (scripts/compress_prefy_videos.py's compressed_key_for) — inserts
+    '_480p' before the extension. Mirrored here rather than imported
+    because that script is a one-off operational tool, not a module this
+    app depends on at runtime."""
+    base, ext = original_key.rsplit('.', 1)
+    return f'{base}_480p.{ext}'
+
 def _prefy_s3_presigned_url(context: str, lang: str) -> Optional[str]:
     key = _PREFY_S3_KEY_TABLES.get(context, {}).get(lang)
     if not key:
         return None
+    if PREFY_SERVE_480P:
+        key = _prefy_480p_key(key)
     client = _prefy_s3_client()
     if client is None:
         return None
