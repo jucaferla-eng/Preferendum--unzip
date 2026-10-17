@@ -1872,11 +1872,19 @@ try:
             print(f'[Scheduler] Error en SE Lifestyle Agent: {e}')
 
     def _run_annual_rental_prices_job():
+        # FINAL REVIEW FIX — this imported `from database import SessionLocal`,
+        # a module that does not exist anywhere in this repo (confirmed:
+        # ModuleNotFoundError). Caught by this same function's own
+        # try/except, so the annual rental-price update has been silently
+        # failing every year since this job was written — never actually
+        # refreshing commune m² prices. The real SessionLocal is
+        # module-level in this file (line 88); no import needed. Same bug
+        # already found and fixed in the consultation-notifications
+        # scheduler job elsewhere in this file.
         try:
             from rental_price_agent import run_full_agent
-            from database import SessionLocal as _SL
             print('[Scheduler] Iniciando RentalPriceAgent — actualización anual precios m²...')
-            _db = _SL()
+            _db = SessionLocal()
             try:
                 result = run_full_agent(_db)
                 print(f'[Scheduler] Precios actualizados — comunas: {result.get("total_communes", 0)}, API hits: {result.get("api_hits", 0)}, fuente: {result.get("source", "?")}')

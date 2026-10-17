@@ -1388,5 +1388,38 @@ class TestConsultationNotificationsDesign(unittest.TestCase):
         self.assertIn('"expo-notifications"', APP_JSON_SRC)
 
 
+class TestAnnualRentalPricesJobBugFix(unittest.TestCase):
+    """FINAL REVIEW FIX: the same 'from database import SessionLocal'
+    bug already found and fixed in the notifications job also existed in
+    _run_annual_rental_prices_job (the pre-existing Jan-2 annual cron) —
+    no `database` module exists anywhere in this repo, so this job has
+    been silently failing (caught by its own try/except) every year
+    since it was written, never actually refreshing commune m² prices."""
+
+    def test_no_real_import_from_nonexistent_database_module_anywhere(self):
+        """AST-level, not a text search: the ONLY remaining mention of
+        'from database import' anywhere in main.py must be inside a
+        docstring (explaining the historical bug), never a real
+        executable import statement."""
+        for node in ast.walk(TREE):
+            if isinstance(node, ast.ImportFrom) and node.module == 'database':
+                self.fail(f'found a real "from database import" statement at line {node.lineno} — '
+                          'that module does not exist in this repo')
+
+    def test_annual_rental_prices_job_uses_the_real_module_level_session_local(self):
+        func_node = None
+        for node in ast.walk(TREE):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == '_run_annual_rental_prices_job':
+                func_node = node
+                break
+        self.assertIsNotNone(func_node, '_run_annual_rental_prices_job not found')
+        self.assertIn('_db = SessionLocal()', _src_of(func_node))
+        # AST-level, not a text search — this function's own explanatory
+        # comment legitimately quotes the old buggy import, which a plain
+        # substring check would wrongly flag.
+        real_imports = [n for n in ast.walk(func_node) if isinstance(n, ast.ImportFrom) and n.module == 'database']
+        self.assertEqual(real_imports, [], f'found a real "from database import" statement: {real_imports}')
+
+
 if __name__ == '__main__':
     unittest.main()
