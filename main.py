@@ -4532,7 +4532,18 @@ async def admin_web_access_login(request: Request):
     body = await request.json()
     provided = (body.get('secret') or '').strip()
     expected = (os.getenv('ADMIN_WEB_ACCESS_SECRET') or '').strip()
-    if not expected or not provided or provided != expected:
+    if not expected:
+        # Diagnostic-only distinction from a wrong secret below — never
+        # reveals the secret itself, only whether THIS specific process
+        # currently has one configured at all. Exists because a stale
+        # instance that started before the env var was set is otherwise
+        # indistinguishable from a genuinely wrong password: both used to
+        # collapse into the same 403 'Forbidden'. RENDER_INSTANCE_ID is
+        # Render's own non-sensitive per-instance identifier — surfacing
+        # it here lets a multi-instance staleness split show up directly
+        # across repeated requests, without needing DB/Shell access.
+        raise HTTPException(503, f"ADMIN_WEB_ACCESS_SECRET no configurado en este proceso (instance={os.getenv('RENDER_INSTANCE_ID', '?')}).")
+    if not provided or provided != expected:
         raise HTTPException(403, 'Forbidden')
     token = _admin_web_make_cookie_token()
     resp = JSONResponse(content={'ok': True})

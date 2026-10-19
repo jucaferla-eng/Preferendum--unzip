@@ -1667,6 +1667,22 @@ class TestAdminWebAccessPhase0(unittest.TestCase):
         self.assertIn('secure=True', src)
         self.assertIn("samesite='strict'", src)
 
+    def test_unconfigured_secret_is_a_distinct_503_not_the_same_403(self):
+        """A process that never picked up ADMIN_WEB_ACCESS_SECRET (stale
+        instance that started before the var was set) must be
+        distinguishable from a genuinely wrong password — both used to
+        collapse into the same 403, which is exactly what made the real
+        incident undiagnosable from the outside."""
+        src = _src_of(_function('admin_web_access_login'))
+        self.assertIn('raise HTTPException(503', src)
+        self.assertIn('RENDER_INSTANCE_ID', src)
+        # the 503 (not-configured) check must run BEFORE the 403 (wrong
+        # value) check, and neither branch may ever interpolate the
+        # secret's own value into the response.
+        self.assertLess(src.index('raise HTTPException(503'), src.index('raise HTTPException(403'))
+        self.assertNotIn('{expected}', src)
+        self.assertNotIn('{provided}', src)
+
     def test_nothing_else_is_gated_by_this_cookie_yet(self):
         """Phase 0 constraint: has_admin_web_access must exist and be
         callable, but must not yet be referenced by any OTHER route as a
