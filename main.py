@@ -531,6 +531,21 @@ class MobileAttestedDevice(Base):
     created_at     = Column(DateTime, default=datetime.utcnow)
     last_seen_at   = Column(DateTime, default=datetime.utcnow)
 
+class WebRequestUASample(Base):
+    """MOBILE-ONLY ACCESS POLICY (simplified plan, no App Attest) — one
+    row per DISTINCT User-Agent string seen hitting /voter, with a hit
+    count. Never one row per request (no per-visit log, no IP, no user
+    identity) — purely so we can see, in aggregate, what the ALREADY
+    PUBLISHED iOS/Android apps and real browsers actually send today,
+    without asking JC to manually open any link. Written best-effort
+    from a middleware that can never block or slow down a real request."""
+    __tablename__ = 'web_request_ua_samples'
+    id          = Column(Integer, primary_key=True)
+    user_agent  = Column(String, unique=True, index=True, nullable=False)
+    hit_count   = Column(Integer, default=1)
+    first_seen  = Column(DateTime, default=datetime.utcnow)
+    last_seen   = Column(DateTime, default=datetime.utcnow)
+
 class SafetyReport(Base):
     """Google Play Child Safety Standards — user/public reports of unsafe
     content or activity (CSAE and otherwise). No login required to submit,
@@ -1884,6 +1899,35 @@ async def security_shield_middleware(request: Request, call_next):
             _sec_block_ip(ip, _SEC_ADMIN_BLOCK_MIN,
                            f'{count} intentos fallidos de ADMIN_SECRET en {_SEC_ADMIN_FAIL_WINDOW//60}min (path: {path})')
 
+    return response
+
+# ── MUESTREO PASIVO DE USER-AGENT (política de acceso solo-app, plan
+#    simplificado sin App Attest/Play Integrity) ──────────────────────
+# Middleware SEPARADO del escudo de seguridad de arriba a propósito —
+# nunca toca ese código ya probado. Solo registra, en agregado, qué
+# User-Agent llega a /voter (la página real que abren tanto las apps ya
+# publicadas como cualquier navegador) — sin IP, sin usuario, sin un
+# registro por visita. Si algo falla aquí, la request sigue normal:
+# jamás puede bloquear ni volver más lenta una solicitud real.
+@app.middleware('http')
+async def ua_sampling_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if request.method == 'GET' and request.url.path == '/voter':
+        try:
+            ua = request.headers.get('user-agent', '')[:300]
+            _db = SessionLocal()
+            try:
+                row = _db.query(WebRequestUASample).filter(WebRequestUASample.user_agent == ua).first()
+                if row:
+                    row.hit_count += 1
+                    row.last_seen = datetime.utcnow()
+                else:
+                    _db.add(WebRequestUASample(user_agent=ua))
+                _db.commit()
+            finally:
+                _db.close()
+        except Exception as e:
+            print(f'[UA-SAMPLING] error (non-fatal): {e}')
     return response
 
 # ── AUTO-SCHEDULER: corre el agente de noticias todos los días a las 7am UTC ──
@@ -4875,6 +4919,21 @@ def mobile_auth_debug_ua(request: Request):
     en iOS en particular ha sido históricamente inconsistente entre
     versiones. No bloquea ni cambia nada."""
     return {'user_agent': request.headers.get('user-agent', '')}
+
+@app.get('/admin/mobile-auth/ua-samples')
+def admin_mobile_auth_ua_samples(secret: str, limit: int = 20, db: Session = Depends(get_db)):
+    """Lectura del muestreo pasivo de arriba — los User-Agent reales que
+    ya llegaron a /voter desde las apps publicadas y desde navegadores,
+    en agregado (sin IP ni usuario). Pensado para revisarse UNA vez
+    desde Render Shell o aquí mismo, nunca abriendo nada en un teléfono."""
+    if secret != os.getenv('ADMIN_SECRET'):
+        raise HTTPException(403, 'Forbidden')
+    rows = db.query(WebRequestUASample).order_by(WebRequestUASample.hit_count.desc()).limit(limit).all()
+    return {'samples': [
+        {'user_agent': r.user_agent, 'hit_count': r.hit_count,
+         'first_seen': r.first_seen.isoformat(), 'last_seen': r.last_seen.isoformat()}
+        for r in rows
+    ]}
 
 # ── Fase 2 — endpoints de verificación de apps oficiales ──────────────
 # Ninguna ruta EXISTENTE los exige todavía; existen para poder construir

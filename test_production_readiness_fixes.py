@@ -2057,6 +2057,52 @@ class TestDebugUserAgentEcho(unittest.TestCase):
         self.assertNotIn('ADMIN_SECRET', src)
 
 
+class TestPassiveUASampling(unittest.TestCase):
+    """Collects real User-Agent strings from real /voter traffic (apps
+    already published + real browsers) in aggregate, with no per-request
+    log and no IP/user identity, so JC never has to manually open a link
+    to get ground truth. Must be structurally incapable of blocking or
+    slowing down a real request, no matter what fails inside it."""
+
+    def test_middleware_exists_and_only_targets_get_voter(self):
+        node = _function('ua_sampling_middleware')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn("request.method == 'GET'", src)
+        self.assertIn("request.url.path == '/voter'", src)
+
+    def test_middleware_always_returns_the_real_response_even_on_failure(self):
+        """The sampling logic is wrapped in try/except so a DB hiccup
+        can never turn into a broken or blocked request -- and the
+        function must return the untouched `response`, not something
+        built inside the try block."""
+        src = _src_of(_function('ua_sampling_middleware'))
+        self.assertIn('except Exception', src)
+        # 'return response' must appear OUTSIDE the try block (i.e. once,
+        # unconditionally, at the end) -- not only inside it.
+        self.assertEqual(src.count('return response'), 1)
+        self.assertLess(src.rindex('except Exception'), src.rindex('return response'))
+
+    def test_no_ip_or_user_identity_is_stored(self):
+        src = _src_of(_function('ua_sampling_middleware'))
+        self.assertNotIn('_sec_client_ip', src)
+        self.assertNotIn('user_id', src)
+
+    def test_ua_samples_table_is_deduplicated_not_one_row_per_visit(self):
+        cls = _class_def('WebRequestUASample')
+        self.assertIsNotNone(cls)
+        cols = _column_names(cls)
+        self.assertIn('hit_count', cols)
+        self.assertNotIn('ip_hash', cols)
+
+    def test_ua_samples_read_endpoint_requires_admin_secret(self):
+        node = _route_function('get', '/admin/mobile-auth/ua-samples')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn("os.getenv('ADMIN_SECRET')", src)
+        self.assertIn('raise HTTPException(403', src)
+
+
 class TestMobileAuthChallengeFlow(unittest.TestCase):
     """Structural checks on the challenge/nonce plumbing and the new
     routes -- confirms the single-use, platform-scoped, expiring nonce
