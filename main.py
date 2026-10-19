@@ -7771,17 +7771,37 @@ def _debate_eligible_formatted(d, user, db, profile):
 
 def _prepend_pinned_consultation(out: list, user, db, profile, status: str, limit: int) -> list:
     """PINNED CONSULTATION — mueve PINNED_CONSULTATION_ID (819) al primer
-    lugar de esta lista, SOLO si ya es elegible para este usuario bajo
-    esta misma consulta de estado ('live'/'expired') — nunca la agrega
-    pasando por alto la elegibilidad real, y nunca la fuerza si no
-    corresponde (requisito 9). Se comprueba de forma independiente del
-    bucle principal de arriba (que corta en los primeros `limit`
-    resultados más recientes) para que nunca se pierda solo porque haya
-    miles de consultas más nuevas por delante (requisito 2) — sin esto,
-    una consulta vieja jamás sobreviviría el `break` por límite. No
-    modifica el título, contexto, alternativas, votos ni resultados de
-    la consulta anclada en absoluto — solo cambia su posición en esta
-    lista y el indicador `is_pinned` ya calculado en format_debate."""
+    lugar de esta lista para TODOS los usuarios, sin importar país,
+    género, edad, nivel socioeconómico, profesión o cualquier otro
+    criterio de targeting demográfico — explícitamente instruido: debe
+    aparecer primera "para todos los usuarios, sin importar su país,
+    siempre que esté publicada y sea accesible para votar".
+
+    CORRECCIÓN (versión anterior): la primera implementación reutilizaba
+    _debate_eligible_formatted, que corre la evaluación COMPLETA de
+    targeting (país/género/edad/tier/ingreso/profesión) — exactamente lo
+    que esta instrucción pide ignorar. Esa versión nunca mostraba la
+    consulta a un usuario cuyo perfil no calzara con el targeting
+    original de la 819 (p.ej. un país distinto al suyo), que es
+    precisamente el caso real reportado en producción.
+
+    Lo único que SÍ sigue respetándose:
+      - Que no esté en borrador ('draft').
+      - Que su propio estado (abierta/cerrada por fecha) corresponda al
+        filtro 'live'/'expired' solicitado — "accesible para votar" no
+        tiene sentido para una consulta ya cerrada bajo el filtro 'live'.
+      - La membresía de lista cerrada (is_closed_list), que es un control
+        de ACCESO real (una nómina de invitados), no una preferencia de
+        targeting demográfico — pasarla por alto dejaría votar/ver a
+        cualquiera una consulta pensada solo para una lista específica.
+
+    Se comprueba de forma independiente del bucle principal de arriba
+    (que corta en los primeros `limit` resultados más recientes) para
+    que nunca se pierda solo porque haya miles de consultas más nuevas
+    por delante. No modifica el título, contexto, alternativas, votos ni
+    resultados de la consulta anclada en absoluto — solo cambia su
+    posición en esta lista y el indicador `is_pinned` ya calculado en
+    format_debate."""
     already_at = next((i for i, dd in enumerate(out) if dd.get('id') == PINNED_CONSULTATION_ID), None)
     if already_at == 0:
         return out
@@ -7799,9 +7819,14 @@ def _prepend_pinned_consultation(out: list, user, db, profile, status: str, limi
     if (status == 'expired') != is_expired:
         return out  # no corresponde a este filtro de estado — no se fuerza
 
-    formatted = _debate_eligible_formatted(pinned_debate, user, db, profile)
-    if formatted is None:
-        return out  # no elegible para este usuario — no se fuerza
+    if bool(getattr(pinned_debate, 'is_closed_list', False)):
+        if not _is_closed_list_member(pinned_debate, user, db):
+            return out  # control de acceso real — nunca se pasa por alto
+
+    try:
+        formatted = format_debate(pinned_debate, sponsor_info=_get_sponsor_info(pinned_debate.id, db))
+    except Exception:
+        return out
     out = [formatted] + out
     return out[:limit] if limit else out
 

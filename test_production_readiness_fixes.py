@@ -1466,13 +1466,19 @@ class TestPinnedConsultation(unittest.TestCase):
         src = _src_of(node)
         self.assertIn('return _prepend_pinned_consultation(out, user, db, profile, status, limit)', src)
 
-    def test_prepend_logic_reuses_the_exact_same_eligibility_check(self):
-        """Never a looser/separate eligibility rule for the pinned
-        consultation — it must call _debate_eligible_formatted, the same
-        helper every other debate in the list already went through."""
+    def test_prepend_bypasses_demographic_targeting_but_keeps_closed_list(self):
+        """CORRECTED REQUIREMENT: must show for every user regardless of
+        country/gender/age/tier/profession — so it must NOT call the full
+        demographic evaluator (_debate_eligible_formatted /
+        evaluate_consultation / consultation_target_from_debate) at all.
+        It MUST still check closed-list membership, since that is a real
+        access-control roster, not a demographic preference."""
         src = _src_of(_function('_prepend_pinned_consultation'))
-        self.assertIn('_debate_eligible_formatted(pinned_debate, user, db, profile)', src)
-        self.assertIn('if formatted is None:\n        return out', src)
+        self.assertNotIn('_debate_eligible_formatted(', src)
+        self.assertNotIn('evaluate_consultation(', src)
+        self.assertNotIn('consultation_target_from_debate(', src)
+        self.assertIn('_is_closed_list_member(pinned_debate, user, db)', src)
+        self.assertIn('format_debate(pinned_debate', src)
 
     def test_prepend_never_writes_to_the_debates_table(self):
         src = _src_of(_function('_prepend_pinned_consultation'))
@@ -1500,21 +1506,21 @@ class TestPinnedConsultation(unittest.TestCase):
     def _load_prepend_fn(self):
         import datetime as _dt_mod
         ns = {'datetime': _dt_mod.datetime, 'PINNED_CONSULTATION_ID': 819}
-        # _debate_eligible_formatted is called by name inside the real
-        # source — inject a controllable stub so these tests drive the
-        # REORDER/GATING logic deterministically without a real DB.
-        ns['_debate_eligible_formatted'] = self._eligible_stub
+        # The real source now calls _is_closed_list_member, format_debate,
+        # and _get_sponsor_info by name — inject controllable stubs so
+        # these tests drive the REORDER/GATING logic deterministically
+        # without a real DB, and WITHOUT the full demographic evaluator
+        # (which this function deliberately no longer calls at all).
+        ns['_is_closed_list_member'] = self._closed_list_stub
+        ns['format_debate'] = self._format_debate_stub
+        ns['_get_sponsor_info'] = lambda *a, **k: None
         class FakeDebate:
-            # Class-level placeholders: the real source evaluates
-            # `Debate.id == PINNED_CONSULTATION_ID` as a SQLAlchemy-style
-            # class-level expression before it ever reaches .filter(),
-            # which our FakeQuery ignores anyway — these just need to
-            # exist so that attribute access at the class level doesn't
-            # raise AttributeError.
             id = None
             status = None
-            def __init__(self, id, status='live', closes_at=None):
+            is_closed_list = False
+            def __init__(self, id, status='live', closes_at=None, is_closed_list=False):
                 self.id = id; self.status = status; self.closes_at = closes_at
+                self.is_closed_list = is_closed_list
         class FakeQuery:
             def __init__(self, result): self._result = result
             def filter(self, *a, **k): return self
@@ -1528,21 +1534,24 @@ class TestPinnedConsultation(unittest.TestCase):
         return ns['_prepend_pinned_consultation']
 
     def test_already_present_not_first_moves_to_front_preserving_rest(self):
-        self._eligible_stub = lambda *a, **k: None  # must not even be consulted on this path
+        self._closed_list_stub = lambda *a, **k: True
+        self._format_debate_stub = lambda *a, **k: {'id': 819}
         fn = self._load_prepend_fn()
         out = [{'id': 1}, {'id': 819}, {'id': 2}]
         result = fn(out, user=None, db=self._FakeDB(None), profile=None, status='live', limit=50)
         self.assertEqual([d['id'] for d in result], [819, 1, 2])
 
     def test_already_first_is_a_no_op(self):
-        self._eligible_stub = lambda *a, **k: None
+        self._closed_list_stub = lambda *a, **k: True
+        self._format_debate_stub = lambda *a, **k: {'id': 819}
         fn = self._load_prepend_fn()
         out = [{'id': 819}, {'id': 1}, {'id': 2}]
         result = fn(out, user=None, db=self._FakeDB(None), profile=None, status='live', limit=50)
         self.assertEqual([d['id'] for d in result], [819, 1, 2])
 
     def test_pinned_debate_not_found_leaves_list_unchanged(self):
-        self._eligible_stub = lambda *a, **k: {'id': 819}
+        self._closed_list_stub = lambda *a, **k: True
+        self._format_debate_stub = lambda *a, **k: {'id': 819}
         fn = self._load_prepend_fn()
         out = [{'id': 1}, {'id': 2}]
         result = fn(out, user=None, db=self._FakeDB(None), profile=None, status='live', limit=50)
@@ -1552,31 +1561,65 @@ class TestPinnedConsultation(unittest.TestCase):
         """A pinned debate with no closes_at (never expires) must not be
         force-shown in an 'expired' listing, and vice versa for one with
         a past closes_at."""
-        self._eligible_stub = lambda *a, **k: {'id': 819}
+        self._closed_list_stub = lambda *a, **k: True
+        self._format_debate_stub = lambda *a, **k: {'id': 819}
         fn = self._load_prepend_fn()
         class D:
-            id = 819; status = 'live'; closes_at = None
+            id = 819; status = 'live'; closes_at = None; is_closed_list = False
         out = [{'id': 1}]
         result = fn(out, user=None, db=self._FakeDB(D()), profile=None, status='expired', limit=50)
         self.assertEqual([d['id'] for d in result], [1])
 
-    def test_ineligible_user_never_sees_it_forced(self):
-        """THE key requirement: if _debate_eligible_formatted says this
-        user isn't eligible (wrong country/gender/age/tier/profession),
-        the pin must not override that under any circumstance."""
-        self._eligible_stub = lambda *a, **k: None  # not eligible
+    def test_demographic_profile_never_blocks_it_any_country_or_tier(self):
+        """THE corrected key requirement: regardless of what the user's
+        own profile/eligibility would normally say (different country,
+        gender, age, tier, profession...), the pinned consultation must
+        still show — this function must never even consult that logic,
+        so a FakeDB/profile combo with no eligibility information at all
+        still succeeds here as long as the debate exists, matches the
+        status filter, and (if applicable) closed-list membership
+        passes."""
+        self._closed_list_stub = lambda *a, **k: True
+        self._format_debate_stub = lambda *a, **k: {'id': 819}
         fn = self._load_prepend_fn()
         class D:
-            id = 819; status = 'live'; closes_at = None
+            id = 819; status = 'live'; closes_at = None; is_closed_list = False
+        out = [{'id': 1}, {'id': 2}]
+        # profile=None here specifically proves no demographic profile is
+        # ever consulted by this function — it would AttributeError if it
+        # tried to read any targeting field off of it.
+        result = fn(out, user=None, db=self._FakeDB(D()), profile=None, status='live', limit=50)
+        self.assertEqual([d['id'] for d in result], [819, 1, 2])
+
+    def test_closed_list_membership_is_still_enforced(self):
+        """The one real access-control check that IS preserved: if the
+        pinned debate is restricted to a closed list and this user isn't
+        on it, it must not be forced in."""
+        self._closed_list_stub = lambda *a, **k: False  # NOT a member
+        self._format_debate_stub = lambda *a, **k: {'id': 819}
+        fn = self._load_prepend_fn()
+        class D:
+            id = 819; status = 'live'; closes_at = None; is_closed_list = True
         out = [{'id': 1}, {'id': 2}]
         result = fn(out, user=None, db=self._FakeDB(D()), profile=None, status='live', limit=50)
         self.assertEqual([d['id'] for d in result], [1, 2])
 
-    def test_eligible_and_absent_is_prepended_and_trimmed_to_limit(self):
-        self._eligible_stub = lambda *a, **k: {'id': 819}
+    def test_closed_list_member_still_sees_it_pinned(self):
+        self._closed_list_stub = lambda *a, **k: True  # IS a member
+        self._format_debate_stub = lambda *a, **k: {'id': 819}
         fn = self._load_prepend_fn()
         class D:
-            id = 819; status = 'live'; closes_at = None
+            id = 819; status = 'live'; closes_at = None; is_closed_list = True
+        out = [{'id': 1}, {'id': 2}]
+        result = fn(out, user=None, db=self._FakeDB(D()), profile=None, status='live', limit=50)
+        self.assertEqual([d['id'] for d in result], [819, 1, 2])
+
+    def test_eligible_and_absent_is_prepended_and_trimmed_to_limit(self):
+        self._closed_list_stub = lambda *a, **k: True
+        self._format_debate_stub = lambda *a, **k: {'id': 819}
+        fn = self._load_prepend_fn()
+        class D:
+            id = 819; status = 'live'; closes_at = None; is_closed_list = False
         out = [{'id': 1}, {'id': 2}, {'id': 3}]
         result = fn(out, user=None, db=self._FakeDB(D()), profile=None, status='live', limit=3)
         self.assertEqual([d['id'] for d in result], [819, 1, 2])  # trimmed to limit=3, oldest dropped from the end
