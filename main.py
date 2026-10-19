@@ -4864,6 +4864,18 @@ def admin_web_access_whoami(request: Request):
     un booleano; no revela el secret ni el contenido de la cookie."""
     return {'has_admin_web_access': has_admin_web_access(request)}
 
+@app.get('/mobile-auth/debug-ua')
+def mobile_auth_debug_ua(request: Request):
+    """Diagnóstico de solo lectura, sin autenticación porque no revela
+    nada salvo lo que el propio llamante ya envió: el User-Agent EXACTO
+    que esta request trae. Pensado para abrirse desde las apps YA
+    publicadas de iOS/Android (sin modificar nada en ellas) y desde un
+    navegador normal, para comparar el dato real antes de diseñar
+    cualquier filtro — no para depender de documentación genérica, que
+    en iOS en particular ha sido históricamente inconsistente entre
+    versiones. No bloquea ni cambia nada."""
+    return {'user_agent': request.headers.get('user-agent', '')}
+
 # ── Fase 2 — endpoints de verificación de apps oficiales ──────────────
 # Ninguna ruta EXISTENTE los exige todavía; existen para poder construir
 # y probar el lado del servidor sin tocar las apps móviles ni activar

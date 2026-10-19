@@ -2043,6 +2043,20 @@ class TestPlayIntegrityVerdictParsing(unittest.TestCase):
             ns['_play_integrity_check_verdict'](payload, 'abc123')
 
 
+class TestDebugUserAgentEcho(unittest.TestCase):
+    """Ground-truth-gathering endpoint for the simplified User-Agent-based
+    plan (no App Attest/Play Integrity) -- reveals nothing but the
+    caller's own already-sent header, so it needs no auth."""
+
+    def test_route_exists_and_only_echoes_the_caller_own_header(self):
+        node = _route_function('get', '/mobile-auth/debug-ua')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn("request.headers.get('user-agent'", src)
+        self.assertNotIn('Depends(get_current_user)', src)
+        self.assertNotIn('ADMIN_SECRET', src)
+
+
 class TestMobileAuthChallengeFlow(unittest.TestCase):
     """Structural checks on the challenge/nonce plumbing and the new
     routes -- confirms the single-use, platform-scoped, expiring nonce
