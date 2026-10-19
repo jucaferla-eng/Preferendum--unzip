@@ -13,6 +13,8 @@ services:
         sync: false
       - key: ADMIN_SECRET_CANARY
         sync: false
+      - key: ADMIN_WEB_ACCESS_SECRET
+        sync: false
       - key: VOTE_ENCRYPTION_KEY
         generateValue: true
       - key: SESSION_SECRET

@@ -1625,5 +1625,133 @@ class TestPinnedConsultation(unittest.TestCase):
         self.assertEqual([d['id'] for d in result], [819, 1, 2])  # trimmed to limit=3, oldest dropped from the end
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# PHASE 0 — private admin web-access cookie (mobile-only access policy,
+# step 1: build and test the admin exception; nothing blocks yet)
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestAdminWebAccessPhase0(unittest.TestCase):
+
+    # ── structural ──────────────────────────────────────────────────
+
+    def test_login_route_lives_under_admin_prefix(self):
+        """Must start with /admin/ so it automatically inherits the
+        existing brute-force (Capa 3) and IP-block (Capa 1) protections
+        in security_shield_middleware — no new code needed for those."""
+        node = _route_function('post', '/admin/web-access/login')
+        self.assertIsNotNone(node)
+
+    def test_logout_and_whoami_and_form_routes_exist(self):
+        self.assertIsNotNone(_route_function('get', '/admin/web-access/login'))
+        self.assertIsNotNone(_route_function('post', '/admin/web-access/logout'))
+        self.assertIsNotNone(_route_function('get', '/admin/web-access/whoami'))
+
+    def test_login_checks_a_secret_distinct_from_admin_secret_and_jwt_secret(self):
+        """Blast-radius separation: a leak of this secret must not also
+        grant the ~140 /admin/* endpoints, and a leak of ADMIN_SECRET must
+        not by itself grant this cookie."""
+        src = _src_of(_function('admin_web_access_login'))
+        self.assertIn("os.getenv('ADMIN_WEB_ACCESS_SECRET')", src)
+        self.assertNotIn("os.getenv('ADMIN_SECRET')", src)
+        self.assertNotIn("os.getenv('JWT_SECRET')", src)
+
+    def test_login_rejects_on_mismatch_before_issuing_any_cookie(self):
+        src = _src_of(_function('admin_web_access_login'))
+        # must raise/compare before ever reaching set_cookie
+        self.assertIn('raise HTTPException(403', src)
+        self.assertLess(src.index('raise HTTPException(403'), src.index('set_cookie'))
+
+    def test_cookie_flags_are_httponly_secure_strict(self):
+        src = _src_of(_function('admin_web_access_login'))
+        self.assertIn('httponly=True', src)
+        self.assertIn('secure=True', src)
+        self.assertIn("samesite='strict'", src)
+
+    def test_nothing_else_is_gated_by_this_cookie_yet(self):
+        """Phase 0 constraint: has_admin_web_access must exist and be
+        callable, but must not yet be referenced by any OTHER route as a
+        Depends(...) gate — that is Phase 3, not yet authorized."""
+        self.assertIsNotNone(_function('has_admin_web_access'))
+        referencing_routes = []
+        for node in ast.walk(TREE):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            is_route = any(
+                isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                and isinstance(d.func.value, ast.Name) and d.func.value.id == 'app'
+                for d in node.decorator_list
+            )
+            if is_route and node.name not in ('admin_web_access_whoami',) \
+                    and 'has_admin_web_access' in _calls_in(node):
+                referencing_routes.append(node.name)
+        self.assertEqual(referencing_routes, [])
+
+    # ── behavioural (real extracted source, exec'd with the real jwt lib) ──
+
+    def _namespace(self):
+        import jwt as _jwt
+        ns = {
+            'jwt': _jwt,
+            'datetime': __import__('datetime').datetime,
+            'timedelta': __import__('datetime').timedelta,
+            'SECRET': 'phase0-test-secret',
+            'ADMIN_WEB_COOKIE_DAYS': 90,
+            'ADMIN_WEB_COOKIE_NAME': 'pfd_admin_web',
+            'Request': object,  # only used as a type annotation here
+        }
+        for fn_name in ('_admin_web_make_cookie_token', '_admin_web_cookie_is_valid', 'has_admin_web_access'):
+            exec(compile(_src_of(_function(fn_name)), '<main.py>', 'exec'), ns)
+        return ns
+
+    class _FakeRequest:
+        def __init__(self, cookies):
+            self.cookies = cookies
+
+    def test_round_trip_token_is_valid(self):
+        ns = self._namespace()
+        token = ns['_admin_web_make_cookie_token']()
+        self.assertTrue(ns['_admin_web_cookie_is_valid'](token))
+
+    def test_empty_or_missing_token_is_invalid(self):
+        ns = self._namespace()
+        self.assertFalse(ns['_admin_web_cookie_is_valid'](''))
+        self.assertFalse(ns['_admin_web_cookie_is_valid'](None))
+
+    def test_token_signed_with_wrong_secret_is_rejected(self):
+        """A voter session token or anything signed with a different key
+        must never pass as an admin-web cookie."""
+        ns = self._namespace()
+        forged = ns['jwt'].encode(
+            {'typ': 'admin_web', 'exp': ns['datetime'].utcnow() + ns['timedelta'](days=1)},
+            'a-different-secret', algorithm='HS256')
+        self.assertFalse(ns['_admin_web_cookie_is_valid'](forged))
+
+    def test_token_with_wrong_typ_claim_is_rejected(self):
+        """A real, validly-signed voter JWT (role/sub claims, no
+        typ='admin_web') must not be reusable as this cookie."""
+        ns = self._namespace()
+        voter_token = ns['jwt'].encode(
+            {'sub': '123', 'role': 'voter', 'exp': ns['datetime'].utcnow() + ns['timedelta'](days=1)},
+            ns['SECRET'], algorithm='HS256')
+        self.assertFalse(ns['_admin_web_cookie_is_valid'](voter_token))
+
+    def test_expired_token_is_rejected(self):
+        ns = self._namespace()
+        expired = ns['jwt'].encode(
+            {'typ': 'admin_web', 'exp': ns['datetime'].utcnow() - ns['timedelta'](days=1)},
+            ns['SECRET'], algorithm='HS256')
+        self.assertFalse(ns['_admin_web_cookie_is_valid'](expired))
+
+    def test_has_admin_web_access_reads_the_named_cookie_from_the_request(self):
+        ns = self._namespace()
+        token = ns['_admin_web_make_cookie_token']()
+        req_ok = self._FakeRequest({'pfd_admin_web': token})
+        req_missing = self._FakeRequest({})
+        req_wrong_name = self._FakeRequest({'some_other_cookie': token})
+        self.assertTrue(ns['has_admin_web_access'](req_ok))
+        self.assertFalse(ns['has_admin_web_access'](req_missing))
+        self.assertFalse(ns['has_admin_web_access'](req_wrong_name))
+
+
 if __name__ == '__main__':
     unittest.main()

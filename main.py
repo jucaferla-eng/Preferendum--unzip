@@ -30,7 +30,7 @@ from email.mime.multipart import MIMEMultipart
 from fastapi import (FastAPI, HTTPException, Depends, UploadFile,
                      File, Form, Query, Request, BackgroundTasks, Header)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response, StreamingResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse, RedirectResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import (create_engine, Column, Integer, String, Boolean,
                         DateTime, Text, Float, Date, ForeignKey, UniqueConstraint,
@@ -1984,6 +1984,50 @@ def get_verified_user(user: User = Depends(get_current_user)):
     if not user.email_verified:
         raise HTTPException(403, 'Email verification required')
     return user
+
+# ══════════════════════════════════════════════════════════════
+# FASE 0 — acceso administrativo privado a la versión web
+# (política de acceso solo-app para el público; ver plan autorizado por JC)
+#
+# Secret DISTINTO de ADMIN_SECRET y de JWT_SECRET a propósito: si este
+# secret se filtra, solo compromete el acceso web de un admin — nunca los
+# ~140 endpoints /admin/* ni la firma de sesiones de votantes. Y viceversa:
+# si ADMIN_SECRET se filtra, no otorga por sí solo una cookie de acceso web.
+#
+# Esta cookie NO bloquea nada todavía — en esta fase solo se construye y se
+# prueba. Ninguna ruta existente la exige aún; eso es la Fase 3, pendiente
+# de autorización aparte.
+ADMIN_WEB_COOKIE_NAME = 'pfd_admin_web'
+ADMIN_WEB_COOKIE_DAYS = 90
+
+if not os.getenv('ADMIN_WEB_ACCESS_SECRET'):
+    print('[SECURITY] ⚠️ ADMIN_WEB_ACCESS_SECRET no está configurado — el login de acceso web admin (Fase 0) queda inaccesible hasta que se setee en Render. No afecta nada más.')
+
+def _admin_web_make_cookie_token() -> str:
+    payload = {
+        'typ': 'admin_web',
+        'exp': datetime.utcnow() + timedelta(days=ADMIN_WEB_COOKIE_DAYS),
+    }
+    return jwt.encode(payload, SECRET, algorithm='HS256')
+
+def _admin_web_cookie_is_valid(token: str) -> bool:
+    """Falla cerrado ante cualquier problema: firma inválida, vencido,
+    reclamo typ incorrecto (p.ej. un JWT de sesión de votante robado, que
+    no lleva typ='admin_web'), o cookie ausente."""
+    if not token:
+        return False
+    try:
+        payload = jwt.decode(token, SECRET, algorithms=['HS256'])
+        return payload.get('typ') == 'admin_web'
+    except Exception:
+        return False
+
+def has_admin_web_access(request: Request) -> bool:
+    """Lee la cookie de la request actual y confirma si otorga acceso web
+    admin. Hoy no la usa ninguna ruta para bloquear nada — queda lista
+    para la Fase 3 (activación del bloqueo público), pendiente de
+    autorización aparte."""
+    return _admin_web_cookie_is_valid(request.cookies.get(ADMIN_WEB_COOKIE_NAME, ''))
 
 # ══════════════════════════════════════════════════════════════
 # CANONICAL ELIGIBILITY — adapters (CHANGE-002)
@@ -4444,6 +4488,76 @@ async def stripe_setup_save(request: Request, db: Session = Depends(get_db)):
         return {'ok': True}
     except Exception as e:
         return {'ok': False, 'error': str(e)}
+
+@app.get('/admin/web-access/login', response_class=HTMLResponse)
+def admin_web_access_login_form():
+    """Fase 0 — formulario de login para la EXCEPCIÓN PRIVADA de acceso web
+    admin. No bloquea nada todavía: hoy esta cookie no es exigida por
+    ninguna otra ruta. Se abre solo desde el Mac del admin para probarla."""
+    return HTMLResponse(content='''<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Acceso administrativo — Preferendum</title>
+<style>body{background:#0f172a;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;}
+.box{background:#1e293b;padding:32px;border-radius:12px;width:90%;max-width:480px;}
+h2{margin:0 0 20px;font-size:18px;}
+input{width:100%;padding:12px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#fff;font-size:14px;box-sizing:border-box;margin-bottom:16px;}
+button{width:100%;padding:12px;background:#2d6eff;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:600;cursor:pointer;}
+#msg{margin-top:12px;font-size:14px;}</style></head>
+<body><div class="box">
+<h2>Acceso administrativo a la versión web</h2>
+<p style="font-size:13px;color:#94a3b8;margin-bottom:16px;">Solo para personas expresamente autorizadas. El acceso queda guardado en este navegador por 90 días.</p>
+<input type="password" id="s" placeholder="Secret de acceso" autocomplete="off" />
+<button onclick="go()">Entrar</button>
+<div id="msg"></div>
+</div>
+<script>
+async function go() {
+  const s = document.getElementById('s').value;
+  if (!s) return;
+  const r = await fetch('/admin/web-access/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({secret: s})});
+  const d = await r.json();
+  document.getElementById('msg').style.color = d.ok ? '#10b981' : '#f87171';
+  document.getElementById('msg').textContent = d.ok ? '✓ Acceso concedido.' : 'Secret incorrecto.';
+  document.getElementById('s').value = '';
+}
+</script></body></html>''')
+
+@app.post('/admin/web-access/login')
+async def admin_web_access_login(request: Request):
+    """Fase 0 — valida el secret dedicado (ADMIN_WEB_ACCESS_SECRET, distinto
+    de ADMIN_SECRET) y, si es correcto, entrega la cookie firmada de acceso
+    web admin. Vive bajo /admin/* a propósito: hereda automáticamente las
+    protecciones de fuerza bruta e IP-block ya existentes en
+    security_shield_middleware (Capa 1 y Capa 3), sin código nuevo."""
+    body = await request.json()
+    provided = (body.get('secret') or '').strip()
+    expected = (os.getenv('ADMIN_WEB_ACCESS_SECRET') or '').strip()
+    if not expected or not provided or provided != expected:
+        raise HTTPException(403, 'Forbidden')
+    token = _admin_web_make_cookie_token()
+    resp = JSONResponse(content={'ok': True})
+    resp.set_cookie(
+        key=ADMIN_WEB_COOKIE_NAME,
+        value=token,
+        max_age=60 * 60 * 24 * ADMIN_WEB_COOKIE_DAYS,
+        httponly=True,
+        secure=True,
+        samesite='strict',
+    )
+    return resp
+
+@app.post('/admin/web-access/logout')
+def admin_web_access_logout():
+    resp = JSONResponse(content={'ok': True})
+    resp.delete_cookie(key=ADMIN_WEB_COOKIE_NAME)
+    return resp
+
+@app.get('/admin/web-access/whoami')
+def admin_web_access_whoami(request: Request):
+    """Fase 0 — diagnóstico de solo lectura: ¿la cookie de ESTA request es
+    válida ahora mismo? No exige ADMIN_SECRET porque no expone nada salvo
+    un booleano; no revela el secret ni el contenido de la cookie."""
+    return {'has_admin_web_access': has_admin_web_access(request)}
 
 @app.get('/admin/dev-otp/{phone}')
 def dev_otp(phone: str, db: Session = Depends(get_db)):
