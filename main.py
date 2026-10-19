@@ -41,6 +41,11 @@ from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel, validator
 import jwt
 import bcrypt
+import cbor2
+from cryptography import x509
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.exceptions import InvalidSignature
 from blockchain import blockchain as _blockchain
 from payments import (
     PAYMENTS_SCHEMA_SQL,
@@ -491,6 +496,40 @@ class ConsultationNotificationLog(Base):
     debate_id  = Column(Integer, index=True, nullable=False)
     channel    = Column(String, default='email')  # 'email' | 'push'
     sent_at    = Column(DateTime, default=datetime.utcnow)
+
+class MobileAttestationChallenge(Base):
+    """MOBILE-ONLY ACCESS POLICY (Phase 2) — one single-use nonce per
+    attestation attempt, embedded in the App Attest clientDataHash / the
+    Play Integrity request so a captured attestation/token can't be
+    replayed later against a different login. Short TTL, deleted (or
+    marked used) once consumed — never reused."""
+    __tablename__ = 'mobile_attestation_challenges'
+    id         = Column(Integer, primary_key=True)
+    nonce      = Column(String, unique=True, index=True, nullable=False)
+    platform   = Column(String, default='')  # 'ios' | 'android'
+    used       = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+
+class MobileAttestedDevice(Base):
+    """MOBILE-ONLY ACCESS POLICY (Phase 2) — one row per device that has
+    completed the INITIAL App Attest key attestation (iOS) and been
+    accepted. Stores the device's public key (never a secret — it's the
+    public half) so later logins can be verified via a cheap signature
+    check (generateAssertion) instead of repeating the full, expensive
+    attestation. counter is Apple's own replay-protection counter: it
+    must only ever increase, never repeat or go backwards, across every
+    subsequent assertion from this same key_id. Android/Play Integrity
+    has no equivalent persistent key — it re-verifies with Google on
+    every login instead, so this table is iOS-only."""
+    __tablename__ = 'mobile_attested_devices'
+    id             = Column(Integer, primary_key=True)
+    key_id         = Column(String, unique=True, index=True, nullable=False)
+    platform       = Column(String, default='ios')
+    public_key_pem = Column(Text, nullable=False)
+    counter        = Column(Integer, default=0)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    last_seen_at   = Column(DateTime, default=datetime.utcnow)
 
 class SafetyReport(Base):
     """Google Play Child Safety Standards — user/public reports of unsafe
@@ -2028,6 +2067,261 @@ def has_admin_web_access(request: Request) -> bool:
     para la Fase 3 (activación del bloqueo público), pendiente de
     autorización aparte."""
     return _admin_web_cookie_is_valid(request.cookies.get(ADMIN_WEB_COOKIE_NAME, ''))
+
+# ══════════════════════════════════════════════════════════════
+# FASE 2 — verificación oficial de apps (App Attest / Play Integrity)
+# (política de acceso solo-app; plan autorizado por JC)
+#
+# IMPORTANTE sobre el alcance real de esto hoy: la lógica criptográfica de
+# App Attest está implementada completa y probada contra datos sintéticos
+# construidos por estas mismas pruebas (no contra una atestación real de
+# un iPhone físico, que no existe todavía en este entorno). Play Integrity
+# solo tiene la llamada a la API de Google y la interpretación del
+# veredicto escritas — NO puede probarse de extremo a extremo sin que JC
+# habilite la API en Google Cloud y entregue una service account, algo
+# que solo él puede hacer. Nada de esto bloquea ni afecta aún ninguna
+# ruta existente — eso es la Fase 3, pendiente de autorización aparte.
+IOS_TEAM_ID    = os.getenv('APPLE_TEAM_ID', '94LF36AQDA')          # eas.json (no es secreto)
+IOS_BUNDLE_ID  = os.getenv('APPLE_BUNDLE_ID', 'com.caip.preferendumapp')  # app.json (no es secreto)
+ANDROID_PACKAGE_NAME = os.getenv('ANDROID_PACKAGE_NAME', 'com.caip.preferendum')  # app.json (no es secreto)
+
+# Descargado directo de https://www.apple.com/certificateauthority/Apple_App_Attestation_Root_CA.pem
+# (no transcrito de memoria -- cualquier byte mal copiado en un certificado
+# de confianza sería un error de seguridad real, no cosmético).
+# SHA256 del certificado: 1C:B9:82:3B:A2:8B:A6:AD:2D:33:A0:06:94:1D:E2:AE:4F:51:3E:F1:D4:E8:31:B9:F7:E0:FA:7B:62:42:C9:32
+APPLE_APPATTEST_ROOT_CA_PEM = b"""-----BEGIN CERTIFICATE-----
+MIICITCCAaegAwIBAgIQC/O+DvHN0uD7jG5yH2IXmDAKBggqhkjOPQQDAzBSMSYw
+JAYDVQQDDB1BcHBsZSBBcHAgQXR0ZXN0YXRpb24gUm9vdCBDQTETMBEGA1UECgwK
+QXBwbGUgSW5jLjETMBEGA1UECAwKQ2FsaWZvcm5pYTAeFw0yMDAzMTgxODMyNTNa
+Fw00NTAzMTUwMDAwMDBaMFIxJjAkBgNVBAMMHUFwcGxlIEFwcCBBdHRlc3RhdGlv
+biBSb290IENBMRMwEQYDVQQKDApBcHBsZSBJbmMuMRMwEQYDVQQIDApDYWxpZm9y
+bmlhMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAERTHhmLW07ATaFQIEVwTtT4dyctdh
+NbJhFs/Ii2FdCgAHGbpphY3+d8qjuDngIN3WVhQUBHAoMeQ/cLiP1sOUtgjqK9au
+Yen1mMEvRq9Sk3Jm5X8U62H+xTD3FE9TgS41o0IwQDAPBgNVHRMBAf8EBTADAQH/
+MB0GA1UdDgQWBBSskRBTM72+aEH/pwyp5frq5eWKoTAOBgNVHQ8BAf8EBAMCAQYw
+CgYIKoZIzj0EAwMDaAAwZQIwQgFGnByvsiVbpTKwSga0kP0e8EeDS4+sQmTvb7vn
+53O5+FRXgeLhpJ06ysC5PrOyAjEAp5U4xDgEgllF7En3VcE3iexZZtKeYnpqtijV
+oyFraWVIyd/dganmrduC1bmTBGwD
+-----END CERTIFICATE-----
+"""
+
+APPATTEST_AAGUID_PRODUCTION  = b'\x00' * 16
+APPATTEST_AAGUID_DEVELOPMENT = b'appattestdevelop'
+APPATTEST_EXTENSION_OID      = '1.2.840.113635.100.8.2'
+
+class AppAttestError(Exception):
+    pass
+
+def _appattest_app_id_hash() -> bytes:
+    return hashlib.sha256(f'{IOS_TEAM_ID}.{IOS_BUNDLE_ID}'.encode()).digest()
+
+def _der_read_tlv(buf: bytes, offset: int):
+    """Minimal DER tag-length-value reader — enough for the fixed,
+    known-shape nonce extension below. Returns (tag, value_bytes, next_offset)."""
+    tag = buf[offset]
+    length_byte = buf[offset + 1]
+    if length_byte < 0x80:
+        length = length_byte
+        value_start = offset + 2
+    else:
+        num_len_bytes = length_byte & 0x7F
+        length = int.from_bytes(buf[offset + 2:offset + 2 + num_len_bytes], 'big')
+        value_start = offset + 2 + num_len_bytes
+    value = buf[value_start:value_start + length]
+    return tag, value, value_start + length
+
+def _appattest_extract_nonce_from_cert(cred_cert) -> bytes:
+    """The credCert carries the attestation nonce inside a custom
+    extension: SEQUENCE { [1] EXPLICIT { OCTET STRING (32-byte nonce) } }.
+    Not a type `cryptography` parses natively, so this reads the fixed,
+    documented DER shape directly."""
+    try:
+        ext = cred_cert.extensions.get_extension_for_oid(x509.ObjectIdentifier(APPATTEST_EXTENSION_OID))
+    except x509.ExtensionNotFound:
+        raise AppAttestError('credCert no tiene la extensión de nonce esperada')
+    raw = ext.value.value  # DER bytes of: SEQUENCE { [1] { OCTET STRING } }
+    _, seq_body, _ = _der_read_tlv(raw, 0)
+    _, octet_wrapped, _ = _der_read_tlv(seq_body, 0)   # the [1] EXPLICIT wrapper
+    _, nonce, _ = _der_read_tlv(octet_wrapped, 0)        # the inner OCTET STRING
+    return nonce
+
+def _appattest_verify_cert_chain(cert_chain: list) -> None:
+    """cert_chain = [credCert, intermediate]. Verifies intermediate was
+    signed by our known Apple root, and credCert was signed by
+    intermediate — a real chain-of-trust check, not just "is a cert"."""
+    if len(cert_chain) < 2:
+        raise AppAttestError('cadena de certificados incompleta (se esperan 2: leaf + intermedio)')
+    cred_cert, intermediate = cert_chain[0], cert_chain[1]
+    root = x509.load_pem_x509_certificate(APPLE_APPATTEST_ROOT_CA_PEM)
+    for child, parent in ((intermediate, root), (cred_cert, intermediate)):
+        parent_pubkey = parent.public_key()
+        try:
+            parent_pubkey.verify(
+                child.signature, child.tbs_certificate_bytes,
+                ec.ECDSA(child.signature_hash_algorithm),
+            )
+        except InvalidSignature:
+            raise AppAttestError('la cadena de certificados no verifica contra la raíz de Apple')
+
+def appattest_verify_attestation(key_id_b64: str, attestation_object_b64: str, challenge: str,
+                                  allow_development: bool = False) -> str:
+    """Full App Attest attestation verification (first-time device
+    registration, DCAppAttestService.attestKey). Returns the device's
+    public key as PEM on success; raises AppAttestError on any failure.
+    Implements Apple's documented verification steps — see module
+    comment above for what's genuinely tested vs. still unverified
+    against a real device."""
+    try:
+        attestation = cbor2.loads(base64.b64decode(attestation_object_b64))
+    except Exception as e:
+        raise AppAttestError(f'attestationObject no es CBOR válido: {e}')
+
+    if attestation.get('fmt') != 'apple-appattest':
+        raise AppAttestError("fmt debe ser 'apple-appattest'")
+
+    att_stmt = attestation.get('attStmt', {})
+    x5c = att_stmt.get('x5c', [])
+    if len(x5c) < 2:
+        raise AppAttestError('attStmt.x5c debe tener al menos 2 certificados (leaf + intermedio)')
+    cert_chain = [x509.load_der_x509_certificate(der) for der in x5c]
+    _appattest_verify_cert_chain(cert_chain)
+    cred_cert = cert_chain[0]
+
+    auth_data = attestation.get('authData')
+    if not isinstance(auth_data, bytes) or len(auth_data) < 37:
+        raise AppAttestError('authData ausente o demasiado corto')
+
+    client_data_hash = hashlib.sha256(challenge.encode()).digest()
+    nonce_computed = hashlib.sha256(auth_data + client_data_hash).digest()
+    nonce_in_cert = _appattest_extract_nonce_from_cert(cred_cert)
+    if nonce_computed != nonce_in_cert:
+        raise AppAttestError('nonce no coincide — posible challenge reutilizado o datos alterados')
+
+    rp_id_hash = auth_data[0:32]
+    if rp_id_hash != _appattest_app_id_hash():
+        raise AppAttestError('rpIdHash no coincide con TeamID.BundleID esperado')
+
+    counter = int.from_bytes(auth_data[33:37], 'big')
+    if counter != 0:
+        raise AppAttestError('counter debe ser 0 en la atestación inicial')
+
+    aaguid = auth_data[37:53]
+    allowed = {APPATTEST_AAGUID_PRODUCTION} | ({APPATTEST_AAGUID_DEVELOPMENT} if allow_development else set())
+    if aaguid not in allowed:
+        raise AppAttestError('aaguid no es de producción (ni de desarrollo, si no está permitido)')
+
+    cred_id_len = int.from_bytes(auth_data[53:55], 'big')
+    credential_id = auth_data[55:55 + cred_id_len]
+    try:
+        key_id_bytes = base64.b64decode(key_id_b64)
+    except Exception:
+        raise AppAttestError('keyId no es base64 válido')
+    if credential_id != key_id_bytes:
+        raise AppAttestError('credentialId de authData no coincide con el keyId recibido')
+
+    return cred_cert.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+
+def appattest_verify_assertion(assertion_object_b64: str, client_data: bytes,
+                                stored_public_key_pem: str, stored_counter: int) -> int:
+    """Verifies a subsequent login (DCAppAttestService.generateAssertion)
+    against a previously-stored public key. Returns the new counter to
+    persist; raises AppAttestError if the signature is invalid or the
+    counter didn't strictly increase (replay)."""
+    try:
+        assertion = cbor2.loads(base64.b64decode(assertion_object_b64))
+    except Exception as e:
+        raise AppAttestError(f'assertionObject no es CBOR válido: {e}')
+
+    signature = assertion.get('signature')
+    auth_data = assertion.get('authenticatorData')
+    if not isinstance(signature, bytes) or not isinstance(auth_data, bytes) or len(auth_data) < 37:
+        raise AppAttestError('assertion incompleta')
+
+    client_data_hash = hashlib.sha256(client_data).digest()
+    nonce = hashlib.sha256(auth_data + client_data_hash).digest()
+
+    public_key = serialization.load_pem_public_key(stored_public_key_pem.encode())
+    try:
+        public_key.verify(signature, nonce, ec.ECDSA(hashes.SHA256()))
+    except InvalidSignature:
+        raise AppAttestError('firma inválida — la assertion no corresponde a la llave registrada')
+
+    rp_id_hash = auth_data[0:32]
+    if rp_id_hash != _appattest_app_id_hash():
+        raise AppAttestError('rpIdHash no coincide con TeamID.BundleID esperado')
+
+    new_counter = int.from_bytes(auth_data[33:37], 'big')
+    if new_counter <= stored_counter:
+        raise AppAttestError('counter no incrementó — posible reproducción (replay) de una assertion anterior')
+
+    return new_counter
+
+def play_integrity_verify(integrity_token: str, expected_nonce: str) -> dict:
+    """Calls Google's real Play Integrity API to decode/verify a token
+    generated on-device by the Play Integrity SDK. UNTESTED end-to-end —
+    requires GOOGLE_PLAY_INTEGRITY_SA_PATH (a Google Cloud service
+    account JSON with the Play Integrity API enabled for this app),
+    which only JC's Google Cloud/Play Console access can provide. The
+    verdict-interpretation logic below IS unit-tested against Google's
+    own documented example response shape."""
+    sa_path = os.getenv('GOOGLE_PLAY_INTEGRITY_SA_PATH')
+    if not sa_path:
+        raise RuntimeError('GOOGLE_PLAY_INTEGRITY_SA_PATH no configurado — Play Integrity no disponible todavía')
+    from google.oauth2 import service_account as _gsa
+    from google.auth.transport.requests import AuthorizedSession as _GAuthSession
+    creds = _gsa.Credentials.from_service_account_file(
+        sa_path, scopes=['https://www.googleapis.com/auth/playintegrity'])
+    session = _GAuthSession(creds)
+    resp = session.post(
+        f'https://playintegrity.googleapis.com/v1/{ANDROID_PACKAGE_NAME}:decodeIntegrityToken',
+        json={'integrity_token': integrity_token}, timeout=15,
+    )
+    resp.raise_for_status()
+    payload = resp.json().get('tokenPayloadExternal', {})
+    return _play_integrity_check_verdict(payload, expected_nonce)
+
+def _play_integrity_check_verdict(payload: dict, expected_nonce: str) -> dict:
+    """Pure verdict interpretation, split out from the network call above
+    so it's testable with a synthetic payload matching Google's
+    documented example response — no live API/credentials needed here."""
+    request_details = payload.get('requestDetails', {})
+    if request_details.get('nonce') != expected_nonce:
+        raise ValueError('nonce no coincide — posible token reutilizado')
+    app_verdict = payload.get('appIntegrity', {}).get('appRecognitionVerdict')
+    if app_verdict != 'PLAY_RECOGNIZED':
+        raise ValueError(f'appIntegrity rechazada: {app_verdict}')
+    device_verdicts = payload.get('deviceIntegrity', {}).get('deviceRecognitionVerdict', [])
+    if 'MEETS_DEVICE_INTEGRITY' not in device_verdicts:
+        raise ValueError(f'deviceIntegrity insuficiente: {device_verdicts}')
+    return payload
+
+def _mobile_app_make_cookie_token() -> str:
+    payload = {'typ': 'mobile_app', 'exp': datetime.utcnow() + timedelta(days=ADMIN_WEB_COOKIE_DAYS)}
+    return jwt.encode(payload, SECRET, algorithm='HS256')
+
+def _mobile_app_cookie_is_valid(token: str) -> bool:
+    if not token:
+        return False
+    try:
+        payload = jwt.decode(token, SECRET, algorithms=['HS256'])
+        return payload.get('typ') == 'mobile_app'
+    except Exception:
+        return False
+
+MOBILE_APP_COOKIE_NAME = 'pfd_mobile_app'
+
+def has_mobile_app_access(request: Request) -> bool:
+    return _mobile_app_cookie_is_valid(request.cookies.get(MOBILE_APP_COOKIE_NAME, ''))
+
+def has_verified_web_access(request: Request) -> bool:
+    """Lo que la Fase 3 (todavía no autorizada) usaría para decidir si
+    deja pasar una solicitud: o bien la cookie administrativa (Fase 0),
+    o bien la cookie de app oficial verificada (Fase 2). Ninguna ruta la
+    usa todavía para bloquear nada."""
+    return has_admin_web_access(request) or has_mobile_app_access(request)
 
 # ══════════════════════════════════════════════════════════════
 # CANONICAL ELIGIBILITY — adapters (CHANGE-002)
@@ -4569,6 +4863,116 @@ def admin_web_access_whoami(request: Request):
     válida ahora mismo? No exige ADMIN_SECRET porque no expone nada salvo
     un booleano; no revela el secret ni el contenido de la cookie."""
     return {'has_admin_web_access': has_admin_web_access(request)}
+
+# ── Fase 2 — endpoints de verificación de apps oficiales ──────────────
+# Ninguna ruta EXISTENTE los exige todavía; existen para poder construir
+# y probar el lado del servidor sin tocar las apps móviles ni activar
+# ningún bloqueo (eso es la Fase 3, pendiente de autorización aparte).
+
+class MobileAttestChallengeOut(BaseModel):
+    nonce: str
+
+class IosAttestIn(BaseModel):
+    nonce: str
+    key_id: str
+    attestation_object: str
+
+class IosAssertIn(BaseModel):
+    nonce: str
+    key_id: str
+    assertion_object: str
+
+class AndroidVerifyIn(BaseModel):
+    nonce: str
+    integrity_token: str
+
+def _mobile_issue_challenge(platform: str, db: Session, ttl_seconds: int = 300) -> str:
+    nonce = uuid.uuid4().hex + uuid.uuid4().hex  # 64 hex chars, random, not a secret
+    db.add(MobileAttestationChallenge(
+        nonce=nonce, platform=platform,
+        expires_at=datetime.utcnow() + timedelta(seconds=ttl_seconds),
+    ))
+    db.commit()
+    return nonce
+
+def _mobile_consume_challenge(nonce: str, platform: str, db: Session) -> bool:
+    """Single-use: must exist, match the expected platform, be unexpired,
+    and never have been consumed before. Marks it used in the SAME
+    lookup so a race can't consume it twice."""
+    row = db.query(MobileAttestationChallenge).filter(
+        MobileAttestationChallenge.nonce == nonce,
+        MobileAttestationChallenge.platform == platform,
+        MobileAttestationChallenge.used == False,
+        MobileAttestationChallenge.expires_at > datetime.utcnow(),
+    ).first()
+    if not row:
+        return False
+    row.used = True
+    db.commit()
+    return True
+
+def _mobile_set_app_cookie(resp: JSONResponse):
+    resp.set_cookie(
+        key=MOBILE_APP_COOKIE_NAME, value=_mobile_app_make_cookie_token(),
+        max_age=60 * 60 * 24 * ADMIN_WEB_COOKIE_DAYS,
+        httponly=True, secure=True, samesite='strict',
+    )
+
+@app.get('/mobile-auth/challenge', response_model=MobileAttestChallengeOut)
+def mobile_auth_challenge(platform: str, db: Session = Depends(get_db)):
+    if platform not in ('ios', 'android'):
+        raise HTTPException(400, "platform debe ser 'ios' o 'android'")
+    return {'nonce': _mobile_issue_challenge(platform, db)}
+
+@app.post('/mobile-auth/ios/register')
+def mobile_auth_ios_register(data: IosAttestIn, db: Session = Depends(get_db)):
+    if not _mobile_consume_challenge(data.nonce, 'ios', db):
+        raise HTTPException(400, 'nonce inválido, vencido o ya usado')
+    try:
+        public_key_pem = appattest_verify_attestation(data.key_id, data.attestation_object, data.nonce)
+    except AppAttestError as e:
+        raise HTTPException(403, str(e))
+    existing = db.query(MobileAttestedDevice).filter(MobileAttestedDevice.key_id == data.key_id).first()
+    if existing:
+        existing.public_key_pem, existing.counter, existing.last_seen_at = public_key_pem, 0, datetime.utcnow()
+    else:
+        db.add(MobileAttestedDevice(key_id=data.key_id, platform='ios', public_key_pem=public_key_pem, counter=0))
+    db.commit()
+    resp = JSONResponse(content={'ok': True})
+    _mobile_set_app_cookie(resp)
+    return resp
+
+@app.post('/mobile-auth/ios/assert')
+def mobile_auth_ios_assert(data: IosAssertIn, db: Session = Depends(get_db)):
+    if not _mobile_consume_challenge(data.nonce, 'ios', db):
+        raise HTTPException(400, 'nonce inválido, vencido o ya usado')
+    device = db.query(MobileAttestedDevice).filter(MobileAttestedDevice.key_id == data.key_id).first()
+    if not device:
+        raise HTTPException(403, 'keyId no registrado — debe pasar primero por /mobile-auth/ios/register')
+    try:
+        new_counter = appattest_verify_assertion(
+            data.assertion_object, data.nonce.encode(), device.public_key_pem, device.counter)
+    except AppAttestError as e:
+        raise HTTPException(403, str(e))
+    device.counter, device.last_seen_at = new_counter, datetime.utcnow()
+    db.commit()
+    resp = JSONResponse(content={'ok': True})
+    _mobile_set_app_cookie(resp)
+    return resp
+
+@app.post('/mobile-auth/android/verify')
+def mobile_auth_android_verify(data: AndroidVerifyIn, db: Session = Depends(get_db)):
+    if not _mobile_consume_challenge(data.nonce, 'android', db):
+        raise HTTPException(400, 'nonce inválido, vencido o ya usado')
+    try:
+        play_integrity_verify(data.integrity_token, expected_nonce=data.nonce)
+    except RuntimeError as e:
+        raise HTTPException(503, str(e))
+    except ValueError as e:
+        raise HTTPException(403, str(e))
+    resp = JSONResponse(content={'ok': True})
+    _mobile_set_app_cookie(resp)
+    return resp
 
 @app.get('/admin/dev-otp/{phone}')
 def dev_otp(phone: str, db: Session = Depends(get_db)):

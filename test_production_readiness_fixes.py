@@ -1769,5 +1769,321 @@ class TestAdminWebAccessPhase0(unittest.TestCase):
         self.assertFalse(ns['has_admin_web_access'](req_wrong_name))
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# PHASE 2 — App Attest (iOS) verification logic, and Play Integrity
+# (Android) verdict parsing.
+#
+# IMPORTANT — what this genuinely proves vs. what it cannot: there is no
+# real iPhone in this environment, so every attestation/assertion object
+# below is SYNTHETIC, built field-by-field from Apple's documented byte
+# layout using our own throwaway PKI (never the real Apple root). This
+# proves the parsing, chain-of-trust, nonce/replay and signature checks
+# are internally correct and actually reject what they claim to reject —
+# it does NOT prove byte-for-byte compatibility with whatever a real
+# device emits, which can only be confirmed against a real attestation.
+# ═══════════════════════════════════════════════════════════════════════
+
+from cryptography import x509 as _x509
+from cryptography.hazmat.primitives.asymmetric import ec as _ec
+from cryptography.hazmat.primitives import hashes as _hashes, serialization as _ser
+from cryptography.x509.oid import NameOID as _NameOID
+import datetime as _dt
+import cbor2 as _cbor2
+
+
+def _der_nonce_ext_value(nonce: bytes) -> bytes:
+    octet = bytes([0x04, len(nonce)]) + nonce
+    wrapped = bytes([0xA1, len(octet)]) + octet
+    return bytes([0x30, len(wrapped)]) + wrapped
+
+
+def _make_test_cert(subject_cn, issuer_cn, issuer_key, subject_key, is_ca=False, extra_ext=None):
+    now = _dt.datetime.utcnow()
+    builder = _x509.CertificateBuilder().subject_name(
+        _x509.Name([_x509.NameAttribute(_NameOID.COMMON_NAME, subject_cn)])
+    ).issuer_name(
+        _x509.Name([_x509.NameAttribute(_NameOID.COMMON_NAME, issuer_cn)])
+    ).public_key(subject_key.public_key()
+    ).serial_number(_x509.random_serial_number()
+    ).not_valid_before(now - _dt.timedelta(days=1)
+    ).not_valid_after(now + _dt.timedelta(days=1))
+    if is_ca:
+        builder = builder.add_extension(_x509.BasicConstraints(ca=True, path_length=None), critical=True)
+    if extra_ext is not None:
+        oid, value = extra_ext
+        builder = builder.add_extension(_x509.UnrecognizedExtension(oid, value), critical=False)
+    return builder.sign(issuer_key, _hashes.SHA256())
+
+
+class TestAppAttestVerification(unittest.TestCase):
+
+    APPATTEST_OID = _x509.ObjectIdentifier('1.2.840.113635.100.8.2')
+
+    def _namespace(self):
+        ns = {
+            'x509': _x509, 'ec': _ec, 'hashes': _hashes, 'serialization': _ser,
+            'cbor2': _cbor2, 'hashlib': __import__('hashlib'), 'base64': __import__('base64'),
+            'datetime': __import__('datetime').datetime, 'timedelta': __import__('datetime').timedelta,
+            'InvalidSignature': __import__('cryptography.exceptions', fromlist=['InvalidSignature']).InvalidSignature,
+            'IOS_TEAM_ID': 'TESTTEAMID1',
+            'IOS_BUNDLE_ID': 'com.caip.preferendumapp',
+            'APPATTEST_AAGUID_PRODUCTION': b'\x00' * 16,
+            'APPATTEST_AAGUID_DEVELOPMENT': b'appattestdevelop',
+            'APPATTEST_EXTENSION_OID': '1.2.840.113635.100.8.2',
+        }
+        # The real module constant is swapped for OUR synthetic root --
+        # this is what makes a self-built PKI something the real,
+        # unmodified verification function will actually accept.
+        self._test_root_key = _ec.generate_private_key(_ec.SECP256R1())
+        test_root_cert = _make_test_cert('Test Root', 'Test Root', self._test_root_key, self._test_root_key, is_ca=True)
+        ns['APPLE_APPATTEST_ROOT_CA_PEM'] = test_root_cert.public_bytes(_ser.Encoding.PEM)
+        ns['AppAttestError'] = type('AppAttestError', (Exception,), {})
+        for fn_name in ('_appattest_app_id_hash', '_der_read_tlv', '_appattest_extract_nonce_from_cert',
+                        '_appattest_verify_cert_chain', 'appattest_verify_attestation',
+                        'appattest_verify_assertion'):
+            exec(compile(_src_of(_function(fn_name)), '<main.py>', 'exec'), ns)
+        return ns
+
+    def _build_chain(self, ns):
+        root_key = self._test_root_key
+        inter_key = _ec.generate_private_key(_ec.SECP256R1())
+        leaf_key = _ec.generate_private_key(_ec.SECP256R1())
+        inter_cert = _make_test_cert('Test Intermediate', 'Test Root', root_key, inter_key, is_ca=True)
+        return inter_key, leaf_key, inter_cert
+
+    def _build_valid_attestation(self, ns, nonce_override=None, counter=0,
+                                  aaguid=None, credential_id_override=None, rp_id_hash_override=None):
+        inter_key, leaf_key, inter_cert = self._build_chain(ns)
+        challenge = 'test-challenge-abc123'
+        key_id = b'\x01' * 32  # the credentialId / keyId, 32 bytes is a realistic size
+        rp_id_hash = rp_id_hash_override or ns['_appattest_app_id_hash']()
+        flags = b'\x40'
+        counter_bytes = counter.to_bytes(4, 'big')
+        aaguid_bytes = aaguid if aaguid is not None else b'\x00' * 16
+        cred_id = credential_id_override if credential_id_override is not None else key_id
+        auth_data = rp_id_hash + flags + counter_bytes + aaguid_bytes + len(cred_id).to_bytes(2, 'big') + cred_id
+
+        client_data_hash = ns['hashlib'].sha256(challenge.encode()).digest()
+        real_nonce = ns['hashlib'].sha256(auth_data + client_data_hash).digest()
+        nonce_to_embed = nonce_override if nonce_override is not None else real_nonce
+
+        leaf_cert = _make_test_cert(
+            'Test Leaf', 'Test Intermediate', inter_key, leaf_key,
+            extra_ext=(self.APPATTEST_OID, _der_nonce_ext_value(nonce_to_embed)),
+        )
+        attestation_object = {
+            'fmt': 'apple-appattest',
+            'attStmt': {'x5c': [
+                leaf_cert.public_bytes(ns['serialization'].Encoding.DER),
+                inter_cert.public_bytes(ns['serialization'].Encoding.DER),
+            ]},
+            'authData': auth_data,
+        }
+        attestation_b64 = ns['base64'].b64encode(ns['cbor2'].dumps(attestation_object)).decode()
+        key_id_b64 = ns['base64'].b64encode(key_id).decode()
+        return key_id_b64, attestation_b64, challenge, leaf_key
+
+    def test_embedded_root_cert_matches_apples_published_fingerprint(self):
+        """The embedded PEM must be the REAL Apple App Attestation Root CA
+        -- fetched directly from apple.com, never retyped from memory.
+        This pins its SHA256 fingerprint so any future accidental edit to
+        the constant is caught here instead of silently breaking trust."""
+        m = re.search(r'APPLE_APPATTEST_ROOT_CA_PEM = b"""(.*?)"""', SRC, re.DOTALL)
+        self.assertIsNotNone(m)
+        cert = _x509.load_pem_x509_certificate(m.group(1).encode())
+        fingerprint = cert.fingerprint(_hashes.SHA256()).hex().upper()
+        self.assertEqual(fingerprint, '1CB9823BA28BA6AD2D33A006941DE2AE4F513EF1D4E831B9F7E0FA7B6242C932')
+        self.assertEqual(cert.subject.rfc4514_string(), 'ST=California,O=Apple Inc.,CN=Apple App Attestation Root CA')
+
+    def test_valid_synthetic_attestation_is_accepted(self):
+        ns = self._namespace()
+        key_id_b64, attestation_b64, challenge, _ = self._build_valid_attestation(ns)
+        pem = ns['appattest_verify_attestation'](key_id_b64, attestation_b64, challenge)
+        self.assertIn('BEGIN PUBLIC KEY', pem)
+
+    def test_chain_not_rooted_in_configured_root_is_rejected(self):
+        """A completely unrelated root (not even OUR test root) must be
+        rejected -- proves the chain check is a real verification, not a
+        pass-through."""
+        ns = self._namespace()
+        other_root_key = ns['ec'].generate_private_key(ns['ec'].SECP256R1())
+        other_root_cert = _make_test_cert('Rogue Root', 'Rogue Root', other_root_key, other_root_key, is_ca=True)
+        rogue_inter_key = ns['ec'].generate_private_key(ns['ec'].SECP256R1())
+        rogue_inter_cert = _make_test_cert('Rogue Intermediate', 'Rogue Root', other_root_key, rogue_inter_key, is_ca=True)
+        leaf_key = ns['ec'].generate_private_key(ns['ec'].SECP256R1())
+        leaf_cert = _make_test_cert('Rogue Leaf', 'Rogue Intermediate', rogue_inter_key, leaf_key)
+        with self.assertRaises(ns['AppAttestError']):
+            ns['_appattest_verify_cert_chain']([leaf_cert, rogue_inter_cert])
+
+    def test_tampered_nonce_is_rejected(self):
+        ns = self._namespace()
+        key_id_b64, attestation_b64, challenge, _ = self._build_valid_attestation(ns, nonce_override=b'\xff' * 32)
+        with self.assertRaises(ns['AppAttestError']):
+            ns['appattest_verify_attestation'](key_id_b64, attestation_b64, challenge)
+
+    def test_wrong_rp_id_hash_is_rejected(self):
+        """A different Team ID / Bundle ID (i.e. a different app) must be
+        rejected, even with an otherwise perfectly valid chain and nonce."""
+        ns = self._namespace()
+        key_id_b64, attestation_b64, challenge, _ = self._build_valid_attestation(
+            ns, rp_id_hash_override=ns['hashlib'].sha256(b'some.other.app').digest())
+        with self.assertRaises(ns['AppAttestError']):
+            ns['appattest_verify_attestation'](key_id_b64, attestation_b64, challenge)
+
+    def test_nonzero_initial_counter_is_rejected(self):
+        ns = self._namespace()
+        key_id_b64, attestation_b64, challenge, _ = self._build_valid_attestation(ns, counter=1)
+        with self.assertRaises(ns['AppAttestError']):
+            ns['appattest_verify_attestation'](key_id_b64, attestation_b64, challenge)
+
+    def test_non_production_aaguid_is_rejected_by_default(self):
+        ns = self._namespace()
+        key_id_b64, attestation_b64, challenge, _ = self._build_valid_attestation(ns, aaguid=b'appattestdevelop')
+        with self.assertRaises(ns['AppAttestError']):
+            ns['appattest_verify_attestation'](key_id_b64, attestation_b64, challenge)
+
+    def test_credential_id_mismatch_with_key_id_is_rejected(self):
+        ns = self._namespace()
+        key_id_b64, attestation_b64, challenge, _ = self._build_valid_attestation(
+            ns, credential_id_override=b'\x02' * 32)  # authData's credentialId != the keyId we claim
+        with self.assertRaises(ns['AppAttestError']):
+            ns['appattest_verify_attestation'](key_id_b64, attestation_b64, challenge)
+
+    def test_valid_assertion_is_accepted_and_counter_advances(self):
+        ns = self._namespace()
+        _, _, _, leaf_key = self._build_valid_attestation(ns)
+        public_key_pem = leaf_key.public_key().public_bytes(
+            ns['serialization'].Encoding.PEM, ns['serialization'].PublicFormat.SubjectPublicKeyInfo).decode()
+        client_data = b'assertion-nonce-xyz'
+        rp_id_hash = ns['_appattest_app_id_hash']()
+        new_auth_data = rp_id_hash + b'\x40' + (5).to_bytes(4, 'big')
+        client_data_hash = ns['hashlib'].sha256(client_data).digest()
+        nonce = ns['hashlib'].sha256(new_auth_data + client_data_hash).digest()
+        signature = leaf_key.sign(nonce, ns['ec'].ECDSA(ns['hashes'].SHA256()))
+        assertion_b64 = ns['base64'].b64encode(ns['cbor2'].dumps(
+            {'signature': signature, 'authenticatorData': new_auth_data})).decode()
+        new_counter = ns['appattest_verify_assertion'](assertion_b64, client_data, public_key_pem, stored_counter=0)
+        self.assertEqual(new_counter, 5)
+
+    def test_replayed_counter_is_rejected(self):
+        """A counter that did NOT increase versus what's stored must be
+        rejected -- this is the anti-replay protection."""
+        ns = self._namespace()
+        _, _, _, leaf_key = self._build_valid_attestation(ns)
+        public_key_pem = leaf_key.public_key().public_bytes(
+            ns['serialization'].Encoding.PEM, ns['serialization'].PublicFormat.SubjectPublicKeyInfo).decode()
+        client_data = b'assertion-nonce-xyz'
+        rp_id_hash = ns['_appattest_app_id_hash']()
+        new_auth_data = rp_id_hash + b'\x40' + (3).to_bytes(4, 'big')  # same as "stored_counter" below
+        client_data_hash = ns['hashlib'].sha256(client_data).digest()
+        nonce = ns['hashlib'].sha256(new_auth_data + client_data_hash).digest()
+        signature = leaf_key.sign(nonce, ns['ec'].ECDSA(ns['hashes'].SHA256()))
+        assertion_b64 = ns['base64'].b64encode(ns['cbor2'].dumps(
+            {'signature': signature, 'authenticatorData': new_auth_data})).decode()
+        with self.assertRaises(ns['AppAttestError']):
+            ns['appattest_verify_assertion'](assertion_b64, client_data, public_key_pem, stored_counter=3)
+
+    def test_assertion_signed_by_wrong_key_is_rejected(self):
+        ns = self._namespace()
+        _, _, _, _real_leaf_key = self._build_valid_attestation(ns)
+        imposter_key = ns['ec'].generate_private_key(ns['ec'].SECP256R1())
+        real_public_pem = _real_leaf_key.public_key().public_bytes(
+            ns['serialization'].Encoding.PEM, ns['serialization'].PublicFormat.SubjectPublicKeyInfo).decode()
+        client_data = b'assertion-nonce-xyz'
+        rp_id_hash = ns['_appattest_app_id_hash']()
+        new_auth_data = rp_id_hash + b'\x40' + (1).to_bytes(4, 'big')
+        nonce = ns['hashlib'].sha256(new_auth_data + ns['hashlib'].sha256(client_data).digest()).digest()
+        forged_signature = imposter_key.sign(nonce, ns['ec'].ECDSA(ns['hashes'].SHA256()))
+        assertion_b64 = ns['base64'].b64encode(ns['cbor2'].dumps(
+            {'signature': forged_signature, 'authenticatorData': new_auth_data})).decode()
+        with self.assertRaises(ns['AppAttestError']):
+            ns['appattest_verify_assertion'](assertion_b64, client_data, real_public_pem, stored_counter=0)
+
+
+class TestPlayIntegrityVerdictParsing(unittest.TestCase):
+    """Only the pure verdict-interpretation logic -- the real network call
+    to Google needs a service account nobody here has yet, so that half
+    stays untested until JC provides one."""
+
+    def _namespace(self):
+        ns = {}
+        exec(compile(_src_of(_function('_play_integrity_check_verdict')), '<main.py>', 'exec'), ns)
+        return ns
+
+    def _good_payload(self, nonce='abc123'):
+        # Shape matches Google's own documented example response.
+        return {
+            'requestDetails': {'nonce': nonce, 'timestampMillis': '1700000000000'},
+            'appIntegrity': {'appRecognitionVerdict': 'PLAY_RECOGNIZED'},
+            'deviceIntegrity': {'deviceRecognitionVerdict': ['MEETS_DEVICE_INTEGRITY']},
+        }
+
+    def test_fully_valid_payload_is_accepted(self):
+        ns = self._namespace()
+        result = ns['_play_integrity_check_verdict'](self._good_payload(), 'abc123')
+        self.assertEqual(result['appIntegrity']['appRecognitionVerdict'], 'PLAY_RECOGNIZED')
+
+    def test_nonce_mismatch_is_rejected(self):
+        ns = self._namespace()
+        with self.assertRaises(ValueError):
+            ns['_play_integrity_check_verdict'](self._good_payload(nonce='abc123'), 'different-nonce')
+
+    def test_unrecognized_app_is_rejected(self):
+        ns = self._namespace()
+        payload = self._good_payload()
+        payload['appIntegrity']['appRecognitionVerdict'] = 'UNRECOGNIZED_VERSION'
+        with self.assertRaises(ValueError):
+            ns['_play_integrity_check_verdict'](payload, 'abc123')
+
+    def test_compromised_device_is_rejected(self):
+        ns = self._namespace()
+        payload = self._good_payload()
+        payload['deviceIntegrity']['deviceRecognitionVerdict'] = []  # fails all integrity checks
+        with self.assertRaises(ValueError):
+            ns['_play_integrity_check_verdict'](payload, 'abc123')
+
+
+class TestMobileAuthChallengeFlow(unittest.TestCase):
+    """Structural checks on the challenge/nonce plumbing and the new
+    routes -- confirms the single-use, platform-scoped, expiring nonce
+    design and that these routes don't gate anything existing yet."""
+
+    def test_challenge_and_verify_routes_exist(self):
+        self.assertIsNotNone(_route_function('get', '/mobile-auth/challenge'))
+        self.assertIsNotNone(_route_function('post', '/mobile-auth/ios/register'))
+        self.assertIsNotNone(_route_function('post', '/mobile-auth/ios/assert'))
+        self.assertIsNotNone(_route_function('post', '/mobile-auth/android/verify'))
+
+    def test_consume_challenge_checks_used_flag_platform_and_expiry(self):
+        src = _src_of(_function('_mobile_consume_challenge'))
+        self.assertIn('MobileAttestationChallenge.used == False', src)
+        self.assertIn('MobileAttestationChallenge.platform == platform', src)
+        self.assertIn('MobileAttestationChallenge.expires_at > datetime.utcnow()', src)
+        self.assertIn('row.used = True', src)
+
+    def test_mobile_app_cookie_has_its_own_distinct_typ_claim(self):
+        """Must not collide with the admin cookie's typ -- a stolen admin
+        cookie must not pass as a verified-app cookie, and vice versa."""
+        src = _src_of(_function('_mobile_app_make_cookie_token'))
+        self.assertIn("'typ': 'mobile_app'", src)
+
+    def test_nothing_else_is_gated_by_mobile_app_access_yet(self):
+        self.assertIsNotNone(_function('has_mobile_app_access'))
+        self.assertIsNotNone(_function('has_verified_web_access'))
+        referencing_routes = []
+        for node in ast.walk(TREE):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            is_route = any(
+                isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute)
+                and isinstance(d.func.value, ast.Name) and d.func.value.id == 'app'
+                for d in node.decorator_list
+            )
+            calls = _calls_in(node)
+            if is_route and ('has_mobile_app_access' in calls or 'has_verified_web_access' in calls):
+                referencing_routes.append(node.name)
+        self.assertEqual(referencing_routes, [])
+
+
 if __name__ == '__main__':
     unittest.main()
