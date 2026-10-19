@@ -3472,6 +3472,18 @@ def get_debate_status(debate):
         return 'verifying'
     return 'verified'
 
+# PINNED CONSULTATION — the very first consultation ever created on
+# Preferendum ("¿Cuánto debería ser el límite máximo de gastos por
+# congresista al año?", debate id 819) always appears first in every
+# general listing. ONE named constant, read in exactly two places below
+# (the display flag here, and the reorder logic in
+# _eligible_debates_for) — never duplicated, never a second place that
+# could silently drift. Does not touch this debate's title, context,
+# options, votes, or results in any way — it is only ever reordered
+# and flagged for display, never rewritten.
+PINNED_CONSULTATION_ID = 819
+
+
 def format_debate(debate, has_voted=False, sponsor_info=None):
     opts = json.loads(debate.options or '[]')
     counts = json.loads(debate.vote_counts or '{}')
@@ -3520,6 +3532,7 @@ def format_debate(debate, has_voted=False, sponsor_info=None):
         'sponsor_logo_url': '',
         'sponsor_discount_pct': 0,
         'sponsor_discount_text': '',
+        'is_pinned': debate.id == PINNED_CONSULTATION_ID,
     }
     if sponsor_info:
         d['is_sponsored'] = True
@@ -7729,6 +7742,70 @@ async def upload_image(
 # ROUTES: DEBATES
 # ══════════════════════════════════════════════════════════════
 
+def _debate_eligible_formatted(d, user, db, profile):
+    """Devuelve el diccionario formateado de esta consulta SI el usuario
+    actual es elegible para verla, o None si no. Factorizado fuera del
+    bucle de _eligible_debates_for para que la lógica de anclaje de abajo
+    reutilice EXACTAMENTE la misma regla de elegibilidad — nunca una
+    versión más permisiva que deje pasar la consulta anclada donde no
+    corresponde (requisito: nunca forzada si no corresponde al filtro/
+    perfil del usuario)."""
+    try:
+        member = None
+        if bool(getattr(d, 'is_closed_list', False)):
+            member = _is_closed_list_member(d, user, db)
+        # PROFESSION FIELD AUDIT (part 2) — same occupation-target
+        # resolution as _consultation_decision, applied here too since
+        # this listing loop calls evaluate_consultation directly
+        # rather than through that helper.
+        target = _elig.consultation_target_from_debate(
+            d, occupations_override=_resolve_target_professions(getattr(d, 'target_professions', '') or ''))
+        if not _elig.evaluate_consultation(profile, target,
+                                           closed_list_member=member).allowed:
+            return None
+        return format_debate(d, sponsor_info=_get_sponsor_info(d.id, db))
+    except Exception:
+        # Fail closed: una consulta que no se puede evaluar no se muestra.
+        return None
+
+
+def _prepend_pinned_consultation(out: list, user, db, profile, status: str, limit: int) -> list:
+    """PINNED CONSULTATION — mueve PINNED_CONSULTATION_ID (819) al primer
+    lugar de esta lista, SOLO si ya es elegible para este usuario bajo
+    esta misma consulta de estado ('live'/'expired') — nunca la agrega
+    pasando por alto la elegibilidad real, y nunca la fuerza si no
+    corresponde (requisito 9). Se comprueba de forma independiente del
+    bucle principal de arriba (que corta en los primeros `limit`
+    resultados más recientes) para que nunca se pierda solo porque haya
+    miles de consultas más nuevas por delante (requisito 2) — sin esto,
+    una consulta vieja jamás sobreviviría el `break` por límite. No
+    modifica el título, contexto, alternativas, votos ni resultados de
+    la consulta anclada en absoluto — solo cambia su posición en esta
+    lista y el indicador `is_pinned` ya calculado en format_debate."""
+    already_at = next((i for i, dd in enumerate(out) if dd.get('id') == PINNED_CONSULTATION_ID), None)
+    if already_at == 0:
+        return out
+    if already_at is not None:
+        out.insert(0, out.pop(already_at))
+        return out
+
+    pinned_debate = db.query(Debate).filter(
+        Debate.id == PINNED_CONSULTATION_ID, Debate.status != 'draft'
+    ).first()
+    if not pinned_debate:
+        return out
+    now = datetime.utcnow()
+    is_expired = bool(pinned_debate.closes_at) and pinned_debate.closes_at < now
+    if (status == 'expired') != is_expired:
+        return out  # no corresponde a este filtro de estado — no se fuerza
+
+    formatted = _debate_eligible_formatted(pinned_debate, user, db, profile)
+    if formatted is None:
+        return out  # no elegible para este usuario — no se fuerza
+    out = [formatted] + out
+    return out[:limit] if limit else out
+
+
 def _eligible_debates_for(user, db, status: str = 'live', limit: int = 50) -> list:
     """Camino ÚNICO de descubrimiento de consultas (CHANGE-002).
 
@@ -7752,26 +7829,13 @@ def _eligible_debates_for(user, db, status: str = 'live', limit: int = 50) -> li
 
     out = []
     for d in q.order_by(Debate.created_at.desc()).limit(500).all():
-        try:
-            member = None
-            if bool(getattr(d, 'is_closed_list', False)):
-                member = _is_closed_list_member(d, user, db)
-            # PROFESSION FIELD AUDIT (part 2) — same occupation-target
-            # resolution as _consultation_decision, applied here too since
-            # this listing loop calls evaluate_consultation directly
-            # rather than through that helper.
-            target = _elig.consultation_target_from_debate(
-                d, occupations_override=_resolve_target_professions(getattr(d, 'target_professions', '') or ''))
-            if not _elig.evaluate_consultation(profile, target,
-                                               closed_list_member=member).allowed:
-                continue
-            out.append(format_debate(d, sponsor_info=_get_sponsor_info(d.id, db)))
-        except Exception:
-            # Fail closed: una consulta que no se puede evaluar no se muestra.
+        formatted = _debate_eligible_formatted(d, user, db, profile)
+        if formatted is None:
             continue
+        out.append(formatted)
         if len(out) >= limit:
             break
-    return out
+    return _prepend_pinned_consultation(out, user, db, profile, status, limit)
 
 
 @app.get('/debates')

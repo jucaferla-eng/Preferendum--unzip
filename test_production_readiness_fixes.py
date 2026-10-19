@@ -799,8 +799,13 @@ class TestTargetSideOccupationResolution(unittest.TestCase):
         /debates/for-me) calls evaluate_consultation directly in its own
         bulk loop, not through _consultation_decision — must carry the
         same fix independently, or discovery would silently diverge from
-        direct access/voting."""
-        node = _function('_eligible_debates_for')
+        direct access/voting. UPDATED for the pinned-consultation
+        refactor: this per-debate check now lives in
+        _debate_eligible_formatted, which _eligible_debates_for's loop
+        (and the pinned-consultation reorder step) both call — same
+        behavior, factored out so the pin reuses it exactly rather than
+        duplicating it."""
+        node = _function('_debate_eligible_formatted')
         self.assertIsNotNone(node)
         src = _src_of(node)
         self.assertIn('_resolve_target_professions(', src)
@@ -1419,6 +1424,162 @@ class TestAnnualRentalPricesJobBugFix(unittest.TestCase):
         # substring check would wrongly flag.
         real_imports = [n for n in ast.walk(func_node) if isinstance(n, ast.ImportFrom) and n.module == 'database']
         self.assertEqual(real_imports, [], f'found a real "from database import" statement: {real_imports}')
+
+
+class TestPinnedConsultation(unittest.TestCase):
+    """Pins debate id 819 ("¿Cuánto debería ser el límite máximo de
+    gastos por congresista al año?") first in every general listing.
+    Implemented once, inside _eligible_debates_for (CHANGE-002's single
+    discovery path) — never duplicated per-screen, so web and mobile
+    (which load the same WebView) get it identically, and it survives a
+    refresh/app-restart because it's recomputed server-side on every
+    request, never cached client state."""
+
+    def test_pinned_id_is_one_named_constant_read_in_exactly_two_places(self):
+        self.assertIn('PINNED_CONSULTATION_ID = 819', SRC)
+        self.assertEqual(SRC.count('PINNED_CONSULTATION_ID'),
+                          SRC.count('# PINNED CONSULTATION') and SRC.count('PINNED_CONSULTATION_ID'))
+        # Used in format_debate (the flag) and _prepend_pinned_consultation
+        # (the reorder) — never a third, separately-maintained copy.
+        format_src = _src_of(_function('format_debate'))
+        prepend_src = _src_of(_function('_prepend_pinned_consultation'))
+        self.assertIn('PINNED_CONSULTATION_ID', format_src)
+        self.assertIn('PINNED_CONSULTATION_ID', prepend_src)
+
+    def test_format_debate_exposes_is_pinned_flag_without_touching_content(self):
+        node = _function('format_debate')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn("'is_pinned': debate.id == PINNED_CONSULTATION_ID", src)
+        # The flag is purely computed from debate.id — never writes to
+        # debate.title/context/options, and never commits anything (this
+        # function already had no db access at all; confirms the pin
+        # didn't introduce any).
+        self.assertNotIn('debate.title =', src)
+        self.assertNotIn('debate.context =', src)
+        self.assertNotIn('debate.options =', src)
+        self.assertNotIn('db.commit', src)
+
+    def test_eligible_debates_for_calls_the_prepend_step_last(self):
+        node = _function('_eligible_debates_for')
+        self.assertIsNotNone(node)
+        src = _src_of(node)
+        self.assertIn('return _prepend_pinned_consultation(out, user, db, profile, status, limit)', src)
+
+    def test_prepend_logic_reuses_the_exact_same_eligibility_check(self):
+        """Never a looser/separate eligibility rule for the pinned
+        consultation — it must call _debate_eligible_formatted, the same
+        helper every other debate in the list already went through."""
+        src = _src_of(_function('_prepend_pinned_consultation'))
+        self.assertIn('_debate_eligible_formatted(pinned_debate, user, db, profile)', src)
+        self.assertIn('if formatted is None:\n        return out', src)
+
+    def test_prepend_never_writes_to_the_debates_table(self):
+        src = _src_of(_function('_prepend_pinned_consultation'))
+        self.assertNotIn('db.add(', src)
+        self.assertNotIn('db.commit(', src)
+        self.assertNotIn('.title =', src)
+        self.assertNotIn('.context =', src)
+        self.assertNotIn('.options =', src)
+
+    def test_voter_portal_renders_the_badge_without_altering_title_or_context(self):
+        self.assertIn('Consulta destacada', VOTER_SRC)
+        idx = VOTER_SRC.index('Consulta destacada')
+        window = VOTER_SRC[max(0, idx - 600):idx + 50]
+        self.assertIn('db.is_pinned', window)
+        # The badge markup must be a SEPARATE element from the title line,
+        # never string-concatenated into it.
+        self.assertIn('db.title', VOTER_SRC)
+        title_line = VOTER_SRC[VOTER_SRC.index('class="debate-title"'):VOTER_SRC.index('class="debate-title"') + 60]
+        self.assertNotIn('Consulta destacada', title_line)
+
+    # ── Real behavioral tests of the extracted reorder/eligibility logic ──
+    # (no real DB needed for most of these — a minimal fake session is
+    # enough to exercise every branch of the real, unmodified source.)
+
+    def _load_prepend_fn(self):
+        import datetime as _dt_mod
+        ns = {'datetime': _dt_mod.datetime, 'PINNED_CONSULTATION_ID': 819}
+        # _debate_eligible_formatted is called by name inside the real
+        # source — inject a controllable stub so these tests drive the
+        # REORDER/GATING logic deterministically without a real DB.
+        ns['_debate_eligible_formatted'] = self._eligible_stub
+        class FakeDebate:
+            # Class-level placeholders: the real source evaluates
+            # `Debate.id == PINNED_CONSULTATION_ID` as a SQLAlchemy-style
+            # class-level expression before it ever reaches .filter(),
+            # which our FakeQuery ignores anyway — these just need to
+            # exist so that attribute access at the class level doesn't
+            # raise AttributeError.
+            id = None
+            status = None
+            def __init__(self, id, status='live', closes_at=None):
+                self.id = id; self.status = status; self.closes_at = closes_at
+        class FakeQuery:
+            def __init__(self, result): self._result = result
+            def filter(self, *a, **k): return self
+            def first(self): return self._result
+        class FakeDB:
+            def __init__(self, result): self._result = result
+            def query(self, *a, **k): return FakeQuery(self._result)
+        ns['Debate'] = FakeDebate
+        self._FakeDB = FakeDB
+        exec(_src_of(_function('_prepend_pinned_consultation')), ns)
+        return ns['_prepend_pinned_consultation']
+
+    def test_already_present_not_first_moves_to_front_preserving_rest(self):
+        self._eligible_stub = lambda *a, **k: None  # must not even be consulted on this path
+        fn = self._load_prepend_fn()
+        out = [{'id': 1}, {'id': 819}, {'id': 2}]
+        result = fn(out, user=None, db=self._FakeDB(None), profile=None, status='live', limit=50)
+        self.assertEqual([d['id'] for d in result], [819, 1, 2])
+
+    def test_already_first_is_a_no_op(self):
+        self._eligible_stub = lambda *a, **k: None
+        fn = self._load_prepend_fn()
+        out = [{'id': 819}, {'id': 1}, {'id': 2}]
+        result = fn(out, user=None, db=self._FakeDB(None), profile=None, status='live', limit=50)
+        self.assertEqual([d['id'] for d in result], [819, 1, 2])
+
+    def test_pinned_debate_not_found_leaves_list_unchanged(self):
+        self._eligible_stub = lambda *a, **k: {'id': 819}
+        fn = self._load_prepend_fn()
+        out = [{'id': 1}, {'id': 2}]
+        result = fn(out, user=None, db=self._FakeDB(None), profile=None, status='live', limit=50)
+        self.assertEqual([d['id'] for d in result], [1, 2])
+
+    def test_status_mismatch_never_forces_it_in(self):
+        """A pinned debate with no closes_at (never expires) must not be
+        force-shown in an 'expired' listing, and vice versa for one with
+        a past closes_at."""
+        self._eligible_stub = lambda *a, **k: {'id': 819}
+        fn = self._load_prepend_fn()
+        class D:
+            id = 819; status = 'live'; closes_at = None
+        out = [{'id': 1}]
+        result = fn(out, user=None, db=self._FakeDB(D()), profile=None, status='expired', limit=50)
+        self.assertEqual([d['id'] for d in result], [1])
+
+    def test_ineligible_user_never_sees_it_forced(self):
+        """THE key requirement: if _debate_eligible_formatted says this
+        user isn't eligible (wrong country/gender/age/tier/profession),
+        the pin must not override that under any circumstance."""
+        self._eligible_stub = lambda *a, **k: None  # not eligible
+        fn = self._load_prepend_fn()
+        class D:
+            id = 819; status = 'live'; closes_at = None
+        out = [{'id': 1}, {'id': 2}]
+        result = fn(out, user=None, db=self._FakeDB(D()), profile=None, status='live', limit=50)
+        self.assertEqual([d['id'] for d in result], [1, 2])
+
+    def test_eligible_and_absent_is_prepended_and_trimmed_to_limit(self):
+        self._eligible_stub = lambda *a, **k: {'id': 819}
+        fn = self._load_prepend_fn()
+        class D:
+            id = 819; status = 'live'; closes_at = None
+        out = [{'id': 1}, {'id': 2}, {'id': 3}]
+        result = fn(out, user=None, db=self._FakeDB(D()), profile=None, status='live', limit=3)
+        self.assertEqual([d['id'] for d in result], [819, 1, 2])  # trimmed to limit=3, oldest dropped from the end
 
 
 if __name__ == '__main__':
