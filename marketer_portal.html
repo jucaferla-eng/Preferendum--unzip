@@ -988,7 +988,7 @@ async function refreshBalance() {
 
 // ── OVERVIEW ──────────────────────────────────────────────────
 async function loadOverview() {
-  const r = await fetch(`${API}/advertiser/campaigns?email=${encodeURIComponent(userEmail)}`);
+  const r = await fetch(`${API}/advertiser/campaigns?email=${encodeURIComponent(userEmail)}`, {headers:{'Authorization':'Bearer '+token}});
   if (!r.ok) return;
   const d = await r.json();
   const camps = d.campaigns || [];
@@ -1136,7 +1136,7 @@ async function confirmCrypto() {
 
 // ── CAMPAIGNS ─────────────────────────────────────────────────
 async function loadCampaigns() {
-  const r = await fetch(`${API}/advertiser/campaigns?email=${encodeURIComponent(userEmail)}`);
+  const r = await fetch(`${API}/advertiser/campaigns?email=${encodeURIComponent(userEmail)}`, {headers:{'Authorization':'Bearer '+token}});
   const d = await r.json();
   const tbody = document.getElementById('campaigns-tbody');
   const camps = d.campaigns || [];
@@ -1161,7 +1161,7 @@ async function loadCampaigns() {
 
 async function toggleCampaign(id) {
   if (window.Prefy) Prefy.setContext('marketer.campaign.active');
-  await fetch(`${API}/advertiser/campaigns/${id}/pause`, {method:'PUT'});
+  await fetch(`${API}/advertiser/campaigns/${id}/pause`, {method:'PUT', headers:{'Authorization':'Bearer '+token}});
   loadCampaigns();
 }
 
@@ -1171,7 +1171,7 @@ async function viewDeployment(id) {
   document.getElementById('dep-title').textContent = 'Loading…';
   document.getElementById('dep-debates-tbody').innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted);padding:32px;">Loading…</td></tr>';
 
-  const r = await fetch(`${API}/marketer/campaigns/${id}/metrics`);
+  const r = await fetch(`${API}/marketer/campaigns/${id}/metrics`, {headers:{'Authorization':'Bearer '+token}});
   if (!r.ok) {
     document.getElementById('dep-title').textContent = 'Error loading data';
     return;
@@ -1218,7 +1218,7 @@ async function viewDeployment(id) {
 
 let _editingCampaignId = null;
 async function editCampaign(id) {
-  const r = await fetch(`${API}/advertiser/campaigns?email=${encodeURIComponent(userEmail)}`);
+  const r = await fetch(`${API}/advertiser/campaigns?email=${encodeURIComponent(userEmail)}`, {headers:{'Authorization':'Bearer '+token}});
   const d = await r.json();
   const c = (d.campaigns||[]).find(x => x.id === id);
   if (!c) return;

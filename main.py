@@ -4402,7 +4402,8 @@ function showPage1(){
 </html>""")
 
 @app.get('/admin/stripe-setup', response_class=HTMLResponse)
-def stripe_setup_form():
+def stripe_setup_form(secret: str):
+    _check_admin(secret)
     return HTMLResponse(content='''<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Stripe Setup</title>
@@ -4423,7 +4424,11 @@ button{width:100%;padding:12px;background:#2d6eff;border:none;border-radius:8px;
 async function save() {
   const k = document.getElementById('k').value.trim();
   if (!k.startsWith('sk_')) { document.getElementById('msg').textContent = 'La clave debe empezar con sk_'; return; }
-  const r = await fetch('/admin/stripe-setup', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: k})});
+  // El secret viaja desde la URL con la que se abrió esta página — la ruta
+  // POST lo exige igual que el resto de /admin/*, así que el formulario
+  // debe reenviarlo o recibiría 403.
+  const s = new URLSearchParams(window.location.search).get('secret') || '';
+  const r = await fetch('/admin/stripe-setup?secret=' + encodeURIComponent(s), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: k})});
   const d = await r.json();
   document.getElementById('msg').style.color = d.ok ? '#10b981' : '#f87171';
   document.getElementById('msg').textContent = d.ok ? '✓ Clave guardada correctamente' : 'Error: ' + d.error;
@@ -4432,7 +4437,8 @@ async function save() {
 </script></body></html>''')
 
 @app.post('/admin/stripe-setup')
-async def stripe_setup_save(request: Request, db: Session = Depends(get_db)):
+async def stripe_setup_save(request: Request, secret: str, db: Session = Depends(get_db)):
+    _check_admin(secret)
     try:
         body = await request.json()
         key = body.get('key', '').strip()
@@ -4446,7 +4452,11 @@ async def stripe_setup_save(request: Request, db: Session = Depends(get_db)):
         return {'ok': False, 'error': str(e)}
 
 @app.get('/admin/dev-otp/{phone}')
-def dev_otp(phone: str, db: Session = Depends(get_db)):
+def dev_otp(phone: str, secret: str, db: Session = Depends(get_db)):
+    # Devuelve el OTP activo en texto plano: sin esta comprobación, cualquiera
+    # que conociera un número de teléfono podía leer el segundo factor y
+    # completar /auth/complete-login con solo la contraseña.
+    _check_admin(secret)
     try:
         from urllib.parse import unquote
         phone = unquote(phone)
@@ -4465,8 +4475,11 @@ def dev_otp(phone: str, db: Session = Depends(get_db)):
         return {'error': str(e)}
 
 @app.post('/admin/force-otp/{phone}')
-def force_otp(phone: str, db: Session = Depends(get_db)):
+def force_otp(phone: str, secret: str, db: Session = Depends(get_db)):
     """Admin: generate fresh OTP for phone without sending SMS (for testing)."""
+    # Acuña un OTP válido y lo devuelve — sin comprobación era la otra mitad
+    # del bypass de doble factor junto a /admin/dev-otp.
+    _check_admin(secret)
     try:
         from urllib.parse import unquote
         phone = unquote(phone)
@@ -4482,24 +4495,41 @@ def force_otp(phone: str, db: Session = Depends(get_db)):
         return {'error': str(e)}
 
 @app.get('/admin/vote-code')
-def admin_vote_code(email: str, debate_id: int, db: Session = Depends(get_db)):
-    """Admin: get verify_code for a user+debate combo (testing only)."""
+def admin_vote_code(email: str, debate_id: int, secret: str, db: Session = Depends(get_db)):
+    """Admin: get verify_code for a user+debate combo (testing only).
+
+    Sin la comprobación de ADMIN_SECRET, esta ruta permitía a CUALQUIERA en
+    internet saber por qué opción votó una persona concreta, pasando solo su
+    correo — la violación directa de "nadie ve por quién votaste".
+
+    Tampoco devuelve ya `option_voted`: la opción elegida no hace falta para
+    el propósito declarado de la ruta (recuperar un verify_code), y
+    exponerla aquí convertía el ADMIN_SECRET en una llave capaz de romper el
+    secreto del voto. El vínculo estructural identidad↔voto que lo hace
+    posible (HasVotedLog.verify_code == DebateVote.verify_code) sigue
+    pendiente y se aborda aparte.
+    """
+    _check_admin(secret)
     user = db.query(User).filter(func.lower(User.email) == func.lower(email)).first()
     if not user:
         return {'error': 'user not found'}
     log = db.query(HasVotedLog).filter(HasVotedLog.user_id == user.id, HasVotedLog.debate_id == debate_id).first()
     if not log:
         return {'error': 'no vote found for this user+debate', 'user_id': user.id}
-    vote = db.query(DebateVote).filter(DebateVote.verify_code == log.verify_code).first()
     return {
         'email': email,
         'debate_id': debate_id,
         'verify_code': log.verify_code,
-        'option_voted': vote.option_text if vote else '—',
     }
 
 @app.get('/admin/check-stripe')
-def check_stripe():
+def check_stripe(secret: str):
+    # Devuelve el inventario COMPLETO de nombres de variables de entorno de
+    # producción (ADMIN_SECRET, JWT_SECRET, DATABASE_URL, claves AWS y de
+    # wallet, el canario...). No filtraba valores, pero entregaba
+    # públicamente el mapa de qué atacar y delataba la existencia del
+    # secreto señuelo, que pierde su utilidad si se sabe que es un señuelo.
+    _check_admin(secret)
     key = (os.getenv('APP_STRIPE_KEY') or os.getenv('STRIPE_SECRET_KEY') or '').strip()
     all_stripe = [k for k in os.environ.keys() if 'STRIPE' in k.upper()]
     system_prefixes = ('PATH','HOME','USER','LANG','LC_','TERM','SHELL','PWD','SHLVL','DEBIAN','SSL','XDG','_','VIRTUAL','PYTHON','PIP','OLDPWD','HOSTNAME','LS_')
@@ -9540,6 +9570,32 @@ def _same_email(a: str, b: str) -> bool:
     return (a or '').strip().lower() == (b or '').strip().lower()
 
 
+def _require_campaign_read_access(user: User, campaign: AdCampaign) -> None:
+    """Lectura de los datos de UNA campaña: basta ser su dueño (o admin).
+
+    CHANGE-002 endureció las ESCRITURAS de campañas (PATCH, pause) con
+    _require_campaign_owner, pero las LECTURAS quedaron anónimas: cualquiera
+    podía pedir presupuesto, gasto, saldo y el desglose de audiencia por
+    género/edad/país de la campaña de cualquier cliente, solo con su id — o
+    listar las campañas de un anunciante pasando su correo.
+
+    Deliberadamente NO reutiliza _require_campaign_owner: esa pasa por
+    _require_campaign_authority, que exige un MarketerProfile 'approved'
+    porque gobierna OPERAR campañas. Aplicar esa puerta a una lectura le
+    quitaría a un marketer con perfil pendiente el acceso a sus propias
+    métricas, que hoy sí tiene. Aquí solo importa la propiedad.
+
+    Mismo 403 genérico que el resto: no revela si la campaña existe y es de
+    otro.
+    """
+    if user is None:
+        raise HTTPException(401, 'Authentication required')
+    if user.role == 'admin':
+        return
+    if not _same_email(campaign.advertiser_email, user.email):
+        raise HTTPException(403, 'No autorizado sobre esta campaña')
+
+
 def _require_campaign_owner(user: User, campaign: AdCampaign, db: Session) -> None:
     """Propiedad: un marketer solo muta SUS campanas.
 
@@ -9629,15 +9685,23 @@ def create_campaign(data: CampaignCreate, db: Session = Depends(get_db),
     return {'message': 'Campaign created', 'campaign_id': campaign.id, 'campaign': _format_campaign(campaign)}
 
 @app.get('/advertiser/campaigns')
-def list_campaigns(email: str, db: Session = Depends(get_db)):
+def list_campaigns(email: str, db: Session = Depends(get_db),
+                   user: User = Depends(get_verified_user)):
+    # El `email` sigue aceptándose para no romper al portal, que ya lo envía,
+    # pero ahora solo puede ser el de la propia sesión (o cualquiera, si es
+    # admin). Antes, pasar el correo de otro anunciante devolvía sus campañas.
+    if user.role != 'admin' and not _same_email(email, user.email):
+        raise HTTPException(403, 'No autorizado sobre estas campañas')
     campaigns = db.query(AdCampaign).filter(AdCampaign.advertiser_email == email).order_by(AdCampaign.created_at.desc()).all()
     return {'campaigns': [_format_campaign(c) for c in campaigns], 'total': len(campaigns)}
 
 @app.get('/advertiser/campaigns/{campaign_id}')
-def get_campaign(campaign_id: int, db: Session = Depends(get_db)):
+def get_campaign(campaign_id: int, db: Session = Depends(get_db),
+                 user: User = Depends(get_verified_user)):
     campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(404, 'Campaign not found')
+    _require_campaign_read_access(user, campaign)
     return _format_campaign(campaign)
 
 @app.patch('/advertiser/campaigns/{campaign_id}')
@@ -9699,10 +9763,14 @@ def pause_campaign(campaign_id: int, db: Session = Depends(get_db),
     return {'campaign_id': campaign_id, 'is_active': campaign.is_active}
 
 @app.get('/advertiser/dashboard/{campaign_id}')
-def get_dashboard(campaign_id: int, db: Session = Depends(get_db)):
+def get_dashboard(campaign_id: int, db: Session = Depends(get_db),
+                  user: User = Depends(get_verified_user)):
     campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(404, 'Campaign not found')
+    # Devuelve presupuesto, gasto, saldo y el desglose de audiencia por
+    # género/edad/país — datos de negocio de un cliente que paga.
+    _require_campaign_read_access(user, campaign)
     views     = db.query(AdImpressionLog).filter(AdImpressionLog.campaign_id == campaign_id).all()
     total_imp = len(views)
     spent     = total_imp * COST_PER_VIEW
@@ -13627,10 +13695,12 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
             'optimization': optimization, 'campaign': _format_campaign(campaign)}
 
 @app.get('/marketer/campaigns/{campaign_id}/metrics')
-def get_campaign_metrics(campaign_id: int, db: Session = Depends(get_db)):
+def get_campaign_metrics(campaign_id: int, db: Session = Depends(get_db),
+                         user: User = Depends(get_verified_user)):
     campaign = db.query(AdCampaign).filter(AdCampaign.id == campaign_id).first()
     if not campaign:
         raise HTTPException(404, 'Campaign not found')
+    _require_campaign_read_access(user, campaign)
 
     views = db.query(AdImpressionLog).filter(
         AdImpressionLog.campaign_id == campaign_id
@@ -13862,8 +13932,9 @@ def marketer_optimize_budget_strategic(db: Session = Depends(get_db),
 
 
 @app.post('/admin/car-sales-import')
-def car_sales_import(db: Session = Depends(get_db)):
+def car_sales_import(secret: str, db: Session = Depends(get_db)):
     """Importa datos de ventas de autos por marca × país (seed 2024-2026)."""
+    _check_admin(secret)
     from car_sales_agent import run_car_sales_import
     return run_car_sales_import(db)
 
@@ -13953,7 +14024,8 @@ def marketer_optimize_budget_brand(db: Session = Depends(get_db),
 
 
 @app.get('/admin/db-info')
-def db_info():
+def db_info(secret: str):
+    _check_admin(secret)
     db_url = DATABASE_URL
     is_pg = 'postgresql' in db_url or 'postgres' in db_url
     masked = db_url[:15] + '...' if len(db_url) > 15 else db_url

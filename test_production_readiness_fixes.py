@@ -33,6 +33,7 @@ VOTER_HTML = Path(__file__).with_name('voter_portal.html')
 VOTER_SRC = VOTER_HTML.read_text(encoding='utf-8')
 
 APP_JS_SRC = Path(__file__).with_name('App.js').read_text(encoding='utf-8')
+MARKETER_PORTAL_SRC = Path(__file__).with_name('marketer_portal.html').read_text(encoding='utf-8')
 APP_JSON_SRC = Path(__file__).with_name('app.json').read_text(encoding='utf-8')
 
 
@@ -1623,6 +1624,256 @@ class TestPinnedConsultation(unittest.TestCase):
         out = [{'id': 1}, {'id': 2}, {'id': 3}]
         result = fn(out, user=None, db=self._FakeDB(D()), profile=None, status='live', limit=3)
         self.assertEqual([d['id'] for d in result], [819, 1, 2])  # trimmed to limit=3, oldest dropped from the end
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# ADMIN ROUTE EXPOSURE AUDIT — every administrative/sensitive route must
+# require authentication AND authorization.
+#
+# Context: a functional audit found 10 of 166 /admin/* routes with no
+# credential check at all, publicly reachable in production. The worst
+# (/admin/vote-code) returned the exact option a named person voted for,
+# given only their email — destroying the "nobody sees how you voted"
+# guarantee. Two more (/admin/dev-otp, /admin/force-otp) read and minted
+# plaintext 2FA codes. /admin/check-stripe published the full inventory of
+# production env-var NAMES. /admin/stripe-setup let anyone overwrite the
+# Stripe secret key.
+#
+# The sweep test below is the real guarantee: it fails if ANY /admin/*
+# route lacks a credential check, so this class of hole cannot silently
+# come back when a new route is added. Patching only the known ten would
+# not have been enough.
+# ═══════════════════════════════════════════════════════════════════════
+
+AUTH_DEPENDENCIES = ('get_current_user', 'get_verified_user', 'get_optional_user')
+
+# Deliberate, individually justified exceptions — both verified to expose
+# nothing and to mutate nothing:
+#   /admin/ping     — liveness probe, returns a constant {'pong': True}.
+#   /admin/approve  — static HTML that PROMPTS the operator for the secret;
+#                     every endpoint its JS calls is itself secret-gated,
+#                     and the page embeds no database data. Requiring the
+#                     secret to load it would break the intended
+#                     "open on a phone, type the secret" flow.
+ADMIN_ROUTES_INTENTIONALLY_PUBLIC = {
+    ('GET', '/admin/ping'),
+    ('GET', '/admin/approve'),
+}
+
+
+def _all_routes():
+    """(method, path, FunctionDef) for every @app.<verb>('/...') route."""
+    out = []
+    for node in ast.walk(TREE):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for dec in node.decorator_list:
+            if not (isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute)):
+                continue
+            if getattr(dec.func.value, 'id', '') != 'app':
+                continue
+            if dec.func.attr not in ('get', 'post', 'put', 'patch', 'delete'):
+                continue
+            if not (dec.args and isinstance(dec.args[0], ast.Constant)):
+                continue
+            out.append((dec.func.attr.upper(), str(dec.args[0].value), node))
+    return out
+
+
+def _route_is_credential_gated(node) -> bool:
+    """True if the route checks the admin secret or requires a session."""
+    src = _src_of(node)
+    arg_names = [a.arg for a in node.args.args]
+    calls = _calls_in(node)
+    return (
+        'ADMIN_SECRET' in src
+        or '_check_admin' in calls
+        or 'x_agent_secret' in arg_names
+        or any(f'Depends({dep})' in src for dep in AUTH_DEPENDENCIES)
+    )
+
+
+class TestAdminRouteExposureSweep(unittest.TestCase):
+
+    def test_every_admin_route_requires_credentials(self):
+        """THE guard. Any /admin/* route without a credential check fails
+        here, including routes added in the future."""
+        unprotected = sorted(
+            (method, path)
+            for method, path, node in _all_routes()
+            if path.startswith('/admin')
+            and (method, path) not in ADMIN_ROUTES_INTENTIONALLY_PUBLIC
+            and not _route_is_credential_gated(node)
+        )
+        self.assertEqual(
+            unprotected, [],
+            'Rutas /admin/* sin comprobación de credenciales:\n' +
+            '\n'.join(f'  {m} {p}' for m, p in unprotected) +
+            '\n\nAñade _check_admin(secret) (o justifícala en '
+            'ADMIN_ROUTES_INTENTIONALLY_PUBLIC solo si no expone ni muta nada).'
+        )
+
+    def test_the_intentional_exceptions_really_are_inert(self):
+        """An allowlist is only safe while its entries stay harmless. If
+        either exception starts touching the database or reading env vars,
+        this fails and forces a re-decision."""
+        by_key = {(m, p): n for m, p, n in _all_routes()}
+        for method, path in sorted(ADMIN_ROUTES_INTENTIONALLY_PUBLIC):
+            node = by_key.get((method, path))
+            self.assertIsNotNone(node, f'{method} {path} ya no existe — quítala de la lista')
+            src = _src_of(node)
+            self.assertNotIn('Depends(get_db)', src, f'{path} ahora toca la BD')
+            self.assertNotIn('os.getenv', src, f'{path} ahora lee variables de entorno')
+            self.assertNotIn('os.environ', src, f'{path} ahora lee variables de entorno')
+
+    def test_each_specific_route_found_exposed_is_now_gated(self):
+        """Named coverage for the exact routes the audit found open, so a
+        regression on any single one is identifiable, not just 'the sweep
+        broke'."""
+        previously_exposed = [
+            ('GET',  '/admin/vote-code'),
+            ('GET',  '/admin/dev-otp/{phone}'),
+            ('POST', '/admin/force-otp/{phone}'),
+            ('GET',  '/admin/check-stripe'),
+            ('GET',  '/admin/stripe-setup'),
+            ('POST', '/admin/stripe-setup'),
+            ('GET',  '/admin/db-info'),
+            ('POST', '/admin/car-sales-import'),
+        ]
+        by_key = {(m, p): n for m, p, n in _all_routes()}
+        for method, path in previously_exposed:
+            node = by_key.get((method, path))
+            self.assertIsNotNone(node, f'{method} {path} no encontrada')
+            self.assertIn('_check_admin', _calls_in(node),
+                          f'{method} {path} sigue sin _check_admin(secret)')
+            self.assertIn('secret', [a.arg for a in node.args.args],
+                          f'{method} {path} no recibe el parámetro secret')
+
+    def test_vote_code_no_longer_returns_the_chosen_option(self):
+        """Even behind the admin secret, this route must not map an email
+        to a vote choice: that would make ADMIN_SECRET a key that breaks
+        ballot secrecy. verify_code (its stated purpose) is still returned.
+
+        Checked over the AST, not the raw text: a prose comment explaining
+        the removal would otherwise trip a substring search and fail a
+        correct implementation."""
+        node = _route_function('get', '/admin/vote-code')
+        returned_keys = set()
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Return) and isinstance(sub.value, ast.Dict):
+                returned_keys |= {k.value for k in sub.value.keys
+                                  if isinstance(k, ast.Constant)}
+        self.assertIn('verify_code', returned_keys)
+        self.assertNotIn('option_voted', returned_keys)
+        # and it must not read the vote's chosen option at all
+        attrs = {s.attr for s in ast.walk(node) if isinstance(s, ast.Attribute)}
+        self.assertNotIn('option_text', attrs)
+        self.assertNotIn('option_index', attrs)
+
+    def test_stripe_setup_form_forwards_the_secret_to_its_own_post(self):
+        """Gating the POST without updating the form's JS would leave a
+        page that always 403s. The form must forward the secret."""
+        src = _src_of(_route_function('get', '/admin/stripe-setup'))
+        self.assertIn("/admin/stripe-setup?secret=", src)
+        self.assertIn('window.location.search', src)
+
+
+class TestCampaignReadAuthorization(unittest.TestCase):
+    """CHANGE-002 hardened campaign WRITES (PATCH, pause) with
+    _require_campaign_owner but left the READS anonymous: budget, spend,
+    balance and the audience breakdown by gender/age/country of ANY paying
+    customer's campaign were reachable with just its id — and listing an
+    advertiser's campaigns needed only their email."""
+
+    READ_ROUTES = [
+        ('GET', '/advertiser/campaigns'),
+        ('GET', '/advertiser/campaigns/{campaign_id}'),
+        ('GET', '/advertiser/dashboard/{campaign_id}'),
+        ('GET', '/marketer/campaigns/{campaign_id}/metrics'),
+    ]
+
+    def test_all_campaign_read_routes_require_a_session(self):
+        for method, path in self.READ_ROUTES:
+            node = _route_function(method.lower(), path)
+            self.assertIsNotNone(node, f'{method} {path} no encontrada')
+            self.assertIn('Depends(get_verified_user)', _src_of(node),
+                          f'{method} {path} sigue siendo anónima')
+
+    def test_all_campaign_read_routes_also_check_ownership(self):
+        """A session alone is not enough — any logged-in user would still
+        read any other customer's campaign."""
+        for method, path in self.READ_ROUTES:
+            src = _src_of(_route_function(method.lower(), path))
+            self.assertTrue(
+                '_require_campaign_read_access' in src or '_same_email' in src,
+                f'{method} {path} autentica pero no comprueba propiedad')
+
+    def test_read_access_helper_does_not_require_an_approved_profile(self):
+        """Deliberate: _require_campaign_authority demands an 'approved'
+        MarketerProfile because it governs OPERATING campaigns. Reusing it
+        for a read would strip a pending marketer of access to their own
+        metrics, which they have today."""
+        node = _function('_require_campaign_read_access')
+        # AST, not text: the docstring explains WHY it avoids that helper,
+        # so a substring search would fail a correct implementation.
+        self.assertNotIn('_require_campaign_authority', _calls_in(node))
+        names = {s.id for s in ast.walk(node) if isinstance(s, ast.Name)}
+        self.assertNotIn('MarketerProfile', names)
+
+    # ── behavioural: run the real extracted helper ──────────────────
+
+    def _helper(self):
+        ns = {
+            'HTTPException': type('HTTPException', (Exception,),
+                                  {'__init__': lambda s, c, d='': (setattr(s, 'code', c),
+                                                                   setattr(s, 'detail', d), None)[-1]}),
+            '_same_email': lambda a, b: (a or '').strip().lower() == (b or '').strip().lower(),
+            'User': object, 'AdCampaign': object,
+        }
+        exec(compile(_src_of(_function('_require_campaign_read_access')), '<main.py>', 'exec'), ns)
+        return ns
+
+    def test_owner_is_allowed_and_stranger_is_rejected(self):
+        ns = self._helper()
+        fn = ns['_require_campaign_read_access']
+
+        class U:
+            def __init__(self, email, role='marketer'):
+                self.email, self.role = email, role
+
+        class C:
+            advertiser_email = 'dueno@empresa.cl'
+
+        fn(U('dueno@empresa.cl'), C())            # owner — must not raise
+        fn(U('DUENO@Empresa.CL'), C())            # same owner, different case
+        fn(U('cualquiera@otra.cl', 'admin'), C())  # admin — allowed
+
+        with self.assertRaises(ns['HTTPException']):
+            fn(U('intruso@otra.cl'), C())          # different customer
+        with self.assertRaises(ns['HTTPException']):
+            fn(None, C())                          # no session
+
+    def test_marketer_portal_sends_the_token_on_every_campaign_call(self):
+        """Server-side gating without updating the portal would break the
+        working marketer dashboard. Note /pause was ALREADY gated by
+        CHANGE-002 while the portal called it with no header — that call
+        was already failing in production and is fixed here too."""
+        for fragment in ('/advertiser/campaigns?email=',
+                         '/advertiser/campaigns/${id}/pause',
+                         '/marketer/campaigns/${id}/metrics'):
+            idx = 0
+            found_any = False
+            while True:
+                idx = MARKETER_PORTAL_SRC.find(fragment, idx)
+                if idx == -1:
+                    break
+                found_any = True
+                # the Authorization header must appear in the same fetch call
+                call_tail = MARKETER_PORTAL_SRC[idx:idx + 260]
+                self.assertIn('Authorization', call_tail,
+                              f'llamada a {fragment} sin cabecera Authorization')
+                idx += 1
+            self.assertTrue(found_any, f'no se encontró ninguna llamada a {fragment}')
 
 
 if __name__ == '__main__':
