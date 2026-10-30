@@ -2061,6 +2061,114 @@ class TestSeededDemoResultSuppression(unittest.TestCase):
         self.assertIn('verify-code-input', VOTER_SRC)
 
 
+class TestSeededDemoLeaksOutsideFormatDebate(unittest.TestCase):
+    """Two endpoints read debates.vote_counts / debates.total_votes
+    DIRECTLY, so the suppression inside format_debate did not reach them:
+
+      GET /r/{debate_id}            — builds its own bars, percentages,
+                                      winner block AND og:description, so
+                                      the fabricated total also leaked into
+                                      shared-link previews.
+      GET /debates/search-similar   — returns total_votes raw.
+
+    Neither is reachable anonymously (both 404/403 in production), but both
+    are reachable by an ordinary authenticated, eligible user."""
+
+    def test_public_results_page_detects_seeded_demo(self):
+        src = _src_of(_route_function('get', '/r/{debate_id}'))
+        self.assertIn('_is_seeded_demo_consultation(debate)', src)
+
+    def test_public_results_page_emits_no_bars_percentages_or_winner(self):
+        src = _src_of(_route_function('get', '/r/{debate_id}'))
+        # el bucle de barras no itera cuando es demo
+        self.assertIn('opts if not demo else []', src)
+        # el bloque de ganador queda excluido
+        self.assertIn('and not demo', src)
+
+    def test_public_results_page_keeps_the_total_out_of_link_previews(self):
+        """El og:description se incrusta en WhatsApp/redes: si llevara el
+        total sembrado, la cifra falsa viajaria fuera de la plataforma."""
+        src = _src_of(_route_function('get', '/r/{debate_id}'))
+        # la ETIQUETA real, no la mencion en un comentario
+        i = src.index('<meta property="og:description"')
+        meta = src[i:i + 260]
+        self.assertIn('if demo', meta)
+        self.assertIn('Datos de demostración', meta)
+
+    def test_public_results_page_hides_the_big_counter(self):
+        src = _src_of(_route_function('get', '/r/{debate_id}'))
+        self.assertIn("{'—' if demo else f'{total:,}'}", src)
+
+    def test_public_results_page_still_shows_title_and_options(self):
+        """Solo se ocultan las cifras: las opciones son contenido publicado."""
+        src = _src_of(_route_function('get', '/r/{debate_id}'))
+        self.assertIn('opciones_html', src)
+        self.assertIn('debate.title', src)
+
+    def test_public_results_page_writes_nothing(self):
+        src = _src_of(_route_function('get', '/r/{debate_id}'))
+        for forbidden in ('db.add', 'db.commit', 'debate.total_votes =',
+                          'debate.vote_counts =', 'debate.status ='):
+            self.assertNotIn(forbidden, src)
+
+    # ── search-similar ──────────────────────────────────────────────
+
+    def test_search_similar_sends_none_not_a_misleading_zero(self):
+        """JC fue explicito: indicar que son demostrativos, no sustituirlos
+        por cero — en dos de las tres SI hay votos reales, solo que no son
+        separables de las cifras de ejemplo."""
+        src = _src_of(_route_function('get', '/debates/search-similar'))
+        self.assertIn('None if es_demo else', src)
+        self.assertIn("'is_demo_data': es_demo", src)
+        self.assertNotIn("'total_votes': 0 if", src)
+
+    def test_search_similar_uses_the_same_strict_identification(self):
+        src = _src_of(_route_function('get', '/debates/search-similar'))
+        self.assertIn('_is_seeded_demo_consultation(d)', src)
+
+    # ── behavioural: la identificacion estricta, una sola vez ───────
+
+    def test_identification_is_shared_not_duplicated(self):
+        """Los tres endpoints deben usar EL MISMO helper: una segunda
+        definicion podria divergir y dejar una fuga abierta."""
+        defs = [n for n in ast.walk(TREE)
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and n.name == '_is_seeded_demo_consultation']
+        self.assertEqual(len(defs), 1)
+        for method, path in (('get', '/r/{debate_id}'),
+                             ('get', '/debates/search-similar')):
+            self.assertIn('_is_seeded_demo_consultation',
+                          _calls_in(_route_function(method, path)))
+
+    def test_no_other_route_still_reads_the_seeded_counters_unprotected(self):
+        """Barrido: cualquier ruta que lea vote_counts/total_votes debe
+        estar cubierta (helper, format_debate o ADMIN_SECRET), contar las
+        papeletas reales, o quedar justificada aqui."""
+        JUSTIFICADAS = {
+            # solo responde a la cuenta de revision de Google Play, nunca
+            # a un usuario del publico
+            '_cast_vote_inner',
+        }
+        sin_cubrir = []
+        for node in ast.walk(TREE):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            src = _src_of(node)
+            if not ('.vote_counts' in src or '.total_votes' in src):
+                continue
+            if node.name in ('format_debate', 'seed_demo_data') or node.name in JUSTIFICADAS:
+                continue
+            cubierto = ('_is_seeded_demo_consultation' in src
+                        or 'format_debate' in src
+                        or 'ADMIN_SECRET' in src
+                        or 'len(votes)' in src)
+            if not cubierto:
+                sin_cubrir.append(node.name)
+        self.assertEqual(sorted(sin_cubrir), [],
+                         'leen los contadores sembrados sin proteccion: '
+                         + ', '.join(sorted(sin_cubrir)))
+
+
 class TestSeedDemoDataIsGated(unittest.TestCase):
     """seed_demo_data() ya corrio una vez en produccion y solo estaba
     protegida por "la base esta vacia". Una restauracion desde cero

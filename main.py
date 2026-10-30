@@ -5282,6 +5282,11 @@ def public_results_page(debate_id: int,
     opts    = json.loads(debate.options or '[]')
     counts  = json.loads(debate.vote_counts or '{}')
     total   = debate.total_votes or 0
+    # Esta página NO pasa por format_debate: arma sus propias barras,
+    # porcentajes, bloque de ganador y og:description. Sin esta comprobación
+    # seguiría publicando los conteos sembrados de demostración — y además
+    # los metía en las vistas previas de enlaces compartidos.
+    demo    = _is_seeded_demo_consultation(debate)
     ls      = round(debate.legitimacy_score or 0, 1)
     status  = debate.status or 'live'
     status_label = {'live': 'En curso', 'closed': 'Cerrada', 'draft': 'Borrador'}.get(status, status)
@@ -5294,7 +5299,7 @@ def public_results_page(debate_id: int,
     bars_html = ''
     winner_opt = ''
     winner_count = 0
-    for i, opt in enumerate(opts):
+    for i, opt in enumerate(opts if not demo else []):
         cnt  = counts.get(opt, 0)
         pct  = round(cnt / total * 100, 1) if total > 0 else 0
         color = COLORS[i % len(COLORS)]
@@ -5313,8 +5318,27 @@ def public_results_page(debate_id: int,
           <div style="font-size:12px;color:#64748b;margin-top:4px;">{cnt:,} votos</div>
         </div>'''
 
+    if demo:
+        # Las opciones siguen visibles (son contenido publicado de la
+        # consulta); lo que desaparece son las cifras. Se explica el motivo
+        # en vez de dejar un hueco o un cero engañoso.
+        opciones_html = ''.join(
+            f'<div style="font-size:15px;color:#e8f0fc;font-weight:600;padding:9px 0;'
+            f'border-bottom:1px solid #1a2240;">{opt}</div>' for opt in opts)
+        bars_html = f'''
+        <div style="background:#2a2010;border:1px solid #a16207;border-radius:12px;
+          padding:16px 18px;margin-bottom:22px;">
+          <div style="font-size:12px;font-weight:800;color:#fbbf24;letter-spacing:1px;
+            text-transform:uppercase;margin-bottom:7px;">Datos de demostración</div>
+          <div style="font-size:13px;color:#fcd34d;line-height:1.55;">Esta consulta se creó con
+            cifras de ejemplo al poner en marcha la plataforma, así que no se publican
+            resultados. Si votaste en ella, tu voto está registrado y puedes verificarlo
+            con tu código.</div>
+        </div>
+        {opciones_html}'''
+
     winner_html = ''
-    if status == 'closed' and winner_opt:
+    if status == 'closed' and winner_opt and not demo:
         winner_html = f'''
         <div style="background:linear-gradient(135deg,#10b98122,#2563eb22);border:1px solid #10b981;
           border-radius:16px;padding:20px 24px;margin-bottom:28px;text-align:center;">
@@ -5329,7 +5353,7 @@ def public_results_page(debate_id: int,
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <meta property="og:title" content="Resultados: {debate.title[:60]}"/>
-<meta property="og:description" content="{total:,} votos verificados · Legitimacy Score {ls}% · Preferendum"/>
+<meta property="og:description" content="{'Datos de demostración · Preferendum' if demo else f'{total:,} votos verificados · Legitimacy Score {ls}% · Preferendum'}"/>
 <meta property="og:type" content="website"/>
 <title>Resultados — {debate.title[:50]} | Preferendum</title>
 <style>
@@ -5375,7 +5399,7 @@ body{{background:#090D18;color:#f0f4ff;font-family:-apple-system,BlinkMacSystemF
 
   <div class="stats">
     <div class="stat">
-      <div class="stat-n">{total:,}</div>
+      <div class="stat-n">{'—' if demo else f'{total:,}'}</div>
       <div class="stat-l">Votos</div>
     </div>
     <div class="stat">
@@ -9391,10 +9415,17 @@ def search_similar_debate(q: str, country: str = 'CL',
         d_kw = keywords(d.title or '')
         overlap = len(q_kw & d_kw)
         if overlap >= 3:
+            # Esta ruta devuelve total_votes crudo, sin pasar por
+            # format_debate, así que publicaba el contador sembrado. Se
+            # envía None y se marca la consulta como demostrativa: poner 0
+            # afirmaría que nadie votó, y en dos de ellas sí hay votos
+            # reales (solo no son separables de las cifras de ejemplo).
+            es_demo = _is_seeded_demo_consultation(d)
             results.append({
                 'id':        d.id,
                 'title':     d.title,
-                'total_votes': d.total_votes or 0,
+                'total_votes': None if es_demo else (d.total_votes or 0),
+                'is_demo_data': es_demo,
                 'overlap':   overlap,
                 'closes_at': d.closes_at.isoformat() if d.closes_at else None,
             })
