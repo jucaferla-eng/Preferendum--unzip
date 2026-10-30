@@ -1876,6 +1876,191 @@ class TestCampaignReadAuthorization(unittest.TestCase):
             self.assertTrue(found_any, f'no se encontró ninguna llamada a {fragment}')
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# SEEDED DEMO RESULTS — presentation-layer suppression
+#
+# seed_demo_data() ran once in production (first deploy, empty DB) and
+# injected three consultations with fabricated tallies summing to exactly
+# 37,928 — the precise deviation measured between debates.total_votes and
+# COUNT(debate_votes). Three people then voted for real in them (2+1+0),
+# and cast_vote added each vote INTO a fabricated bucket.
+#
+# The fix suppresses those tallies in PRESENTATION only. Correcting the
+# numbers instead would surface "2 votes: 1 for X, 1 for Y" and "1 vote,
+# 1 option", exposing identifiable people's preferences — the fabricated
+# figures are currently protecting them by dilution.
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestSeededDemoResultSuppression(unittest.TestCase):
+
+    class _Debate:
+        """Fila mínima que format_debate necesita."""
+        def __init__(self, id, title, total_votes, vote_counts, options):
+            import datetime as _d
+            self.id, self.title = id, title
+            self.total_votes, self.vote_counts, self.options = total_votes, vote_counts, options
+            self.context = ''
+            self.option_images = '[]'
+            self.creator_type = 'citizen'
+            self.inst_name = ''
+            self.debate_type = 'nat'
+            self.scope = 'country'
+            self.scope_country = 'CL'
+            self.scope_commune = ''
+            self.target_gender = 'all'
+            self.target_age_min, self.target_age_max = 13, 99
+            self.status = 'live'
+            self.opens_at = _d.datetime(2025, 1, 10)
+            self.closes_at = _d.datetime(2025, 1, 17)
+            self.verify_opens_at = self.verify_closes_at = None
+            self.legitimacy_score = 0.0
+            self.verifications_ok = self.verifications_total = 0
+            self.follow_up_questions = ''
+            self.reward = ''
+            self.cover_image_url = ''
+            self.is_anonymous = False
+            self.created_at = _d.datetime(2025, 1, 10)
+            self.target_se_tiers = 'A,B,C,D'
+
+    def _format(self):
+        """Ejecuta el format_debate REAL extraído del archivo."""
+        import datetime as _d
+        ns = {
+            'json': __import__('json'),
+            'datetime': _d.datetime, 'timedelta': _d.timedelta,
+            'PINNED_CONSULTATION_ID': 819,
+            'get_debate_status': lambda d: 'live',
+        }
+        for name in ('SEEDED_DEMO_CONSULTATION_IDS', 'SEEDED_DEMO_CONSULTATION_TITLES'):
+            for node in ast.walk(TREE):
+                if (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+                        and node.targets[0].id == name):
+                    exec(compile(ast.Module(body=[node], type_ignores=[]), '<main.py>', 'exec'), ns)
+        for fn in ('_is_seeded_demo_consultation', 'format_debate'):
+            exec(compile(_src_of(_function(fn)), '<main.py>', 'exec'), ns)
+        return ns
+
+    # ── las tres consultas sembradas ────────────────────────────────
+
+    def test_seeded_consultation_counts_and_percentages_are_suppressed(self):
+        ns = self._format()
+        d = self._Debate(
+            1, 'Cual debe ser el sueldo de diputados y senadores?', 24814,
+            '{"Reducir 40%": 11167, "Reducir 20%": 6204, "Mantener actual": 4963, "Aumentar segun metricas": 2480}',
+            '["Reducir 40%", "Reducir 20%", "Mantener actual", "Aumentar segun metricas"]')
+        out = ns['format_debate'](d)
+        self.assertIsNone(out['total_votes'])
+        for r in out['results']:
+            self.assertIsNone(r['count'])
+            self.assertIsNone(r['pct'])
+        self.assertTrue(out['is_demo_data'])
+        self.assertTrue(out['results_suppressed'])
+
+    def test_all_three_seeded_titles_are_covered(self):
+        ns = self._format()
+        for i, title in enumerate(sorted(ns['SEEDED_DEMO_CONSULTATION_TITLES']), 1):
+            d = self._Debate(i, title, 1000, '{}', '["a"]')
+            self.assertTrue(ns['_is_seeded_demo_consultation'](d), title)
+
+    def test_options_and_title_are_never_hidden(self):
+        """Solo se suprimen las CIFRAS. El contenido de la consulta sigue
+        visible: ocultarlo cambiaria lo que la plataforma dice haber
+        publicado."""
+        ns = self._format()
+        d = self._Debate(1, 'Cual debe ser el sueldo de diputados y senadores?', 24814,
+                         '{}', '["Reducir 40%", "Mantener actual"]')
+        out = ns['format_debate'](d)
+        self.assertEqual(out['title'], 'Cual debe ser el sueldo de diputados y senadores?')
+        self.assertEqual(out['options'], ['Reducir 40%', 'Mantener actual'])
+        self.assertEqual([r['option'] for r in out['results']],
+                         ['Reducir 40%', 'Mantener actual'])
+
+    # ── nada mas puede quedar afectado ──────────────────────────────
+
+    def test_consultation_819_is_completely_unaffected(self):
+        """JC fue explicito: no tocar la 819."""
+        ns = self._format()
+        self.assertNotIn(819, ns['SEEDED_DEMO_CONSULTATION_IDS'])
+        d = self._Debate(819, 'Cuanto deberia ser el limite maximo de gastos por congresista al año?',
+                         4, '{"A": 3, "B": 1}', '["A", "B"]')
+        out = ns['format_debate'](d)
+        self.assertEqual(out['total_votes'], 4)
+        self.assertEqual(out['results'][0]['count'], 3)
+        self.assertEqual(out['results'][0]['pct'], 75.0)
+        self.assertFalse(out['is_demo_data'])
+        self.assertFalse(out['results_suppressed'])
+        self.assertTrue(out['is_pinned'])
+
+    def test_a_real_consultation_reusing_a_seeded_id_is_not_suppressed(self):
+        """Doble condicion (id Y titulo): falla hacia MOSTRAR, nunca hacia
+        ocultar los resultados de una consulta real."""
+        ns = self._format()
+        d = self._Debate(1, 'Una consulta real cualquiera', 50,
+                         '{"Si": 30, "No": 20}', '["Si", "No"]')
+        out = ns['format_debate'](d)
+        self.assertEqual(out['total_votes'], 50)
+        self.assertEqual(out['results'][0]['count'], 30)
+        self.assertFalse(out['results_suppressed'])
+
+    def test_a_seeded_title_at_a_different_id_is_not_suppressed(self):
+        ns = self._format()
+        d = self._Debate(5000, 'Prioridad para el presupuesto municipal 2027', 7,
+                         '{"Vial": 7}', '["Vial"]')
+        out = ns['format_debate'](d)
+        self.assertEqual(out['total_votes'], 7)
+        self.assertFalse(out['results_suppressed'])
+
+    def test_ordinary_consultations_are_byte_for_byte_unchanged(self):
+        ns = self._format()
+        d = self._Debate(4242, 'Consulta normal', 9, '{"X": 6, "Y": 3}', '["X", "Y"]')
+        out = ns['format_debate'](d)
+        self.assertEqual(out['total_votes'], 9)
+        self.assertEqual([(r['count'], r['pct']) for r in out['results']],
+                         [(6, 66.7), (3, 33.3)])
+
+    # ── la ruta admin sigue viendo los crudos ───────────────────────
+
+    def test_admin_can_still_see_the_raw_seeded_counters(self):
+        ns = self._format()
+        d = self._Debate(1, 'Cual debe ser el sueldo de diputados y senadores?', 24814,
+                         '{"Reducir 40%": 11167}', '["Reducir 40%"]')
+        out = ns['format_debate'](d, reveal_demo_counts=True)
+        self.assertEqual(out['total_votes'], 24814)
+        self.assertEqual(out['results'][0]['count'], 11167)
+        self.assertTrue(out['is_demo_data'])        # sigue marcada como demo
+        self.assertFalse(out['results_suppressed'])  # pero no se suprimio
+
+    def test_admin_patch_route_passes_the_reveal_flag(self):
+        src = _src_of(_route_function('patch', '/admin/debates/{debate_id}'))
+        self.assertIn('reveal_demo_counts=True', src)
+
+    # ── lo que NO debe cambiar en la base ni en el voto ─────────────
+
+    def test_suppression_writes_nothing_to_the_database(self):
+        """La correccion es de presentacion: format_debate no debe
+        adquirir ninguna escritura ni sesion de BD."""
+        node = _function('format_debate')
+        src = _src_of(node)
+        for forbidden in ('db.add', 'db.commit', 'db.execute', 'Depends(get_db)',
+                          'debate.total_votes =', 'debate.vote_counts ='):
+            self.assertNotIn(forbidden, src, f'format_debate ahora hace: {forbidden}')
+
+    def test_verification_by_code_does_not_go_through_format_debate(self):
+        """Los 3 votantes reales deben seguir verificando su codigo. La
+        ruta de verificacion lee DebateVote directamente."""
+        for method, path in (('post', '/debates/{debate_id}/verify'),
+                             ('post', '/debates/{debate_id}/verify/confirm')):
+            src = _src_of(_route_function(method, path))
+            self.assertNotIn('format_debate', src)
+            self.assertIn('DebateVote', src)
+
+    def test_voter_portal_explains_the_absence_instead_of_showing_zero(self):
+        self.assertIn('results_suppressed', VOTER_SRC)
+        self.assertIn('datos de demostración', VOTER_SRC)
+        # y el formulario de verificar el voto sigue en la vista de cerradas
+        self.assertIn('verify-code-input', VOTER_SRC)
+
+
 class TestSeedDemoDataIsGated(unittest.TestCase):
     """seed_demo_data() ya corrio una vez en produccion y solo estaba
     protegida por "la base esta vacia". Una restauracion desde cero
@@ -1906,7 +2091,6 @@ class TestSeedDemoDataIsGated(unittest.TestCase):
             code = 'def _f():\n' + '\n'.join('    ' + l for l in guard.strip().split('\n')) + '\n    return True'
             exec(compile(code, '<guard>', 'exec'), ns)
             self.assertEqual(bool(ns['_f']()), debe_sembrar, f'env={env}')
-
 
 
 if __name__ == '__main__':

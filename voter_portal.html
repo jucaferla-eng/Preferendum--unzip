@@ -2782,7 +2782,7 @@ async function loadDebates(status = 'live') {
               <div style="font-size:12px;font-weight:700;color:#b45309;background:rgba(245,158,11,0.15);padding:3px 10px;border-radius:20px;">🎁 ${db.sponsor_discount_pct}% descuento al votar</div>
             </div>` : (db.reward ? `<div style="margin:8px 0 4px;background:linear-gradient(135deg,rgba(16,185,129,0.10),rgba(26,58,143,0.08));border:1px solid rgba(16,185,129,0.30);border-radius:8px;padding:7px 12px;font-size:12px;font-weight:600;color:#059669;display:flex;align-items:center;gap:6px;">🎁 ${esc(db.reward)}</div>` : '')}
           <div class="debate-meta">
-            <span class="debate-votes">⬡ ${db.total_votes || 0} votos</span>
+            <span class="debate-votes">${db.results_suppressed ? '⬡ datos de demostración' : `⬡ ${db.total_votes || 0} votos`}</span>
             <span>${countryLabel(db.scope_country)}</span>
             ${db.created_at ? `<span>🕐 ${fmtDateTime(db.created_at)}</span>` : ''}
             ${db.closes_at ? `<span>Cierra ${fmtDate(db.closes_at)}</span>` : ''}
@@ -4146,7 +4146,12 @@ function renderExpiredDebate(db, res, items, content) {
   content.innerHTML = `
     <div style="padding:0 0 80px;">
       <div style="font-size:18px;font-weight:700;color:#060810;margin-bottom:6px;">${esc(db.title)}</div>
-      <div style="font-size:12px;color:#7a7570;margin-bottom:28px;">Consulta cerrada</div>
+      <div style="font-size:12px;color:#7a7570;margin-bottom:${db.results_suppressed ? '12' : '28'}px;">Consulta cerrada</div>
+      ${db.results_suppressed ? `
+      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:12px;padding:13px 15px;margin-bottom:24px;">
+        <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:5px;">Datos de demostración</div>
+        <div style="font-size:12px;color:#92400e;line-height:1.5;">Esta consulta fue creada con cifras de ejemplo al poner en marcha la plataforma, así que no se muestran resultados. Si votaste en ella, tu voto está registrado y puedes verificarlo con tu código.</div>
+      </div>` : ''}
 
       <div style="font-size:11px;font-weight:700;color:#7a7570;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;">Verificar mi voto</div>
       <div style="background:#fff;border:1px solid #e8e4dc;border-radius:14px;padding:18px;">

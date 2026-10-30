@@ -3484,17 +3484,63 @@ def get_debate_status(debate):
 PINNED_CONSULTATION_ID = 819
 
 
-def format_debate(debate, has_voted=False, sponsor_info=None):
+# ══════════════════════════════════════════════════════════════
+# RESULTADOS SEMBRADOS DE DEMOSTRACIÓN — supresión en PRESENTACIÓN
+# ══════════════════════════════════════════════════════════════
+# seed_demo_data() corrió una vez en producción (solo siembra si la base
+# está vacía, es decir en el primer despliegue) e insertó tres consultas
+# con conteos FABRICADOS: 24.812 + 8.934 + 4.182 = 37.928, exactamente la
+# desviación medida entre `debates.total_votes` y COUNT(debate_votes).
+#
+# Después, 3 personas votaron de verdad en ellas (2 + 1 + 0) y
+# `cast_vote` sumó su voto DENTRO de un bucket ficticio
+# (`counts[option] += 1`), así que en el JSON ya no son separables.
+#
+# Por qué se suprime en la PRESENTACIÓN y no se corrigen los números:
+# corregir los contadores mostraría «2 votos: 1 para X, 1 para Y» en una
+# consulta, y «1 voto, 1 opción» en otra — revelando la preferencia de
+# personas identificables. Hoy los números ficticios los están
+# protegiendo por dilución. Suprimir la presentación quita el dato falso
+# SIN exponer a esos votantes y SIN escribir nada en la base: ni los
+# votos, ni los códigos, ni los anclajes, ni el estado administrativo.
+#
+# La verificación por código NO pasa por aquí (`verify_vote` lee
+# `DebateVote` directamente), así que esos 3 votantes siguen pudiendo
+# comprobar su voto con normalidad.
+#
+# Doble condición deliberada (id Y título): si los ids no fueran los
+# esperados, la supresión no se aplica en vez de ocultar por error los
+# resultados de una consulta real. Falla hacia mostrar, no hacia ocultar.
+SEEDED_DEMO_CONSULTATION_IDS = frozenset({1, 2, 3})
+SEEDED_DEMO_CONSULTATION_TITLES = frozenset({
+    'Cual debe ser el sueldo de diputados y senadores?',
+    'Prioridad para el presupuesto municipal 2027',
+    'Cual zapatilla preferirías para 2026?',
+})
+
+def _is_seeded_demo_consultation(debate) -> bool:
+    return (getattr(debate, 'id', None) in SEEDED_DEMO_CONSULTATION_IDS
+            and (getattr(debate, 'title', '') or '') in SEEDED_DEMO_CONSULTATION_TITLES)
+
+
+def format_debate(debate, has_voted=False, sponsor_info=None, reveal_demo_counts=False):
     opts = json.loads(debate.options or '[]')
     counts = json.loads(debate.vote_counts or '{}')
     imgs = json.loads(debate.option_images or '[]')
     status = get_debate_status(debate)
     total = debate.total_votes or 0
+    # `reveal_demo_counts=True` solo lo pasan las rutas administrativas, que
+    # deben seguir viendo los valores crudos para poder auditarlos.
+    suppress = _is_seeded_demo_consultation(debate) and not reveal_demo_counts
     results = []
     for i, opt in enumerate(opts):
         c = counts.get(opt, 0)
         pct = round(c / total * 100, 1) if total > 0 else 0
+        if suppress:
+            c, pct = None, None
         results.append({'option': opt, 'index': i, 'count': c, 'pct': pct})
+    if suppress:
+        total = None
     d = {
         'id': debate.id,
         'title': debate.title,
@@ -3533,6 +3579,12 @@ def format_debate(debate, has_voted=False, sponsor_info=None):
         'sponsor_discount_pct': 0,
         'sponsor_discount_text': '',
         'is_pinned': debate.id == PINNED_CONSULTATION_ID,
+        # Permite al frontend explicar la ausencia de cifras en vez de
+        # mostrar un hueco silencioso. `results_suppressed` es lo que
+        # realmente pasó en ESTA respuesta; `is_demo_data` describe la
+        # consulta (sigue siendo True cuando un admin pide ver los crudos).
+        'is_demo_data': _is_seeded_demo_consultation(debate),
+        'results_suppressed': suppress,
     }
     if sponsor_info:
         d['is_sponsored'] = True
@@ -14161,7 +14213,9 @@ def admin_patch_debate(debate_id: int, secret: str, target_age_min: int = None, 
             debate.verify_closes_at = debate.closes_at + timedelta(days=1)
     db.commit()
     db.refresh(debate)
-    return {'ok': True, 'debate': format_debate(debate)}
+    # Ruta admin: ve los contadores crudos, incluidos los sembrados, para
+    # poder auditarlos. La supresión es solo de cara al público.
+    return {'ok': True, 'debate': format_debate(debate, reveal_demo_counts=True)}
 
 
 @app.delete('/admin/debates/{debate_id}')
