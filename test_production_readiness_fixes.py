@@ -1876,5 +1876,38 @@ class TestCampaignReadAuthorization(unittest.TestCase):
             self.assertTrue(found_any, f'no se encontró ninguna llamada a {fragment}')
 
 
+class TestSeedDemoDataIsGated(unittest.TestCase):
+    """seed_demo_data() ya corrio una vez en produccion y solo estaba
+    protegida por "la base esta vacia". Una restauracion desde cero
+    volveria a inyectar los 37.928 votos ficticios."""
+
+    def test_requires_an_explicit_environment_signal(self):
+        src = _src_of(_function('seed_demo_data'))
+        self.assertIn("os.getenv('SEED_DEMO_DATA')", src)
+
+    def test_the_gate_runs_before_anything_else(self):
+        """El return temprano debe ir ANTES de abrir sesion o insertar."""
+        src = _src_of(_function('seed_demo_data'))
+        gate = src.index("os.getenv('SEED_DEMO_DATA')")
+        self.assertLess(gate, src.index('SessionLocal()'))
+        self.assertLess(gate, src.index('Debate('))
+
+    def test_behaviour_default_off_and_explicit_on(self):
+        """Ejecuta la guarda real extraida del archivo."""
+        import ast as _ast
+        node = _function('seed_demo_data')
+        body_src = _src_of(node)
+        guard = body_src[body_src.index("if (os.getenv"):body_src.index('db = SessionLocal()')]
+        for env, debe_sembrar in (({}, False), ({'SEED_DEMO_DATA': '0'}, False),
+                                  ({'SEED_DEMO_DATA': 'true'}, False),
+                                  ({'SEED_DEMO_DATA': '1'}, True),
+                                  ({'SEED_DEMO_DATA': ' 1 '}, True)):
+            ns = {'os': type('O', (), {'getenv': staticmethod(lambda k, d=None: env.get(k, d))})}
+            code = 'def _f():\n' + '\n'.join('    ' + l for l in guard.strip().split('\n')) + '\n    return True'
+            exec(compile(code, '<guard>', 'exec'), ns)
+            self.assertEqual(bool(ns['_f']()), debe_sembrar, f'env={env}')
+
+
+
 if __name__ == '__main__':
     unittest.main()

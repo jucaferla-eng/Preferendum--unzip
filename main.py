@@ -4151,6 +4151,18 @@ class EstimateInput(BaseModel):
 # ══════════════════════════════════════════════════════════════
 
 def seed_demo_data():
+    # Esta función YA corrió una vez en producción, en el primer despliegue
+    # (su única guarda es "la base está vacía"), e inyectó tres consultas
+    # con 37.928 votos FABRICADOS que quedaron indistinguibles de
+    # resultados reales en la presentación, y sobre los que después votaron
+    # 3 personas de verdad.
+    #
+    # Ahora exige una señal explícita. Sin SEED_DEMO_DATA=1 no siembra
+    # nunca, así que una restauración desde cero, una base nueva o una
+    # migración no pueden volver a inyectar cifras ficticias en producción
+    # por accidente. El entorno de desarrollo la activa cuando la quiere.
+    if (os.getenv('SEED_DEMO_DATA') or '').strip() != '1':
+        return
     db = SessionLocal()
     try:
         if db.query(Debate).count() > 0:
