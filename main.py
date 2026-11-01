@@ -20514,8 +20514,9 @@ def _require_admin_access(authorization: str = Header(None),
     esperado = os.getenv('ADMIN_SECRET')
     if esperado and x_admin_secret and x_admin_secret == esperado:
         return None
-    if not esperado and not authorization:
-        raise HTTPException(503, 'ADMIN_SECRET no configurado')
+    # Siempre 403, nunca un codigo que distinga "mal credencial" de
+    # "ADMIN_SECRET sin configurar": lo segundo le cuenta a cualquiera como
+    # esta montado el servicio, y no hace falta para denegar.
     raise HTTPException(403, 'Forbidden')
 
 
