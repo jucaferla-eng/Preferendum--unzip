@@ -543,6 +543,24 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
       <a href="/" style="text-decoration:none;color:inherit;"><div class="topbar-brand">prefer<span>endum</span></div></a>
     </div>
     <div class="topbar-user">
+      <!-- ADMINISTRACION. Oculto por omision y revelado SOLO si el servidor
+           dice que esta sesion tiene rol administrativo (/auth/me). No es la
+           proteccion: la proteccion esta en el servidor, que exige el rol en
+           cada ruta. Esto solo evita ofrecer una puerta que no se puede
+           abrir. Un ciudadano o un representante empresarial no lo ven, y si
+           lo forzaran en su navegador recibirian 403. -->
+      <span id="admin-menu" style="display:none;position:relative;">
+        <span class="logout-btn" id="admin-menu-btn"
+              onclick="toggleAdminMenu()">Administración ▾</span>
+        <span id="admin-menu-items" style="display:none;position:absolute;
+              right:0;top:22px;background:#fff;border:1px solid #e8e4dc;
+              border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.12);
+              padding:6px 0;min-width:230px;z-index:200;">
+          <a href="/admin/approve" style="display:block;padding:10px 14px;
+             font-size:13px;color:#060810;text-decoration:none;white-space:nowrap;">
+            Solicitudes de acreditación</a>
+        </span>
+      </span>
       <span id="user-name-display"></span>
       <span class="logout-btn" onclick="doLogout()">Salir</span>
     </div>
@@ -1581,10 +1599,36 @@ async function validateAndShowApp() {
         userReferralCode = d.referral_code;
         localStorage.setItem('pref_referral_code', userReferralCode);
       }
+      aplicarMenuAdministracion(d.is_admin);
       showApp();
     } else { token=''; localStorage.removeItem('pref_voter_token'); }
   } catch(e) { showApp(); }
 }
+
+// ── ADMINISTRACION ──
+// El menu se revela con lo que responde el SERVIDOR, no con nada guardado en
+// el navegador: cada vez que se carga el portal se vuelve a preguntar.
+function aplicarMenuAdministracion(esAdmin) {
+  const m = document.getElementById('admin-menu');
+  if (m) m.style.display = esAdmin ? '' : 'none';
+  if (!esAdmin) {
+    const it = document.getElementById('admin-menu-items');
+    if (it) it.style.display = 'none';
+  }
+}
+
+function toggleAdminMenu() {
+  const it = document.getElementById('admin-menu-items');
+  if (it) it.style.display = (it.style.display === 'none') ? '' : 'none';
+}
+
+document.addEventListener('click', e => {
+  const m = document.getElementById('admin-menu');
+  if (m && !m.contains(e.target)) {
+    const it = document.getElementById('admin-menu-items');
+    if (it) it.style.display = 'none';
+  }
+});
 
 // ── AUTH ──
 function switchTab(tab) {

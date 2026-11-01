@@ -6458,6 +6458,12 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
         'phone_verified': user.phone_verified,
         'selfie_verified': user.selfie_verified,
         'referral_code': _ensure_referral_code(user, db),
+        # El portal necesita saber si esta sesion es administrativa para
+        # decidir si muestra la opcion de Administracion. Es informativo: la
+        # autorizacion la resuelve el servidor en cada ruta, asi que falsear
+        # esto en el navegador no abre nada.
+        'role': user.role,
+        'is_admin': user.role == 'admin',
     }
 
 # ══════════════════════════════════════════════════════════════
@@ -17809,19 +17815,27 @@ ADMIN_APPROVE_PAGE_HTML = """<!DOCTYPE html>
 <body>
   <h1>Revisión de acreditaciones</h1>
   <div class="sub">
-    La credencial se escribe aquí y viaja en una cabecera, nunca en la
-    dirección: esta pantalla consulta documentos de identidad y de cargo, y
-    una URL queda en el historial, en los registros del proxy y en el Referer.
+    Acceso con tu sesión de Preferendum y rol administrativo. El navegador no
+    conoce ningún secreto: la autorización la resuelve el servidor en cada
+    petición, y las decisiones piden además un código enviado al correo de tu
+    cuenta. Esta pantalla consulta documentos de identidad, así que nada viaja
+    en la dirección.
   </div>
-  <label>Credencial administrativa</label>
-  <input type="password" id="secret" autocomplete="off"
-         placeholder="No queda en la dirección ni en el historial">
+  <div id="quien" class="sub"></div>
   <button class="refresh" onclick="load()">Ver solicitudes pendientes</button>
   <div id="list"></div>
 
 <script>
-function sec() { return document.getElementById('secret').value.trim(); }
-function cab() { return { 'X-Admin-Secret': sec() }; }
+// La sesion es la del portal: mismo origen, mismo almacenamiento. No hay
+// ningun secreto administrativo en el navegador.
+function tok() {
+  for (const k of ['pref_voter_token', 'pref_org_token', 'pref_adv_token']) {
+    const v = localStorage.getItem(k);
+    if (v) return v;
+  }
+  return '';
+}
+function cab() { return { 'Authorization': 'Bearer ' + tok() }; }
 function esc(t) {
   return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -17850,12 +17864,21 @@ function enganchar() {
 
 async function load() {
   const lista = document.getElementById('list');
-  if (!sec()) { lista.innerHTML = '<div class="empty">Escribe la credencial.</div>'; return; }
+  if (!tok()) {
+    lista.innerHTML = '<div class="empty">No hay sesión. Inicia sesión en '
+      + 'Preferendum con tu cuenta de administrador y vuelve a esta pantalla.</div>';
+    return;
+  }
   lista.innerHTML = '<div class="empty">Cargando…</div>';
   let d;
   try {
     const r = await fetch('/admin/accreditation/pending', { headers: cab() });
-    if (r.status === 403) { lista.innerHTML = '<div class="empty">Credencial incorrecta.</div>'; return; }
+    if (r.status === 403 || r.status === 401) {
+      lista.innerHTML = '<div class="empty">Tu cuenta no tiene rol '
+        + 'administrativo. Esta pantalla es exclusiva de administradores '
+        + 'autorizados.</div>';
+      return;
+    }
     if (!r.ok) { lista.innerHTML = '<div class="empty">Error ' + r.status + '</div>'; return; }
     d = await r.json();
   } catch (e) { lista.innerHTML = '<div class="empty">Sin conexión.</div>'; return; }
@@ -17948,6 +17971,25 @@ async function decidir(tipo, userId, decision) {
       cuerpo.crear_empresa = { country: pais.value.trim(), tax_id: rut, name: razon };
     }
   }
+  // Segunda verificacion: un codigo al correo de la propia cuenta. Una
+  // sesion abierta en un equipo ajeno no basta para habilitar a una empresa.
+  msg.textContent = 'Enviando código de confirmación a tu correo…';
+  try {
+    const rc = await fetch('/admin/accreditation/request-code',
+                           { method: 'POST', headers: cab() });
+    const dc = await rc.json();
+    if (!rc.ok) { msg.innerHTML = '<span class="warn">' + esc(dc.detail || 'No se pudo pedir el código') + '</span>'; return; }
+    if (dc.requiere_codigo) {
+      if (!dc.enviado) {
+        msg.innerHTML = '<span class="warn">No se pudo enviar el código a tu '
+          + 'correo, así que la decisión no se envía.</span>';
+        return;
+      }
+      const codigo = prompt('Escribe el código que acabamos de enviar a tu correo:');
+      if (!codigo) { msg.textContent = 'Decisión cancelada.'; return; }
+      cuerpo.codigo_verificacion = codigo.trim();
+    }
+  } catch (e) { msg.textContent = 'Sin conexión.'; return; }
   msg.textContent = 'Enviando…';
   try {
     const r = await fetch('/admin/accreditation/decide', {
@@ -17969,11 +18011,27 @@ async function decidir(tipo, userId, decision) {
   } catch (e) { msg.textContent = 'Sin conexión.'; }
 }
 
-// Sin ?secret= en la URL: si alguien llega con uno, se ignora.
+// Quien esta usando la pantalla, segun el servidor.
+(async () => {
+  if (!tok()) {
+    document.getElementById('quien').textContent =
+      'Sin sesión: inicia sesión en Preferendum con tu cuenta de administrador.';
+    return;
+  }
+  try {
+    const r = await fetch('/auth/me', { headers: cab() });
+    if (!r.ok) { document.getElementById('quien').textContent = 'Sesión no válida.'; return; }
+    const d = await r.json();
+    document.getElementById('quien').textContent = d.is_admin
+      ? ('Sesión administrativa: ' + d.name + ' · ' + d.email)
+      : ('Tu cuenta (' + d.email + ') no tiene rol administrativo.');
+  } catch (e) { /* la lista lo dira */ }
+})();
+
+// Un ?secret= en la direccion no se usa para nada: aqui no hay secretos.
 if (new URLSearchParams(location.search).get('secret')) {
-  document.getElementById('list').innerHTML =
-    '<div class="empty">La credencial no se pasa por la dirección. '
-    + 'Escríbela en el campo de arriba.</div>';
+  document.getElementById('quien').textContent =
+    'La dirección no transporta credenciales. Esta pantalla usa tu sesión.';
 }
 </script>
 </body>
@@ -20404,6 +20462,119 @@ def admin_tally_reconciliation(secret: str, limit: int = 500,
     }
 
 
+def _es_sesion_administrativa(authorization, db) -> User:
+    """Devuelve el usuario si la sesion es de un administrador, o None.
+
+    Reutiliza la autenticacion de Preferendum -el mismo token JWT del
+    portal- y el rol que ya vive en la tabla users. No hay un mecanismo de
+    identidad nuevo: lo unico que se comprueba aqui es que el rol sea
+    'admin', y lo comprueba el SERVIDOR. Que el navegador diga otra cosa no
+    cambia nada.
+    """
+    if not authorization or not authorization.lower().startswith('bearer '):
+        return None
+    try:
+        payload = jwt.decode(authorization.split(' ', 1)[1], SECRET,
+                             algorithms=['HS256'])
+    except Exception:
+        return None
+    uid = payload.get('sub')
+    if not uid:
+        return None
+    u = db.query(User).filter(User.id == int(uid)).first()
+    # A PROPOSITO se mira el rol de la BASE, no el del token.
+    # get_current_user deja que el rol del token sobrescriba el de la base
+    # (un override para impersonar en pruebas). Para la administracion de
+    # acreditaciones eso no vale: la autoridad es la fila del usuario.
+    return u if (u and u.role == 'admin') else None
+
+
+def _require_admin_access(authorization: str = Header(None),
+                          x_admin_secret: str = Header(None),
+                          db: Session = Depends(get_db)):
+    """Autorizacion de la administracion de acreditaciones.
+
+    Dos credenciales aceptadas, las dos comprobadas por el servidor:
+
+      · la SESION de un usuario con rol 'admin' -lo que usa la pantalla
+        integrada en el menu, asi que el navegador no necesita conocer
+        ningun secreto-;
+      · la cabecera X-Admin-Secret, para uso fuera del navegador.
+
+    Conocer la URL no concede nada: sin una de las dos, 403. Y un ciudadano
+    o un representante empresarial con sesion valida tampoco pasa: lo que
+    se exige no es tener sesion, es tener el rol.
+
+    Devuelve el usuario administrador cuando entra por sesion, o None
+    cuando entra por cabecera.
+    """
+    admin = _es_sesion_administrativa(authorization, db)
+    if admin:
+        return admin
+    esperado = os.getenv('ADMIN_SECRET')
+    if esperado and x_admin_secret and x_admin_secret == esperado:
+        return None
+    if not esperado and not authorization:
+        raise HTTPException(503, 'ADMIN_SECRET no configurado')
+    raise HTTPException(403, 'Forbidden')
+
+
+def _exigir_segunda_verificacion(admin: User, codigo: str, db: Session):
+    """Segunda verificacion para una decision sensible.
+
+    Solo se exige cuando la decision llega desde una SESION de navegador:
+    aprobar, rechazar o pedir antecedentes cambia la capacidad de una
+    empresa para operar, y una sesion abierta en un equipo ajeno no debe
+    bastar. Reutiliza el OTP que la plataforma ya usa -OTPCode + el mismo
+    envio de correo-, no un segundo sistema.
+
+    Por cabecera no se exige: ese secreto no vive en el navegador y es, el
+    mismo, una credencial fuera de banda.
+    """
+    if admin is None:
+        return
+    if not codigo:
+        raise HTTPException(403,
+            'Falta el codigo de verificacion. Pide uno en '
+            'POST /admin/accreditation/request-code y vuelve a enviar la '
+            'decision con codigo_verificacion.')
+    otp = db.query(OTPCode).filter(
+        OTPCode.user_id == admin.id, OTPCode.channel == 'email',
+        OTPCode.code == str(codigo).strip(), OTPCode.used == False,
+        OTPCode.expires_at > datetime.utcnow()
+    ).first()
+    if not otp:
+        raise HTTPException(403, 'Codigo de verificacion invalido o expirado')
+    otp.used = True
+    db.commit()
+
+
+@app.post('/admin/accreditation/request-code')
+def admin_acreditacion_pedir_codigo(admin=Depends(_require_admin_access),
+                                    db: Session = Depends(get_db)):
+    """Envia al administrador un codigo para confirmar una decision.
+
+    Al correo de su propia cuenta, nunca a otro. Mismo OTP de siempre.
+    """
+    if admin is None:
+        return {'ok': True, 'requiere_codigo': False,
+                'mensaje': ('La cabecera administrativa no requiere segunda '
+                            'verificacion: ese secreto no vive en el navegador.')}
+    db.query(OTPCode).filter(
+        OTPCode.user_id == admin.id, OTPCode.channel == 'email',
+        OTPCode.used == False).update({'used': True})
+    db.commit()
+    codigo = gen_otp()
+    db.add(OTPCode(user_id=admin.id, email=admin.email, code=codigo,
+                   channel='email',
+                   expires_at=datetime.utcnow() + timedelta(minutes=10)))
+    db.commit()
+    enviado = send_email_otp(admin.email, codigo, admin.name, '')
+    return {'ok': True, 'requiere_codigo': True, 'enviado': bool(enviado),
+            'mensaje': ('Codigo enviado al correo de tu cuenta.' if enviado
+                        else 'No se pudo enviar el codigo por correo.')}
+
+
 def _require_admin_header(x_admin_secret: str = Header(None)):
     """Credencial administrativa por CABECERA, nunca en la URL.
 
@@ -20424,7 +20595,7 @@ def _require_admin_header(x_admin_secret: str = Header(None)):
 
 
 @app.get('/admin/accreditation/pending')
-def admin_acreditaciones_pendientes(_ok: bool = Depends(_require_admin_header),
+def admin_acreditaciones_pendientes(_admin=Depends(_require_admin_access),
                                     db: Session = Depends(get_db)):
     """SOLO LECTURA — las acreditaciones empresariales por revisar.
 
@@ -20462,7 +20633,7 @@ def admin_acreditaciones_pendientes(_ok: bool = Depends(_require_admin_header),
 
 @app.get('/admin/accreditation/document')
 def admin_acreditacion_documento(tipo: str, user_id: int,
-                                 _ok: bool = Depends(_require_admin_header),
+                                 _admin=Depends(_require_admin_access),
                                  db: Session = Depends(get_db)):
     """Acceso seguro al documento de cargo de UN solicitante.
 
@@ -20483,7 +20654,7 @@ def admin_acreditacion_documento(tipo: str, user_id: int,
 
 @app.post('/admin/accreditation/decide')
 def admin_acreditacion_decidir(body: dict,
-                               _ok: bool = Depends(_require_admin_header),
+                               _admin=Depends(_require_admin_access),
                                db: Session = Depends(get_db)):
     """Aprobar, rechazar o pedir antecedentes. Queda registrado quien,
     cuando y con que resultado.
@@ -20517,6 +20688,11 @@ def admin_acreditacion_decidir(body: dict,
     decision = (body or {}).get('decision')
     motivo = ((body or {}).get('motivo') or '').strip()
     quien = ((body or {}).get('decidido_por') or 'admin').strip()
+    if _admin is not None:
+        # Desde el navegador: quien decide queda identificado por su propia
+        # cuenta, no por un nombre escrito a mano.
+        quien = f'{_admin.name or "admin"} (user {_admin.id})'
+    _exigir_segunda_verificacion(_admin, (body or {}).get('codigo_verificacion'), db)
     if tipo not in ('organizador', 'anunciante'):
         raise HTTPException(422, "tipo debe ser 'organizador' o 'anunciante'")
     if decision not in ('approved', 'rejected', 'more_info'):

@@ -1024,18 +1024,224 @@ class TestCicloCompleto(Base):
         self.assertTrue(self._aviso_al_solicitante(correo))
 
     # ── La pantalla de revision ───────────────────────────────────
-    def test_la_pantalla_de_revision_no_pasa_el_secreto_por_la_URL(self):
+    def test_la_pantalla_de_revision_no_transporta_credenciales(self):
         h = main.ADMIN_APPROVE_PAGE_HTML
-        self.assertIn("'X-Admin-Secret': sec()", h, 'la credencial va en cabecera')
         self.assertNotIn("?secret=' + encodeURIComponent(secret)", h,
                          'ya no se pasa por la dirección')
+        self.assertNotIn('X-Admin-Secret', h,
+                         'el navegador no debe conocer el secreto')
         self.assertIn('/admin/accreditation/pending', h)
         self.assertIn('/admin/accreditation/document', h)
         self.assertIn('/admin/accreditation/decide', h)
         for texto in ('Aprobar', 'Rechazar', 'Pedir antecedentes',
                       'Ver documento', 'crear_empresa'):
             self.assertIn(texto, h, f'la pantalla no ofrece {texto}')
-        self.assertIn('type="password" id="secret"', h)
+
+
+# ══════════════════════════════════════════════════════════════════
+# D quater. SOLO ADMINISTRADORES AUTORIZADOS
+# ══════════════════════════════════════════════════════════════════
+#
+# La plataforma esta abierta a ciudadanos de todo el mundo. Conocer la URL
+# no puede conceder nada, y tener una sesion valida tampoco: lo que se
+# exige es el ROL, comprobado en la base por el servidor.
+
+RUTAS_ADMIN = [
+    ('GET',  '/admin/accreditation/pending', None),
+    ('GET',  '/admin/accreditation/document?tipo=anunciante&user_id=1', None),
+    ('POST', '/admin/accreditation/decide',
+     {'tipo': 'anunciante', 'user_id': 1, 'decision': 'approved'}),
+    ('POST', '/admin/accreditation/request-code', None),
+]
+
+
+class TestSoloAdministradores(Base):
+
+    def _llamar(self, metodo, ruta, cuerpo, cab):
+        if metodo == 'GET':
+            return self.client.get(ruta, headers=cab)
+        return self.client.post(ruta, json=(cuerpo or {}), headers=cab)
+
+    def _sesion(self, rol, rol_en_base=None):
+        """Una sesion real de la plataforma, con el rol indicado."""
+        u = self._usuario(rol_en_base or rol)
+        h = _ip()
+        h['Authorization'] = 'Bearer ' + main.make_token(u.id, rol)
+        return u, h
+
+    def test_un_ciudadano_con_sesion_valida_no_entra(self):
+        _, cab = self._sesion('voter')
+        for metodo, ruta, cuerpo in RUTAS_ADMIN:
+            r = self._llamar(metodo, ruta, cuerpo, cab)
+            self.assertEqual(r.status_code, 403,
+                             f'{metodo} {ruta} dejo entrar a un ciudadano: '
+                             f'{r.status_code} {r.text[:120]}')
+
+    def test_un_representante_empresarial_aprobado_no_entra(self):
+        u, cab = self._sesion('marketer')
+        self._perfil(main.MarketerProfile, u.id, company_id=self._empresa().id,
+                     status='approved', supervisor=True)
+        for metodo, ruta, cuerpo in RUTAS_ADMIN:
+            r = self._llamar(metodo, ruta, cuerpo, cab)
+            self.assertEqual(r.status_code, 403,
+                             f'{metodo} {ruta} dejo entrar a un anunciante '
+                             f'acreditado: {r.status_code}')
+
+    def test_un_organizador_aprobado_no_entra(self):
+        u, cab = self._sesion('organizer')
+        self._perfil(main.OrganizerProfile, u.id, company_id=self._empresa().id,
+                     status='approved', supervisor=True)
+        for metodo, ruta, cuerpo in RUTAS_ADMIN:
+            r = self._llamar(metodo, ruta, cuerpo, cab)
+            self.assertEqual(r.status_code, 403, f'{metodo} {ruta}: {r.status_code}')
+
+    def test_sin_credencial_alguna_no_se_entra(self):
+        for metodo, ruta, cuerpo in RUTAS_ADMIN:
+            r = self._llamar(metodo, ruta, cuerpo, _ip())
+            self.assertIn(r.status_code, (401, 403),
+                          f'{metodo} {ruta}: {r.status_code}')
+
+    def test_un_token_que_DICE_admin_no_basta_si_la_base_dice_otra_cosa(self):
+        """get_current_user deja que el rol del TOKEN sobrescriba el de la
+        base. Para la administracion de acreditaciones eso no vale: la
+        autoridad es la fila del usuario."""
+        u = self._usuario('voter')                    # en la base: voter
+        cab = _ip()
+        cab['Authorization'] = 'Bearer ' + main.make_token(u.id, 'admin')
+        for metodo, ruta, cuerpo in RUTAS_ADMIN:
+            r = self._llamar(metodo, ruta, cuerpo, cab)
+            self.assertEqual(r.status_code, 403,
+                             f'{metodo} {ruta} acepto un rol inventado en el '
+                             f'token: {r.status_code}')
+
+    def test_un_token_firmado_con_otra_clave_no_basta(self):
+        u = self._usuario('admin')
+        import jwt as _jwt
+        falso = _jwt.encode({'sub': str(u.id), 'role': 'admin',
+                             'exp': main.datetime.utcnow() + main.timedelta(days=1)},
+                            'otra-clave-cualquiera', algorithm='HS256')
+        cab = _ip(); cab['Authorization'] = 'Bearer ' + falso
+        r = self.client.get('/admin/accreditation/pending', headers=cab)
+        self.assertEqual(r.status_code, 403)
+
+    def test_un_administrador_SI_entra_con_su_sesion(self):
+        u, cab = self._sesion('admin')
+        r = self.client.get('/admin/accreditation/pending', headers=cab)
+        self.assertEqual(r.status_code, 200, r.text[:200])
+        self.assertIn('pendientes', r.json())
+
+    def test_el_administrador_necesita_SEGUNDA_verificacion_para_decidir(self):
+        admin, cab = self._sesion('admin')
+        sol = self._usuario('marketer')
+        self._perfil(main.MarketerProfile, sol.id,
+                     company_id=self._empresa().id, status='pending')
+        sin = self.client.post('/admin/accreditation/decide',
+                               json={'tipo': 'anunciante', 'user_id': sol.id,
+                                     'decision': 'approved'}, headers=cab)
+        self.assertEqual(sin.status_code, 403,
+                         'una sesion abierta no debe bastar para habilitar '
+                         'a una empresa')
+        self.assertIn('codigo', sin.json()['detail'].lower())
+        p = self.db.query(main.MarketerProfile).filter(
+            main.MarketerProfile.user_id == sol.id).first()
+        self.db.refresh(p)
+        self.assertEqual(p.status, 'pending', 'no se decidio nada')
+
+        mal = self.client.post('/admin/accreditation/decide',
+                               json={'tipo': 'anunciante', 'user_id': sol.id,
+                                     'decision': 'approved',
+                                     'codigo_verificacion': '000000'}, headers=cab)
+        self.assertEqual(mal.status_code, 403, 'acepto un codigo inventado')
+
+        rc = self.client.post('/admin/accreditation/request-code', headers=cab)
+        self.assertEqual(rc.status_code, 200, rc.text[:200])
+        self.assertTrue(rc.json()['requiere_codigo'])
+        otp = self.db.query(main.OTPCode).filter(
+            main.OTPCode.user_id == admin.id,
+            main.OTPCode.used == False).order_by(main.OTPCode.id.desc()).first()
+        bien = self.client.post('/admin/accreditation/decide',
+                                json={'tipo': 'anunciante', 'user_id': sol.id,
+                                      'decision': 'approved',
+                                      'codigo_verificacion': otp.code}, headers=cab)
+        self.assertEqual(bien.status_code, 200, bien.text[:300])
+        self.assertEqual(bien.json()['estado'], 'approved')
+        self.assertIn(f'user {admin.id}', bien.json()['decidido_por'],
+                      'la decision debe quedar a nombre de quien la tomo')
+
+    def test_el_codigo_no_se_reutiliza(self):
+        admin, cab = self._sesion('admin')
+        s1 = self._usuario('marketer')
+        s2 = self._usuario('marketer')
+        emp = self._empresa()
+        for u in (s1, s2):
+            self._perfil(main.MarketerProfile, u.id, company_id=emp.id,
+                         status='pending')
+        self.client.post('/admin/accreditation/request-code', headers=cab)
+        otp = self.db.query(main.OTPCode).filter(
+            main.OTPCode.user_id == admin.id,
+            main.OTPCode.used == False).order_by(main.OTPCode.id.desc()).first()
+        codigo = otp.code
+        r1 = self.client.post('/admin/accreditation/decide',
+                              json={'tipo': 'anunciante', 'user_id': s1.id,
+                                    'decision': 'approved',
+                                    'codigo_verificacion': codigo}, headers=cab)
+        self.assertEqual(r1.status_code, 200, r1.text[:200])
+        r2 = self.client.post('/admin/accreditation/decide',
+                              json={'tipo': 'anunciante', 'user_id': s2.id,
+                                    'decision': 'approved',
+                                    'codigo_verificacion': codigo}, headers=cab)
+        self.assertEqual(r2.status_code, 403, 'el codigo se reutilizo')
+
+    def test_el_codigo_de_otro_administrador_no_sirve(self):
+        a1, cab1 = self._sesion('admin')
+        a2, _ = self._sesion('admin')
+        sol = self._usuario('marketer')
+        self._perfil(main.MarketerProfile, sol.id,
+                     company_id=self._empresa().id, status='pending')
+        self.db.add(main.OTPCode(user_id=a2.id, email=a2.email, code='123456',
+                                 channel='email',
+                                 expires_at=main.datetime.utcnow()
+                                 + main.timedelta(minutes=10)))
+        self.db.commit()
+        r = self.client.post('/admin/accreditation/decide',
+                             json={'tipo': 'anunciante', 'user_id': sol.id,
+                                   'decision': 'approved',
+                                   'codigo_verificacion': '123456'}, headers=cab1)
+        self.assertEqual(r.status_code, 403,
+                         'acepto el codigo emitido a OTRO administrador')
+
+    def test_la_cabecera_sigue_sirviendo_fuera_del_navegador(self):
+        h = _ip(); h['X-Admin-Secret'] = ADMIN
+        r = self.client.get('/admin/accreditation/pending', headers=h)
+        self.assertEqual(r.status_code, 200, r.text[:200])
+
+    def test_el_menu_del_portal_se_revela_con_el_rol_del_servidor(self):
+        portal = open('voter_portal.html', encoding='utf-8').read()
+        self.assertIn('id="admin-menu"', portal)
+        self.assertIn('Solicitudes de acreditación', portal)
+        self.assertIn('/admin/approve', portal)
+        self.assertIn('aplicarMenuAdministracion(d.is_admin)', portal,
+                      'el menu debe depender de lo que diga el servidor')
+        # Oculto por omision: un ciudadano no lo ve ni un instante.
+        i = portal.index('id="admin-menu"')
+        self.assertIn('display:none', portal[i:i + 120])
+
+    def test_auth_me_informa_del_rol(self):
+        _, cab = self._sesion('voter')
+        d = self.client.get('/auth/me', headers=cab).json()
+        self.assertIs(d['is_admin'], False)
+        _, cab_a = self._sesion('admin')
+        d = self.client.get('/auth/me', headers=cab_a).json()
+        self.assertIs(d['is_admin'], True)
+
+    def test_la_pantalla_no_pide_ningun_secreto_al_navegador(self):
+        h = main.ADMIN_APPROVE_PAGE_HTML
+        self.assertNotIn('X-Admin-Secret', h,
+                         'el navegador no debe conocer el secreto')
+        self.assertNotIn('ADMIN_SECRET', h)
+        self.assertIn("'Authorization': 'Bearer ' + tok()", h)
+        self.assertIn('/admin/accreditation/request-code', h,
+                      'falta la segunda verificacion en la pantalla')
 
 
 # ══════════════════════════════════════════════════════════════════

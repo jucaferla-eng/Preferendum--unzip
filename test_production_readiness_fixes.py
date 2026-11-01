@@ -1698,7 +1698,10 @@ AUTH_DEPENDENCIES = ('get_current_user', 'get_verified_user', 'get_optional_user
                      # documentos de identidad, y una URL queda en el historial,
                      # en los logs del proxy y en el Referer. La dependencia
                      # compara contra ADMIN_SECRET y responde 403 sin ella.
-                     '_require_admin_header')
+                     '_require_admin_header',
+                     # Sesion con rol administrativo verificado en la base, o
+                     # la misma cabecera. Las dos las comprueba el servidor.
+                     '_require_admin_access')
 
 # Deliberate, individually justified exceptions — both verified to expose
 # nothing and to mutate nothing:
@@ -1776,15 +1779,16 @@ class TestAdminRouteExposureSweep(unittest.TestCase):
         by_key = {(m, p): n for m, p, n in _all_routes()}
         rutas = [('GET',  '/admin/accreditation/pending'),
                  ('GET',  '/admin/accreditation/document'),
-                 ('POST', '/admin/accreditation/decide')]
+                 ('POST', '/admin/accreditation/decide'),
+                 ('POST', '/admin/accreditation/request-code')]
         for method, path in rutas:
             node = by_key.get((method, path))
             self.assertIsNotNone(node, f'{method} {path} no existe')
             nombres = [a.arg for a in node.args.args]
             self.assertNotIn('secret', nombres,
                              f'{path} no puede recibir el secreto por URL')
-            self.assertIn('Depends(_require_admin_header)', _src_of(node),
-                          f'{path} tiene que exigir la cabecera')
+            self.assertIn('Depends(_require_admin_access)', _src_of(node),
+                          f'{path} tiene que exigir rol administrativo o cabecera')
 
     def test_the_intentional_exceptions_really_are_inert(self):
         """An allowlist is only safe while its entries stay harmless. If
