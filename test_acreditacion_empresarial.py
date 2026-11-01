@@ -24,6 +24,7 @@ Lo que se comprueba, en este orden:
   E. Los dos formularios publicados: que envíen de verdad lo que el servidor
      ya verificaba y que consulten el estado antes de ofrecer operar.
 """
+import hashlib
 import json
 import os
 import re
@@ -802,6 +803,239 @@ class TestCompletarAntecedentes(Base):
         self.assertEqual(r.status_code, 200, r.text[:300])
         self.assertEqual(r.json()['estado'], 'approved')
         self.assertIsNone(r.json()['company_id'])
+
+
+# ══════════════════════════════════════════════════════════════════
+# D ter. EL CICLO COMPLETO: SOLICITUD -> REVISION -> DECISION -> AVISO
+# ══════════════════════════════════════════════════════════════════
+
+class TestCicloCompleto(Base):
+    """Cualquier empresa y representante nuevos, no casos particulares."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._web = main._verify_company_web
+        cls._dom = main._verify_email_domain
+        cls._get = main._requests.get
+        cls._post = main._requests.post
+        main._verify_company_web = lambda *a, **k: {'valid': True}
+        main._verify_email_domain = lambda *a, **k: {'valid': True}
+        main._requests.get = lambda *a, **k: (_ for _ in ()).throw(
+            RuntimeError('sin red en pruebas'))
+        # Los correos no salen: se registran para poder comprobarlos.
+        cls.enviados = []
+
+        class _Resp:
+            status_code = 200
+            def json(self): return {'id': 'prueba'}
+
+        def _capturar(url, **kw):
+            cls.enviados.append({'url': url, 'json': kw.get('json') or {}})
+            return _Resp()
+        main._requests.post = _capturar
+        os.environ['RESEND_API_KEY'] = 'clave-de-prueba-local'
+
+    @classmethod
+    def tearDownClass(cls):
+        main._verify_company_web = cls._web
+        main._verify_email_domain = cls._dom
+        main._requests.get = cls._get
+        main._requests.post = cls._post
+        os.environ.pop('RESEND_API_KEY', None)
+        super().tearDownClass()
+
+    def _admin(self):
+        h = _ip(); h['X-Admin-Secret'] = ADMIN
+        return h
+
+    def _solicitud(self, ruta='/marketer/register', **extra):
+        """Una empresa NUEVA pide acreditacion, por la ruta real."""
+        type(self).enviados.clear()
+        correo = _uniq('rep') + '@empresa-ficticia.invalid'
+        cuerpo = {'name': _uniq('Empresa') + ' SpA', 'email': correo,
+                  'password': 'Clave-de-prueba-2026', 'country': 'CL',
+                  'company_name': _uniq('Empresa') + ' SpA',
+                  'business_category': 'retail_comercio',
+                  'company_rut': _rut_valido(), 'cargo': 'Gerente',
+                  'company_web': 'https://www.empresa-ficticia.invalid',
+                  'is_supervisor': True, 'phone': '+56900000000'}
+        cuerpo.update(extra)
+        r = self.client.post(ruta, json=cuerpo, headers=_ip())
+        self.assertEqual(r.status_code, 200, r.text[:300])
+        u = self.db.query(main.User).filter(
+            main.func.lower(main.User.email) == correo.lower()).first()
+        return r.json().get('token', ''), u, correo
+
+    # ── 1. Queda pendiente y se avisa a quien revisa ──────────────
+    def test_la_solicitud_queda_pendiente_y_avisa_al_revisor(self):
+        _, u, _ = self._solicitud()
+        p = self.db.query(main.MarketerProfile).filter(
+            main.MarketerProfile.user_id == u.id).first()
+        self.assertEqual(p.status, 'pending')
+        avisos = [e for e in self.enviados
+                  if main.REVISION_ACREDITACION_EMAIL in (e['json'].get('to') or [])]
+        self.assertTrue(avisos, f'no se avisó a quien revisa: {self.enviados}')
+        cuerpo = json.dumps(avisos[-1]['json'], ensure_ascii=False)
+        self.assertIn('acreditacion', cuerpo.lower())
+        for prohibido in ('password', 'Clave-de-prueba', 'X-Admin-Secret',
+                          'secret='):
+            self.assertNotIn(prohibido, cuerpo,
+                             f'el aviso no puede llevar {prohibido}')
+
+    def test_tambien_para_CREAR_CONSULTA(self):
+        """El mismo mecanismo, no uno duplicado."""
+        # OrganizerRegisterFullInput trae org_type='person' por omision; el
+        # portal lo envia explicitamente desde la correccion del formulario.
+        _, u, _ = self._solicitud(ruta='/organizer/register', org_type='company')
+        p = self.db.query(main.OrganizerProfile).filter(
+            main.OrganizerProfile.user_id == u.id).first()
+        self.assertEqual(p.status, 'pending')
+        self.assertTrue([e for e in self.enviados
+                         if main.REVISION_ACREDITACION_EMAIL in (e['json'].get('to') or [])])
+
+    # ── 2. Revisión: todos los datos y el documento ───────────────
+    def test_la_revision_ve_los_datos_y_el_documento(self):
+        tok, u, _ = self._solicitud()
+        pdf = b'%PDF-1.4 documento ficticio\n%%EOF'
+        r = self.client.post('/marketer/upload-cargo-doc',
+                             files={'file': ('doc.pdf', pdf, 'application/pdf')},
+                             headers={'Authorization': 'Bearer ' + tok, **_ip()})
+        self.assertEqual(r.status_code, 200, r.text[:200])
+        pend = self.client.get('/admin/accreditation/pending',
+                               headers=self._admin()).json()['pendientes']
+        fila = next(f for f in pend if f['user_id'] == u.id and f['tipo'] == 'anunciante')
+        for campo in ('org_type', 'cargo', 'company_id', 'pais', 'identificacion',
+                      'identificacion_verificada', 'verificaciones',
+                      'tiene_documento_de_cargo', 'solicitado_en'):
+            self.assertIn(campo, fila)
+        self.assertTrue(fila['tiene_documento_de_cargo'])
+        doc = self.client.get(
+            f'/admin/accreditation/document?tipo=anunciante&user_id={u.id}',
+            headers=self._admin())
+        self.assertEqual(doc.status_code, 200, doc.text[:200])
+        self.assertEqual(doc.json()['sha256'],
+                         hashlib.sha256(pdf).hexdigest(),
+                         'el documento guardado no es el que se envió')
+
+    # ── 3 y 5. Las tres decisiones, con registro y aviso ──────────
+    def _decidir(self, u, decision, **extra):
+        type(self).enviados.clear()
+        cuerpo = {'tipo': 'anunciante', 'user_id': u.id, 'decision': decision,
+                  'decidido_por': 'JC'}
+        cuerpo.update(extra)
+        return self.client.post('/admin/accreditation/decide', json=cuerpo,
+                                headers=self._admin())
+
+    def _aviso_al_solicitante(self, correo):
+        return [e for e in self.enviados if correo in (e['json'].get('to') or [])]
+
+    def test_aprobar_registra_avisa_y_habilita_el_panel(self):
+        tok, u, correo = self._solicitud()
+        r = self._decidir(u, 'approved')
+        self.assertEqual(r.status_code, 200, r.text[:300])
+        d = r.json()
+        self.assertEqual(d['estado'], 'approved')
+        self.assertEqual(d['decidido_por'], 'JC')
+        self.assertTrue(d['decidido_en'].endswith('Z'))
+        self.assertTrue(d['notificado_al_solicitante'],
+                        'no se avisó al representante de su aprobación')
+        avisos = self._aviso_al_solicitante(correo)
+        self.assertTrue(avisos, 'el representante no recibió nada')
+        texto = json.dumps(avisos[-1]['json'], ensure_ascii=False)
+        self.assertIn('APROBADA', texto)
+        for prohibido in ('Clave-de-prueba', 'secret', 'Bearer'):
+            self.assertNotIn(prohibido, texto,
+                             f'el aviso no puede llevar {prohibido}')
+        # Y el acceso queda habilitado SIN ninguna otra intervencion.
+        est = self.client.get('/marketer/status',
+                              headers={'Authorization': 'Bearer ' + tok, **_ip()})
+        self.assertEqual(est.json()['status'], 'approved')
+
+    def test_rechazar_avisa_con_el_motivo(self):
+        _, u, correo = self._solicitud()
+        r = self._decidir(u, 'rejected', motivo='El poder no acredita el cargo')
+        self.assertEqual(r.status_code, 200, r.text[:300])
+        self.assertEqual(r.json()['estado'], 'rejected')
+        self.assertTrue(r.json()['notificado_al_solicitante'])
+        texto = json.dumps(self._aviso_al_solicitante(correo)[-1]['json'],
+                           ensure_ascii=False)
+        self.assertIn('NO fue aprobada', texto)
+        self.assertIn('no acredita el cargo', texto)
+
+    def test_pedir_antecedentes_avisa_y_deja_pendiente(self):
+        _, u, correo = self._solicitud()
+        r = self._decidir(u, 'more_info', motivo='Falta certificado de vigencia')
+        self.assertEqual(r.status_code, 200, r.text[:300])
+        self.assertEqual(r.json()['estado'], 'pending')
+        texto = json.dumps(self._aviso_al_solicitante(correo)[-1]['json'],
+                           ensure_ascii=False)
+        self.assertIn('antecedentes adicionales', texto)
+        self.assertIn('certificado de vigencia', texto)
+
+    # ── 4. Habilitado sin ninguna otra intervencion ───────────────
+    def test_tras_aprobar_el_representante_opera_sin_mas_tramites(self):
+        tok, u, correo = self._solicitud()
+        cab = {'Authorization': 'Bearer ' + tok, **_ip()}
+        bloq = self.client.post('/payments/demo-credits', json={}, headers=cab)
+        self.assertEqual(bloq.status_code, 403, 'pendiente debe estar bloqueado')
+        self._decidir(u, 'approved')
+        # El correo lo exige el servidor por su cuenta: se confirma como en
+        # el portal, leyendo el codigo de la base.
+        otp = self.client.get(f'/admin/test-otp?email={correo}&secret={ADMIN}',
+                              headers=_ip()).json()['code']
+        self.client.post('/verify/email/confirm', json={'code': otp}, headers=cab)
+        libre = self.client.post('/payments/demo-credits', json={}, headers=cab)
+        self.assertEqual(libre.status_code, 200,
+                         f'tras aprobar no deberia hacer falta nada mas: {libre.text[:200]}')
+        camp = self.client.post('/marketer/campaigns', json={
+            'advertiser_email': correo, 'advertiser_name': 'Empresa Ficticia',
+            'campaign_title': _uniq('Campana'), 'budget_clp': 95000,
+            'value_class': 'DEMO', 'target_country': 'CL',
+            'start_date': '2026-12-01T00:00:00', 'end_date': '2026-12-31T00:00:00',
+            'ad_type': 'banner'}, headers=cab)
+        self.assertEqual(camp.status_code, 200, camp.text[:200])
+        c = self.db.query(main.AdCampaign).filter(
+            main.AdCampaign.id == camp.json()['campaign_id']).first()
+        self.assertFalse(c.is_active, 'la campaña debe nacer pausada')
+
+    # ── 7. Una sola puerta: la ruta antigua aplica la misma regla ──
+    def test_la_ruta_antigua_no_es_una_segunda_puerta(self):
+        _, u, correo = self._solicitud(company_rut='')     # sin identificacion
+        p = self.db.query(main.MarketerProfile).filter(
+            main.MarketerProfile.user_id == u.id).first()
+        self.assertIsNone(p.company_id)
+        r = self.client.post(f'/admin/marketer/{u.id}/status'
+                             f'?secret={ADMIN}&status=approved', headers=_ip())
+        self.assertEqual(r.status_code, 409,
+                         'la ruta antigua aprobaba sin empresa identificada')
+        self.db.expire_all()
+        p = self.db.query(main.MarketerProfile).filter(
+            main.MarketerProfile.user_id == u.id).first()
+        self.assertEqual(p.status, 'pending')
+
+    def test_la_ruta_antigua_tambien_avisa_al_solicitante(self):
+        _, u, correo = self._solicitud()
+        type(self).enviados.clear()
+        r = self.client.post(f'/admin/marketer/{u.id}/status'
+                             f'?secret={ADMIN}&status=approved', headers=_ip())
+        self.assertEqual(r.status_code, 200, r.text[:200])
+        self.assertTrue(r.json()['notificado_al_solicitante'])
+        self.assertTrue(self._aviso_al_solicitante(correo))
+
+    # ── La pantalla de revision ───────────────────────────────────
+    def test_la_pantalla_de_revision_no_pasa_el_secreto_por_la_URL(self):
+        h = main.ADMIN_APPROVE_PAGE_HTML
+        self.assertIn("'X-Admin-Secret': sec()", h, 'la credencial va en cabecera')
+        self.assertNotIn("?secret=' + encodeURIComponent(secret)", h,
+                         'ya no se pasa por la dirección')
+        self.assertIn('/admin/accreditation/pending', h)
+        self.assertIn('/admin/accreditation/document', h)
+        self.assertIn('/admin/accreditation/decide', h)
+        for texto in ('Aprobar', 'Rechazar', 'Pedir antecedentes',
+                      'Ver documento', 'crear_empresa'):
+            self.assertIn(texto, h, f'la pantalla no ofrece {texto}')
+        self.assertIn('type="password" id="secret"', h)
 
 
 # ══════════════════════════════════════════════════════════════════

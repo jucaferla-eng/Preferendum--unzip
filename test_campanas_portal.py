@@ -229,9 +229,17 @@ class TestQ_RecorridoDelAnunciante(unittest.TestCase):
         assert _p is not None, 'el alta no creo perfil de anunciante'
         assert _p.status == 'pending', (
             f'el alta deberia nacer pendiente y nacio {_p.status!r}')
+        # Aprobar una organizacion exige que su empresa este IDENTIFICADA
+        # (pais + identificacion tributaria). La ruta administrativa la
+        # completa en la misma decision, que es como lo hace la pantalla de
+        # revision.
         _acred = cls.client.post(
-            f'/admin/marketer/{cls.u.id}/status?secret={ADMIN}&status=approved',
-            headers=_ip())
+            '/admin/accreditation/decide',
+            json={'tipo': 'anunciante', 'user_id': cls.u.id,
+                  'decision': 'approved', 'decidido_por': 'pruebas',
+                  'crear_empresa': {'country': 'CL', 'tax_id': '76.123.456-0',
+                                    'name': 'Empresa Ficticia'}},
+            headers={**_ip(), 'X-Admin-Secret': ADMIN})
         assert _acred.status_code == 200, (
             f'la acreditacion fallo: {_acred.status_code} {_acred.text[:200]}')
         cls.db.expire_all()

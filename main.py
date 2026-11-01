@@ -6690,6 +6690,101 @@ def _notificar_revision_acreditacion(*, perfil_tipo: str, user_id: int,
         return False
 
 
+def _notificar_decision_acreditacion(*, email: str, nombre: str,
+                                     perfil_tipo: str, decision: str,
+                                     motivo: str = '') -> bool:
+    """Avisa al representante del resultado de su solicitud.
+
+    Sin esto, una solicitud aprobada no se lo decia a nadie: el
+    representante tenia que adivinar cuando volver a entrar. Y una
+    rechazada, igual.
+
+    No lleva credenciales, ni enlaces con secretos, ni el documento. Nunca
+    lanza: el estado ya quedo guardado, y el aviso es un aviso.
+    """
+    textos = {
+        'approved': ('Su acreditacion empresarial fue aprobada',
+                     'Su solicitud de acreditacion empresarial ha sido '
+                     'revisada y APROBADA. Ya puede ingresar con su correo y '
+                     'su contrasena para usar todas las funciones.'),
+        'rejected': ('Su solicitud de acreditacion no fue aprobada',
+                     'Su solicitud de acreditacion empresarial ha sido '
+                     'revisada y NO fue aprobada.'),
+        'more_info': ('Necesitamos antecedentes adicionales',
+                      'Hemos revisado su solicitud de acreditacion '
+                      'empresarial y necesitamos antecedentes adicionales. '
+                      'Su solicitud sigue pendiente.'),
+    }
+    asunto, cuerpo = textos.get(decision, (None, None))
+    if not asunto or not email:
+        return False
+    texto = (f'{nombre or "Hola"},\n\n{cuerpo}\n'
+             + (f'\nMotivo: {motivo}\n' if motivo else '')
+             + f'\nTipo de perfil: {perfil_tipo}\n\nPreferendum\n')
+    try:
+        resend_key = os.getenv('RESEND_API_KEY')
+        if not resend_key:
+            print(f'[acreditacion] decision no notificada por falta de '
+                  f'proveedor de correo: {decision} {perfil_tipo}')
+            return False
+        _requests.post(
+            'https://api.resend.com/emails',
+            json={'from': 'Preferendum <noreply@preferendum.com>',
+                  'to': [email], 'subject': f'[Preferendum] {asunto}',
+                  'text': texto},
+            headers={'Authorization': f'Bearer {resend_key}'}, timeout=10)
+        print(f'[acreditacion] decision notificada al solicitante: {decision}')
+        return True
+    except Exception as e:
+        print(f'[acreditacion] no se pudo notificar la decision '
+              f'({type(e).__name__}); el estado ya quedo guardado')
+        return False
+
+
+def _aplicar_decision_acreditacion(db: Session, Perfil, p, decision: str,
+                                   motivo: str, quien: str):
+    """El UNICO sitio donde una acreditacion cambia de estado.
+
+    Existian dos puertas: estas rutas administrativas y las de
+    /admin/{kind}/{user_id}/status, que escribian el estado directamente y
+    podian aprobar una organizacion SIN empresa identificada -justo lo que
+    el procedimiento prohibe-. Ahora las dos pasan por aqui, asi que hay un
+    solo comportamiento, una sola guarda y un solo registro.
+
+    Devuelve (estado, notificado).
+    """
+    if decision == 'approved':
+        if _es_organizacion(p.org_type) and not p.company_id:
+            raise HTTPException(409,
+                'No se puede aprobar una organizacion sin empresa '
+                'identificada; indica crear_empresa (pais, identificacion '
+                'tributaria y razon social comprobados en los antecedentes) '
+                'o vincular_company_id si la empresa ya esta registrada')
+        p.status = 'approved'
+        p.approved_at = datetime.utcnow()
+        p.rejection_reason = ''
+    elif decision in ('rejected', 'suspended'):
+        p.status = decision
+        p.rejection_reason = motivo or 'Antecedentes insuficientes'
+    else:
+        p.status = 'pending'
+        p.rejection_reason = motivo or 'Se solicitaron antecedentes adicionales'
+    db.commit()
+    u = db.query(User).filter(User.id == p.user_id).first()
+    tipo = 'organizador' if Perfil is OrganizerProfile else 'anunciante'
+    notificado = _notificar_decision_acreditacion(
+        email=(u.email if u else ''), nombre=(u.name if u else ''),
+        perfil_tipo=tipo,
+        decision=('rejected' if decision == 'suspended' else decision),
+        motivo=p.rejection_reason or '')
+    # Queda registrado quien decidio, cuando y el resultado. Sin datos
+    # personales del solicitante: solo su id interno.
+    print(f'[acreditacion] decision={decision} tipo={tipo} '
+          f'user={p.user_id} company={p.company_id} por={quien} '
+          f'en={datetime.utcnow().isoformat()}Z notificado={notificado}')
+    return p.status, notificado
+
+
 def _verify_company_rut(rut: str) -> dict:
     """
     Valida RUT chileno por dígito verificador (matemático, siempre funciona).
@@ -17600,13 +17695,15 @@ def admin_set_organizer_status(user_id: int, secret: str, status: str, reason: s
     profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user_id).first()
     if not profile:
         raise HTTPException(404, 'Perfil no encontrado')
-    profile.status           = status
-    profile.rejection_reason = reason
-    if status == 'approved':
-        profile.approved_at = datetime.utcnow()
-    db.commit()
-    return {'ok': True, 'user_id': user_id, 'status': status}
-
+    # MISMA puerta que /admin/accreditation/decide: esta ruta escribia el
+    # estado directamente y podia aprobar una organizacion SIN empresa
+    # identificada, que es justo lo que el procedimiento prohibe. Era una
+    # segunda puerta al mismo sitio, con otra regla.
+    _decision = 'more_info' if status == 'pending' else status
+    _estado, _notificado = _aplicar_decision_acreditacion(
+        db, OrganizerProfile, profile, _decision, reason, 'admin')
+    return {'ok': True, 'user_id': user_id, 'status': _estado,
+            'notificado_al_solicitante': _notificado}
 
 @app.post('/admin/marketer/{user_id}/status')
 def admin_set_marketer_status(user_id: int, secret: str, status: str, reason: str = '', db: Session = Depends(get_db)):
@@ -17621,13 +17718,15 @@ def admin_set_marketer_status(user_id: int, secret: str, status: str, reason: st
     profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == user_id).first()
     if not profile:
         raise HTTPException(404, 'Perfil no encontrado')
-    profile.status           = status
-    profile.rejection_reason = reason
-    if status == 'approved':
-        profile.approved_at = datetime.utcnow()
-    db.commit()
-    return {'ok': True, 'user_id': user_id, 'status': status}
-
+    # MISMA puerta que /admin/accreditation/decide: esta ruta escribia el
+    # estado directamente y podia aprobar una organizacion SIN empresa
+    # identificada, que es justo lo que el procedimiento prohibe. Era una
+    # segunda puerta al mismo sitio, con otra regla.
+    _decision = 'more_info' if status == 'pending' else status
+    _estado, _notificado = _aplicar_decision_acreditacion(
+        db, MarketerProfile, profile, _decision, reason, 'admin')
+    return {'ok': True, 'user_id': user_id, 'status': _estado,
+            'notificado_al_solicitante': _notificado}
 
 @app.get('/admin/pending-approvals')
 def admin_pending_approvals(secret: str, db: Session = Depends(get_db)):
@@ -17677,102 +17776,204 @@ ADMIN_APPROVE_PAGE_HTML = """<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Preferendum — Aprobaciones</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preferendum — Revisión de acreditaciones</title>
 <style>
   * { box-sizing: border-box; }
   body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-          background:#090D18; color:#F0F4FF; padding:16px; }
+         background:#090D18; color:#F0F4FF; padding:16px; }
   h1 { font-size:20px; margin:0 0 4px; }
-  .sub { color:#64748B; font-size:13px; margin-bottom:18px; }
+  .sub { color:#64748B; font-size:13px; margin-bottom:18px; line-height:1.5; }
   .card { background:#10172A; border:1px solid #1E293B; border-radius:14px;
-           padding:16px; margin-bottom:14px; }
+          padding:16px; margin-bottom:14px; }
   .name { font-size:17px; font-weight:700; }
-  .meta { font-size:13px; color:#94A3B8; margin-top:4px; line-height:1.6; }
-  .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:999px;
-            margin:2px 4px 0 0; }
-  .ok { background:rgba(16,185,129,0.18); color:#10B981; }
-  .no { background:rgba(244,63,94,0.18); color:#F43F5E; }
-  .kindtag { display:inline-block; font-size:11px; text-transform:uppercase; letter-spacing:.05em;
-              color:#2563EB; background:rgba(37,99,235,0.15); padding:3px 9px; border-radius:6px;
-              margin-bottom:6px; }
-  .row { display:flex; gap:10px; margin-top:14px; }
-  button { flex:1; border:none; border-radius:10px; padding:14px; font-size:16px;
-            font-weight:700; cursor:pointer; -webkit-tap-highlight-color: transparent; }
-  .approve { background:#10B981; color:#06291E; }
-  .reject { background:#1E293B; color:#F43F5E; }
-  .approve:active, .reject:active { transform: scale(0.97); }
+  .meta { font-size:13px; color:#94A3B8; margin-top:6px; line-height:1.7; }
+  .ok   { color:#34D399; } .no { color:#64748B; }
+  .warn { color:#FBBF24; }
+  label { display:block; font-size:12px; color:#64748B; margin:10px 0 4px;
+          text-transform:uppercase; letter-spacing:.05em; }
+  input, textarea { width:100%; background:#0B1222; border:1px solid #1E293B;
+          border-radius:8px; padding:11px 12px; color:#F0F4FF; font-size:15px; }
+  button { border:none; border-radius:10px; padding:12px 16px; font-size:15px;
+           font-weight:700; cursor:pointer; margin:6px 6px 0 0; }
+  .approve { background:#059669; color:#fff; }
+  .reject  { background:#B91C1C; color:#fff; }
+  .info    { background:#1E293B; color:#F0F4FF; }
+  .doc     { background:#1D4ED8; color:#fff; }
+  .refresh { background:#1E293B; color:#F0F4FF; width:100%; }
   .empty { color:#64748B; text-align:center; padding:40px 0; }
-  .done { color:#10B981; font-weight:700; }
-  .refresh { background:#2563EB; color:#fff; border:none; border-radius:10px;
-              padding:12px 18px; font-size:14px; font-weight:700; margin-bottom:16px; width:100%; }
+  .emp { margin-top:12px; padding:12px; border:1px dashed #334155; border-radius:10px; }
+  .msg { font-size:13px; margin-top:10px; line-height:1.5; }
 </style>
 </head>
 <body>
-  <h1>Aprobaciones pendientes</h1>
-  <div class="sub">Empresas esperando luz verde para anunciar / organizar — un toque para aprobar.</div>
-  <button class="refresh" onclick="load()">Actualizar</button>
-  <div id="list"><div class="empty">Cargando...</div></div>
+  <h1>Revisión de acreditaciones</h1>
+  <div class="sub">
+    La credencial se escribe aquí y viaja en una cabecera, nunca en la
+    dirección: esta pantalla consulta documentos de identidad y de cargo, y
+    una URL queda en el historial, en los registros del proxy y en el Referer.
+  </div>
+  <label>Credencial administrativa</label>
+  <input type="password" id="secret" autocomplete="off"
+         placeholder="No queda en la dirección ni en el historial">
+  <button class="refresh" onclick="load()">Ver solicitudes pendientes</button>
+  <div id="list"></div>
 
 <script>
-const secret = new URLSearchParams(location.search).get('secret') || '';
+function sec() { return document.getElementById('secret').value.trim(); }
+function cab() { return { 'X-Admin-Secret': sec() }; }
+function esc(t) {
+  return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function marca(v) { return v ? '<span class="ok">✓</span>' : '<span class="no">·</span>'; }
 
-function badge(label, ok) {
-  return '<span class="badge ' + (ok ? 'ok' : 'no') + '">' + (ok ? String.fromCharCode(10003) : String.fromCharCode(10007)) + ' ' + label + '</span>';
+// Los manejadores se enganchan despues de pintar, con atributos de datos.
+// Meter los argumentos dentro de un onclick obliga a escapar comillas, y
+// ese escape se pierde al pasar por el literal de Python: el boton quedaba
+// roto sin que nada avisara.
+function boton(clase, p, decision, texto) {
+  return '<button class="' + clase + '" data-acc="decidir" data-tipo="'
+    + esc(p.tipo) + '" data-uid="' + p.user_id + '" data-dec="' + decision
+    + '">' + texto + '</button>';
+}
+
+function enganchar() {
+  document.querySelectorAll('[data-acc]').forEach(b => {
+    b.onclick = () => {
+      const t = b.dataset.tipo, u = parseInt(b.dataset.uid, 10);
+      if (b.dataset.acc === 'doc') verDoc(t, u);
+      else decidir(t, u, b.dataset.dec);
+    };
+  });
 }
 
 async function load() {
-  const list = document.getElementById('list');
-  list.innerHTML = '<div class="empty">Cargando...</div>';
+  const lista = document.getElementById('list');
+  if (!sec()) { lista.innerHTML = '<div class="empty">Escribe la credencial.</div>'; return; }
+  lista.innerHTML = '<div class="empty">Cargando…</div>';
+  let d;
   try {
-    const r = await fetch('/admin/pending-approvals?secret=' + encodeURIComponent(secret));
-    const d = await r.json();
-    if (!r.ok) { list.innerHTML = '<div class="empty">' + (d.detail || 'Error') + '</div>'; return; }
-    if (!d.pending.length) { list.innerHTML = '<div class="empty">No hay cuentas pendientes</div>'; return; }
-    list.innerHTML = d.pending.map(function(p) {
-      return '<div class="card" id="card-' + p.kind + '-' + p.user_id + '">' +
-        '<span class="kindtag">' + (p.kind === 'marketer' ? 'Anunciante' : 'Organizador') + '</span>' +
-        '<div class="name">' + (p.company || p.name || '(sin nombre)') + '</div>' +
-        '<div class="meta">' + p.name + ' &middot; ' + p.email + '<br>' +
-          (p.cargo ? 'Cargo: ' + p.cargo + '<br>' : '') +
-          (p.business_category ? 'Rubro: ' + p.business_category + '<br>' : '') +
-          'Tipo: ' + p.org_type + ' &middot; Registrado: ' + new Date(p.created_at).toLocaleString('es-CL') +
-        '</div>' +
-        '<div class="meta">' + badge('RUT', p.rut_verified) + badge('Dominio', p.domain_verified) + badge('Web', p.web_verified) + badge('Selfie', p.selfie_verified) + '</div>' +
-        '<div class="row">' +
-          '<button class="approve" onclick="act(\\'' + p.kind + '\\', ' + p.user_id + ', \\'approved\\', this)">Aprobar</button>' +
-          '<button class="reject" onclick="act(\\'' + p.kind + '\\', ' + p.user_id + ', \\'suspended\\', this)">Rechazar</button>' +
-        '</div>' +
-      '</div>';
-    }).join('');
-  } catch (e) {
-    list.innerHTML = '<div class="empty">Error de red: ' + e + '</div>';
-  }
+    const r = await fetch('/admin/accreditation/pending', { headers: cab() });
+    if (r.status === 403) { lista.innerHTML = '<div class="empty">Credencial incorrecta.</div>'; return; }
+    if (!r.ok) { lista.innerHTML = '<div class="empty">Error ' + r.status + '</div>'; return; }
+    d = await r.json();
+  } catch (e) { lista.innerHTML = '<div class="empty">Sin conexión.</div>'; return; }
+  const ps = d.pendientes || [];
+  if (!ps.length) { lista.innerHTML = '<div class="empty">No hay solicitudes pendientes.</div>'; return; }
+  lista.innerHTML = ps.map(p => {
+    const id = p.tipo + '-' + p.user_id;
+    const identificada = !!p.company_id;
+    return '<div class="card" id="c-' + id + '">'
+      + '<div class="name">' + esc(p.razon_social_declarada || '(sin razón social)') + '</div>'
+      + '<div class="meta">'
+      +   esc(p.tipo) + ' · user ' + p.user_id + ' · ' + esc(p.org_type || '') + '<br>'
+      +   'Cargo declarado: ' + esc(p.cargo || '(sin dato)') + '<br>'
+      +   (identificada
+            ? 'Empresa: ' + esc(p.pais) + ' ' + esc(p.identificacion)
+              + (p.identificacion_verificada
+                   ? ' <span class="ok">(identificación verificada)</span>'
+                   : ' <span class="warn">(sin verificar)</span>')
+            : '<span class="warn">Empresa SIN identificar: completa los datos abajo '
+              + 'tras revisar los antecedentes.</span>') + '<br>'
+      +   'Verificaciones: ' + marca(p.verificaciones.rut) + ' identificación tributaria &nbsp; '
+      +   marca(p.verificaciones.dominio) + ' dominio &nbsp; '
+      +   marca(p.verificaciones.web) + ' sitio web<br>'
+      +   'Documento de cargo: ' + (p.tiene_documento_de_cargo
+            ? '<span class="ok">adjuntado</span>' : '<span class="warn">NO adjuntado</span>')
+      + '</div>'
+      + (p.tiene_documento_de_cargo
+          ? '<button class="doc" data-acc="doc" data-tipo="' + esc(p.tipo)
+            + '" data-uid="' + p.user_id + '">Ver documento</button>'
+          : '')
+      + (identificada ? '' :
+          '<div class="emp">'
+          + '<label>País</label><input id="pais-' + id + '" placeholder="CL">'
+          + '<label>Identificación tributaria o registral</label>'
+          + '<input id="rut-' + id + '" placeholder="76.123.456-7">'
+          + '<label>Razón social comprobada</label>'
+          + '<input id="razon-' + id + '" value="' + esc(p.razon_social_declarada || '') + '">'
+          + '</div>')
+      + '<label>Motivo (se le comunica al solicitante)</label>'
+      + '<textarea id="motivo-' + id + '" rows="2"></textarea>'
+      + boton('approve', p, 'approved',  'Aprobar')
+      + boton('reject',  p, 'rejected',  'Rechazar')
+      + boton('info',    p, 'more_info', 'Pedir antecedentes')
+      + '<div class="msg" id="msg-' + id + '"></div>'
+      + '</div>';
+  }).join('');
+  enganchar();
 }
 
-async function act(kind, userId, status, btn) {
-  btn.closest('.card').style.opacity = '0.5';
+async function verDoc(tipo, userId) {
+  const id = tipo + '-' + userId;
+  const msg = document.getElementById('msg-' + id);
+  msg.textContent = 'Abriendo el documento…';
   try {
-    const r = await fetch('/admin/' + kind + '/' + userId + '/status?secret=' + encodeURIComponent(secret) + '&status=' + status, { method: 'POST' });
+    const r = await fetch('/admin/accreditation/document?tipo=' + encodeURIComponent(tipo)
+                          + '&user_id=' + userId, { headers: cab() });
     const d = await r.json();
-    const card = document.getElementById('card-' + kind + '-' + userId);
-    if (r.ok && d.ok) {
-      card.innerHTML = '<div class="done">' + (status === 'approved' ? 'Aprobado — ya puede lanzar campanas / publicar consultas' : 'Rechazado') + '</div>';
-    } else {
-      card.innerHTML = '<div class="empty">Error: ' + (d.detail || 'desconocido') + '</div>';
-      card.style.opacity = '1';
+    if (!r.ok || !d.tiene_documento) {
+      msg.textContent = d.detail || d.mensaje || 'No hay documento.'; return;
     }
-  } catch (e) {
-    btn.closest('.card').style.opacity = '1';
-    alert('Error de red: ' + e);
-  }
+    // El documento no se publica en ningun enlace: se abre en memoria, en
+    // esta misma sesion autenticada.
+    const bin = atob(d.contenido_base64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const tipos = { '%PDF': 'application/pdf', '\x89PNG': 'image/png' };
+    let mime = 'application/pdf';
+    if (bytes[0] === 0x89) mime = 'image/png';
+    else if (bytes[0] === 0xFF && bytes[1] === 0xD8) mime = 'image/jpeg';
+    else if (bytes[0] === 0x52 && bytes[1] === 0x49) mime = 'image/webp';
+    const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+    window.open(url, '_blank');
+    msg.innerHTML = 'Documento abierto. sha256 <code>' + esc(d.sha256).slice(0, 16) + '…</code>';
+  } catch (e) { msg.textContent = 'No se pudo abrir el documento.'; }
 }
 
-if (!secret) {
-  document.getElementById('list').innerHTML = '<div class="empty">Falta ?secret= en la URL</div>';
-} else {
-  load();
-  setInterval(load, 15000);
+async function decidir(tipo, userId, decision) {
+  const id = tipo + '-' + userId;
+  const msg = document.getElementById('msg-' + id);
+  const cuerpo = {
+    tipo: tipo, user_id: userId, decision: decision,
+    decidido_por: 'JC',
+    motivo: (document.getElementById('motivo-' + id) || {}).value || ''
+  };
+  const pais = document.getElementById('pais-' + id);
+  if (pais) {
+    const rut   = document.getElementById('rut-' + id).value.trim();
+    const razon = document.getElementById('razon-' + id).value.trim();
+    if (pais.value.trim() && rut && razon) {
+      cuerpo.crear_empresa = { country: pais.value.trim(), tax_id: rut, name: razon };
+    }
+  }
+  msg.textContent = 'Enviando…';
+  try {
+    const r = await fetch('/admin/accreditation/decide', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, cab()),
+      body: JSON.stringify(cuerpo)
+    });
+    const d = await r.json();
+    if (!r.ok) { msg.innerHTML = '<span class="warn">' + esc(d.detail || ('Error ' + r.status)) + '</span>'; return; }
+    msg.innerHTML = '<span class="ok">Estado: ' + esc(d.estado) + '</span>'
+      + ' · decidido por ' + esc(d.decidido_por) + ' el ' + esc(d.decidido_en)
+      + (d.empresa ? '<br>Empresa ' + (d.empresa.creada ? 'registrada' : 'reutilizada')
+                     + ': ' + esc(d.empresa.pais) + ' ' + esc(d.empresa.identificacion_normalizada) : '')
+      + '<br>' + (d.notificado_al_solicitante
+                   ? 'Se notificó al solicitante por correo.'
+                   : '<span class="warn">No se pudo notificar al solicitante por correo '
+                     + '(el estado sí quedó guardado).</span>');
+    setTimeout(load, 1800);
+  } catch (e) { msg.textContent = 'Sin conexión.'; }
+}
+
+// Sin ?secret= en la URL: si alguien llega con uno, se ignora.
+if (new URLSearchParams(location.search).get('secret')) {
+  document.getElementById('list').innerHTML =
+    '<div class="empty">La credencial no se pasa por la dirección. '
+    + 'Escríbela en el campo de arriba.</div>';
 }
 </script>
 </body>
@@ -20377,33 +20578,10 @@ def admin_acreditacion_decidir(body: dict,
                 'no se reasigna desde aqui')
         p.company_id = empresa_resuelta.id
 
-    if decision == 'approved':
-        # No se aprueba a una organizacion sin empresa identificada: seria
-        # volver a acreditar por nombre. Si hace falta, se vincula en la
-        # misma llamada con vincular_company_id.
-        if _es_organizacion(p.org_type) and not p.company_id:
-            raise HTTPException(409,
-                'No se puede aprobar una organizacion sin empresa '
-                'identificada; indica crear_empresa (pais, identificacion '
-                'tributaria y razon social comprobados en los antecedentes) '
-                'o vincular_company_id si la empresa ya esta registrada')
-        p.status = 'approved'
-        p.approved_at = datetime.utcnow()
-        p.rejection_reason = ''
-    elif decision == 'rejected':
-        p.status = 'rejected'
-        p.rejection_reason = motivo or 'Antecedentes insuficientes'
-    else:
-        p.status = 'pending'
-        p.rejection_reason = motivo or 'Se solicitaron antecedentes adicionales'
-    db.commit()
-    # Queda registrado quien decidio, cuando y el resultado. Sin datos
-    # personales del solicitante: solo su id interno.
-    print(f'[acreditacion] decision={decision} tipo={tipo} '
-          f'user={user_id} company={p.company_id} '
-          f'empresa_creada={bool(empresa_creada)} por={quien} '
-          f'en={datetime.utcnow().isoformat()}Z')
+    _estado, _notificado = _aplicar_decision_acreditacion(
+        db, Perfil, p, decision, motivo, quien)
     salida = {'ok': True, 'tipo': tipo, 'user_id': user_id,
+              'notificado_al_solicitante': _notificado,
               'decision': decision, 'estado': p.status,
               'company_id': p.company_id, 'decidido_por': quien,
               'decidido_en': datetime.utcnow().isoformat() + 'Z',

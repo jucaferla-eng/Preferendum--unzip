@@ -483,9 +483,14 @@ class TestZ_AcreditacionDelSupervisor(Base):
         existía. Sin esto, nadie podría empezar nunca."""
         u = self._usuario('organizer')
         self._perfil(main.OrganizerProfile, u.id, status='pending')
-        r = self.client.post(
-            f'/admin/organizer/{u.id}/status?secret={ADMIN}&status=approved',
-            headers=_ip())
+        r = self.client.post('/admin/accreditation/decide',
+                         json={'tipo': 'organizador', 'user_id': u.id,
+                               'decision': 'approved',
+                               'decidido_por': 'pruebas',
+                               'crear_empresa': {'country': 'CL',
+                                   'tax_id': _uniq('76').replace('-', ''),
+                                   'name': 'Empresa Ficticia'}},
+                         headers={**_ip(), 'X-Admin-Secret': ADMIN})
         self.assertEqual(r.status_code, 200, r.text[:300])
         self.db.expire_all()
         p = self.db.query(main.OrganizerProfile).filter(
@@ -704,9 +709,14 @@ class TestW_RecorridoRealDelPortal(Base):
         self.db.execute(main.text(
             'UPDATE users SET email_verified=1 WHERE id=:i'), {'i': u.id})
         self.db.commit()
-        ac = self.client.post(
-            f'/admin/marketer/{u.id}/status?secret={ADMIN}&status=approved',
-            headers=_ip())
+        ac = self.client.post('/admin/accreditation/decide',
+                         json={'tipo': 'anunciante', 'user_id': u.id,
+                               'decision': 'approved',
+                               'decidido_por': 'pruebas',
+                               'crear_empresa': {'country': 'CL',
+                                   'tax_id': _uniq('76').replace('-', ''),
+                                   'name': 'Empresa Ficticia'}},
+                         headers={**_ip(), 'X-Admin-Secret': ADMIN})
         self.assertEqual(ac.status_code, 200, ac.text[:300])
         self.db.expire_all()
 
