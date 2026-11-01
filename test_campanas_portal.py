@@ -39,6 +39,7 @@ from fastapi.testclient import TestClient        # noqa: E402
 
 import main                                      # noqa: E402
 
+ADMIN = os.environ['ADMIN_SECRET']
 PORTAL = open('marketer_portal.html', encoding='utf-8').read()
 
 
@@ -212,6 +213,28 @@ class TestQ_RecorridoDelAnunciante(unittest.TestCase):
         cls.db.execute(main.text('UPDATE users SET email_verified=1 WHERE id=:i'),
                        {'i': cls.u.id})
         cls.db.commit()
+
+        # OPCION A — el recorrido real del anunciante tiene ahora un paso mas.
+        # El alta de una ORGANIZACION nace 'pending': ya no se autoaprueba.
+        # Para operar campanas hace falta que la acredite un supervisor ya
+        # acreditado o, en el arranque -cuando la empresa todavia no tiene
+        # ninguno-, un administrador por la ruta que ya existia.
+        #
+        # Se hace aqui, por esa MISMA ruta, para que el resto de la suite
+        # pruebe lo que de verdad le ocurre a un anunciante acreditado. Que
+        # sin acreditar la puerta este cerrada se comprueba aparte, en
+        # test_representacion_empresarial.
+        _p = cls.db.query(main.MarketerProfile).filter(
+            main.MarketerProfile.user_id == cls.u.id).first()
+        assert _p is not None, 'el alta no creo perfil de anunciante'
+        assert _p.status == 'pending', (
+            f'el alta deberia nacer pendiente y nacio {_p.status!r}')
+        _acred = cls.client.post(
+            f'/admin/marketer/{cls.u.id}/status?secret={ADMIN}&status=approved',
+            headers=_ip())
+        assert _acred.status_code == 200, (
+            f'la acreditacion fallo: {_acred.status_code} {_acred.text[:200]}')
+        cls.db.expire_all()
         cls.token = main.make_token(cls.u.id, 'marketer')
 
     @classmethod

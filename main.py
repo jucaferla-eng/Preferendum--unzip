@@ -6455,6 +6455,55 @@ def confirm_phone(data: OTPInput, user: User = Depends(get_current_user), db: Se
     update_verify_level(user, db)
     return {'verified': True, 'verify_level': user.verify_level}
 
+# ═══════════════════════════════════════════════════════════════════════
+# OPCIÓN A — REPRESENTACIÓN EMPRESARIAL E INSTITUCIONAL VERIFICADA
+# ═══════════════════════════════════════════════════════════════════════
+#
+# UNA sola definición de "esto es una organización, no una persona", leída
+# por los dos registros (organizador y anunciante) y por las dos puertas
+# (crear consultas y operar campañas). No se construye otro sistema de
+# registro: se reutilizan las verificaciones que ya existen
+# (_verify_email_domain, _verify_company_rut, _verify_company_web) y el
+# mecanismo de acreditación por supervisor que ya funciona en ambos lados.
+#
+# La regla es por exclusión, no por lista blanca: todo lo que NO sea
+# 'person' es una organización. Así quedan cubiertos 'company', el
+# 'public' que la interfaz del organizador ya ofrecía sin que el backend
+# lo contemplara, el 'ngo' que existe en producción, y cualquier valor
+# futuro — sin tener que acordarse de añadirlo aquí.
+#
+# Los ciudadanos ('person') conservan su procedimiento intacto: no se les
+# pide representar a ninguna empresa.
+_ORG_TYPE_PERSONA = 'person'
+
+
+def _es_organizacion(org_type: str) -> bool:
+    """True si el perfil representa a una organización (empresa, organismo
+    público, ONG…) y no a un ciudadano a título personal."""
+    return (org_type or _ORG_TYPE_PERSONA).strip().lower() != _ORG_TYPE_PERSONA
+
+
+def _estado_inicial_de_perfil(org_type: str) -> str:
+    """Estado con el que nace un perfil recién registrado.
+
+    OPCIÓN A: una organización NO se autoaprueba. Nace 'pending' y solo
+    pasa a 'approved' cuando un supervisor YA ACREDITADO la autoriza (ver
+    supervisor_approve / marketer_supervisor_approve: exigen perfil propio
+    aprobado, ser supervisor y selfie propia verificada), o cuando un
+    administrador la acredita por las rutas que ya existen
+    (/admin/organizer/{id}/status, /admin/marketer/{id}/status).
+
+    Antes ambos registros ponían 'approved' directamente, así que la
+    cadena de verificación nunca condicionaba nada: el documento de cargo
+    se guardaba "para revisión" y la autorización del jefe era un camino
+    paralelo, no un requisito.
+
+    Un ciudadano sigue naciendo aprobado: su identificación es la de
+    persona natural, no una representación.
+    """
+    return 'pending' if _es_organizacion(org_type) else 'approved'
+
+
 def _verify_company_rut(rut: str) -> dict:
     """
     Valida RUT chileno por dígito verificador (matemático, siempre funciona).
@@ -10889,17 +10938,37 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks,
         db.commit()
         profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == existing.id).first()
         if not profile:
+            # OPCION A — esta rama (un ciudadano que ya tiene cuenta y
+            # pasa a organizador/anunciante) creaba el perfil 'approved' y
+            # ademas is_supervisor=True, es decir se fabricaba a si mismo la
+            # acreditacion que la puerta exige. Era el camino mas corto para
+            # saltarse toda la verificacion de representacion.
+            #
+            # Ahora: una organizacion nace 'pending' y NO nace supervisor;
+            # acreditar a alguien como supervisor es precisamente lo que un
+            # supervisor ya acreditado o un administrador deben decidir. Un
+            # ciudadano a titulo personal sigue igual que antes.
+            _es_org = _es_organizacion(data.org_type or 'person')
             profile = OrganizerProfile(
                 user_id=existing.id, org_type=data.org_type or 'person',
-                is_supervisor=True, status='approved', company_name=data.company_name or '',
+                is_supervisor=(not _es_org),
+                status=_estado_inicial_de_perfil(data.org_type or 'person'),
+                company_name=data.company_name or '',
             )
             db.add(profile); db.commit()
         token = make_token(existing.id, existing.role)
         return {'token': token, 'user': {'id': existing.id, 'name': existing.name, 'email': existing.email, 'role': existing.role}, 'profile': {'status': profile.status if profile else 'approved'}}
 
 
-    # Verificar dominio email corporativo
-    if data.org_type == 'company':
+    # Verificar dominio email corporativo o institucional.
+    #
+    # OPCIÓN A — antes esto solo corría para 'company', asi que un organismo
+    # publico (que la interfaz SI ofrece) o una ONG no recibian NINGUNA
+    # comprobacion: ni correo institucional, ni RUT, ni web. Ahora aplica a
+    # toda organizacion. Para el sector publico esta es la identificacion
+    # institucional efectiva: un dominio .gob/.gov propio lo acredita, y los
+    # correos gratuitos quedan rechazados igual que a una empresa.
+    if _es_organizacion(data.org_type):
         domain_check = _verify_email_domain(data.email)
         if not domain_check['valid']:
             raise HTTPException(400, domain_check.get('reason', 'Email inválido'))
@@ -10918,16 +10987,16 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks,
     rut_ok  = False
     web_ok  = False
     rut_info = {}
-    if data.org_type == 'company' and data.company_rut:
+    if _es_organizacion(data.org_type) and data.company_rut:
         rut_info = _verify_company_rut(data.company_rut)
         rut_ok   = rut_info.get('valid', False)
 
     # Verificar web empresa
-    if data.org_type == 'company' and data.company_web:
+    if _es_organizacion(data.org_type) and data.company_web:
         web_check = _verify_company_web(data.company_web, data.company_name, data.company_rut)
         web_ok    = web_check.get('valid', False)
 
-    domain_ok = data.org_type == 'company' and _verify_email_domain(data.email)['valid']
+    domain_ok = _es_organizacion(data.org_type) and _verify_email_domain(data.email)['valid']
 
     profile = OrganizerProfile(
         user_id              = user.id,
@@ -10942,7 +11011,9 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks,
         rut_verified         = rut_ok,
         domain_verified      = domain_ok,
         web_verified         = web_ok,
-        status               = 'approved',
+        # OPCION A — una organizacion nace 'pending'; un ciudadano, aprobado.
+        # Ver _estado_inicial_de_perfil.
+        status               = _estado_inicial_de_perfil(data.org_type),
     )
     db.add(profile)
     db.commit()
@@ -11196,12 +11267,28 @@ def create_organizer_consultation(data: DebateCreate, user: User = Depends(get_c
     if user.role not in ('organizer', 'admin'):
         raise HTTPException(403, 'Organizer role required')
 
-    # Verificar que el organizador está aprobado
-    profile = db.query(OrganizerProfile).filter(OrganizerProfile.user_id == user.id).first()
-    if profile and profile.status == 'suspended':
-        raise HTTPException(403, 'Tu cuenta está suspendida')
-    if profile and profile.status == 'pending' and user.role != 'admin':
-        raise HTTPException(403, 'Tu cuenta está pendiente de aprobación')
+    # OPCIÓN A, regla 5 — la puerta exige perfil APROBADO.
+    #
+    # Antes era `if profile and profile.status == …`: si el perfil NO
+    # existía, las dos comprobaciones se saltaban y el usuario creaba
+    # consultas sin ninguna verificación. Era alcanzable por la ruta de alta
+    # antigua `/organizers/register`, que fija role='organizer' y no crea
+    # perfil. Medido en el respaldo de producción: 2 cuentas de organizador
+    # sin perfil.
+    #
+    # Ahora se exige el perfil, igual que ya hacía la puerta de campañas
+    # (_require_campaign_authority). Esto solo afecta a CREAR consultas
+    # nuevas: leer, listar y ver resultados de las que ya existen no pasa
+    # por aquí, así que ninguna cuenta pierde acceso a su información.
+    if user.role != 'admin':
+        profile = db.query(OrganizerProfile).filter(
+            OrganizerProfile.user_id == user.id).first()
+        if not profile:
+            raise HTTPException(403, 'Perfil de organizador requerido')
+        if profile.status == 'suspended':
+            raise HTTPException(403, 'Tu cuenta está suspendida')
+        if profile.status != 'approved':
+            raise HTTPException(403, 'Tu cuenta está pendiente de aprobación')
 
     if len(data.options) < 2:
         raise HTTPException(400, 'At least 2 options required')
@@ -11397,9 +11484,22 @@ def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Sess
         db.commit()
         mk_profile = db.query(MarketerProfile).filter(MarketerProfile.user_id == existing.id).first()
         if not mk_profile:
+            # OPCION A — esta rama (un ciudadano que ya tiene cuenta y
+            # pasa a organizador/anunciante) creaba el perfil 'approved' y
+            # ademas is_supervisor=True, es decir se fabricaba a si mismo la
+            # acreditacion que la puerta exige. Era el camino mas corto para
+            # saltarse toda la verificacion de representacion.
+            #
+            # Ahora: una organizacion nace 'pending' y NO nace supervisor;
+            # acreditar a alguien como supervisor es precisamente lo que un
+            # supervisor ya acreditado o un administrador deben decidir. Un
+            # ciudadano a titulo personal sigue igual que antes.
+            _es_org = _es_organizacion(data.org_type or 'person')
             mk_profile = MarketerProfile(
                 user_id=existing.id, org_type=data.org_type or 'person',
-                is_supervisor=True, status='approved', company_name=data.company_name or '',
+                is_supervisor=(not _es_org),
+                status=_estado_inicial_de_perfil(data.org_type or 'person'),
+                company_name=data.company_name or '',
             )
             db.add(mk_profile); db.commit()
         token = make_token(existing.id, existing.role)
@@ -11412,8 +11512,10 @@ def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Sess
     if not cat_check['allowed']:
         raise HTTPException(403, cat_check['reason'])
 
-    # Verificar dominio email corporativo
-    if data.org_type == 'company':
+    # Verificar dominio email corporativo o institucional.
+    # OPCION A — igual que en el registro de organizador: aplica a TODA
+    # organizacion, no solo a 'company'.
+    if _es_organizacion(data.org_type):
         domain_check = _verify_email_domain(data.email)
         if not domain_check['valid']:
             raise HTTPException(400, domain_check.get('reason', 'Email inválido'))
@@ -11430,14 +11532,14 @@ def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Sess
 
     # Verificar RUT empresa en SII y sitio web
     rut_ok, web_ok, rut_info, web_check = False, False, {}, {}
-    if data.org_type == 'company' and data.company_rut:
+    if _es_organizacion(data.org_type) and data.company_rut:
         rut_info = _verify_company_rut(data.company_rut)
         rut_ok   = rut_info.get('valid', False)
-    if data.org_type == 'company' and data.company_web:
+    if _es_organizacion(data.org_type) and data.company_web:
         web_check = _verify_company_web(data.company_web, data.company_name, data.company_rut)
         web_ok    = web_check.get('valid', False)
 
-    domain_ok = data.org_type == 'company' and _verify_email_domain(data.email)['valid']
+    domain_ok = _es_organizacion(data.org_type) and _verify_email_domain(data.email)['valid']
 
     profile = MarketerProfile(
         user_id              = user.id,
@@ -11457,7 +11559,8 @@ def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Sess
         rut_verified         = rut_ok,
         domain_verified      = domain_ok,
         web_verified         = web_ok,
-        status               = 'approved',
+        # OPCION A — una organizacion nace 'pending'; un ciudadano, aprobado.
+        status               = _estado_inicial_de_perfil(data.org_type),
     )
     db.add(profile)
     db.commit()
