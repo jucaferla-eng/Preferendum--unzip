@@ -337,6 +337,20 @@ class TestFundingReal(Base):
 
 
 class TestFundingDemo(Base):
+    """Estas pruebas miden el MECANISMO de la concesion DEMO.
+
+    Usan `mk_marketer` (anunciante con perfil aprobado) y no `mk_user`,
+    porque /payments/demo-credits pasa ahora por el mismo control de
+    autorizacion que las campanas: es una funcion del anunciante, y los
+    creditos DEMO solo pueden financiar campanas DEMO, que unicamente un
+    anunciante tiene.
+
+    El motivo del cambio fue un defecto real: una cuenta recien registrada,
+    con el correo sin verificar y el perfil 'pending', obtenia 500 creditos.
+    Que una cuenta no habilitada quede fuera se comprueba en
+    test_representacion_empresarial (W6); aqui se mide lo de siempre, con
+    quien si tiene derecho a pedirlos.
+    """
 
     def test_demo_route_requires_authentication(self):
         r = self.client.post('/payments/demo-credits')
@@ -351,7 +365,7 @@ class TestFundingDemo(Base):
         self.assertNotIn('user_id', args)
 
     def test_demo_grant_creates_demo_value_only(self):
-        u = mk_user(self.db)
+        u = mk_marketer(self.db)
         r = self.client.post('/payments/demo-credits', headers=auth(u))
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(main._ledger_balance(self.db, L.USER_DEMO, u.id), L.DEMO_GRANT_AMOUNT)
@@ -359,14 +373,14 @@ class TestFundingDemo(Base):
     def test_demo_grant_never_touches_credit_accounts(self):
         """G: cannot be represented as real purchased funds — the legacy
         REAL-only cache must show nothing for a demo-only user."""
-        u = mk_user(self.db)
+        u = mk_marketer(self.db)
         self.client.post('/payments/demo-credits', headers=auth(u))
         row = self.db.execute(main.text(
             "SELECT balance_credits FROM credit_accounts WHERE user_id=:u"), {'u': u.id}).fetchone()
         self.assertIsNone(row)  # no credit_accounts row was ever created for this user
 
     def test_repeated_demo_requests_same_day_are_idempotent(self):
-        u = mk_user(self.db)
+        u = mk_marketer(self.db)
         r1 = self.client.post('/payments/demo-credits', headers=auth(u))
         r2 = self.client.post('/payments/demo-credits', headers=auth(u))
         r3 = self.client.post('/payments/demo-credits', headers=auth(u))
@@ -379,7 +393,7 @@ class TestFundingDemo(Base):
         """Belt and suspenders: simulate many distinct days (distinct
         idempotency keys) hitting the SAME user, proving the LIFETIME cap
         (not just the daily key) is what ultimately stops it."""
-        u = mk_user(self.db)
+        u = mk_marketer(self.db)
         granted = 0.0
         for day in range(1, 30):
             issued = main._ledger_lifetime_credited(self.db, L.USER_DEMO, u.id)

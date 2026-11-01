@@ -492,3 +492,213 @@ class TestZ_AcreditacionDelSupervisor(Base):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# W. LO QUE VE Y PUEDE HACER UNA PERSONA AL REGISTRARSE EN CAMPAÑAS
+#
+# El defecto que JC encontró probando el formulario publicado: el portal
+# entraba al panel operativo con solo tener un token, sin mirar si la
+# cuenta estaba habilitada. Entrar al portal y estar autorizado a operar
+# son dos cosas distintas.
+#
+# Estas pruebas recorren el camino del PORTAL (las mismas llamadas, en el
+# mismo orden, con los mismos cuerpos) y además comprueban que el servidor
+# sigue bloqueando aunque alguien se salte la interfaz.
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestW_RecorridoRealDelPortal(Base):
+
+    PORTAL = None
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.PORTAL = open('marketer_portal.html', encoding='utf-8').read()
+
+    def _registrar_por_el_portal(self, dominio='example.com'):
+        """Exactamente lo que envía doRegister() del portal publicado."""
+        em = _uniq('alta') + '@' + dominio
+        r = self.client.post('/marketer/register', json={
+            'name': 'Marca Ficticia', 'email': em, 'password': 'ClaveW123!',
+            'country': 'CL', 'company_name': 'Marca Ficticia',
+            'business_category': 'retail_comercio', 'lang': 'es'},
+            headers=_ip())
+        return em, r
+
+    # ── el estado con el que nace ────────────────────────────────────
+
+    def test_W1_al_registrarse_la_cuenta_NO_queda_habilitada(self):
+        em, r = self._registrar_por_el_portal()
+        self.assertIn(r.status_code, (200, 201), r.text[:300])
+        self.assertTrue(r.json().get('token'),
+                        'el registro no devuelve token: el portal se guiaba por él')
+        u = self.db.query(main.User).filter(
+            main.func.lower(main.User.email) == em.lower()).first()
+        p = self.db.query(main.MarketerProfile).filter(
+            main.MarketerProfile.user_id == u.id).first()
+        self.assertEqual(u.role, 'marketer')
+        self.assertFalse(u.email_verified, 'el correo quedó verificado sin confirmarlo')
+        self.assertEqual(p.status, 'pending')
+        self.assertFalse(p.is_supervisor,
+                         'CORRECCION 4: nació supervisor sin acreditación')
+
+    def test_W2_el_estado_que_consulta_el_portal_dice_la_verdad(self):
+        """`/marketer/status` es lo que showApp() consulta ahora."""
+        em, r = self._registrar_por_el_portal()
+        tok = r.json()['token']
+        h = _ip(); h['Authorization'] = 'Bearer ' + tok
+        st = self.client.get('/marketer/status', headers=h)
+        self.assertEqual(st.status_code, 200, st.text[:300])
+        d = st.json()
+        self.assertEqual(d['status'], 'pending')
+        self.assertFalse(d['verifications']['email'])
+        self.assertFalse(d['is_supervisor'])
+
+    # ── CORRECCIÓN 1: el portal no muestra el panel ──────────────────
+
+    def test_W3_showApp_consulta_el_estado_antes_de_revelar_el_panel(self):
+        """CORRECCION 1. Antes revelaba el panel con solo tener token."""
+        bloque = self.PORTAL[self.PORTAL.index('async function showApp'):]
+        bloque = bloque[:bloque.index('\n// ── BALANCE')]
+        self.assertIn('_estadoAnunciante()', bloque,
+                      'showApp no consulta el estado real')
+        self.assertIn("status === 'approved'", bloque,
+                      'no comprueba la aprobación del perfil')
+        self.assertIn('verifications.email', bloque,
+                      'no comprueba la verificación del correo')
+        # y el panel solo se revela DESPUÉS de las comprobaciones
+        i_check = bloque.index('_mostrarPendiente')
+        i_panel = bloque.index("classList.add('visible')")
+        self.assertLess(i_check, i_panel,
+                        'revela el panel antes de comprobar el estado')
+
+    def test_W4_los_puntos_de_entrada_esperan_la_comprobacion(self):
+        """showApp es asíncrono: si no se espera, el panel aparecería igual."""
+        for fn in ('doLogin', 'doRegister'):
+            bloque = self.PORTAL[self.PORTAL.index(f'async function {fn}'):]
+            bloque = bloque[:bloque.index('\n}') + 2]
+            self.assertIn('await showApp()', bloque,
+                          f'{fn} no espera la comprobación de estado')
+
+    def test_W5_existe_el_aviso_y_no_es_un_panel_nuevo(self):
+        self.assertIn('id="pending-notice"', self.PORTAL)
+        self.assertIn('todavía no está habilitada', self.PORTAL,
+                      'el aviso no dice con claridad que no está habilitada')
+        # dentro de la tarjeta de acceso, no un panel aparte
+        self.assertLess(self.PORTAL.index('id="pending-notice"'),
+                        self.PORTAL.index('id="main-app"'))
+
+    # ── CORRECCIONES 2 y 3: el servidor bloquea ──────────────────────
+
+    def test_W6_una_cuenta_pendiente_NO_obtiene_creditos_demo(self):
+        """CORRECCION 2. Antes devolvía 200 y acreditaba 500 DEMO."""
+        em, r = self._registrar_por_el_portal()
+        tok = r.json()['token']
+        u = self.db.query(main.User).filter(
+            main.func.lower(main.User.email) == em.lower()).first()
+        h = _ip(); h['Authorization'] = 'Bearer ' + tok
+        rc = self.client.post('/payments/demo-credits', json={}, headers=h)
+        self.assertEqual(rc.status_code, 403, rc.text[:300])
+        self.assertEqual(
+            main._ledger_balance(self.db, main._ledger.USER_DEMO, u.id), 0.0,
+            'se le acreditó saldo DEMO a una cuenta pendiente')
+
+    def test_W7_una_cuenta_pendiente_NO_abre_sesion_de_pago(self):
+        """CORRECCION 3. Ningún cobro real: se cierra antes de empezar."""
+        em, r = self._registrar_por_el_portal()
+        h = _ip(); h['Authorization'] = 'Bearer ' + r.json()['token']
+        rp = self.client.post('/payments/stripe/create-session',
+                              json={'package_id': 1,
+                                    'success_url': 'https://e.invalid/ok',
+                                    'cancel_url': 'https://e.invalid/no'},
+                              headers=h)
+        self.assertEqual(rp.status_code, 403, rp.text[:300])
+
+    def test_W8_el_servidor_bloquea_aunque_se_salte_la_interfaz(self):
+        """Lo que importa: la interfaz es una cortesía, no la seguridad.
+        Con el token en la mano y sin pasar por el portal, nada operativo."""
+        em, r = self._registrar_por_el_portal()
+        tok = r.json()['token']
+        def h():
+            x = _ip(); x['Authorization'] = 'Bearer ' + tok; return x
+        campana = {
+            'advertiser_email': em, 'advertiser_name': 'Marca Ficticia',
+            'campaign_title': _uniq('C'), 'budget_clp': 95000,
+            'target_country': 'CL', 'start_date': '2026-11-20T00:00:00',
+            'end_date': '2026-12-20T23:59:59', 'ad_copy': 'x',
+            'link_url': 'https://e.invalid'}
+        bloqueadas = [
+            ('POST', '/marketer/campaigns', campana),
+            ('POST', '/payments/demo-credits', {}),
+            ('POST', '/payments/stripe/create-session',
+             {'package_id': 1, 'success_url': 'https://e.invalid/a',
+              'cancel_url': 'https://e.invalid/b'}),
+            ('GET', f'/advertiser/campaigns?email={em}', None),
+        ]
+        for met, ruta, cuerpo in bloqueadas:
+            rr = self.client.request(met, ruta, json=cuerpo, headers=h())
+            self.assertEqual(rr.status_code, 403,
+                             f'{met} {ruta.split("?")[0]} dio {rr.status_code}, '
+                             f'deberia bloquear: {rr.text[:160]}')
+
+    def test_W9_el_inicio_de_sesion_POSTERIOR_tampoco_habilita(self):
+        """Pedido explícitamente: comprobar también el login posterior."""
+        em, r = self._registrar_por_el_portal()
+        li = self.client.post('/marketer/login',
+                              json={'email': em, 'password': 'ClaveW123!'},
+                              headers=_ip())
+        self.assertEqual(li.status_code, 200, li.text[:300])
+        tok = li.json().get('token')
+        self.assertTrue(tok, 'el login no devolvió token')
+        h = _ip(); h['Authorization'] = 'Bearer ' + tok
+        # el estado que vera showApp sigue siendo pendiente
+        st = self.client.get('/marketer/status', headers=h).json()
+        self.assertEqual(st['status'], 'pending')
+        self.assertFalse(st['verifications']['email'])
+        # y el servidor sigue bloqueando
+        rc = self.client.post('/payments/demo-credits', json={}, headers=h)
+        self.assertEqual(rc.status_code, 403, rc.text[:200])
+
+    # ── la contraparte: una cuenta habilitada SÍ opera ───────────────
+
+    def test_W10_una_cuenta_aprobada_y_verificada_opera_con_normalidad(self):
+        """Las correcciones no pueden cerrar la puerta a quien sí cumple."""
+        em, r = self._registrar_por_el_portal()
+        u = self.db.query(main.User).filter(
+            main.func.lower(main.User.email) == em.lower()).first()
+        # el recorrido real: verificar correo + acreditar por administrador
+        self.db.execute(main.text(
+            'UPDATE users SET email_verified=1 WHERE id=:i'), {'i': u.id})
+        self.db.commit()
+        ac = self.client.post(
+            f'/admin/marketer/{u.id}/status?secret={ADMIN}&status=approved',
+            headers=_ip())
+        self.assertEqual(ac.status_code, 200, ac.text[:300])
+        self.db.expire_all()
+
+        tok = main.make_token(u.id, 'marketer')
+        def h():
+            x = _ip(); x['Authorization'] = 'Bearer ' + tok; return x
+        st = self.client.get('/marketer/status', headers=h()).json()
+        self.assertEqual(st['status'], 'approved')
+        self.assertTrue(st['verifications']['email'])
+
+        # créditos demo: ahora SI
+        rc = self.client.post('/payments/demo-credits', json={}, headers=h())
+        self.assertEqual(rc.status_code, 200, rc.text[:300])
+        self.assertGreater(
+            main._ledger_balance(self.db, main._ledger.USER_DEMO, u.id), 0,
+            'una cuenta habilitada no pudo obtener saldo demo')
+        # crear campaña: ahora SI
+        campana = {
+            'advertiser_email': em, 'advertiser_name': 'Marca Ficticia',
+            'campaign_title': _uniq('C'), 'budget_clp': 95000,
+            'target_country': 'CL', 'start_date': '2026-11-20T00:00:00',
+            'end_date': '2026-12-20T23:59:59', 'ad_copy': 'x',
+            'link_url': 'https://e.invalid'}
+        rcam = self.client.post('/marketer/campaigns', json=campana, headers=h())
+        self.assertEqual(rcam.status_code, 200, rcam.text[:400])
+        # y ver sus campañas
+        rl = self.client.get(f'/advertiser/campaigns?email={em}', headers=h())
+        self.assertEqual(rl.status_code, 200, rl.text[:200])

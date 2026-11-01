@@ -11015,6 +11015,10 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks,
         # Ver _estado_inicial_de_perfil.
         status               = _estado_inicial_de_perfil(data.org_type),
     )
+    # Mismo defecto que en el registro de anunciante: `is_supervisor` venia
+    # del cuerpo de la peticion, con True por defecto. Una organizacion no
+    # nace supervisora.
+    profile.is_supervisor = not _es_organizacion(data.org_type)
     db.add(profile)
     db.commit()
     if profile.status == 'approved':
@@ -11562,6 +11566,15 @@ def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Sess
         # OPCION A — una organizacion nace 'pending'; un ciudadano, aprobado.
         status               = _estado_inicial_de_perfil(data.org_type),
     )
+    # DEFECTO CORREGIDO — `is_supervisor` venia del cuerpo de la peticion,
+    # cuyo valor por defecto es True: un anunciante recien registrado nacia
+    # supervisor sin que nadie lo acreditara. Hoy no era explotable, porque
+    # un perfil 'pending' no puede autorizar a nadie (comprobado: 403), pero
+    # era incoherente con la decision tomada: acreditar a un supervisor es
+    # justo lo que un supervisor ya acreditado o un administrador deben
+    # decidir. Una organizacion no nace supervisora; un ciudadano a titulo
+    # personal si, porque se representa a si mismo.
+    profile.is_supervisor = not _es_organizacion(data.org_type)
     db.add(profile)
     db.commit()
     if profile.status == 'approved':
@@ -15598,6 +15611,12 @@ def payments_stripe_create_session(
     db: Session = Depends(get_db),
 ):
     """Creates a Stripe Checkout session and returns the URL to redirect the advertiser."""
+    # DEFECTO CORREGIDO — solo exigia sesion, asi que una cuenta pendiente y
+    # sin correo verificado podia abrir una sesion de pago. Se aplica el
+    # MISMO control que gobierna las campanas: perfil existente y aprobado.
+    # No se ejecuta ningun cobro aqui; lo que se cierra es que una cuenta no
+    # habilitada pueda ni empezar el proceso.
+    _require_campaign_authority(user, db)
     try:
         return create_stripe_checkout(
             user_id     = user.id,
@@ -16161,6 +16180,18 @@ def payments_demo_credits(user: User = Depends(get_current_user), db: Session = 
     CHANGE-001 recon flagged this as a live production defect independent
     of this change).
     """
+
+    # DEFECTO CORREGIDO — esta ruta solo exigia sesion, asi que una cuenta
+    # recien registrada, con el correo SIN verificar y el perfil 'pending',
+    # obtenia 500 creditos DEMO. Reproducido de punta a punta contra los
+    # datos reales de produccion.
+    #
+    # No habia perdida economica -el DEMO no se retira ni financia una
+    # campana REAL, y una cuenta pendiente no puede crear campanas donde
+    # gastarlo- pero era una puerta que debia estar cerrada. Se aplica el
+    # MISMO control que ya gobierna las campanas: perfil existente y
+    # aprobado. No se anade ningun mecanismo nuevo.
+    _require_campaign_authority(user, db)
     result = _ledger_demo_grant(db, user.id)
     if not result['ok']:
         reason = result['reason']

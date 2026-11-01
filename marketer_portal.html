@@ -273,6 +273,13 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
       <button class="btn-primary" onclick="doRegister()">Create Account</button>
       <p class="auth-err" id="reg-err"></p>
     </div>
+    <!-- DEFECTO CORREGIDO — el portal entraba al panel operativo con solo
+         tener un token, sin mirar si la cuenta estaba habilitada. Aqui se
+         muestra el estado real cuando NO lo esta. No es un panel nuevo:
+         es un aviso dentro de la misma tarjeta de acceso. -->
+    <div id="pending-notice" style="display:none;margin-top:18px;padding:18px;
+         background:rgba(196,154,42,0.12);border:1px solid rgba(196,154,42,0.35);
+         border-radius:10px;line-height:1.55;font-size:14px;"></div>
   </div>
 </div>
 
@@ -967,7 +974,7 @@ async function doLogin() {
   localStorage.setItem('pref_adv_token', token);
   localStorage.setItem('pref_adv_email', userEmail);
   localStorage.setItem('pref_adv_name',  userName);
-  showApp();
+  await showApp();
 }
 
 async function doRegister() {
@@ -1000,7 +1007,7 @@ async function doRegister() {
     localStorage.setItem('pref_adv_token', token);
     localStorage.setItem('pref_adv_email', userEmail);
     localStorage.setItem('pref_adv_name',  userName);
-    showApp();
+    await showApp();
   } else {
     document.getElementById('login-email').value = email;
     document.getElementById('login-pass').value  = pass;
@@ -1016,7 +1023,58 @@ function doLogout() {
   setTimeout(() => location.reload(), window.Prefy ? 700 : 0);
 }
 
-function showApp() {
+// DEFECTO CORREGIDO — antes esto era `showApp()` sin mas: ocultaba la
+// pantalla de acceso y revelaba el panel operativo en cuanto habia un
+// token. Como /marketer/register devuelve token aunque el perfil quede
+// 'pending' y el correo sin verificar, quien se registraba "entraba" y veia
+// el panel como si estuviera aprobado. Entrar al portal y estar autorizado
+// a operar son dos cosas distintas, y el portal no las separaba.
+//
+// Ahora consulta /marketer/status -que ya devolvia `status` y
+// `verifications.email`- y solo revela el panel si la cuenta esta
+// habilitada. Si no, deja la pantalla de acceso con un aviso que dice el
+// estado real. El servidor ya bloqueaba las operaciones; esto evita
+// prometer en pantalla algo que no se puede hacer.
+async function _estadoAnunciante() {
+  try {
+    const r = await fetch(`${API}/marketer/status`, {headers:{'Authorization':'Bearer '+token}});
+    if (!r.ok) return null;          // 404 = sin perfil
+    return await r.json();
+  } catch (_) { return null; }
+}
+
+function _mostrarPendiente(html) {
+  const el = document.getElementById('pending-notice');
+  if (el) { el.innerHTML = html; el.style.display = 'block'; }
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('main-app').classList.remove('visible');
+}
+
+async function showApp() {
+  const est = await _estadoAnunciante();
+  const correoOk = !!(est && est.verifications && est.verifications.email);
+  const aprobado = !!(est && est.status === 'approved');
+
+  if (!est) {
+    _mostrarPendiente('<b>Tu cuenta todavía no está habilitada para operar.</b><br>'
+      + 'No encontramos un perfil de anunciante asociado. Completa el registro '
+      + 'de empresa u organismo para continuar.');
+    return;
+  }
+  if (!aprobado || !correoOk) {
+    let faltan = [];
+    if (!correoOk) faltan.push('confirmar tu correo electrónico');
+    if (!aprobado)  faltan.push('la acreditación de tu representación por parte de Preferendum');
+    _mostrarPendiente('<b>Tu cuenta todavía no está habilitada para operar.</b><br>'
+      + 'Estado: <b>' + (est.status || 'desconocido') + '</b>'
+      + (correoOk ? '' : ' · correo sin confirmar') + '<br><br>'
+      + 'Falta: ' + faltan.join(' y ') + '.<br><br>'
+      + 'Mientras tanto no puedes crear ni activar campañas, ni obtener saldo. '
+      + 'Te avisaremos en cuanto quede acreditada.');
+    return;
+  }
+
+  document.getElementById('pending-notice') && (document.getElementById('pending-notice').style.display = 'none');
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('main-app').classList.add('visible');
   document.getElementById('nav-name').textContent = userName;
