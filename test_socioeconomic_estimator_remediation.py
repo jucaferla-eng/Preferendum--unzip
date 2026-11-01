@@ -1181,9 +1181,14 @@ class TestNoDirectTierShortcut(unittest.TestCase):
     """
 
     _KNOWN_SE_TIER_WRITER_FUNCTIONS = {
-        '_assign_user_tier_inner': 2,   # resolved + unresolved-clears branches
-        '_assign_user_tier':       1,   # re-applies the inner function's own result
+        '_assign_user_tier_inner':   2,  # resolved + unresolved-clears branches
+        '_assign_user_tier_persist': 1,  # re-applies the inner function's own result
     }
+    # P0.6 — site #3 did NOT move or multiply: the old `_assign_user_tier`
+    # body was renamed `_assign_user_tier_persist`, and `_assign_user_tier`
+    # is now a thin wrapper that only opens and closes the isolated
+    # reference-read session (it writes se_tier zero times, so it is
+    # correctly absent from this map). The total below still pins THREE.
 
     def test_every_se_tier_writer_is_a_known_named_site(self):
         offenders = []

@@ -242,6 +242,34 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
           <option value="GB">United Kingdom</option><option value="DE">Germany</option>
         </select>
       </div>
+      <!-- DEFECTO CORREGIDO — el alta exige declarar la categoria de la
+           empresa (control de brand safety que ya existe en el backend:
+           MARKETER_BUSINESS_CATEGORIES). Ningun formulario la recogia, asi
+           que /marketer/register era inalcanzable desde la interfaz y el
+           boton de alta creaba un usuario SIN rol de anunciante. Los valores
+           son exactamente los de la lista cerrada del servidor; hay una
+           prueba que falla si las dos listas se separan. -->
+      <div class="field">
+        <label>Business Category</label>
+        <select id="reg-category">
+          <option value="">— Select —</option>
+          <option value="retail_comercio">Retail / Comercio</option>
+          <option value="banca_finanzas">Banca / Finanzas</option>
+          <option value="automotriz">Automotriz</option>
+          <option value="tecnologia">Tecnología</option>
+          <option value="alimentos_bebidas">Alimentos / Bebidas</option>
+          <option value="inmobiliaria">Inmobiliaria</option>
+          <option value="salud_bienestar">Salud / Bienestar</option>
+          <option value="educacion">Educación</option>
+          <option value="turismo_viajes">Turismo / Viajes</option>
+          <option value="telecomunicaciones">Telecomunicaciones</option>
+          <option value="energia_servicios_basicos">Energía / Servicios básicos</option>
+          <option value="medios_entretenimiento">Medios / Entretenimiento</option>
+          <option value="ong_sin_fines_de_lucro">ONG / Sin fines de lucro</option>
+          <option value="gobierno_sector_publico">Gobierno / Sector público</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
       <button class="btn-primary" onclick="doRegister()">Create Account</button>
       <p class="auth-err" id="reg-err"></p>
     </div>
@@ -847,8 +875,17 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
           </div>
           <div class="card">
             <h3 style="font-family:'Playfair Display',serif;font-size:18px;margin-bottom:16px;">Verify a Vote</h3>
+            <!-- DEFECTO CORREGIDO — este recuadro llamaba a GET
+                 /verify/{codigo}, una ruta que no existe, asi que respondia
+                 siempre "Code not found". La verificacion SI existe y
+                 funciona: es POST /debates/{id}/verify, la misma que usa el
+                 portal del votante. Esa ruta resuelve el codigo DENTRO de
+                 una consulta, por eso se pide tambien su numero. No se
+                 creo ninguna ruta nueva ni se toco la integracion con la
+                 cadena. -->
+            <div class="field"><label>Consultation ID</label><input type="text" id="vcode-debate" placeholder="e.g. 819"/></div>
             <div class="field"><label>Verification Code</label><input type="text" id="vcode-input" placeholder="e.g. PREF-XXXXXX-XXXXXX"/></div>
-            <button class="btn-primary" onclick="verifyVote()" style="width:auto;padding:12px 32px;">Verify on Blockchain</button>
+            <button class="btn-primary" onclick="verifyVote()" style="width:auto;padding:12px 32px;">Verify Vote</button>
             <div id="verify-result" style="margin-top:16px;display:none;"></div>
           </div>
           <p class="memorial">En memoria del Socio Fundador José Ignacio Fernández (1989–2024)</p>
@@ -938,9 +975,23 @@ async function doRegister() {
   const email   = document.getElementById('reg-email').value.trim();
   const pass    = document.getElementById('reg-pass').value;
   const country = document.getElementById('reg-country').value;
+  const category = document.getElementById('reg-category').value;
   if (!name || !email || !pass) return;
-  const r = await fetch(`${API}/auth/register`, {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name, email, password: pass, phone:'', country, dob:'', county:'', gender:'', national_id:'',
+  if (!category) { showErr('reg-err', 'Selecciona la categoría de tu empresa'); return; }
+  // DEFECTO CORREGIDO — esto llamaba a /auth/register, que crea un usuario
+  // con rol 'voter' y SIN MarketerProfile. Reproducido de punta a punta: el
+  // anunciante se daba de alta, verificaba su correo, y al crear su primera
+  // campaña recibia 403 'Marketer role required'. Es decir, ningun
+  // anunciante nuevo podia usar CAMPANAS desde la interfaz.
+  //
+  // /marketer/register es la ruta real de alta de anunciante y YA existia:
+  // crea el usuario con rol 'marketer' y su MarketerProfile con
+  // status='approved'. No se inventa nada; solo se conecta lo que estaba
+  // desconectado. El nombre del formulario es el de la empresa, asi que va
+  // a `name` y a `company_name`.
+  const r = await fetch(`${API}/marketer/register`, {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, email, password: pass, country,
+      company_name: name, business_category: category,
       lang: window.PreferendumLang ? window.PreferendumLang.currentLanguage() : ''})});
   const d = await r.json();
   if (!r.ok) { showErr('reg-err', d.detail || 'Registration failed'); return; }
@@ -1507,8 +1558,15 @@ async function createCampaign() {
     _editingCampaignId = null;
     document.querySelector('[onclick="createCampaign()"]').textContent = 'Launch Campaign';
   } else {
+    // DEFECTO CORREGIDO — esta llamada no enviaba la cabecera de
+    // autorizacion, pero POST /marketer/campaigns exige
+    // `get_verified_user`: la creacion de campanas desde el portal fallaba
+    // siempre con 403, mientras la rama de EDICION (PATCH, arriba) si
+    // enviaba el token. Un anunciante no podia crear ninguna campana desde
+    // la interfaz. Se usa la misma variable `token` que ya usa el PATCH.
     r = await fetch(`${API}/marketer/campaigns`, {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
       body: JSON.stringify(body)
     });
     d = await r.json();
@@ -1555,22 +1613,52 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── BLOCKCHAIN ────────────────────────────────────────────────
+// DEFECTO CORREGIDO — llamaba a GET /verify/{codigo}, que no existe, asi
+// que SIEMPRE caia en el mensaje de error. Ahora usa POST
+// /debates/{id}/verify, la ruta canonica que ya existe y que el portal del
+// votante usa correctamente. No se creo ninguna ruta nueva.
+//
+// Y deja de afirmar lo que no puede demostrar: antes mostraba
+// "Vote verified on Polygon" en cuanto la respuesta traia cualquier cosa.
+// El anclaje real lo dice `blockchain_anchored`, que el servidor calcula
+// con honestidad (exige que el anclaje haya ocurrido Y en vivo) y que es
+// NULL en los votos anteriores a esa columna: ese caso se muestra como
+// desconocido, nunca como verificado.
 async function verifyVote() {
-  const vcode = document.getElementById('vcode-input').value.trim();
-  if (!vcode) return;
-  const r = await fetch(`${API}/verify/${vcode}`);
-  const d = await r.json();
-  const el = document.getElementById('verify-result');
-  el.style.display = 'block';
-  if (d.verified || d.exists) {
-    el.innerHTML = `<div style="background:rgba(26,122,74,0.15);border:1px solid rgba(26,122,74,0.3);border-radius:8px;padding:16px;">
-      <div style="color:var(--green2);font-weight:600;margin-bottom:8px;">✓ Vote verified on Polygon</div>
-      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);">Hash: ${d.vote_hash||'—'}</div>
-      <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-top:4px;">Tx: ${d.tx_hash||'on-chain'}</div>
-    </div>`;
-  } else {
-    el.innerHTML = `<div style="background:rgba(196,58,42,0.15);border:1px solid rgba(196,58,42,0.3);border-radius:8px;padding:16px;color:#ff6b5a;">Code not found on blockchain.</div>`;
+  const vcode    = document.getElementById('vcode-input').value.trim();
+  const debateId = document.getElementById('vcode-debate').value.trim();
+  const el       = document.getElementById('verify-result');
+  if (!vcode || !debateId) {
+    el.style.display = 'block';
+    el.innerHTML = `<div style="background:rgba(196,58,42,0.15);border:1px solid rgba(196,58,42,0.3);border-radius:8px;padding:16px;color:#ff6b5a;">Enter both the consultation ID and the verification code.</div>`;
+    return;
   }
+  el.style.display = 'block';
+  const r = await fetch(`${API}/debates/${encodeURIComponent(debateId)}/verify`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({code: vcode})
+  });
+  const d = await r.json();
+  if (!r.ok || !d.found) {
+    el.innerHTML = `<div style="background:rgba(196,58,42,0.15);border:1px solid rgba(196,58,42,0.3);border-radius:8px;padding:16px;color:#ff6b5a;">${d.detail||'Code not found for that consultation.'}</div>`;
+    return;
+  }
+  // Tres estados distintos, no dos: anclado, NO anclado, o desconocido.
+  let cadena;
+  if (d.blockchain_anchored === true) {
+    cadena = `<div style="color:var(--green2);font-weight:600;margin-bottom:8px;">✓ Anchored on Polygon</div>`;
+  } else if (d.blockchain_anchored === false) {
+    cadena = `<div style="color:#e0a34a;font-weight:600;margin-bottom:8px;">Recorded — not anchored on-chain</div>`;
+  } else {
+    cadena = `<div style="color:var(--muted);font-weight:600;margin-bottom:8px;">Recorded — on-chain status unknown for this vote</div>`;
+  }
+  el.innerHTML = `<div style="background:rgba(26,122,74,0.15);border:1px solid rgba(26,122,74,0.3);border-radius:8px;padding:16px;">
+    <div style="color:var(--green2);font-weight:600;margin-bottom:8px;">✓ Vote found in the consultation record</div>
+    ${cadena}
+    <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);">Consultation: ${d.debate_title||debateId}</div>
+    <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-top:4px;">Recorded at: ${d.recorded_at||'—'}</div>
+    <div style="font-family:'DM Mono',monospace;font-size:11px;color:var(--muted);margin-top:4px;">Tx: ${d.blockchain_tx||'—'}</div>
+  </div>`;
 }
 
 // ── NAVIGATION ────────────────────────────────────────────────

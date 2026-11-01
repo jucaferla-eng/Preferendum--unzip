@@ -414,6 +414,13 @@ class DebateVote(Base):
     dispute_reason  = Column(Text, default='')
     vote_chain      = Column(Text, default='[]')
     created_at      = Column(DateTime, default=datetime.utcnow)
+    # CHANGE-005 — el escrutinio se deriva de ESTA tabla con un GROUP BY
+    # por (debate_id, option_index), así que ese par necesita índice. Sin
+    # él, cada render de resultados sería un recorrido completo de la
+    # tabla de papeletas.
+    __table_args__ = (
+        Index('ix_debate_votes_debate_option', 'debate_id', 'option_index'),
+    )
 
 class HasVotedLog(Base):
     __tablename__ = 'debate_has_voted'
@@ -658,6 +665,14 @@ class AdImpressionLog(Base):
     debate_id   = Column(Integer, index=True, nullable=True)
     user_id     = Column(Integer, index=True, nullable=True)  # quién vio el anuncio — para límite de frecuencia
     cost_clp    = Column(Integer, nullable=True)  # lo que se cobró a la campaña por ESTE impresión específico
+    # CHANGE-006 — el importe EXACTO que el ledger asentó para esta
+    # impresión. `cost_clp` es el importe en pesos del que se partió; este
+    # es lo que el libro reconoció de verdad, tras llevarlo al céntimo.
+    # Guardarlo hace exacta la conciliación impresiones <-> ledger sin
+    # tocar ningún precio ni ningún importe histórico.
+    # NULL = desconocido (filas anteriores a esta columna), nunca un valor
+    # supuesto.
+    cost_credits_posted = Column(Float, nullable=True)
     gender      = Column(String, default='')
     age_group   = Column(String, default='')
     county      = Column(String, default='')
@@ -979,8 +994,20 @@ class GeoUnit(Base):
         # (country_code, unit_name_norm) — keeping a second, plain-collation
         # index alongside it made the planner inconsistently prefer the
         # slower plan for ORDER BY + LIMIT queries (also verified).
-        Index('ix_geo_units_country_namenorm_patternops', 'country_code',
-              text('unit_name_norm varchar_pattern_ops')),
+        #
+        # P0.1 — la clase de operador se declara vía `postgresql_ops`, no
+        # incrustada en text(). El efecto en PostgreSQL es IDÉNTICO (el DDL
+        # emitido es byte por byte el mismo, verificado en la prueba), pero
+        # text('… varchar_pattern_ops') se emitía en TODOS los dialectos y
+        # SQLite lo rechaza con un error de sintaxis. Eso hacía que
+        # Base.metadata.create_all() reventara al importar main.py y dejaba
+        # 467 pruebas imposibles de ejecutar —entre ellas las 105 del
+        # cableado del ledger y las 106 de integración HTTP— desde el
+        # 2026-09-29 (commit e36b4a28). `postgresql_ops` solo se aplica en
+        # PostgreSQL; en SQLite se crea un índice llano, inofensivo.
+        Index('ix_geo_units_country_namenorm_patternops',
+              'country_code', 'unit_name_norm',
+              postgresql_ops={'unit_name_norm': 'varchar_pattern_ops'}),
     )
 
 class SystemTodo(Base):
@@ -1015,6 +1042,105 @@ for _sql_block in [_payment_schema, _ATTR_SQL]:
                     _conn.execute(text(_stmt))
             except Exception:
                 pass
+
+# ═══════════════════════════════════════════════════════════════════════
+# CHANGE-004 — UNICIDAD DEL VOTO GARANTIZADA POR LA BASE DE DATOS
+# ═══════════════════════════════════════════════════════════════════════
+#
+# EL DEFECTO. `_cast_vote_inner` impedía el doble voto con cinco SELECT
+# previos (cuenta, teléfono, documento, aparato, serie del documento) y
+# NINGUNA restricción detrás. Es el patrón comprobar-y-después-insertar sin
+# respaldo del motor: dos peticiones simultáneas de la misma persona
+# ejecutan sus cinco SELECT antes de que ninguna haya insertado, las dos
+# pasan, y las dos insertan. Resultado: dos papeletas de la misma persona en
+# la misma consulta, y el contador sumado dos veces. No hacía falta ningún
+# ataque elaborado — bastaba pulsar dos veces, o un reintento del cliente.
+#
+# POR QUÉ LA RESTRICCIÓN VA EN ESTAS TABLAS Y NO EN `debate_votes`. La
+# unicidad hay que imponerla sobre la IDENTIDAD, y `debate_votes` no la
+# tiene: `voter_id` se escribe siempre como NULL a propósito, que es la
+# separación entre identidad y preferencia. Añadir el votante a la papeleta
+# para poder restringirla destruiría justo esa separación.
+#
+# Las cinco tablas de deduplicación sí contienen la identidad (hasheada) y
+# NO contienen la opción votada. Restringirlas garantiza «una persona, un
+# voto» sin crear en ningún sitio un vínculo público entre quién eres y qué
+# votaste. La papeleta sigue sin saber de quién es.
+#
+# IDENTIDAD DE ELEGIBILIDAD. La elegibilidad se evalúa sobre los atributos
+# de la PERSONA, y el ancla de unicidad de la persona es su documento: el
+# registro ya rechaza un `national_id` repetido. Por eso las dos
+# restricciones que de verdad garantizan el principio son
+# `(debate_id, national_id_hash)` —una persona, aunque abra varias cuentas—
+# y `(debate_id, user_id)` —una cuenta, siempre aplicable incluso sin
+# documento—. Las otras tres (teléfono, aparato, serie) ya eran política
+# vigente en los SELECT; restringirlas no cambia la política, solo la hace
+# resistente a la concurrencia.
+#
+# DATOS PREEXISTENTES. Si una tabla ya tiene duplicados (de una carrera
+# pasada, o de las rutas de borrado que dejan residuos), crear el índice
+# único fallaría. La migración NO borra nada: detecta, deja el índice sin
+# crear, lo registra aquí y lo grita en los logs. Corregir un duplicado
+# histórico es una decisión con consecuencias —son votos reales de personas
+# reales— y no le toca a una migración automática.
+#
+# Esta tabla de estado es lo que permite a /admin/tally/reconciliation
+# responder «la garantía está activa» o «no lo está, y por esto».
+VOTE_UNIQUENESS_INDEXES = (
+    # (nombre del índice, tabla, columnas)
+    ('ux_vote_once_account',    'debate_has_voted',     ('debate_id', 'user_id')),
+    ('ux_vote_once_national_id', 'national_id_vote_log', ('debate_id', 'national_id_hash')),
+    ('ux_vote_once_sim',        'sim_vote_log',         ('debate_id', 'phone_hash')),
+    ('ux_vote_once_device',     'imei_vote_log',        ('debate_id', 'imei_hash')),
+    ('ux_vote_once_doc_serial', 'doc_serial_vote_log',  ('debate_id', 'serial_hash')),
+)
+
+# Estado real tras la migración: {nombre_indice: 'ACTIVO' | 'DUPLICADOS:<n>'
+# | 'TABLA_AUSENTE' | 'ERROR:<Tipo>'}. Se rellena en _migrate().
+VOTE_UNIQUENESS_STATUS = {}
+
+
+def _migrate_vote_uniqueness(conn, inspector, text):
+    """Crea los índices únicos que garantizan «una persona, un voto».
+
+    Nunca borra una fila ni lanza: si no puede garantizarlo, lo dice. Un
+    arranque no debe caerse por esto, pero tampoco debe quedarse callado
+    fingiendo que la garantía existe.
+    """
+    for nombre, tabla, cols in VOTE_UNIQUENESS_INDEXES:
+        try:
+            if not inspector.has_table(tabla):
+                VOTE_UNIQUENESS_STATUS[nombre] = 'TABLA_AUSENTE'
+                continue
+            lista = ', '.join(cols)
+            dup = conn.execute(text(
+                f'SELECT count(*) FROM (SELECT 1 FROM {tabla} '
+                f'GROUP BY {lista} HAVING count(*) > 1) d'
+            )).scalar() or 0
+            if dup:
+                VOTE_UNIQUENESS_STATUS[nombre] = f'DUPLICADOS:{int(dup)}'
+                print(f'[vote-uniqueness] NO se pudo crear {nombre}: '
+                      f'{tabla} ya tiene {int(dup)} grupo(s) duplicado(s) por '
+                      f'({lista}). No se borra nada: son votos reales y su '
+                      f'corrección es una decisión explícita. La garantía de '
+                      f'voto único queda INACTIVA para esta dimensión — ver '
+                      f'/admin/tally/reconciliation.')
+                continue
+            conn.execute(text(
+                f'CREATE UNIQUE INDEX IF NOT EXISTS {nombre} ON {tabla} ({lista})'))
+            conn.commit()
+            VOTE_UNIQUENESS_STATUS[nombre] = 'ACTIVO'
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            VOTE_UNIQUENESS_STATUS[nombre] = f'ERROR:{type(e).__name__}'
+            print(f'[vote-uniqueness] {nombre} falló: {type(e).__name__}')
+    _activos = sum(1 for v in VOTE_UNIQUENESS_STATUS.values() if v == 'ACTIVO')
+    print(f'[vote-uniqueness] {_activos}/{len(VOTE_UNIQUENESS_INDEXES)} '
+          f'restricciones de voto único activas')
+
 
 # Column migrations — works for both SQLite and PostgreSQL
 def _migrate():
@@ -1528,6 +1654,54 @@ def _migrate():
                     conn.commit()
                 except Exception:
                     pass
+
+        # CHANGE-006 — columna aditiva para el importe realmente asentado.
+        # Las filas históricas quedan en NULL, que significa "desconocido":
+        # no se les inventa un valor y sus importes no se tocan.
+        try:
+            cols_imp = ({c['name'] for c in inspector.get_columns('ad_impression_logs')}
+                        if inspector.has_table('ad_impression_logs') else set())
+            if cols_imp and 'cost_credits_posted' not in cols_imp:
+                conn.execute(text('ALTER TABLE ad_impression_logs '
+                                  'ADD COLUMN cost_credits_posted FLOAT'))
+                conn.commit()
+        except Exception:
+            pass
+
+        # CHANGE-005 — índice para el GROUP BY del escrutinio derivado.
+        #
+        # IMPRESCINDIBLE declararlo aquí y no solo en `__table_args__` del
+        # modelo: `create_all()` omite por completo las tablas que ya
+        # existen, así que NUNCA añade un índice nuevo a una tabla
+        # preexistente (comprobado ejecutándolo). Sin esta migración el
+        # índice existiría solo en bases creadas de cero, y en producción
+        # —donde `debate_votes` ya existe— el recuento derivado recorrería
+        # la tabla entera en cada render de resultados.
+        #
+        # El inspector se consulta con `inspect(engine)` FRESCO: el de
+        # arriba se creó al entrar en _migrate y cachea lo que ya leyó.
+        try:
+            from sqlalchemy import inspect as _inspect_fresh
+            _insp = _inspect_fresh(engine)
+            if _insp.has_table('debate_votes'):
+                _idx = {i['name'] for i in _insp.get_indexes('debate_votes')}
+                if 'ix_debate_votes_debate_option' not in _idx:
+                    conn.execute(text(
+                        'CREATE INDEX IF NOT EXISTS ix_debate_votes_debate_option '
+                        ' ON debate_votes (debate_id, option_index)'))
+                    conn.commit()
+                    print('[tally] índice ix_debate_votes_debate_option creado')
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f'[tally] no se pudo crear el índice del escrutinio (no '
+                  f'fatal: el recuento sigue siendo correcto, solo más '
+                  f'lento): {type(e).__name__}')
+
+        # CHANGE-004 — al final, cuando todas las tablas ya existen.
+        _migrate_vote_uniqueness(conn, inspector, text)
 _migrate()
 
 # ══════════════════════════════════════════════════════════════
@@ -1763,6 +1937,123 @@ _CANARY_DECOY_PAYLOAD = {
 
 def _sec_canary_secret() -> str:
     return (os.getenv('ADMIN_SECRET_CANARY') or '').strip()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# OBSERVABILIDAD DE ERRORES (monitoreo)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Antes de esto, un error 500 en producción no generaba NINGUNA señal: la
+# única evidencia era una traza suelta entre los `print` de los logs de
+# Render, imposible de alertar y fácil de perder. No hay Sentry, Rollbar,
+# Datadog ni OpenTelemetry, y añadir cualquiera de ellos exige una cuenta,
+# una credencial y una dependencia nueva.
+#
+# Lo que sí se puede hacer sin nada de eso, y es lo que hace esto:
+#
+#   1. Emitir CADA error no controlado como UNA línea con prefijo fijo y
+#      cuerpo JSON. Una línea con prefijo fijo es alertable desde los
+#      propios logs de Render (o desde cualquier recolector posterior) sin
+#      cambiar el código otra vez.
+#   2. Enviarlo además a un webhook si ERROR_WEBHOOK_URL está configurada.
+#      Sin esa variable no se envía nada: la función queda inerte.
+#
+# No cambia ninguna respuesta HTTP: observa y vuelve a lanzar la excepción,
+# así que el comportamiento visible es exactamente el de antes.
+#
+# PRIVACIDAD. Un evento de error es un sitio clásico por donde se escapan
+# datos personales y secretos. Aquí se emite, a propósito, solo:
+#   · la PLANTILLA de la ruta (`/admin/dev-otp/{phone}`), nunca la ruta
+#     concreta, que llevaría el teléfono real dentro
+#   · el método, el tipo de excepción y el último marco de la traza
+#   · el hash de la IP, con la misma función que ya usa el escudo
+# Nunca: la cadena de consulta (lleva `secret=`), ni el cuerpo, ni las
+# cabeceras, ni el correo, ni el documento, ni el mensaje de la excepción
+# (que puede arrastrar valores de una fila).
+
+ERROR_EVENT_PREFIX = '[ERROR_EVENT]'
+
+
+def _error_route_template(request) -> str:
+    """Plantilla de la ruta, no la ruta concreta.
+
+    `/admin/dev-otp/+56912345678` se convierte en `/admin/dev-otp/{phone}`.
+    Si FastAPI no resolvió ninguna ruta (404, o fallo antes del enrutado),
+    se enmascara cualquier segmento con dígitos: así un id o un teléfono no
+    se cuela por la vía de respaldo.
+    """
+    try:
+        route = request.scope.get('route')
+        if route is not None and getattr(route, 'path', None):
+            return route.path
+    except Exception:
+        pass
+    try:
+        partes = []
+        for seg in (request.url.path or '').split('/'):
+            partes.append('{masked}' if any(ch.isdigit() for ch in seg) else seg)
+        return '/'.join(partes)
+    except Exception:
+        return '<desconocida>'
+
+
+def _error_event(request, exc) -> None:
+    """Emite un evento de error. Nunca lanza: si el monitoreo falla, el
+    request sigue su curso igual que antes de que esto existiera."""
+    try:
+        import traceback as _tb
+        marco = ''
+        try:
+            cuadros = _tb.extract_tb(exc.__traceback__)
+            if cuadros:
+                ultimo = cuadros[-1]
+                marco = f'{os.path.basename(ultimo.filename)}:{ultimo.lineno}'
+        except Exception:
+            marco = ''
+        evento = {
+            'ts':     datetime.utcnow().isoformat() + 'Z',
+            'route':  _error_route_template(request),
+            'method': getattr(request, 'method', '') or '',
+            'exc':    type(exc).__name__,
+            'at':     marco,
+            'ip_hash': _sec_hash(_sec_client_ip(request)),
+            'commit': os.getenv('RENDER_GIT_COMMIT', '')[:12],
+        }
+        linea = json.dumps(evento, ensure_ascii=False, sort_keys=True)
+        print(f'{ERROR_EVENT_PREFIX} {linea}', flush=True)
+
+        destino = (os.getenv('ERROR_WEBHOOK_URL') or '').strip()
+        if destino:
+            try:
+                _requests.post(destino, json=evento, timeout=5)
+            except Exception as e:
+                # Un monitoreo caído no puede convertirse en un segundo
+                # error. Se deja rastro del tipo, sin la URL ni el mensaje.
+                print(f'{ERROR_EVENT_PREFIX} webhook falló: {type(e).__name__}',
+                      flush=True)
+    except Exception:
+        # Último recinto: la observabilidad no rompe nada, pase lo que pase.
+        pass
+
+
+@app.middleware('http')
+async def error_observability_middleware(request: Request, call_next):
+    """Registra los errores no controlados y vuelve a lanzarlos sin tocar
+    la respuesta.
+
+    Posición en la pila, comprobada ejecutándola y no supuesta:
+    Starlette inserta cada middleware en el índice 0, así que el ÚLTIMO
+    declarado queda el más externo. Orden real: security_shield (externo) →
+    este → CORS → rutas. Es decir, este middleware ve los errores de las
+    rutas —que es lo que importa— pero NO los del propio escudo, que queda
+    por fuera. Un fallo del escudo seguiría llegando solo a los logs.
+    """
+    try:
+        return await call_next(request)
+    except Exception as exc:
+        _error_event(request, exc)
+        raise
+
 
 @app.middleware('http')
 async def security_shield_middleware(request: Request, call_next):
@@ -3226,7 +3517,7 @@ def _ledger_release(db: Session, campaign: 'AdCampaign', user_id: int, amount, *
 
 def _ledger_spend(db: Session, campaign: 'AdCampaign', cost_credits, *,
                   idempotency_key: str, source: str, reference: str = '',
-                  description: str = '') -> dict:
+                  description: str = '', impression_log_id=None) -> dict:
     """THE canonical ad-spend function (E) — unifies what were previously
     THREE divergent billing paths (`/ads/view`'s non-atomic Python count,
     `_append_campaign_ad`'s atomic-but-CLP-only LEAST() update, and the
@@ -3254,12 +3545,35 @@ def _ledger_spend(db: Session, campaign: 'AdCampaign', cost_credits, *,
     result = _ledger_post(db, posting, idempotency_key=idempotency_key,
                           campaign_id=campaign.id, source=source, reference=reference,
                           description=description or f'Spend {cost_credits} {value_class} credits')
+    # CHANGE-006 — el importe REALMENTE asentado, que no es el pedido.
+    #
+    # `build_spend` lleva el importe al céntimo (`ledger.round_amount`), así
+    # que lo que entra en el libro es 0,02 y no los 0,0210526… que se
+    # pidieron. Devolverlo aquí es lo que permite que cada impresión guarde
+    # la cifra exacta que se le asentó, y que la conciliación
+    # impresiones ↔ ledger sea EXACTA en vez de "dentro de una tolerancia".
+    #
+    # No cambia ningún precio, ninguna tarifa y ningún importe histórico: es
+    # el mismo asiento de siempre, ahora identificable fila a fila. La
+    # decisión de qué número es el precio correcto (19 o 20 CLP) sigue
+    # pendiente y es comercial — ver docs/POLITICA_CONCILIACION_FACTURACION.md
+    _posted = _ledger.round_amount(cost_credits)
+    result['posted_credits'] = _posted
     if result['ok'] and not result['idempotent']:
+        # El espejo en CLP se conserva EXACTAMENTE como estaba, calculado
+        # desde el importe pedido. Cambiarlo a la cifra asentada bajaría el
+        # gasto registrado un 5,26%, y eso es una decisión comercial, no una
+        # corrección técnica: se deja pendiente a propósito.
         cost_clp = int(round(float(cost_credits) * USD_TO_CLP))
         db.execute(text("""
             UPDATE ad_campaigns SET spent_clp = COALESCE(spent_clp,0) + :cost
             WHERE id = :cid
         """), {'cost': cost_clp, 'cid': campaign.id})
+        if impression_log_id and _posted is not None:
+            db.execute(text("""
+                UPDATE ad_impression_logs SET cost_credits_posted = :amt
+                WHERE id = :lid
+            """), {'amt': float(_posted), 'lid': int(impression_log_id)})
         db.commit()
         db.expire(campaign, ['spent_clp'])
     return result
@@ -3523,12 +3837,96 @@ def _is_seeded_demo_consultation(debate) -> bool:
             and (getattr(debate, 'title', '') or '') in SEEDED_DEMO_CONSULTATION_TITLES)
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# CHANGE-005 — EL ESCRUTINIO SE DERIVA DE LAS PAPELETAS
+# ═══════════════════════════════════════════════════════════════════════
+#
+# EL DEFECTO, MEDIDO. Hasta aquí, ningún resultado mostrado a un usuario
+# salía de contar papeletas: `format_debate` leía dos valores almacenados,
+# `debates.total_votes` (entero) y `debates.vote_counts` (JSON por texto de
+# opción), que `_cast_vote_inner` mantenía con un leer-modificar-escribir en
+# Python.
+#
+# Eso es una actualización perdida de manual. Medido en PostgreSQL real con
+# 12 personas DISTINTAS votando a la vez (ver
+# test_vote_concurrency_pg.TestVotoConcurrente): quedaron 12 papeletas, 12
+# registros de deduplicación... y el contador en 1. Once votos legítimos
+# desaparecieron del resultado publicado. Las doce transacciones leyeron 0,
+# sumaron 1 en memoria y escribieron 1.
+#
+# Es decir: la concurrencia no solo permitía votar dos veces (CHANGE-004),
+# también DESCARTABA votos válidos del escrutinio, en silencio y sin que
+# ninguna comprobación lo notara.
+#
+# LA CORRECCIÓN. El recuento se deriva de las papeletas con un GROUP BY, que
+# es la única fuente que no puede desincronizarse de sí misma. No hay nada
+# que mantener, nada que pueda perder una actualización y nada que reparar
+# después.
+#
+# QUÉ NO CAMBIA
+#   · No se toca ni una papeleta, ni un código de verificación, ni la
+#     consulta 819: esto solo cambia de DÓNDE se lee el resultado.
+#   · Se agrega por `option_index`, no por el texto de la opción, así que un
+#     texto editado ya no puede dejar votos invisibles (el defecto de las
+#     claves huérfanas que detecta /admin/tally/reconciliation).
+#   · Es una agregación: nunca expone la opción de una persona concreta.
+#   · La supresión de los datos de demostración sembrados y las reglas de
+#     visibilidad de consultas restringidas quedan intactas, aplicadas
+#     después, igual que antes.
+#   · `total_votes` y `vote_counts` se siguen escribiendo, para no romper lo
+#     que los lea por fuera, pero dejan de ser la verdad. La conciliación
+#     los vigila.
+
+def _derived_tally(debate, db=None):
+    """Recuento real por opción, contado sobre las papeletas.
+
+    Devuelve (counts_por_texto, total) o (None, None) si no hay sesión con
+    la que contar — en ese caso quien llama usa el contador almacenado, que
+    es el comportamiento anterior. Nunca lanza: un resultado es demasiado
+    importante para caerse, y degradar al valor almacenado es exactamente
+    lo que hacía antes.
+
+    La sesión se obtiene del propio objeto con `object_session`, así que los
+    dieciséis sitios que llaman a `format_debate` no necesitan cambiar ni
+    pasar nada nuevo.
+    """
+    try:
+        if db is None:
+            from sqlalchemy.orm import object_session
+            db = object_session(debate)
+        if db is None:
+            return None, None
+        opts = json.loads(debate.options or '[]')
+        filas = db.execute(text(
+            'SELECT option_index, count(*) FROM debate_votes '
+            ' WHERE debate_id = :d GROUP BY option_index'
+        ), {'d': debate.id}).fetchall()
+        por_indice = {int(i): int(n) for i, n in filas if i is not None}
+        counts = {opt: por_indice.get(i, 0) for i, opt in enumerate(opts)}
+        # El total son TODAS las papeletas de la consulta, incluidas las que
+        # tengan un option_index fuera del rango actual de opciones: si
+        # existen, el total debe decirlo en vez de esconderlas.
+        total = int(db.execute(text(
+            'SELECT count(*) FROM debate_votes WHERE debate_id = :d'
+        ), {'d': debate.id}).scalar() or 0)
+        return counts, total
+    except Exception as e:
+        print(f'[tally] no se pudo derivar el escrutinio de la consulta '
+              f'{getattr(debate, "id", "?")}: {type(e).__name__} '
+              f'(se usa el contador almacenado)')
+        return None, None
+
+
 def format_debate(debate, has_voted=False, sponsor_info=None, reveal_demo_counts=False):
     opts = json.loads(debate.options or '[]')
-    counts = json.loads(debate.vote_counts or '{}')
     imgs = json.loads(debate.option_images or '[]')
     status = get_debate_status(debate)
-    total = debate.total_votes or 0
+    # CHANGE-005 — contado sobre las papeletas; el valor almacenado queda
+    # solo como respaldo si no hay sesión con la que contar.
+    counts, total = _derived_tally(debate)
+    if counts is None:
+        counts = json.loads(debate.vote_counts or '{}')
+        total = debate.total_votes or 0
     # `reveal_demo_counts=True` solo lo pasan las rutas administrativas, que
     # deben seguir viendo los valores crudos para poder auditarlos.
     suppress = _is_seeded_demo_consultation(debate) and not reveal_demo_counts
@@ -5280,8 +5678,14 @@ def public_results_page(debate_id: int,
         return HTMLResponse('<html><body>Consulta no encontrada</body></html>', status_code=404)
 
     opts    = json.loads(debate.options or '[]')
-    counts  = json.loads(debate.vote_counts or '{}')
-    total   = debate.total_votes or 0
+    # CHANGE-005 — contado sobre las papeletas, igual que format_debate.
+    # Esta página publica barras, porcentajes, ganador y la vista previa de
+    # enlaces compartidos: si leyera el contador almacenado, seguiría
+    # publicando un resultado al que la concurrencia le quitó votos.
+    counts, total = _derived_tally(debate, db)
+    if counts is None:
+        counts  = json.loads(debate.vote_counts or '{}')
+        total   = debate.total_votes or 0
     # Esta página NO pasa por format_debate: arma sus propias barras,
     # porcentajes, bloque de ganador y og:description. Sin esta comprobación
     # seguiría publicando los conteos sembrados de demostración — y además
@@ -6614,13 +7018,112 @@ def _ensure_referral_code(user, db):
     return user.referral_code
 
 
+def _isco_group_for_soc(soc_code: str, db):
+    """Grupo ISCO de un código SOC, derivado de los DATOS ya importados.
+
+    occupation_unified trae `occupation_code` (SOC) e `isco_group` juntos en
+    sus 818 filas reales del BLS (verificado: las 818 tienen ambos), así que
+    la correspondencia sale de la misma fuente de referencia que ya usa la
+    estimación — no de una tabla de equivalencias escrita a mano, que sería
+    criterio nuevo y no está autorizado.
+
+    Devuelve None si el código no está en los datos: falla hacia "no sé",
+    nunca hacia un grupo adivinado.
+    """
+    if not soc_code:
+        return None
+    try:
+        row = db.execute(text("""
+            SELECT isco_group FROM occupation_unified
+             WHERE occupation_code = :soc AND isco_group IS NOT NULL
+             LIMIT 1
+        """), {'soc': soc_code}).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+    except Exception as e:
+        # Nunca romper la clasificación por un fallo de lectura aquí.
+        print(f'[socioeconomic] _isco_group_for_soc error (no fatal): {type(e).__name__}')
+        return None
+
+
+class _ReferenceReadSession(Session):
+    """Sesión de SOLO LECTURA para los datos de referencia del clasificador.
+
+    DEFECTO P0.6. En PostgreSQL una sentencia que falla aborta la transacción
+    COMPLETA: todas las sentencias siguientes mueren con
+    InFailedSqlTransaction hasta que alguien hace rollback. Las ~17 lecturas
+    de referencia de `_assign_user_tier_inner` son opcionales y sus fallos se
+    toleran con `except Exception`, pero atrapar la excepción de Python NO
+    restituye la transacción.
+
+    Medido en PostgreSQL 16: basta que falte UNA tabla de referencia para que
+    toda la clasificación posterior se caiga y el usuario quede sin ingreso
+    estimado y sin se_tier. Y pueden faltar: de las cinco tablas que lee este
+    camino, `create_all` solo crea `commune_market_data`; `ilo_wages`,
+    `occupation_unified`, `occupation_salary` y `china_wages` las crea
+    únicamente su agente de importación.
+
+    Hacer `db.rollback()` sobre la sesión del usuario tampoco sirve: descarta
+    los cambios pendientes de `user` y EXPIRA el objeto, así que la siguiente
+    lectura de `user.estimated_income_usd` recarga NULL desde la base. Ese
+    era el mecanismo exacto de la pérdida.
+
+    Por eso las lecturas de referencia se hacen en esta sesión aparte: un
+    fallo aquí no puede tocar la sesión que contiene a `user`. Como todo lo
+    que lee son datos de referencia ya confirmados, restituir su propia
+    transacción no pierde nada — por eso hace rollback automático al primer
+    fallo y queda utilizable para la lectura siguiente, y vuelve a lanzar la
+    excepción para que los manejadores tolerantes ya existentes decidan
+    exactamente como antes.
+
+    No cambia ninguna regla económica: mismas consultas, mismos datos, misma
+    precedencia. Las reglas R1-R8 de socioeconomic.py quedan intactas.
+    """
+
+    def execute(self, *args, **kwargs):
+        try:
+            return super().execute(*args, **kwargs)
+        except Exception:
+            try:
+                super().rollback()
+            except Exception:
+                pass
+            raise
+
+
 def _assign_user_tier(user, db):
     """Asigna se_tier e income_index combinando comuna + profesión declarada."""
+    # P0.6 — las lecturas de datos de referencia van en una sesión aislada,
+    # de modo que un fallo en ellas no pueda abortar la transacción del
+    # usuario ni expirar el objeto `user`. Ver _ReferenceReadSession.
+    _refdb = _ReferenceReadSession(bind=db.get_bind())
+    try:
+        return _assign_user_tier_persist(user, db, _refdb)
+    finally:
+        try:
+            _refdb.close()
+        except Exception:
+            pass
+
+
+def _assign_user_tier_persist(user, db, refdb):
     try:
         with db.no_autoflush:
-            _assign_user_tier_inner(user, db)
-    except Exception:
-        pass
+            _assign_user_tier_inner(user, db, refdb)
+    except Exception as _tier_err:
+        # P0.5 — antes esto era `except Exception: pass`, silencioso. Un
+        # fallo aquí deja al usuario sin tier, y sin tier no calza con
+        # ninguna consulta ni campaña segmentada por tier: es decir, una
+        # excepción muda se convertía en una pérdida de alcance comercial
+        # invisible. Durante la investigación del estimador tuve que quitar
+        # este bloque a mano para poder ver qué pasaba.
+        #
+        # Se mantiene la tolerancia a fallos (el registro NUNCA debe caerse
+        # porque la clasificación falle), pero ahora DEJA RASTRO. Se registra
+        # solo el id interno y el tipo de excepción: ningún dato personal, ni
+        # correo, ni documento, ni el mensaje de la excepción, que podría
+        # arrastrar valores de la fila.
+        print(f'[socioeconomic] clasificación falló para user={getattr(user, "id", "?")} '
+              f'-> {type(_tier_err).__name__} (no fatal, el usuario queda sin tier)')
 
     # Capturar valores calculados (están en el objeto Python aunque la TX esté abortada)
     _new_tier  = user.se_tier
@@ -6683,7 +7186,25 @@ def _assign_user_tier(user, db):
     except Exception:
         db.rollback()
 
-def _assign_user_tier_inner(user, db):
+def _assign_user_tier_inner(user, db, refdb=None):
+    # P0.6 — Dentro de esta función la sesión se usa EXCLUSIVAMENTE para leer
+    # datos de referencia: 11 `execute` + 6 `query` (todas contra
+    # CommuneMarketData) + los agentes regionales, y ni un solo `add`,
+    # `commit`, `flush` ni consulta a la tabla `users`. El objeto `user` se
+    # modifica solo en memoria y lo persiste `_assign_user_tier_persist` con
+    # un UPDATE directo.
+    #
+    # Por eso `db` puede apuntar aquí a la sesión aislada sin cambiar nada de
+    # la lógica: lo único que se pierde es la capacidad de un fallo de
+    # lectura para abortar la transacción del usuario y expirar `user`, que
+    # es precisamente el defecto. `_orm_db` conserva la sesión real por si
+    # alguna vez hiciera falta.
+    _orm_db = db
+    if refdb is None:
+        # Llamada directa (pruebas y diagnósticos). El camino de producción
+        # pasa por `_assign_user_tier`, que crea y cierra la sesión aislada.
+        refdb = _ReferenceReadSession(bind=db.get_bind())
+    db = refdb
     # CHANGE-003 remediation (idempotency BLOCKER) — every recomputation
     # must derive the estimate from clean source inputs, never from a
     # value THIS SAME function already wrote on a previous call. Without
@@ -6833,6 +7354,27 @@ def _assign_user_tier_inner(user, db):
     # 'medico' — is untouched and falls through to the resolution paths
     # below exactly as before.
     _resolved_soc = _socio.resolve_occupation_soc(user_profession)
+    # P0.5 FIX — se conserva el valor CRUDO además del SOC resuelto.
+    #
+    # Antes esta línea hacía `user_profession = _resolved_soc`, es decir
+    # SOBREESCRIBÍA el valor almacenado. Pero los dos mapas de lookup de más
+    # abajo (_OCC_TO_ISCO y _US_PROFESSION_SOC) contienen ÚNICAMENTE los 54
+    # slugs heredados ('medico', 'ing_civil', …) y no códigos SOC. Al
+    # sobreescribir, 'medico' se convertía en '29-1215' y
+    # `_OCC_TO_ISCO.get('29-1215')` devolvía None: el camino heredado quedó
+    # roto, y el camino SOC nunca existió. Resultado medido: ninguna
+    # observación de ingreso, verdict=unresolved, se_tier vacío — y como
+    # se_tier gobierna la elegibilidad por tier de consultas y la
+    # segmentación por tier de campañas, toda segmentación por tier calzaba
+    # con nadie.
+    #
+    # Ahora se usan los dos: el crudo para los mapas heredados (restaura
+    # exactamente el comportamiento previo a la regresión) y el SOC para el
+    # camino nuevo. Ninguna regla, umbral ni criterio de clasificación
+    # cambia: lo único que cambia es que el insumo alcanza los MISMOS datos
+    # de referencia que ya existían.
+    user_profession_raw = user_profession
+    user_profession_soc = _resolved_soc or ''
     if _resolved_soc:
         user_profession = _resolved_soc
 
@@ -6986,8 +7528,14 @@ def _assign_user_tier_inner(user, db):
                                     profession_tier = profession_score_to_tier(float(row[0]))
                                     if row[1]: user.estimated_income_usd = float(row[1])
             elif user_country_code == 'US':
-                # Legacy codes — USA: lookup por major_group
-                major_group = _US_PROFESSION_SOC.get(user_profession)
+                # P0.5 — primero el mapa heredado con el valor CRUDO (igual
+                # que antes de la regresión); si no está, se usa el grupo
+                # mayor del propio código SOC canónico. No se inventa
+                # ninguna correspondencia: el grupo mayor son los dos
+                # primeros dígitos del SOC, que es su definición.
+                major_group = (_US_PROFESSION_SOC.get(user_profession_raw)
+                               or _US_PROFESSION_SOC.get(user_profession)
+                               or (user_profession_soc or None))
                 if major_group:
                     row = db.execute(text("""
                         SELECT AVG(profession_score), AVG(median_annual_usd) FROM occupation_unified
@@ -6999,8 +7547,15 @@ def _assign_user_tier_inner(user, db):
                         profession_tier = profession_score_to_tier(float(row[0]))
                         if row[1]: user.estimated_income_usd = float(row[1])
             else:
-                # Legacy codes — no-USA: lookup por ISCO group
-                isco_grp = _OCC_TO_ISCO.get(user_profession)
+                # P0.5 — mapa heredado con el valor CRUDO primero (restaura
+                # el comportamiento previo a la regresión); si no está, se
+                # deriva el grupo ISCO del código SOC canónico CONSULTANDO
+                # occupation_unified, que trae SOC e ISCO juntos en sus 818
+                # filas reales del BLS. Es un mapeo guiado por los datos ya
+                # importados, no una tabla de equivalencias inventada.
+                isco_grp = (_OCC_TO_ISCO.get(user_profession_raw)
+                            or _OCC_TO_ISCO.get(user_profession)
+                            or _isco_group_for_soc(user_profession_soc, db))
                 if isco_grp:
                     _known_isco_grp = isco_grp
                     # 1. ILO primero
@@ -7022,8 +7577,16 @@ def _assign_user_tier_inner(user, db):
                         if row and row[0] is not None:
                             profession_tier = profession_score_to_tier(float(row[0]))
                             if row[1]: user.estimated_income_usd = float(row[1])
-        except Exception:
-            pass
+        except Exception as _occ_err:
+            # P0.5 — era `pass`. Este bloque es TODA la estimación por
+            # ocupación; un fallo aquí deja al usuario sin ingreso y sin
+            # tier, y por tanto fuera de cualquier segmentación por tier.
+            # Se conserva la tolerancia (el registro no debe caerse) pero
+            # ahora deja rastro: solo id interno y tipo de excepción,
+            # ningún dato personal.
+            print(f'[socioeconomic] estimación por ocupación falló para '
+                  f'user={getattr(user, "id", "?")} -> {type(_occ_err).__name__} '
+                  f'(no fatal, queda sin ingreso estimado)')
         if not profession_tier:
             # occupation_salary: datos reales INE ESI (CL) y seeds LATAM (BR/MX/CO/AR)
             try:
@@ -7387,12 +7950,18 @@ def _assign_user_tier_inner(user, db):
                         FROM commune_market_data WHERE country=:cc AND price_m2_avg > 0
                     """), {'cc': user_country_code, 'fx': _m2_factor}).fetchone()
                 except Exception:
-                    # PRODUCTION READINESS AUDIT — rollback before the
-                    # retry: without it, a failed PERCENTILE_CONT (e.g. on
-                    # a backend that doesn't support it) would leave the
-                    # session's transaction aborted and the very next
-                    # db.execute() below would itself fail.
-                    db.rollback()
+                    # PRODUCTION READINESS AUDIT — el motivo original sigue
+                    # vigente: un PERCENTILE_CONT fallido (p. ej. en SQLite,
+                    # que no lo soporta) deja la transacción abortada y el
+                    # db.execute() de abajo también fallaría.
+                    #
+                    # P0.6 — pero ese rollback explícito aquí era el
+                    # mecanismo de pérdida: se ejecutaba sobre la sesión del
+                    # usuario, descartando el `estimated_income_usd` ya
+                    # calculado y expirando `user`. Ahora `db` es la sesión
+                    # aislada de referencia, que se restituye ella misma al
+                    # primer fallo (ver _ReferenceReadSession.execute), así
+                    # que el reintento funciona sin tocar al usuario.
                     _med_r = db.execute(text("""
                         SELECT AVG(price_m2_avg * :fx) FROM commune_market_data
                         WHERE country=:cc AND price_m2_avg > 0
@@ -7402,10 +7971,17 @@ def _assign_user_tier_inner(user, db):
                     _commune_price_usd = float(commune_data.price_m2_avg) * _m2_factor
                     _comm_index = (_commune_price_usd / _nat_m2) * 100.0
             except Exception:
-                # PRODUCTION READINESS AUDIT — rollback: this function
-                # (socioeconomic tier assignment) runs during registration
-                # and keeps going afterward in the same request/session.
-                db.rollback()
+                # PRODUCTION READINESS AUDIT — el índice comunal es opcional:
+                # si no se puede calcular, se sigue sin él.
+                #
+                # P0.6 — aquí había un `db.rollback()` cuyo propósito era
+                # dejar la sesión utilizable para el resto del request. Se
+                # retira: `db` es ahora la sesión aislada de referencia, que
+                # se restituye sola, y ejecutar el rollback sobre la sesión
+                # del usuario era lo que borraba la estimación por ocupación
+                # ya calculada. Sin él, un usuario con comuna conserva su
+                # ingreso estimado y su tier.
+                pass
 
         # β efectivo según edad (dob = 'YYYY-MM-DD')
         _user_age = None
@@ -7478,6 +8054,58 @@ _voter_face_collection_ready = False
 # behavior here could leave a consultation's lock stuck, permanently
 # blocking voting on it — exactly what this change must never do.
 _VOTER_FACE_LOCK_NAMESPACE = 1947283  # arbitrary fixed int, keeps this lock's key-space separate from any future unrelated advisory-lock use
+
+# CHANGE-004 — candado por (consulta, persona) para el camino de voto.
+#
+# Los índices únicos de CHANGE-004 son LA garantía: con ellos, dos
+# inserciones simultáneas de la misma persona terminan con una confirmada y
+# la otra rechazada por el motor, siempre, incluso sin este candado.
+#
+# Este candado añade algo distinto: evita el TRABAJO desperdiciado de la
+# carrera. `_cast_vote_inner` ancla el voto en blockchain ANTES de insertar,
+# así que sin serializar, la petición perdedora de la carrera ya habría
+# gastado una transacción en Polygon —gas real cuando la wallet está
+# configurada— para un voto que se va a rechazar. Serializando por persona y
+# consulta, la segunda petición ve el registro de la primera en sus SELECT y
+# sale con 409 antes de anclar nada.
+#
+# Se usa la variante _xact_ (pg_advisory_xact_lock), no la de sesión que usa
+# el candado facial de arriba: se libera automáticamente al hacer commit o
+# rollback, así que no puede quedarse retenida por una conexión devuelta al
+# pool —el riesgo que el comentario de _pg_advisory_unlock describe— ni
+# necesita desbloqueo explícito en cada camino de salida. Y es BLOQUEANTE,
+# no `try`: aquí esperar unos milisegundos a que la otra petición termine es
+# exactamente lo que se quiere; devolver «inténtalo luego» a quien está
+# votando sería peor.
+_VOTE_ONCE_LOCK_NAMESPACE = 1947284
+
+
+def _pg_vote_once_xact_lock(db: Session, debate_id: int, identity: str) -> bool:
+    """Serializa el camino de voto por (consulta, identidad de la persona).
+
+    `identity` es el hash del documento cuando existe, y si no la cuenta:
+    la misma identidad con la que se decide la elegibilidad. Se reduce a un
+    int32 estable con sha256 — no hace falta que sea inyectivo, una
+    colisión solo serializaría de más a dos personas distintas, que es
+    inofensivo.
+
+    Devuelve False en SQLite y ante cualquier fallo, sin lanzar: el candado
+    es una optimización de la carrera, no la garantía. La garantía son los
+    índices únicos.
+    """
+    try:
+        if 'postgresql' not in DATABASE_URL:
+            return False
+        clave = int.from_bytes(
+            hashlib.sha256(identity.encode()).digest()[:4], 'big') % 2147483647
+        db.execute(text('SELECT pg_advisory_xact_lock(:ns, :k)'),
+                   {'ns': _VOTE_ONCE_LOCK_NAMESPACE,
+                    'k': (debate_id * 1000003 + clave) % 2147483647})
+        return True
+    except Exception as _e:
+        print(f'[vote-once] no se pudo tomar el candado (no fatal, '
+              f'los índices únicos siguen garantizando): {type(_e).__name__}')
+        return False
 
 def _pg_try_advisory_lock(db: Session, debate_id: int) -> bool:
     """Non-blocking — returns False immediately if another
@@ -8567,7 +9195,8 @@ def get_opinions(debate_id: int,
             spend_result = _ledger_spend(
                 db, orm, cost_credits, idempotency_key=f'spend:opinions:{log_id}',
                 source='opinions_ad', reference=str(log_id),
-                description=f'Impression served in debate {debate_id} opinions')
+                description=f'Impression served in debate {debate_id} opinions',
+                impression_log_id=log_id)
             if not spend_result['ok']:
                 db.rollback()
                 if spend_result['reason'] == 'insufficient_balance':
@@ -8841,6 +9470,21 @@ def _cast_vote_inner(debate_id: int, data, user, db):
         except Exception:
             raise HTTPException(403, 'Token de verificación facial inválido')
 
+    # CHANGE-004 — candado por (consulta, persona) ANTES de los cinco
+    # bloqueos. Sin él, dos peticiones simultáneas ejecutan sus SELECT antes
+    # de que ninguna haya insertado, las dos pasan, y la perdedora de la
+    # carrera ya habría gastado un anclaje en blockchain (gas real) para un
+    # voto que los índices únicos van a rechazar al hacer commit. Con él, la
+    # segunda ve el registro de la primera aquí abajo y sale con 409 limpio.
+    #
+    # La identidad es la misma con la que se decide la elegibilidad: el
+    # documento cuando existe, la cuenta si no.
+    _lock_identity = (
+        hash_str(user.national_id.replace('.', '').replace('-', '').upper(),
+                 'pref-nid-')
+        if user.national_id else f'user:{user.id}')
+    _pg_vote_once_xact_lock(db, debate_id, _lock_identity)
+
     # Bloqueo 1: misma cuenta
     already = db.query(HasVotedLog).filter(
         HasVotedLog.user_id == user.id,
@@ -8948,8 +9592,27 @@ def _cast_vote_inner(debate_id: int, data, user, db):
 
     verify_code = generate_verify_code()
     vote_hash = hashlib.sha256(f'{debate_id}:{option}:{verify_code}'.encode()).hexdigest()
-    bc_result = _blockchain.anchor_vote(debate_id, vote_hash, verify_code,
-                                        debate_title=debate.title)
+    # DEFECTO CORREGIDO — esta llamada no estaba protegida. El comentario de
+    # abajo afirma que `anchor_vote()` nunca lanza, y asi esta escrita; pero
+    # si alguna vez lanza (un fallo inesperado de web3, de la red, o un
+    # cambio futuro en ese modulo), la excepcion subia hasta el manejador de
+    # `cast_vote` y el votante recibia un 500: SE PERDIA EL VOTO. Comprobado
+    # reproduciendolo.
+    #
+    # Un fallo de Polygon no puede costarle el voto a nadie. El voto se
+    # registra en Preferendum y se informa como NO confirmado en blockchain,
+    # que es exactamente lo que ocurrio. No se pierde y no se duplica: si
+    # esto falla, no hay papeleta ni registros de deduplicacion escritos
+    # todavia, asi que no queda nada a medias.
+    try:
+        bc_result = _blockchain.anchor_vote(debate_id, vote_hash, verify_code,
+                                            debate_title=debate.title)
+    except BaseException as _bc_err:
+        print(f'[cast_vote] el anclaje en blockchain fallo para '
+              f'debate={debate_id} -> {type(_bc_err).__name__}; el voto se '
+              f'registra SIN anclaje y asi se informa')
+        bc_result = {'tx_hash': '', 'live': False, 'success': False,
+                     'reason': f'fallo del anclaje: {type(_bc_err).__name__}'}
     blockchain_tx = bc_result['tx_hash']
     # PRODUCTION READINESS AUDIT — bc_result['tx_hash'] is a deliberately
     # "realistic-looking mock transaction hash" (blockchain.py's own
@@ -8984,10 +9647,32 @@ def _cast_vote_inner(debate_id: int, data, user, db):
         db.add(ImeiVoteLog(debate_id=debate_id, imei_hash=imei_log.imei_hash))
     if serial_hash:
         db.add(DocSerialVoteLog(debate_id=debate_id, serial_hash=serial_hash))
+    # CHANGE-005 — el contador se suma con un UPDATE atómico, no con un
+    # leer-modificar-escribir en Python.
+    #
+    # Lo que había aquí era `debate.total_votes = (debate.total_votes or 0)
+    # + 1`: cada transacción leía el valor, sumaba en memoria y lo
+    # escribía. Con doce votantes simultáneos las doce leían 0 y las doce
+    # escribían 1 — once votos legítimos perdidos del escrutinio, medido en
+    # PostgreSQL real.
+    #
+    # `SET total_votes = COALESCE(total_votes, 0) + 1` es una sola
+    # sentencia: toma el candado de la fila, así que la segunda transacción
+    # espera a que la primera confirme y suma sobre el valor ya
+    # actualizado. No se pierde ninguna.
+    #
+    # `vote_counts` se sigue manteniendo para no romper lo que lo lea por
+    # fuera, pero ya NO es la verdad del resultado: el recuento por opción
+    # se deriva de las papeletas en `_derived_tally`. Por eso su
+    # leer-modificar-escribir, que no se puede hacer atómico de forma
+    # portable sobre un JSON, dejó de ser un problema de corrección.
+    # /admin/tally/reconciliation lo vigila.
+    db.execute(text(
+        'UPDATE debates SET total_votes = COALESCE(total_votes, 0) + 1 '
+        ' WHERE id = :d'), {'d': debate_id})
     counts = json.loads(debate.vote_counts or '{}')
     counts[option] = counts.get(option, 0) + 1
     debate.vote_counts = json.dumps(counts)
-    debate.total_votes = (debate.total_votes or 0) + 1
     # Assign unique reward code from pool if available
     reward_code = None
     try:
@@ -9031,11 +9716,43 @@ def _cast_vote_inner(debate_id: int, data, user, db):
         print(f'[cast_vote] sponsor check error (non-fatal): {e}')
     try:
         db.commit()
+    except IntegrityError as e:
+        # CHANGE-004 — ESTA es la garantía de «una persona, un voto», y el
+        # único sitio donde se nota que actuó.
+        #
+        # Si llegamos aquí, otra petición de la MISMA persona insertó su
+        # voto entre nuestros cinco SELECT y este commit: exactamente la
+        # carrera que los SELECT no podían cerrar. Uno de los índices
+        # únicos de CHANGE-004 rechazó la inserción, y el rollback deshace
+        # la transacción COMPLETA —papeleta, los cinco registros de
+        # deduplicación, el contador y el recuento por opción—, así que no
+        # queda ni media escritura: el voto duplicado no existe en ningún
+        # sitio y el escrutinio no se infla.
+        #
+        # Se devuelve el mismo 409 que habría devuelto el bloqueo 1 si
+        # hubiera llegado a tiempo. Para quien vota, pulsar dos veces se
+        # siente igual que antes; la diferencia es que ahora no hay dos
+        # papeletas.
+        #
+        # No se registra el documento ni el teléfono: solo el id interno y
+        # la consulta.
+        db.rollback()
+        print(f'[cast_vote] CHANGE-004 — voto duplicado rechazado por la base '
+              f'de datos para user={user.id} debate={debate_id}; el voto ya '
+              f'estaba registrado por una petición simultánea')
+        raise HTTPException(409, 'Ya votaste en esta consulta')
     except Exception as e:
         import traceback
         print(f'[cast_vote] DB commit error for user={user.id} debate={debate_id}: {traceback.format_exc()}')
         db.rollback()
         raise HTTPException(500, f'Error al registrar el voto: {type(e).__name__}')
+
+    # CHANGE-005 — el escrutinio que se devuelve al votante se cuenta sobre
+    # las papeletas YA confirmadas, después del commit, no sobre el
+    # diccionario local que se calculó antes.
+    _resp_counts, _resp_total = _derived_tally(debate, db)
+    if _resp_counts is None:
+        _resp_counts, _resp_total = counts, (debate.total_votes or 0)
 
     # Impresión + gasto de campaña al VOTAR — no solo al leer opiniones existentes.
     # Votar es la acción universal (todos lo hacen); escribir opinión es opcional y
@@ -9069,7 +9786,9 @@ def _cast_vote_inner(debate_id: int, data, user, db):
                 cpm_usd  = top.get('cpm') or 6.0
                 cost_credits = cpm_usd / 1000.0
                 cost_clp = max(1, int(round(cost_credits * USD_TO_CLP)))
-                db.add(AdImpressionLog(
+                # CHANGE-006 — se conserva la fila para poder anotarle el
+                # importe realmente asentado; antes se añadía sin referencia.
+                _vote_imp_log = AdImpressionLog(
                     campaign_id = orm.id,
                     debate_id   = debate_id,
                     user_id     = user.id,
@@ -9078,13 +9797,15 @@ def _cast_vote_inner(debate_id: int, data, user, db):
                     age_group   = _get_age_group(user.dob),
                     county      = user.county or '',
                     country     = user.country or '',
-                ))
+                )
+                db.add(_vote_imp_log)
                 db.flush()
                 vote_spend_result = _ledger_spend(
                     db, orm, cost_credits,
                     idempotency_key=f'spend:vote:{user.id}:{debate_id}',
                     source='vote_ad', reference=f'{user.id}:{debate_id}',
-                    description=f'Post-vote impression, debate={debate_id}')
+                    description=f'Post-vote impression, debate={debate_id}',
+                    impression_log_id=_vote_imp_log.id)
                 if not vote_spend_result['ok']:
                     db.rollback()
                     if vote_spend_result['reason'] == 'insufficient_balance':
@@ -9108,8 +9829,12 @@ def _cast_vote_inner(debate_id: int, data, user, db):
         # was anchored on-chain or linking to a block explorer — never
         # infer it from blockchain_tx merely being present.
         'blockchain_anchored': blockchain_anchored,
-        'total_votes': debate.total_votes,
-        'current_results': counts,
+        # CHANGE-005 — lo que se le devuelve al votante también sale de las
+        # papeletas. `counts` era el diccionario local del
+        # leer-modificar-escribir, que bajo concurrencia le mostraba al
+        # votante un resultado al que le faltaban los votos simultáneos.
+        'total_votes': _resp_total,
+        'current_results': _resp_counts,
         'reward_code': reward_code,
         'sponsor_discount_code': sponsor_discount_code,
         'sponsor_name': sponsor_name,
@@ -9947,7 +10672,8 @@ def track_ad_view(data: AdViewInput,
     idem_key = data.idempotency_key  # CHANGE-001 remediation (§2) — required, validated non-blank above; no row-id fallback
     result = _ledger_spend(db, campaign, cost_credits, idempotency_key=idem_key,
                            source='ads_view', reference=str(log.id),
-                           description=f'Impression served, debate={data.debate_id}')
+                           description=f'Impression served, debate={data.debate_id}',
+                           impression_log_id=log.id)
     if not result['ok']:
         db.rollback()   # descarta también el log recién flusheado — no se cobró, no se registra
         if result['reason'] == 'insufficient_balance':
@@ -10034,7 +10760,8 @@ def record_impression(
     idem_key = idempotency_key  # CHANGE-001 remediation (§2) — required, validated non-blank above; no row-id fallback
     result = _ledger_spend(db, _campaign, cost_credits, idempotency_key=idem_key,
                            source='ads_impression', reference=str(log.id),
-                           description=f'Impression served, debate={debate_id}')
+                           description=f'Impression served, debate={debate_id}',
+                           impression_log_id=log.id)
     if not result['ok']:
         db.rollback()
         if result['reason'] == 'insufficient_balance':
@@ -18864,6 +19591,164 @@ def admin_ledger_reconciliation(secret: str, limit: int = 500, db: Session = Dep
     }
 
 
+@app.get('/admin/tally/reconciliation')
+def admin_tally_reconciliation(secret: str, limit: int = 500,
+                               db: Session = Depends(get_db)):
+    """SOLO LECTURA — conciliación del ESCRUTINIO contra las papeletas.
+
+    Equivalente, para los votos, de /admin/ledger/reconciliation. No
+    existía: hasta ahora no había ninguna forma de preguntarle al sistema
+    si el resultado que publica coincide con las papeletas que tiene.
+
+    POR QUÉ HACE FALTA. Ningún resultado que se muestra a un usuario sale
+    de contar papeletas. `format_debate` lee dos valores almacenados:
+    `debates.total_votes` (entero) y `debates.vote_counts` (JSON con el
+    recuento por opción, indexado por el TEXTO de la opción). Los
+    porcentajes son el cociente de esos dos números guardados por separado,
+    así que pueden no sumar 100 si divergen. No hay ningún GROUP BY sobre
+    `debate_votes` en todo el código.
+
+    Esta ruta compara, por consulta, las TRES cifras:
+      1. `total_votes`               — el contador declarado
+      2. COUNT(debate_votes)         — las papeletas que de verdad existen
+      3. SUM(vote_counts.values())   — la suma del recuento por opción
+
+    y además señala:
+      · claves de `vote_counts` que ya no corresponden a ninguna opción
+        actual (quedarían como votos invisibles, porque `format_debate`
+        hace `counts.get(opt, 0)` y devuelve 0 en silencio)
+      · consultas con papeletas pero sin registro en `debate_has_voted`,
+        que es el puente identidad→voto
+      · si la consulta está entre los datos de demostración sembrados,
+        cuya desviación es CONOCIDA y está documentada
+
+    NO REPARA NADA, a propósito. La desviación mayor conocida (37.928 votos
+    fabricados por `seed_demo_data` en las consultas 1-3) no se puede
+    corregir sin exponer las preferencias individuales de las 3 personas
+    que sí votaron en ellas, porque sus votos se sumaron dentro de los
+    mismos cubos ficticios. Cualquier corrección es una decisión con
+    consecuencias de privacidad y requiere autorización explícita y
+    separada.
+    """
+    _check_admin(secret)
+    lim = min(int(limit or 500), 5000)
+
+    hallazgos = []
+    resumen = {'consultas_revisadas': 0, 'cuadradas': 0,
+               'con_desviacion': 0, 'desviacion_total_votos': 0,
+               'datos_demo_sembrados': 0}
+
+    for d in db.query(Debate).order_by(Debate.id.asc()).limit(lim).all():
+        resumen['consultas_revisadas'] += 1
+
+        declarado = int(d.total_votes or 0)
+        papeletas = db.query(func.count(DebateVote.id)).filter(
+            DebateVote.debate_id == d.id).scalar() or 0
+        puente = db.query(func.count(HasVotedLog.id)).filter(
+            HasVotedLog.debate_id == d.id).scalar() or 0
+
+        # `suma_opciones is None` significa "no se pudo leer", que es
+        # distinto de 0 ("se leyó y no hay votos"). R7: lo que no se sabe
+        # no se convierte en un número.
+        counts = {}
+        suma_opciones = None
+        try:
+            leido = json.loads(d.vote_counts or '{}')
+            if isinstance(leido, dict):
+                counts = leido
+                suma_opciones = int(sum(int(v or 0) for v in counts.values()))
+        except Exception:
+            counts = {}
+            suma_opciones = None
+
+        try:
+            opciones = json.loads(d.options or '[]') or []
+        except Exception:
+            opciones = []
+        # Claves del JSON que ya no son ninguna opción: sus votos no se
+        # mostrarían nunca, porque la lectura es counts.get(opcion, 0).
+        huerfanas = sorted(set(counts.keys()) - set(opciones)) if counts else []
+
+        es_demo = _is_seeded_demo_consultation(d)
+        if es_demo:
+            resumen['datos_demo_sembrados'] += 1
+
+        # CHANGE-005 — se distinguen dos cosas que antes se mezclaban:
+        #
+        #   · PUBLICADO: lo que un usuario ve. Desde CHANGE-005 se cuenta
+        #     sobre las papeletas, así que no puede desviarse de ellas por
+        #     construcción. Si aquí aparece una desviación de este tipo, es
+        #     un defecto real y grave.
+        #   · CACHÉ: las columnas heredadas `total_votes` y `vote_counts`.
+        #     Ya no alimentan ningún resultado mostrado. `vote_counts` se
+        #     mantiene con un leer-modificar-escribir que bajo concurrencia
+        #     queda por debajo, y NO se corrige automáticamente: en las
+        #     consultas sembradas contiene los votos reales sumados dentro
+        #     de cubos ficticios, y sobrescribirla destruiría ese registro
+        #     histórico. Su desviación es INFORMATIVA.
+        desviaciones = []       # afectan a lo publicado
+        informativas = []       # solo afectan a la caché heredada
+
+        if declarado != papeletas:
+            informativas.append('cache total_votes != papeletas')
+        if suma_opciones is not None and suma_opciones != papeletas:
+            informativas.append('cache vote_counts != papeletas')
+        if suma_opciones is None:
+            informativas.append('cache vote_counts ilegible')
+        if huerfanas:
+            # Ya no esconde votos —se agrega por option_index, no por
+            # texto— pero sigue siendo señal de que alguien editó opciones.
+            informativas.append('claves de vote_counts sin opcion actual')
+        if papeletas > 0 and puente == 0:
+            # Esto SÍ es grave: papeletas sin el puente identidad→voto
+            # significa que esos votantes no pueden verificar su voto.
+            desviaciones.append('papeletas sin puente identidad->voto')
+        if puente > papeletas:
+            desviaciones.append('mas registros de puente que papeletas')
+
+        if not desviaciones and not informativas:
+            resumen['cuadradas'] += 1
+            continue
+
+        if desviaciones:
+            resumen['con_desviacion'] += 1
+        resumen['desviacion_total_votos'] += abs(declarado - papeletas)
+        hallazgos.append({
+            'debate_id':              d.id,
+            'papeletas_reales':       int(papeletas),
+            'publicado':              int(papeletas),   # derivado: por construcción igual
+            'cache_total_votes':      declarado,
+            'cache_suma_por_opcion':  suma_opciones,
+            'registros_puente':       int(puente),
+            'claves_huerfanas':       huerfanas,
+            'desviaciones':           desviaciones,
+            'informativas':           informativas,
+            'es_dato_demo_sembrado':  es_demo,
+        })
+
+    return {
+        'ok': True,
+        'resumen': resumen,
+        'hallazgos': hallazgos,
+        'garantia_voto_unico': dict(VOTE_UNIQUENESS_STATUS),
+        'nota': ('Diagnóstico de SOLO LECTURA. No corrige nada. `desviaciones` '
+                 'son problemas reales; `informativas` son desajustes de las '
+                 'columnas heredadas de caché, que ya no alimentan ningún '
+                 'resultado mostrado y se dejan intactas a propósito: en las '
+                 'consultas sembradas contienen votos reales sumados dentro de '
+                 'cubos ficticios, y sobrescribirlas destruiría ese registro '
+                 'histórico.'),
+        'origen_del_resultado': (
+            'CHANGE-005 — el escrutinio publicado se cuenta sobre debate_votes '
+            'con un GROUP BY por option_index (ver _derived_tally), no sobre '
+            'debates.total_votes ni debates.vote_counts. Por eso el resultado '
+            'publicado no puede desviarse de las papeletas: no hay nada que '
+            'mantener sincronizado. Antes de CHANGE-005 se leían las columnas '
+            'almacenadas, y 12 votantes simultáneos dejaban el contador en 1 '
+            '(medido en PostgreSQL real).'),
+    }
+
+
 @app.get('/admin/socioeconomic/impact')
 def admin_socioeconomic_impact(secret: str, limit: int = 2000,
                                db: Session = Depends(get_db)):
@@ -19729,11 +20614,22 @@ def pilot_live_dashboard(debate_id: int,
         by_tier[tier] = by_tier.get(tier, 0) + 1
 
     # Votes by option
-    counts = {}
-    try:
-        counts = json.loads(debate.vote_counts or '{}')
-    except Exception:
-        pass
+    #
+    # CHANGE-005 — este panel era INTERNAMENTE INCONSISTENTE: `total_votes`
+    # salía de contar las papeletas (`len(votes)`, arriba) mientras el
+    # desglose por opción salía del JSON almacenado. En las consultas con
+    # datos de demostración sembrados eso mostraba a una marca unos 2 votos
+    # totales junto a un desglose de 11.166. Ahora ambas cifras se cuentan
+    # sobre las mismas papeletas.
+    counts, _derivado_total = _derived_tally(debate, db)
+    if counts is None:
+        counts = {}
+        try:
+            counts = json.loads(debate.vote_counts or '{}')
+        except Exception:
+            pass
+    else:
+        total_votes = _derivado_total
 
     # Reward codes claimed
     total_codes = db.query(DebateRewardCode).filter(DebateRewardCode.debate_id == debate_id).count()

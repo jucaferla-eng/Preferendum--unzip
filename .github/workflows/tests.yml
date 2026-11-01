@@ -1,0 +1,82 @@
+name: pruebas
+
+# Ejecuta la suite completa en cada push y cada pull request. Antes de esto
+# no existía integración continua, y por eso 467 pruebas estuvieron un mes
+# sin ejecutarse sin que nadie lo notara.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Instalar dependencias fijadas
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          # web3 puede subir pydantic a 2.x por dependencia transitiva
+          pip install "pydantic==1.10.13"
+      - name: Ejecutar suites Python
+        env:
+          # Base temporal y secretos de prueba. NUNCA credenciales reales:
+          # la CI no necesita acceso a producción para nada.
+          DATABASE_URL: sqlite:///./ci_test.db
+          ADMIN_SECRET: solo-ci
+          JWT_SECRET: solo-ci
+          PYTHONNOUSERSITE: '1'
+          PYTHONPATH: .
+        run: |
+          fallos=0
+          for t in test_eligibility test_socioeconomic test_socioeconomic_wiring \
+                   test_socioeconomic_estimator_remediation test_ledger test_ledger_wiring \
+                   test_matching_wiring test_matching_diagnostics \
+                   test_global_occupation_resolution test_i18n_hardening \
+                   test_i18n_remediation test_jc_demo_account \
+                   test_production_readiness_fixes test_integration_http \
+                   test_e2e_commercial; do
+            echo "::group::$t"
+            if python -m unittest "$t"; then echo "$t OK"; else echo "$t FALLÓ"; fallos=1; fi
+            echo "::endgroup::"
+          done
+          exit $fallos
+
+  javascript:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Ejecutar suites JS
+        run: |
+          fallos=0
+          for f in test_prefy.mjs test_prefy_motion.mjs test_prefy_voice.mjs \
+                   test_prefy_portal_wiring.mjs test_lang_resolver.mjs \
+                   test_app_native_i18n.mjs test_cross_system_language_consistency.mjs \
+                   test_voter_portal_i18n.mjs test_prefy_complete_coverage.mjs; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"
+            if node "$f"; then echo "$f OK"; else echo "$f FALLÓ"; fallos=1; fi
+            echo "::endgroup::"
+          done
+          exit $fallos
+
+  auditoria:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Inventario de rutas, pruebas y trabajo pendiente
+        run: python tools/audit_inventory.py

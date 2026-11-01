@@ -1,0 +1,28 @@
+# Dependencias de DESARROLLO y PRUEBAS de Preferendum.
+#
+# Por qué existe este archivo: requirements.txt fija lo que necesita
+# producción, pero NO basta para ejecutar la suite. Los tres pines de abajo
+# marcados como "crítico" son los que hacen la diferencia entre que corran
+# 981 pruebas o que fallen 467 con un ImportError engañoso.
+#
+# Uso:  make setup && make test
+#       (o bien: tools/run_all_tests.sh)
+
+-r requirements.txt
+
+# ── crítico: sin estos pines la suite NO arranca ────────────────────────
+# fastapi 0.95.2 exige pydantic 1.x. Si el entorno trae pydantic 2.x,
+# `import fastapi` falla con "cannot import name 'Undefined'" y se cae
+# cualquier suite que importe main.py.
+pydantic==1.10.13
+# starlette 0.27 pasa `app=` a httpx.Client; httpx >=0.25 lo rechaza, así
+# que TestClient deja de construirse ("unexpected keyword argument 'app'").
+httpx==0.24.1
+# web3 6.11.1 con eth-utils moderno arrastra pydantic 2 por dependencia
+# transitiva y rompe el pin de arriba.
+eth-utils==2.3.1
+eth-keys<0.5
+
+# ── utilidades de prueba ────────────────────────────────────────────────
+pytest>=7.4
+cbor2==5.6.3

@@ -8,3 +8,7 @@ __pycache__/
 # binaries, not yet approved for commit/push/deploy). Only used as the
 # dev-fallback storage backend when PREFY_MEDIA_BASE_URL is unset.
 assets/prefy-media/
+
+# entorno de pruebas local (make setup)
+.venv-test/
+ci_test.db

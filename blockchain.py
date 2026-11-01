@@ -15,6 +15,7 @@ En memoria de Jose Ignacio Fernandez (1989-2024)
 
 import os
 import hashlib
+import time
 import json
 from typing import Optional
 
@@ -130,17 +131,62 @@ class PreferendumBlockchain:
         self.contract         = None
         self._initialized     = False  # lazy: connect on first use, not at import
         self._init_attempts   = 0      # cap retries at 3
+        # Momento en que se agotaron los intentos. Permite reintentar mas
+        # tarde en vez de quedarse en modo simulado para siempre (ver
+        # _ensure_init: esa era la causa de la intermitencia del anclaje).
+        self._gave_up_at      = 0.0
         self.contract_address = (os.getenv('CONTRACT_ADDRESS') or '').strip()
         self.wallet_address   = (os.getenv('WALLET_ADDRESS') or '').strip()
         self.private_key      = (os.getenv('WALLET_PRIVATE_KEY') or self._read_secret('WALLET_PRIVATE_KEY') or '').strip()
         self.rpc_url          = (os.getenv('POLYGON_RPC_URL') or 'https://1rpc.io/matic').strip()
 
+    # CAUSA DE LA INTERMITENCIA — ver _ensure_init.
+    # Tiempo que se espera antes de volver a intentar la conexion despues de
+    # agotar los intentos. Acota el coste: como el anclaje ocurre dentro del
+    # camino de voto, cada reintento puede costarle a UN votante hasta la
+    # suma de los timeouts de los RPC candidatos. Con esta espera, ese coste
+    # lo paga como maximo un voto cada cinco minutos, en vez de dejar el
+    # anclaje muerto hasta el siguiente despliegue.
+    _REINTENTO_CONEXION_SEGUNDOS = 300
+
     def _ensure_init(self):
-        """Connect to Polygon on first use. Retries up to 3 times on transient failures."""
+        """Connect to Polygon on first use, and keep trying later if it failed.
+
+        DEFECTO CORREGIDO — ESTA ERA LA CAUSA DE LA INTERMITENCIA.
+
+        Antes, tras tres intentos fallidos se hacia `self._initialized = True`
+        y se devolvia para siempre sin volver a intentarlo:
+
+            if not self.live and self._init_attempts < 3:
+                pass          # Will retry on next request
+            else:
+                self._initialized = True   # Either connected or gave up
+
+        El comentario decia "gave up", y era literal: ese proceso web se
+        quedaba en modo SIMULADO durante toda su vida. Si al arrancar —o en
+        los tres primeros votos— los RPC publicos estaban caidos, saturados
+        o limitando peticiones, todos los votos servidos por ese proceso
+        recibian un hash simulado, hasta el siguiente reinicio o despliegue.
+
+        Eso explica exactamente el patron medido en produccion: tramos
+        CONTIGUOS de votos simulados y tramos contiguos de votos reales
+        (mayo simulados, julio reales, agosto simulados, octubre reales).
+        No era aleatorio por voto: era por vida de proceso.
+
+        Correccion minima: no se abandona para siempre. Se mantiene el tope
+        de tres intentos seguidos, pero pasado el tiempo de espera se
+        permite otra tanda. No se anade ningun mecanismo nuevo: solo deja de
+        recordar un fallo transitorio como si fuera permanente.
+        """
         if self.live:
             return  # Already connected — fast path
+        ahora = time.time()
         if self._initialized:
-            return  # Gave up after max retries
+            if ahora - self._gave_up_at < self._REINTENTO_CONEXION_SEGUNDOS:
+                return  # dentro de la espera: no se reintenta todavia
+            # Se reabre la ventana de intentos.
+            self._initialized   = False
+            self._init_attempts = 0
         self._init_attempts += 1
         try:
             self._init()
@@ -149,7 +195,13 @@ class PreferendumBlockchain:
         if not self.live and self._init_attempts < 3:
             pass  # Will retry on next request
         else:
-            self._initialized = True  # Either connected or gave up
+            self._initialized = True
+            if not self.live:
+                self._gave_up_at = ahora
+                print(f'[Blockchain] sin conexion tras {self._init_attempts} '
+                      f'intentos; se reintentara en '
+                      f'{self._REINTENTO_CONEXION_SEGUNDOS}s. Mientras tanto '
+                      f'los votos se registran SIN anclaje (y se informa asi).')
 
     @staticmethod
     def _read_secret(name: str) -> str:
@@ -226,7 +278,31 @@ class PreferendumBlockchain:
         return 137
 
     def _send_transaction(self, func) -> Optional[str]:
-        """Sign and send a transaction to Polygon. Waits for receipt."""
+        """Sign and send a transaction to Polygon. Waits for the receipt and
+        only returns a hash if the transaction was MINED AND SUCCEEDED.
+
+        DEFECTO CORREGIDO — antes el resultado del recibo se descartaba:
+
+            try:
+                w3.eth.wait_for_transaction_receipt(tx_hash, timeout=30)
+            except Exception:
+                pass
+            return tx_hash.hex()
+
+        Eso devolvia el hash como exito en dos casos en los que el voto NO
+        quedaba anclado:
+
+          1. La espera agota los 30 s (red lenta, bloque no minado todavia).
+             El `except ... pass` lo tragaba y devolvia el hash igual.
+          2. La transaccion se mina pero REVIERTE (`status == 0`): por
+             ejemplo si la consulta no esta abierta en el contrato o el
+             codigo ya existe. El hash EXISTE en la cadena —de hecho
+             `eth_getTransactionByHash` lo encuentra— pero el anclaje
+             fracaso. El recibo nunca se miraba.
+
+        Ahora el recibo decide: sin recibo o con `status != 1` no hay
+        anclaje, y quien llama se entera.
+        """
         try:
             w3 = self.web3
             wallet = w3.to_checksum_address(self.wallet_address)
@@ -248,11 +324,19 @@ class PreferendumBlockchain:
             # web3.py v5 uses rawTransaction, v6 uses raw_transaction
             raw_tx = getattr(signed, 'raw_transaction', None) or getattr(signed, 'rawTransaction', None)
             tx_hash = w3.eth.send_raw_transaction(raw_tx)
-            # Wait up to 30s for receipt so next tx uses correct nonce
             try:
-                w3.eth.wait_for_transaction_receipt(tx_hash, timeout=30)
-            except Exception:
-                pass
+                receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=30)
+            except Exception as wait_err:
+                # El hash se envio, pero no hay confirmacion. Puede minarse
+                # despues; lo que NO se puede hacer es declararlo anclado.
+                print(f'[Blockchain] sin recibo para {tx_hash.hex()} '
+                      f'({type(wait_err).__name__}): NO se declara anclado')
+                return None
+            estado = receipt.get('status') if isinstance(receipt, dict) else getattr(receipt, 'status', None)
+            if estado != 1:
+                print(f'[Blockchain] transaccion {tx_hash.hex()} minada pero '
+                      f'REVERTIDA (status={estado}): NO se declara anclado')
+                return None
             return tx_hash.hex()
 
         except Exception as e:
@@ -294,12 +378,25 @@ class PreferendumBlockchain:
                     debate_title: str = '') -> dict:
         self._ensure_init()
         if not self.live:
-            tx_hash = self._mock_tx(vote_hash)
-            return {'tx_hash': tx_hash, 'live': False, 'success': True}
+            # DEFECTO CORREGIDO — esta rama devolvia `success: True` con un
+            # hash SIMULADO. main.py calcula `blockchain_anchored = success
+            # AND live`, asi que la columna quedaba bien por casualidad,
+            # pero el contrato de la funcion mentia: cualquier otro sitio
+            # que mirase `success` daria por anclado un voto que no lo esta.
+            # Un hash simulado NUNCA es exito de anclaje.
+            return {'tx_hash': self._mock_tx(vote_hash), 'live': False,
+                    'success': False, 'reason': 'sin conexion a Polygon'}
 
         try:
-            # Auto-open debate on-chain the first time a vote is cast
-            self._ensure_debate_open(debate_id, debate_title)
+            # DEFECTO CORREGIDO — el resultado de abrir la consulta en el
+            # contrato se IGNORABA. Si no se puede abrir, `anchorVote`
+            # revierte: se gastaba gas real en una transaccion condenada y
+            # ademas se devolvia su hash, que existe en la cadena pero NO
+            # ancla nada. Ahora, si no se puede abrir, no se envia.
+            if not self._ensure_debate_open(debate_id, debate_title):
+                return {'tx_hash': self._mock_tx(vote_hash), 'live': False,
+                        'success': False,
+                        'reason': 'la consulta no esta abierta en el contrato'}
 
             hash_bytes = bytes.fromhex(vote_hash)
             func = self.contract.functions.anchorVote(debate_id, hash_bytes, vcode)
@@ -307,11 +404,15 @@ class PreferendumBlockchain:
 
             if tx_hash:
                 return {'tx_hash': tx_hash, 'live': True, 'success': True}
-            return {'tx_hash': self._mock_tx(vote_hash), 'live': False, 'success': False}
+            # Sin recibo, o minada y revertida: no hay anclaje.
+            return {'tx_hash': self._mock_tx(vote_hash), 'live': False,
+                    'success': False,
+                    'reason': 'la transaccion no se confirmo en la cadena'}
 
         except Exception as e:
             print(f'[Blockchain] anchor_vote error: {e}')
-            return {'tx_hash': self._mock_tx(vote_hash), 'live': False, 'success': False}
+            return {'tx_hash': self._mock_tx(vote_hash), 'live': False,
+                    'success': False, 'reason': f'error: {type(e).__name__}'}
 
     def anchor_vote_batch(self, debate_id: int, votes: list) -> dict:
         """
@@ -356,7 +457,13 @@ class PreferendumBlockchain:
         try:
             func = self.contract.functions.openDebate(debate_id, title, institution)
             tx_hash = self._send_transaction(func)
-            return {'tx_hash': tx_hash, 'live': True}
+            # DEFECTO CORREGIDO — declaraba `live: True` incluso cuando
+            # _send_transaction devolvia None, es decir cuando la
+            # transaccion no se confirmo. `live` tiene que reflejar lo que
+            # de verdad paso en la cadena.
+            if tx_hash:
+                return {'tx_hash': tx_hash, 'live': True}
+            return {'tx_hash': self._mock_tx(f'open-{debate_id}'), 'live': False}
         except Exception as e:
             print(f'[Blockchain] open_debate error: {e}')
             return {'tx_hash': self._mock_tx(f'open-{debate_id}'), 'live': False}
@@ -370,7 +477,13 @@ class PreferendumBlockchain:
         try:
             func = self.contract.functions.closeDebate(debate_id)
             tx_hash = self._send_transaction(func)
-            return {'tx_hash': tx_hash, 'live': True}
+            # DEFECTO CORREGIDO — declaraba `live: True` incluso cuando
+            # _send_transaction devolvia None, es decir cuando la
+            # transaccion no se confirmo. `live` tiene que reflejar lo que
+            # de verdad paso en la cadena.
+            if tx_hash:
+                return {'tx_hash': tx_hash, 'live': True}
+            return {'tx_hash': self._mock_tx(f'close-{debate_id}'), 'live': False}
         except Exception as e:
             print(f'[Blockchain] close_debate error: {e}')
             return {'tx_hash': self._mock_tx(f'close-{debate_id}'), 'live': False}

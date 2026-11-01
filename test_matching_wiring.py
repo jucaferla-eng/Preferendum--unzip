@@ -430,7 +430,10 @@ class TestPersistence(unittest.TestCase):
         self.fail('User model not found')
 
     def test_hnw_score_is_persisted_by_tier_assignment(self):
-        body = _src_of(_function('_assign_user_tier'))
+        # P0.6 — the persisting body was renamed `_assign_user_tier_persist`;
+        # `_assign_user_tier` is now the wrapper that opens and closes the
+        # isolated reference-read session. The UPDATE itself is unchanged.
+        body = _src_of(_function('_assign_user_tier_persist'))
         self.assertIn('hnw_score=:hnw', body)
 
     def test_hnw_behaviour_signal_uses_the_real_column(self):

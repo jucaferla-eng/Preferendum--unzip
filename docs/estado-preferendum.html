@@ -1,0 +1,694 @@
+<title>Qué está comprobado en Preferendum</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;0,700;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --paper:#EEF1F4;
+  --surface:#FFFFFF;
+  --surface-2:#F6F8FA;
+  --ink:#16202B;
+  --ink-soft:#33414F;
+  --muted:#5C6977;
+  --hair:#D5DBE2;
+  --hair-soft:#E4E9EE;
+  --accent:#17457A;
+  --ok:#0E6B52;
+  --ok-bg:#E3F0EB;
+  --risk:#8E5209;
+  --risk-bg:#F7EBDA;
+  --todo:#4F5C6B;
+  --todo-bg:#E7EBEF;
+  --crit:#8C2F2F;
+  --crit-bg:#F7E6E4;
+
+  --serif:'Spectral',Georgia,'Times New Roman',serif;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'IBM Plex Mono','SF Mono',Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#10161C;
+    --surface:#171F27;
+    --surface-2:#1C252E;
+    --ink:#E6EBF0;
+    --ink-soft:#C2CCD6;
+    --muted:#8F9CA9;
+    --hair:#2C3842;
+    --hair-soft:#232D36;
+    --accent:#8AB4E0;
+    --ok:#6FC9AA;
+    --ok-bg:#15302A;
+    --risk:#DCA35C;
+    --risk-bg:#322615;
+    --todo:#9FACB9;
+    --todo-bg:#212A33;
+    --crit:#E29390;
+    --crit-bg:#331E1D;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#10161C;
+  --surface:#171F27;
+  --surface-2:#1C252E;
+  --ink:#E6EBF0;
+  --ink-soft:#C2CCD6;
+  --muted:#8F9CA9;
+  --hair:#2C3842;
+  --hair-soft:#232D36;
+  --accent:#8AB4E0;
+  --ok:#6FC9AA;
+  --ok-bg:#15302A;
+  --risk:#DCA35C;
+  --risk-bg:#322615;
+  --todo:#9FACB9;
+  --todo-bg:#212A33;
+  --crit:#E29390;
+  --crit-bg:#331E1D;
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:16px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:980px;margin:0 auto;padding:0 24px 96px}
+
+/* ── cabecera ───────────────────────────────────────────── */
+header{padding:56px 0 34px;border-bottom:2px solid var(--ink)}
+.eyebrow{
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted);margin:0 0 18px;
+}
+h1{
+  font-family:var(--serif);font-weight:700;
+  font-size:clamp(2.1rem,5.2vw,3.5rem);line-height:1.04;
+  letter-spacing:-.018em;margin:0;text-wrap:balance;
+}
+.standfirst{
+  font-family:var(--serif);font-size:clamp(1.05rem,2.1vw,1.28rem);
+  line-height:1.5;color:var(--ink-soft);margin:22px 0 0;max-width:60ch;
+}
+
+/* ── aviso ──────────────────────────────────────────────── */
+.caveat{
+  margin:30px 0 0;padding:20px 22px;
+  background:var(--crit-bg);
+  border-left:4px solid var(--crit);
+  border-radius:0 4px 4px 0;
+}
+.caveat p{margin:0;font-size:15.2px;line-height:1.56;color:var(--ink)}
+.caveat strong{color:var(--crit)}
+
+/* ── cifras ─────────────────────────────────────────────── */
+.figures{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+  gap:1px;background:var(--hair);
+  margin:40px 0 0;border:1px solid var(--hair);
+}
+.fig{background:var(--surface);padding:20px 18px}
+.fig b{
+  display:block;font-family:var(--mono);font-weight:500;
+  font-size:clamp(1.5rem,3.4vw,1.95rem);line-height:1.1;
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em;
+}
+.fig span{display:block;margin-top:7px;font-size:12.8px;color:var(--muted);line-height:1.4}
+
+/* ── leyenda de estados ─────────────────────────────────── */
+.legend{margin:44px 0 0;padding:22px;background:var(--surface-2);border:1px solid var(--hair-soft)}
+.legend h2{font-family:var(--sans);font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);margin:0 0 16px;font-weight:600}
+.legend dl{margin:0;display:grid;gap:12px}
+.legend div{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start}
+.legend dd{margin:0;font-size:14.4px;color:var(--ink-soft);line-height:1.5}
+
+.chip{
+  display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:500;
+  letter-spacing:.07em;text-transform:uppercase;padding:4px 9px;
+  white-space:nowrap;border-radius:3px;
+}
+.chip.ok{background:var(--ok-bg);color:var(--ok)}
+.chip.risk{background:var(--risk-bg);color:var(--risk)}
+.chip.todo{background:var(--todo-bg);color:var(--todo)}
+.chip.crit{background:var(--crit-bg);color:var(--crit)}
+
+/* ── secciones ──────────────────────────────────────────── */
+section{margin:62px 0 0}
+.snum{
+  font-family:var(--mono);font-size:11.5px;color:var(--accent);
+  letter-spacing:.1em;display:block;margin-bottom:9px;
+}
+h2.sh{
+  font-family:var(--serif);font-weight:600;
+  font-size:clamp(1.55rem,3.3vw,2.1rem);line-height:1.14;
+  letter-spacing:-.012em;margin:0 0 6px;text-wrap:balance;
+  padding-bottom:12px;border-bottom:1px solid var(--hair);
+}
+.lede{margin:16px 0 0;max-width:68ch;color:var(--ink-soft);font-size:15.6px}
+section p{max-width:68ch}
+h3{
+  font-family:var(--sans);font-weight:600;font-size:16.5px;
+  margin:34px 0 10px;letter-spacing:-.005em;
+}
+
+/* ── hallazgos ──────────────────────────────────────────── */
+.items{margin:22px 0 0;display:grid;gap:1px;background:var(--hair-soft);border:1px solid var(--hair-soft)}
+.item{background:var(--surface);padding:18px 20px;border-left:3px solid transparent}
+.item.ok{border-left-color:var(--ok)}
+.item.risk{border-left-color:var(--risk)}
+.item.todo{border-left-color:var(--todo)}
+.item.crit{border-left-color:var(--crit)}
+.item-head{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin-bottom:8px}
+.item-head h4{font-family:var(--sans);font-weight:600;font-size:15.4px;margin:0;letter-spacing:-.005em}
+.item p{margin:0;font-size:14.5px;color:var(--ink-soft);line-height:1.58;max-width:70ch}
+.item p + p{margin-top:9px}
+
+/* ── tablas ─────────────────────────────────────────────── */
+.tscroll{overflow-x:auto;margin:24px 0 0;border:1px solid var(--hair)}
+table{border-collapse:collapse;width:100%;min-width:480px;background:var(--surface);font-size:14.3px}
+caption{
+  text-align:left;padding:13px 16px;background:var(--surface-2);
+  font-size:12.6px;color:var(--muted);border-bottom:1px solid var(--hair);
+}
+th,td{padding:11px 16px;text-align:left;border-bottom:1px solid var(--hair-soft)}
+th{
+  font-family:var(--sans);font-weight:600;font-size:11.8px;
+  letter-spacing:.07em;text-transform:uppercase;color:var(--muted);
+  background:var(--surface-2);
+}
+tbody tr:last-child td{border-bottom:none}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.was{color:var(--crit)}
+td.now{color:var(--ok)}
+code{
+  font-family:var(--mono);font-size:.88em;
+  background:var(--surface-2);padding:1.5px 5px;border-radius:3px;
+  color:var(--ink);border:1px solid var(--hair-soft);
+}
+
+/* ── cita / nota ────────────────────────────────────────── */
+.note{
+  margin:26px 0 0;padding:17px 20px;background:var(--surface);
+  border-left:3px solid var(--accent);font-size:14.6px;color:var(--ink-soft);
+  max-width:72ch;
+}
+.note strong{color:var(--ink)}
+
+footer{
+  margin:76px 0 0;padding:28px 0 0;border-top:2px solid var(--ink);
+  font-size:14px;color:var(--muted);max-width:72ch;
+}
+footer p{max-width:72ch}
+footer .sig{font-family:var(--mono);font-size:11.8px;letter-spacing:.06em;margin-top:20px;color:var(--muted)}
+
+@media (max-width:620px){
+  header{padding-top:38px}
+  .wrap{padding:0 17px 68px}
+  .legend div{grid-template-columns:1fr;gap:6px}
+}
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">Preferendum · estado de la plataforma · 31 octubre 2026</p>
+  <h1>Qué está comprobado en Preferendum</h1>
+  <p class="standfirst">Tres niveles de certeza, separados a propósito: lo que está
+  medido y verificado, lo que es un riesgo abierto, y lo que todavía no existe.</p>
+
+  <div class="caveat">
+    <p><strong>Esta plataforma NO está completamente auditada ni lista para
+    producción.</strong> Persisten riesgos críticos abiertos, listados en la
+    sección 5. Este documento existe para que esa distinción sea imposible de
+    perder: un conjunto de pruebas en verde no es un certificado de
+    producción, y nada de lo que sigue debe leerse como tal.</p>
+  </div>
+
+  <div class="figures">
+    <div class="fig"><b>1.124</b><span>pruebas Python ejecutándose, todas en suites verdes</span></div>
+    <div class="fig"><b>9</b><span>pruebas de concurrencia sobre PostgreSQL real</span></div>
+    <div class="fig"><b>15.936</b><span>aserciones JavaScript en verde</span></div>
+    <div class="fig"><b>17</b><span>módulos recorridos de principio a fin</span></div>
+  </div>
+</header>
+
+<div class="legend">
+  <h2>Cómo leer este documento</h2>
+  <dl>
+    <div><dt><span class="chip ok">Comprobado</span></dt>
+      <dd>Medido con una prueba que se ejecuta y que falla si el comportamiento
+      cambia. Se indica <em>cómo</em> se midió. Un HTTP 200 no cuenta como
+      prueba de funcionamiento.</dd></div>
+    <div><dt><span class="chip risk">Riesgo abierto</span></dt>
+      <dd>Defecto o limitación real, identificada y medida, todavía sin
+      corregir. Está documentada porque decidirla corresponde al negocio, o
+      porque corregirla exige una autorización que no se ha dado.</dd></div>
+    <div><dt><span class="chip todo">Pendiente</span></dt>
+      <dd>No existe todavía. No es un defecto: es trabajo que falta, dicho sin
+      adornos para que no se confunda con algo que ya está.</dd></div>
+  </dl>
+</div>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<section>
+  <span class="snum">01</span>
+  <h2 class="sh">Integridad del voto</h2>
+  <p class="lede">La pregunta es si una persona puede votar dos veces. Hasta
+  esta semana la respuesta era sí, y no hacía falta ningún ataque elaborado:
+  bastaba pulsar dos veces.</p>
+
+  <p>El doble voto se impedía con cinco consultas previas —cuenta, teléfono,
+  documento, aparato, serie del documento— y <strong>ninguna restricción en la
+  base de datos</strong>. Es el patrón comprobar-y-después-insertar sin respaldo
+  del motor: dos peticiones simultáneas ejecutan sus comprobaciones antes de que
+  ninguna haya insertado, las dos pasan, y las dos insertan.</p>
+
+  <div class="tscroll">
+    <table>
+      <caption>Medido sobre PostgreSQL 16.15 real. SQLite no sirve para esto: serializa
+      las escrituras con un candado de fichero, así que una prueba de concurrencia
+      ejecutada ahí daría verde sin haber probado nada.</caption>
+      <thead><tr><th>Escenario</th><th>Antes</th><th>Ahora</th></tr></thead>
+      <tbody>
+        <tr><td>16 procesos simultáneos, misma identidad</td>
+            <td class="n was">16 registros</td><td class="n now">1 registro</td></tr>
+        <tr><td>8 peticiones simultáneas, misma cuenta</td>
+            <td class="n was">8 papeletas</td><td class="n now">1 papeleta + 7 × HTTP 409</td></tr>
+        <tr><td>Misma persona, dos cuentas, simultáneas</td>
+            <td class="n was">2 papeletas</td><td class="n now">1 papeleta</td></tr>
+        <tr><td>12 personas <em>distintas</em> simultáneas</td>
+            <td class="n was">12 papeletas, contador 1</td><td class="n now">12 papeletas, contador 12</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Dónde va la restricción, y por qué no en la papeleta</h3>
+  <p>La unicidad hay que imponerla sobre la identidad, y la papeleta no la
+  tiene: su campo de votante se escribe siempre vacío a propósito, y eso es la
+  separación entre identidad y preferencia. Añadir el votante a la papeleta para
+  poder restringirla destruiría justo lo que protege el voto secreto.</p>
+
+  <p>La restricción va en las cinco tablas de deduplicación, que sí contienen la
+  identidad —hasheada— y <strong>no contienen la opción votada</strong>. Así se
+  garantiza «una persona, un voto» sin crear en ningún sitio un vínculo público
+  entre quién eres y qué votaste.</p>
+
+  <div class="items">
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>Un voto por persona y consulta, garantizado por la base de datos</h4></div>
+      <p>Cinco índices únicos. Los dos que garantizan el principio son
+      <em>(consulta, documento)</em> —una persona, aunque abra varias cuentas— y
+      <em>(consulta, cuenta)</em>, aplicable siempre, incluso sin documento.</p>
+      <p>Medido con 16 procesos del sistema operativo, cada uno con su propia
+      conexión, liberados por una barrera común: exactamente uno inserta, y los
+      quince restantes fallan <em>por la restricción</em>, no por otra causa.</p>
+    </div>
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>Un fallo del sistema no consume el derecho a voto</h4></div>
+      <p>Con un fallo inyectado a mitad de la transacción no queda ni media
+      escritura —ni papeleta, ni registro de deduplicación, ni contador— y la
+      persona puede votar después.</p>
+    </div>
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>El reintento es indistinguible de antes para quien vota</h4></div>
+      <p>Pulsar dos veces devuelve el mismo HTTP 409 de siempre. La diferencia
+      es que ahora no hay dos papeletas.</p>
+    </div>
+    <div class="item risk">
+      <div class="item-head"><span class="chip risk">Riesgo abierto</span>
+        <h4>Si producción ya tiene duplicados, la garantía no se activa sola</h4></div>
+      <p>Un duplicado preexistente —de una carrera pasada— impediría crear el
+      índice. La migración <strong>no borra nada</strong>: lo detecta, deja el
+      índice sin crear y lo publica. Corregir un duplicado histórico es una
+      decisión sobre votos reales de personas reales.</p>
+      <p>Por eso hay que comprobar el campo <code>garantia_voto_unico</code>
+      después de desplegar. Si alguna de las cinco dimensiones no dice
+      <code>ACTIVO</code>, la garantía no está puesta para ella.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<section>
+  <span class="snum">02</span>
+  <h2 class="sh">Integridad del escrutinio</h2>
+  <p class="lede">Al medir la concurrencia apareció un segundo defecto, peor que
+  el primero: no solo se podía votar dos veces, también <strong>se perdían votos
+  legítimos del resultado publicado</strong>.</p>
+
+  <p>Ningún resultado mostrado a un usuario salía de contar papeletas. Se leían
+  dos valores almacenados —un contador entero y un JSON con el recuento por
+  opción— que el voto mantenía leyendo, sumando en memoria y escribiendo. Con
+  doce votantes simultáneos, las doce transacciones leyeron 0, sumaron 1 y
+  escribieron 1: <strong>doce papeletas en la base y el contador en uno</strong>.
+  Once votos legítimos desaparecidos, en silencio, sin que ninguna comprobación
+  lo notara.</p>
+
+  <div class="items">
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>El resultado publicado se cuenta sobre las papeletas</h4></div>
+      <p>El recuento se deriva de la tabla de papeletas con una agregación por
+      índice de opción: la única fuente que no puede desincronizarse de sí misma.
+      No hay nada que mantener ni que reparar después.</p>
+      <p>Se aplica en los tres sitios que publican resultados, incluido el panel
+      de marca, que era internamente inconsistente: su total contaba papeletas
+      mientras su desglose leía el JSON, mostrando a un anunciante unos 2 votos
+      totales junto a un desglose de 11.166.</p>
+    </div>
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>Agregar por índice elimina los votos invisibles</h4></div>
+      <p>El JSON estaba indexado por el <em>texto</em> de la opción. Editar ese
+      texto dejaba la clave huérfana y sus votos devolvían cero en silencio.
+      Agregando por índice, un texto editado ya no puede esconder votos.</p>
+    </div>
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>Nada histórico se reescribe</h4></div>
+      <p>No se toca ninguna papeleta, ningún código de verificación ni la
+      consulta 819. Solo cambia <em>de dónde se lee</em> el resultado. Es una
+      agregación, así que nunca expone la opción de una persona concreta, y las
+      reglas de visibilidad de consultas restringidas se aplican después, igual
+      que antes.</p>
+    </div>
+    <div class="item risk">
+      <div class="item-head"><span class="chip risk">Riesgo abierto</span>
+        <h4>37.928 votos fabricados siguen en la base</h4></div>
+      <p>Un sembrado de demostración se ejecutó una vez en producción e insertó
+      tres consultas con contadores fabricados y cero papeletas. Después, tres
+      personas votaron de verdad en ellas, y sus votos quedaron sumados
+      <em>dentro</em> de los cubos ficticios: ya no son separables.</p>
+      <p>Desde la corrección esa desviación <strong>ya no miente a nadie</strong>,
+      porque el resultado publicado se cuenta sobre las papeletas. Pero los
+      números fabricados siguen en las columnas de caché, y limpiarlos expondría
+      las preferencias individuales de esas tres personas. Es una decisión de
+      privacidad, no una tarea técnica.</p>
+    </div>
+    <div class="item risk">
+      <div class="item-head"><span class="chip risk">Riesgo abierto</span>
+        <h4>El código de verificación no se comprueba contra la cadena</h4></div>
+      <p>El código que recibe el votante se resuelve <strong>contra la base de
+      datos</strong>, no contra la blockchain. La función que consultaría la
+      cadena existe y no se llama desde ningún sitio.</p>
+      <p>El campo que declara si un voto quedó anclado se calcula con honestidad
+      —exige que el anclaje haya sido real y en vivo, nunca lo asume— pero la
+      verificación que se le ofrece al votante es una consulta a la base, con la
+      confianza que eso implica.</p>
+    </div>
+    <div class="item todo">
+      <div class="item-head"><span class="chip todo">Pendiente</span>
+        <h4>Verificabilidad criptográfica de extremo a extremo</h4></div>
+      <p>Garantizar un voto por persona no es lo mismo que que un tercero pueda
+      verificar el escrutinio sin confiar en el servidor. Las tres propiedades
+      —emitido según intención, registrado como emitido, contado como
+      registrado— siguen sin implementar. Hay un diseño escrito; no hay código.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<section>
+  <span class="snum">03</span>
+  <h2 class="sh">Conciliación financiera</h2>
+  <p class="lede">Una sola impresión cobrada produce hoy tres números distintos.
+  Los tres están medidos; ninguno se ha cambiado, porque decidir cuál es el
+  correcto es una decisión comercial.</p>
+
+  <div class="tscroll">
+    <table>
+      <caption>Precio por impresión con la configuración actual. El libro canónico
+      es el ledger, y es el que dice 19.</caption>
+      <thead><tr><th>Representación</th><th>Valor</th><th>De dónde sale</th></tr></thead>
+      <tbody>
+        <tr><td>Registro de impresión</td><td class="n">20 CLP</td><td>constante de coste por vista</td></tr>
+        <tr><td>Espejo de gasto de la campaña</td><td class="n">20 CLP</td><td>del importe <em>pedido</em></td></tr>
+        <tr><td><strong>Ledger canónico</strong></td><td class="n">19 CLP</td><td>del importe <em>posteado</em>, al céntimo</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>El precio real es 0,0210526… créditos, y el ledger lleva los importes al
+  céntimo, así que postea 0,02. El espejo, en cambio, multiplica el importe
+  <em>pedido</em>, no el <em>asentado</em>: por eso dice 20 donde el libro dice
+  19. <strong>No es un espejo; refleja la petición.</strong></p>
+
+  <div class="note">
+    <p><strong>Brecha: 1 CLP por impresión, el 5,26 %.</strong> A un millón de
+    impresiones, un millón de pesos. Importa por dos razones concretas: la puerta
+    de entrega compara presupuesto contra ese espejo inflado, así que una campaña
+    <em>deja de entregarse antes de haber gastado su presupuesto</em> según el
+    libro canónico; y cualquier factura construida sobre él cobraría de más.</p>
+  </div>
+
+  <div class="items">
+    <div class="item risk">
+      <div class="item-head"><span class="chip risk">Riesgo abierto</span>
+        <h4>El recálculo administrativo usa el precio de hoy, no lo cobrado</h4></div>
+      <p>La herramienta de reparación recalcula el gasto como impresiones × el
+      CPM vigente, derivado de datos de mercado que cambian. Medido: tres
+      impresiones cobradas a 20 CLP —60 en el libro— se recalculan a 18.</p>
+      <p>Dos consecuencias: reparar una campaña mueve su gasto a una base de
+      precios que nunca se le aplicó, y el resultado <em>depende de cuándo se
+      ejecute la reparación</em>. Hoy el daño está acotado porque la ruta se
+      niega a actuar sobre una campaña gestionada por el ledger.</p>
+    </div>
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>El ledger no permite gastar sin fondos reservados</h4></div>
+      <p>Una campaña sin reserva se declara no facturable en vez de inventar un
+      cargo. Al agotarse el saldo se detiene sola y deja de entregarse. Un
+      reintento con la misma clave de idempotencia no vuelve a cobrar, y sin
+      clave no hay cargo: falla cerrado.</p>
+    </div>
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>Un anuncio solo se cobra a quien podía verlo</h4></div>
+      <p>Una impresión a un usuario fuera del público objetivo se rechaza y no
+      mueve saldo. Y un clic se registra sin facturar: no es un evento pagado.</p>
+    </div>
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>La herramienta legacy no puede pisar el ledger</h4></div>
+      <p>Sobre una campaña gestionada por el ledger, la reparación del gasto se
+      rechaza en vez de sobrescribir la cifra de la que el ledger es dueño. Un
+      contable único solo lo es si nadie más puede escribir en él.</p>
+    </div>
+    <div class="item todo">
+      <div class="item-head"><span class="chip todo">Pendiente</span>
+        <h4>No existe ningún concepto de factura</h4></div>
+      <p>Ni tabla, ni ruta, ni periodo de facturación. Cualquier factura que se
+      emitiera hoy saldría del espejo inflado.</p>
+    </div>
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>Impresiones y ledger concilian exactamente</h4></div>
+      <p>Cada impresión guarda ahora el importe <em>exacto</em> que el ledger
+      asentó, no el que se pidió. La suma de las impresiones iguala el gasto
+      reconocido en la unidad del libro, sin tolerancia.</p>
+      <p>Corrección mínima y deliberadamente neutra: <strong>no cambia ningún
+      precio, ninguna tarifa ni ningún importe histórico.</strong> El registro
+      en pesos y el espejo de gasto quedan exactamente como estaban.</p>
+    </div>
+    <div class="item risk">
+      <div class="item-head"><span class="chip risk">Decisión pendiente</span>
+        <h4>Qué número es el precio: 19 o 20</h4></div>
+      <p>El registro en pesos dice 20 y el libro canónico reconoce 19. Hacer
+      que coincidan exige decidir cuál es el precio, y eso es comercial, no
+      técnico. Hay una política propuesta; mientras no se decida, la brecha
+      queda medida y visible en lugar de resuelta por omisión.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<section>
+  <span class="snum">04</span>
+  <h2 class="sh">Respaldo, recuperación y monitoreo</h2>
+  <p class="lede">El respaldo pasó de no existir a estar probado. El monitoreo
+  pasó de no existir a ser parcial. Ninguna de las dos cosas está terminada.</p>
+
+  <h3>Recuperación ante desastre</h3>
+  <p>El ensayo levanta su propia instancia de PostgreSQL, crea el esquema con las
+  mismas funciones que usa la aplicación al arrancar, siembra datos ficticios,
+  respalda, <strong>destruye la base entera</strong>, restaura, y comprueba la
+  integridad: huella del contenido, ausencia de dobles votos, que cada código de
+  verificación siga resolviendo a su papeleta, y deriva cero entre el contador y
+  las papeletas.</p>
+
+  <div class="tscroll">
+    <table>
+      <caption>Ensayo LOCAL con 50.000 papeletas y 6,1 MB de respaldo, PostgreSQL a
+      PostgreSQL en la misma máquina, por socket local, sin red.</caption>
+      <thead><tr><th>Fase</th><th>Tiempo</th></tr></thead>
+      <tbody>
+        <tr><td>Respaldo</td><td class="n">1 s</td></tr>
+        <tr><td>Restauración</td><td class="n">1 s</td></tr>
+        <tr><td>Verificación de integridad</td><td class="n">huella idéntica</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="caveat">
+    <p><strong>Esos 2 segundos no son el RTO de producción, y no deben
+    presentarse como tal.</strong> Un RTO real tendría que incluir la
+    transferencia por red desde un almacenamiento externo que todavía no existe,
+    el volumen real de la base —que no está medido—, aprovisionar la instancia, y
+    el tramo de detección y decisión, que hoy es <em>desconocido</em> porque no
+    hay monitoreo de base de datos que avise. Lo que el ensayo sí demuestra es
+    que el respaldo es restaurable y que los datos vuelven íntegros: la
+    diferencia entre «tenemos respaldos» y «hemos probado que funcionan».</p>
+  </div>
+
+  <div class="items">
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>El respaldo es restaurable y verificado fila a fila</h4></div>
+      <p>Cada respaldo lleva su suma de comprobación y un manifiesto con el
+      recuento de las 14 tablas críticas. La restauración verifica la suma
+      <em>antes</em> de borrar nada del destino y compara contra el manifiesto al
+      terminar. Y se niega a escribir sobre una base cuyo nombre sugiera
+      producción.</p>
+    </div>
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>Los errores dejan una señal alertable, sin filtrar datos</h4></div>
+      <p>Cada excepción no controlada emite una línea con prefijo fijo y cuerpo
+      estructurado, alertable desde los logs sin volver a tocar el código. No
+      lleva la cadena de consulta —que contiene el secreto administrativo—, ni el
+      cuerpo, ni el correo, ni el documento, ni el mensaje de la excepción. La
+      ruta se enmascara, así que un teléfono en la URL no se escapa. Hay pruebas
+      que intentan filtrar un secreto, un correo y un teléfono.</p>
+    </div>
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>164 de 166 rutas administrativas exigen credencial</h4></div>
+      <p>Las dos restantes son públicas a propósito. Hay una guarda que barre
+      todas las rutas y falla si aparece una nueva sin proteger, verificada
+      inyectando una ruta de prueba.</p>
+    </div>
+    <div class="item todo">
+      <div class="item-head"><span class="chip todo">Pendiente</span>
+        <h4>Respaldo programado y fuera de Render</h4></div>
+      <p>Hoy se ejecuta a mano. Un respaldo que depende de que alguien se acuerde
+      no es un respaldo, y uno que vive en la misma infraestructura que la base
+      no protege contra perderla.</p>
+    </div>
+    <div class="item todo">
+      <div class="item-head"><span class="chip todo">Pendiente</span>
+        <h4>Monitoreo de la base de datos y del servicio</h4></div>
+      <p>No hay servicio de observabilidad externo ni alerta de que la base haya
+      caído. Esa ausencia es la que deja indefinido el tramo de detección del
+      RTO.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<section>
+  <span class="snum">05</span>
+  <h2 class="sh">Riesgos críticos abiertos</h2>
+  <p class="lede">Estos cuatro son la razón por la que este documento no declara
+  la plataforma lista para producción.</p>
+
+  <div class="items">
+    <div class="item crit">
+      <div class="item-head"><span class="chip crit">Crítico</span>
+        <h4>La verificación del voto no llega a la blockchain</h4></div>
+      <p>El código de verificación se resuelve contra la base de datos. Mientras
+      siga así, la promesa de verificación es una consulta al mismo servidor que
+      guardó el voto, no una comprobación independiente.</p>
+    </div>
+    <div class="item crit">
+      <div class="item-head"><span class="chip crit">Crítico</span>
+        <h4>Sin verificabilidad de extremo a extremo</h4></div>
+      <p>Un tercero no puede verificar el escrutinio sin confiar en el servidor.
+      El escrutinio es ahora correcto y conciliable, pero su corrección se apoya
+      en la confianza en el operador.</p>
+    </div>
+    <div class="item crit">
+      <div class="item-head"><span class="chip crit">Crítico</span>
+        <h4>Recuperación ante desastre incompleta</h4></div>
+      <p>El procedimiento está probado, pero no está programado, el respaldo no
+      sale de la infraestructura, y no hay cifra de RTO de producción. Hoy una
+      pérdida de la base dependería de que alguien ejecutara el procedimiento a
+      mano con el último respaldo que se hiciera manualmente.</p>
+    </div>
+    <div class="item risk">
+      <div class="item-head"><span class="chip risk">Decisión pendiente</span>
+        <h4>El precio efectivo no está decidido</h4></div>
+      <p>Impresiones y ledger ya concilian exactamente, pero el registro en
+      pesos (20) y el libro canónico (19) siguen discrepando un 5,26 %.
+      Resolverlo es decidir el precio, no corregir un defecto.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ -->
+<section>
+  <span class="snum">06</span>
+  <h2 class="sh">Lo que las pruebas no pueden validar</h2>
+  <p class="lede">Declarado a propósito, para que «suite en verde» no se lea como
+  «todo comprobado».</p>
+
+  <div class="items">
+    <div class="item todo">
+      <div class="item-head"><span class="chip todo">Fuera de alcance</span>
+        <h4>Pagos reales, reconocimiento facial y anclaje en cadena</h4></div>
+      <p>No se ejecuta ningún pago: del webhook de pagos solo se comprueba que
+      rechaza una carga sin firma válida, que es lo que lo protege. El
+      reconocimiento facial exige credenciales y una cara real. El anclaje en
+      blockchain corre en modo simulado sin clave de wallet, y el campo que lo
+      declara dice la verdad en vez de asumir que ocurrió.</p>
+    </div>
+    <div class="item ok">
+      <div class="item-head"><span class="chip ok">Comprobado</span>
+        <h4>Las dos aplicaciones existen y están configuradas</h4></div>
+      <p><strong>Corrección de un error anterior de este documento:</strong> se
+      afirmó que Android no tenía proyecto nativo porque no hay carpeta
+      <code>android/</code> en el repositorio. Eso es normal con EAS Build —el
+      proyecto nativo se genera en la nube y no se versiona— y la aplicación
+      Android existe y está instalada.</p>
+      <p>Comprobado: perfil de compilación de producción para ambas plataformas
+      (Android como <em>app-bundle</em>), identificadores de aplicación, envío
+      configurado a Google Play y App Store, y los permisos de cámara que la
+      verificación por selfie necesita. Las dos apps son un envoltorio WebView
+      sobre la URL de producción, así que comprobar los flujos web comprueba
+      casi todo de ambas.</p>
+    </div>
+    <div class="item todo">
+      <div class="item-head"><span class="chip todo">No comprobado</span>
+        <h4>Comportamiento en un dispositivo físico</h4></div>
+      <p>No hay acceso a un teléfono real desde aquí, así que el arranque, los
+      permisos nativos y las notificaciones push en dispositivo quedan como
+      <em>no comprobados</em>, no como inexistentes.</p>
+    </div>
+    <div class="item todo">
+      <div class="item-head"><span class="chip todo">Pendiente</span>
+        <h4>Carga, escalabilidad y volumen real</h4></div>
+      <p>No medidos. Las 50.000 papeletas del ensayo de recuperación son una
+      hipótesis de trabajo, no el tamaño de la base de producción.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p>Todas las cifras de este documento salen de ejecutar el código, no de
+  leerlo. Los ensayos de concurrencia y de recuperación se ejecutan contra
+  PostgreSQL real y levantan su propia instancia temporal; no tocan ninguna base
+  existente. Las pruebas que fijan los hallazgos financieros están escritas para
+  <em>fallar</em> si las cifras dejan de divergir, obligando a actualizar la
+  documentación en vez de dejarla mintiendo.</p>
+  <p>Nada de lo descrito aquí se ha desplegado a producción. Los votos
+  históricos, los códigos de verificación y la consulta 819 están intactos.</p>
+  <p class="sig">Preferendum · estado al 31 de octubre de 2026</p>
+</footer>
+
+</div>

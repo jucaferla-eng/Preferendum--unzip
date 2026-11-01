@@ -268,19 +268,32 @@ assertTrue(js.includes("'chrome.voice.mute'") && js.includes("'chrome.voice.unmu
 assertEqual(Object.keys(Content.STRINGS).filter((l) => !('chrome.voice.mute' in Content.STRINGS[l]) || !('chrome.voice.unmute' in Content.STRINGS[l])), [], 'every one of the 30 languages has both chrome.voice.mute and chrome.voice.unmute translated (no silent fallback-to-Spanish gap)');
 
 // ═══════════════════════════════════════════════════════════════════════
-// 16. Voter/organizer/marketer integration (task §17)
-// ═══════════════════════════════════════════════════════════════════════
-[
-  ['voter_portal.html', voterHtml],
-  ['marketer_portal.html', marketerHtml],
-  ['preferendum_organizer.html', organizerHtml],
-].forEach(([name, html]) => {
-  assertTrue(html.includes('/prefy-voice.js'), `${name} loads /prefy-voice.js`);
-  assertTrue(/prefy\.js["']><\/script>\s*\n<script src=["']\/prefy-voice\.js/.test(html), `${name} loads prefy-voice.js AFTER prefy.js (dependency order)`);
-  assertTrue(/PrefyVoice\.init\(\)/.test(html), `${name} calls PrefyVoice.init()`);
-  assertTrue(/if\s*\(\s*window\.PrefyVoice\s*\)\s*PrefyVoice\.init\(\)/.test(html), `${name} guards the PrefyVoice.init() call the same defensive way Prefy.init() itself is guarded`);
-});
-assertTrue(mainPy.includes("@app.get('/prefy-voice.js')"), 'main.py serves /prefy-voice.js');
+// 16. Integración en los portales — RETIRADA, no eliminada.
+//
+// Esta sección exigía que voter_portal.html, marketer_portal.html y
+// preferendum_organizer.html cargaran /prefy-voice.js y llamaran a
+// PrefyVoice.init(). Esas aserciones quedaron OBSOLETAS por una decisión
+// de producto posterior, documentada en test_prefy_portal_wiring.mjs:
+//
+//   "Prefy Welcome-Only Implementation (product decision): Prefy (the
+//    HeyGen video engine) now lives ONLY on the public Welcome/Landing
+//    screen — main.py's root `/` route. NONE of the three internal
+//    portals load any Prefy engine, old or new. Old-engine source
+//    (prefy.css/prefy.js/prefy-content.js/prefy-voice.js) and every
+//    existing window.Prefy call site inside the portals stay in the
+//    repo/source as safe no-ops."
+//
+// Esa suite tiene 159 aserciones en verde que exigen ACTIVAMENTE lo
+// contrario de lo que pedía esta sección: que los portales NO carguen el
+// motor antiguo. Las dos suites se contradecían, y la autoridad es la
+// decisión de producto, no esta sección.
+//
+// Se retiran SOLO las cuatro aserciones de cableado en portales. Las
+// ~1.970 aserciones de lógica pura de prefy-voice.js que sigue este
+// archivo se conservan intactas: el módulo permanece en el repositorio y
+// su comportamiento sigue siendo correcto y verificado, listo para
+// reconectarse si la decisión de producto cambia.
+assertTrue(mainPy.includes("@app.get('/prefy-voice.js')"), 'main.py sigue sirviendo /prefy-voice.js (el módulo no se eliminó)');
 assertTrue(css.includes('.prefy-voice-btn'), 'prefy.css styles the voice control');
 
 console.log(`\n${passed} passed, ${failed} failed`);

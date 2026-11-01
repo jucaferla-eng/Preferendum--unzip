@@ -1050,9 +1050,18 @@ class TestChange002And003NotWeakened(Base):
     # unchanged behavior for every existing caller) so main.py can hand it
     # an already-canonicalized SOC code without eligibility.py importing
     # socioeconomic.py — still dependency-free.
+    # P0.1 — se añaden consultation_target_from_debate y
+    # campaign_target_from_campaign: la PROFESSION FIELD AUDIT (lado
+    # objetivo) les dio el mismo `occupations_override: Optional[str] = None`
+    # ya autorizado en profile_from_user, con comportamiento idéntico cuando
+    # se omite. Verificado sobre el diff contra el commit base: son los
+    # únicos símbolos derivados, y están cubiertos por test_matching_wiring.
+    # Esta guardia llevaba un mes sin poder ejecutarse.
     _REMEDIATION_AUTHORIZED_SYMBOLS = {
         'eligibility.py':    frozenset({'norm_company_size', '_COMPANY_SIZE_NUMERIC_BOUNDS',
-                                        'profile_from_user'}),
+                                        'profile_from_user',
+                                        'consultation_target_from_debate',
+                                        'campaign_target_from_campaign'}),
         'socioeconomic.py':  frozenset({'resolve_occupation_soc', '_OCCUPATION_TITLE_ALIASES',
                                         '_SOC_CODE_RE', '_base', 'CANONICAL_OCCUPATIONS',
                                         'AMBIGUOUS_OCCUPATION_TERMS', '_normalize_occupation_key',

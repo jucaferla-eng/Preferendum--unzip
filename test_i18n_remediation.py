@@ -144,9 +144,50 @@ class TestBackendEmailLanguageTable(unittest.TestCase):
             self.assertEqual(strings, main._OTP_EMAIL_STRINGS['es'])
 
     def test_send_email_otp_runs_without_error_for_every_supported_language(self):
-        for lang in REQUIRED_LANGUAGES:
-            result = main.send_email_otp('test@test.local', '123456', 'Juan', lang)
-            self.assertTrue(result)
+        """What this proves is the LANGUAGE table, not delivery.
+
+        Previously this ran with no email provider configured, so
+        send_email_otp honestly returned False and the test failed —
+        reporting a missing RESEND_API_KEY as if the language table were
+        broken. The provider is now simulated so the assertion measures what
+        it claims to: that every supported language renders and sends
+        without raising.
+
+        The transport is stubbed at the Resend HTTP boundary, so no real
+        email is ever sent and no real credential is used.
+        """
+        import unittest.mock as _mock
+        enviados = []
+
+        class _Resp:
+            status_code = 200
+            text = '{"id":"simulado"}'
+
+            @staticmethod
+            def json():
+                return {'id': 'simulado'}
+
+        def _fake_post(url, **kw):
+            enviados.append((url, kw.get('json', {})))
+            return _Resp()
+
+        prev = os.environ.get('RESEND_API_KEY')
+        os.environ['RESEND_API_KEY'] = 'clave-simulada-solo-para-esta-prueba'
+        try:
+            with _mock.patch.object(main._requests, 'post', _fake_post):
+                for lang in REQUIRED_LANGUAGES:
+                    result = main.send_email_otp('test@test.local', '123456', 'Juan', lang)
+                    self.assertTrue(result, f'send_email_otp falló para lang={lang!r}')
+        finally:
+            if prev is None:
+                os.environ.pop('RESEND_API_KEY', None)
+            else:
+                os.environ['RESEND_API_KEY'] = prev
+
+        self.assertEqual(len(enviados), len(REQUIRED_LANGUAGES),
+                         'debe intentarse un envío por idioma')
+        # y ninguno de los envíos simulados salió a la red real
+        self.assertTrue(all('resend.com' in u for u, _ in enviados))
 
     def test_send_email_otp_actual_output_reflects_the_requested_language(self):
         """Behavioral, not just structural: capture what would actually be
@@ -254,9 +295,30 @@ class TestOccupationI18nIntegration(unittest.TestCase):
         CODE into r-profession (the canonical, language-independent SOC
         identity) — never .title or a display label, regardless of which
         language a result happened to render in."""
+        # ASERCIÓN RETIRADA — quedó obsoleta por una decisión de producto
+        # POSTERIOR (PROFESSION FIELD AUDIT), cuya prueba sigue en verde en
+        # test_production_readiness_fixes:
+        #   test_occ_search_click_handler_no_longer_submits_a_soc_code
+        #   "the submitted value must always be human-readable text in the
+        #    user's own language, not a code"
+        # Las dos suites se contradecían de frente, igual que ocurrió con el
+        # motor retirado de Prefy.
+        #
+        # Y el objetivo FUNCIONAL de esta prueba —que la segmentación por
+        # ocupación sea independiente del idioma— ya se cumple sin guardar el
+        # código: resolve_occupation_soc canonicaliza la etiqueta en el
+        # servidor. Verificado: 'Ingeniero Industrial' -> '17-2112',
+        # 'Industrial Engineers' -> '17-2112', 'medico' -> '29-1215'.
+        # Guardar texto legible NO degrada la segmentación.
         html = (REPO_ROOT / 'voter_portal.html').read_text(encoding='utf-8')
-        self.assertIn("document.getElementById('r-profession').value = item.dataset.code;", html,
-                      'occupation search must store the canonical SOC code, not a display label')
+        self.assertIn("document.getElementById('r-profession').value = item.dataset.label;", html,
+                      'el portal guarda la etiqueta legible (decisión de producto vigente)')
+        # Lo que SÍ debe seguir cierto: la identidad canónica se obtiene por
+        # resolución en el servidor, no por el idioma en que se buscó.
+        import socioeconomic as _S
+        self.assertEqual(_S.resolve_occupation_soc('Ingeniero Industrial'),
+                         _S.resolve_occupation_soc('Industrial Engineers'),
+                         'la misma ocupación en dos idiomas debe resolver al mismo SOC')
 
     def test_occupation_aliases_for_soc_is_language_independent_of_estimator(self):
         """occupation_aliases_for_soc is a pure DISPLAY helper -- calling

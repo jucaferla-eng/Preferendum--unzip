@@ -474,23 +474,70 @@ class TestWorldCountriesRollbackFix(unittest.TestCase):
         window = SRC[max(0, idx - 600):idx]
         self.assertIn('db.rollback()', window)
 
-    def test_both_percentile_cont_fallback_blocks_roll_back_on_failure(self):
-        """Two non-identical nested PERCENTILE_CONT/AVG retry blocks in
-        socioeconomic-tier code (different variable names at each site) —
-        both independently needed the fix since Edit's replace_all only
-        matched one on the first pass."""
-        occurrences = 0
-        idx = 0
-        while True:
-            idx = SRC.find('PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_m2_avg', idx)
-            if idx == -1:
-                break
-            occurrences += 1
-            window = SRC[idx: idx + 1500]
-            self.assertIn('db.rollback()', window,
-                          f'PERCENTILE_CONT block at offset {idx} has no nearby db.rollback()')
-            idx += 1
-        self.assertEqual(occurrences, 2, 'expected exactly 2 PERCENTILE_CONT(price_m2_avg) sites')
+    # The two PERCENTILE_CONT/AVG retry sites still both exist, but P0.6
+    # split their requirement, so one test per site replaces the old shared
+    # one. Both are checked over the AST rather than a text window: the
+    # comments that EXPLAIN each decision contain the literal
+    # 'db.rollback()', which made the old substring window pass for the
+    # wrong reason.
+    _PCT_SITES = ('_assign_user_tier_inner', 'admin_recompute_composite_income')
+
+    def test_there_are_still_exactly_two_percentile_cont_sites(self):
+        owners = []
+        for node in ast.walk(TREE):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if 'PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY price_m2_avg' in (_src_of(node) or ''):
+                owners.append(node.name)
+        self.assertEqual(sorted(set(owners)), sorted(self._PCT_SITES),
+                         f'the PERCENTILE_CONT(price_m2_avg) sites moved: {owners}')
+
+    def test_admin_recompute_site_still_rolls_back_before_its_retry(self):
+        """Unchanged requirement. This admin loop runs the retry on the
+        REQUEST's own session, once per country, so an un-rolled-back
+        failure poisons every remaining iteration."""
+        node = _function('admin_recompute_composite_income')
+        self.assertIsNotNone(node)
+        rollbacks = [n for n in ast.walk(node)
+                     if isinstance(n, ast.Call)
+                     and isinstance(n.func, ast.Attribute)
+                     and n.func.attr == 'rollback']
+        self.assertTrue(rollbacks,
+                        'the admin recompute loop lost its rollback; a failed '
+                        'PERCENTILE_CONT would break every later country')
+
+    def test_tier_assignment_site_must_NOT_roll_back_the_users_session(self):
+        """P0.6 — INVERTED requirement at this site, and the reason is the
+        defect it caused.
+
+        The old guard demanded a db.rollback() here too. On the tier-
+        assignment path that rollback ran on the session holding `user`, so
+        it discarded the occupation income estimate already computed in
+        memory and EXPIRED the object: the next read of
+        `user.estimated_income_usd` reloaded NULL. Measured effect — a
+        Chilean user with seeded commune data (the normal case) ended with
+        no estimated income and no se_tier at all.
+
+        The retry still has to leave a usable session, which is why the
+        reads were moved onto `_ReferenceReadSession`: it restores its OWN
+        transaction on failure and cannot touch the user's. So the correct
+        invariant here is the opposite of the old one — no rollback at all
+        inside the classifier — plus the isolated session that replaced it.
+        """
+        node = _function('_assign_user_tier_inner')
+        self.assertIsNotNone(node)
+        rollbacks = [n for n in ast.walk(node)
+                     if isinstance(n, ast.Call)
+                     and isinstance(n.func, ast.Attribute)
+                     and n.func.attr == 'rollback']
+        self.assertEqual(rollbacks, [],
+                         'a rollback came back inside the classifier: it '
+                         'destroys the income already computed for the user')
+        # and the mechanism that makes dropping it safe is actually wired
+        self.assertIsNotNone(_class_def('_ReferenceReadSession'))
+        wrapper = _src_of(_function('_assign_user_tier')) or ''
+        self.assertIn('_ReferenceReadSession(bind=', wrapper,
+                      'the classifier no longer gets an isolated read session')
 
 
 class TestVoteVerificationCode(unittest.TestCase):
@@ -1936,7 +1983,19 @@ class TestSeededDemoResultSuppression(unittest.TestCase):
                 if (isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
                         and node.targets[0].id == name):
                     exec(compile(ast.Module(body=[node], type_ignores=[]), '<main.py>', 'exec'), ns)
-        for fn in ('_is_seeded_demo_consultation', 'format_debate'):
+        # CHANGE-005 — `format_debate` ahora deriva el escrutinio de las
+        # papeletas con `_derived_tally`, así que el ayudante REAL se
+        # extrae también, en vez de sustituirlo por un doble que podría
+        # divergir del código de producción.
+        #
+        # Estas pruebas pasan un `_Debate` de mentira que no pertenece a
+        # ninguna sesión, así que `object_session` no devuelve ninguna y
+        # `_derived_tally` cae al contador almacenado — su respaldo
+        # declarado. Es justo lo que se quiere aquí: estas pruebas miden la
+        # SUPRESIÓN de los datos sembrados, con el contador como entrada.
+        # La derivación en sí se mide contra PostgreSQL real en
+        # test_vote_concurrency_pg.
+        for fn in ('_derived_tally', '_is_seeded_demo_consultation', 'format_debate'):
             exec(compile(_src_of(_function(fn)), '<main.py>', 'exec'), ns)
         return ns
 
@@ -2199,6 +2258,90 @@ class TestSeedDemoDataIsGated(unittest.TestCase):
             code = 'def _f():\n' + '\n'.join('    ' + l for l in guard.strip().split('\n')) + '\n    return True'
             exec(compile(code, '<guard>', 'exec'), ns)
             self.assertEqual(bool(ns['_f']()), debe_sembrar, f'env={env}')
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# P0.3 — PRODUCT CLAIMS MUST MATCH THE CODE
+#
+# The welcome sheet made four claims the code does not support. Each is
+# pinned here against its specific counter-evidence in the codebase, so a
+# future edit cannot quietly reintroduce it:
+#
+#   1. "incluso si quien lo manipuló fuera el propio administrador" —
+#      verification reads ONLY our own database. blockchain.verify_by_code()
+#      exists and is never called from main.py, so a tampered tally would be
+#      reported faithfully as tampered.
+#   2. "La selfie ... Se elimina después" — selfie_logs.face_bytes is kept
+#      indefinitely as the biometric reference for returning-user and
+#      per-vote face matching. Only the DOCUMENT photo is cleared.
+#   3. "Nadie sabe qué elegiste — ni nosotros" — debate_has_voted.verify_code
+#      equals debate_votes.verify_code, so one JOIN links identity to choice.
+#   4. "Sin verificación, el resultado vale cero" — vote_counts is
+#      incremented for every vote; no tally path filters on verified votes.
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestWelcomeClaimsAreAccurate(unittest.TestCase):
+
+    RETIRED_CLAIMS = [
+        ('el propio administrador',
+         'la verificación lee solo nuestra base de datos; verify_by_code nunca se llama'),
+        ('la matemática reemplaza la fe',
+         'no hay verificación independiente del escrutinio todavía'),
+        ('Se elimina después',
+         'selfie_logs.face_bytes se conserva como referencia biométrica'),
+        ('ni nosotros',
+         'debate_has_voted.verify_code permite unir identidad y voto con un JOIN'),
+        ('vale cero',
+         'vote_counts cuenta todos los votos, no solo los verificados'),
+        ('Nadie sabe qué elegiste',
+         'mismo motivo que "ni nosotros"'),
+    ]
+
+    def test_no_retired_claim_reappears_in_the_welcome_sheet(self):
+        for frase, motivo in self.RETIRED_CLAIMS:
+            self.assertNotIn(
+                frase, VOTER_SRC,
+                f'La afirmación {frase!r} volvió al portal, pero sigue siendo '
+                f'inexacta: {motivo}')
+
+    def test_the_counter_evidence_still_holds(self):
+        """Si alguna de estas condiciones cambiara —por ejemplo si se
+        conectara verify_by_code— la afirmación correspondiente PODRÍA
+        volver a ser verdadera, y esta prueba avisa de que hay que
+        revisarla, en vez de dejarla retirada para siempre por inercia."""
+        # 1. verify_by_code sigue sin conectarse
+        self.assertNotIn('verify_by_code', SRC,
+                         'verify_by_code ya se usa: revisar la afirmación 1')
+        # 2. la selfie sigue conservándose como referencia
+        self.assertIn('face_bytes=base64.b64encode(contents).decode()', SRC)
+        # 3. el puente identidad-voto sigue existiendo
+        hv = _class_def('HasVotedLog')
+        self.assertIn('verify_code', _column_names(hv),
+                      'ya no existe el puente: revisar la afirmación 3')
+        # 4. ningún camino de escrutinio filtra por voto verificado
+        self.assertNotIn('DebateVote.verified == True', SRC)
+
+    def test_the_welcome_sheet_keeps_its_structure_and_personality(self):
+        """La corrección es de exactitud, no un recorte: los tres puntos,
+        sus iconos y el banner siguen en su lugar."""
+        for marcador in ('welcome-points', 'welcome-point-icon', 'welcome-point-title',
+                         'welcome-nav', 'welcome-cta', '🎓', '🔐', '🗳️'):
+            self.assertIn(marcador, VOTER_SRC)
+        self.assertIn('Debate, aprende y luego decide', VOTER_SRC)
+        self.assertIn('Tu identidad protege el sistema', VOTER_SRC)
+
+    def test_the_new_claims_are_each_backed_by_the_code(self):
+        """Lo que ahora SÍ afirma el portal, con su respaldo."""
+        # el voto se ancla en Polygon y se entrega un código
+        self.assertIn('anclado en blockchain', VOTER_SRC)
+        self.assertIn('anchor_vote', SRC)
+        self.assertIn('verify_code = generate_verify_code()', SRC)
+        # la papeleta no lleva identidad
+        self.assertIn('no lleva tu nombre', VOTER_SRC)
+        self.assertIn('voter_id=None', SRC)
+        # solo cuentas verificadas votan
+        self.assertIn('Solo las cuentas verificadas pueden votar', VOTER_SRC)
+        self.assertIn('Depends(get_verified_user)', _src_of(_function('cast_vote')))
 
 
 if __name__ == '__main__':

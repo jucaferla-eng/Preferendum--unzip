@@ -968,8 +968,21 @@ class TestChange002NotWeakened(Base):
     # behavior for every existing caller) so main.py can hand it an
     # already-canonicalized SOC code without eligibility.py importing
     # socioeconomic.py itself — still dependency-free.
+    # P0.1 — se añaden los DOS adaptadores del lado OBJETIVO. La PROFESSION
+    # FIELD AUDIT (lado objetivo) les dio a ambos un parámetro
+    # `occupations_override: Optional[str] = None`, exactamente el mismo
+    # patrón ya autorizado en profile_from_user: cuando se omite, el
+    # comportamiento es idéntico al anterior para todos los llamadores
+    # existentes. Verificado sobre el diff contra este mismo commit base:
+    # los ÚNICOS símbolos derivados son estos cuatro, y el cambio en los dos
+    # nuevos es sólo la lectura del override en vez del campo crudo. Está
+    # cubierto por test_matching_wiring (en verde).
+    #
+    # Esta guardia llevaba un mes sin poder ejecutarse —ver el comentario
+    # del índice geo_units en main.py— y por eso la deriva pasó inadvertida.
     _CHANGE003_AUTHORIZED_ELIGIBILITY_SYMBOLS = frozenset({
         'norm_company_size', '_COMPANY_SIZE_NUMERIC_BOUNDS', 'profile_from_user',
+        'consultation_target_from_debate', 'campaign_target_from_campaign',
     })
 
     def test_canonical_evaluator_module_is_untouched_by_change003(self):
