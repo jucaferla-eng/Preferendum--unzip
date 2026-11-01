@@ -216,7 +216,7 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
     <p class="auth-subtitle">Reach verified voters by commune, income tier, and demographics.</p>
     <div class="tabs">
       <div class="tab active" onclick="switchTab('login')">Sign In</div>
-      <div class="tab" onclick="switchTab('register')">Create Account</div>
+      <div class="tab" onclick="switchTab('register')">Solicitud de acreditación</div>
     </div>
 
     <!-- LOGIN -->
@@ -305,7 +305,22 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
         Preferendum revise los antecedentes. Tu cuenta se crea de inmediato,
         pero no podrá crear campañas ni obtener saldo hasta entonces.
       </div>
-      <button class="btn-primary" onclick="doRegister()">Create Account</button>
+      <!-- DOCUMENTO QUE ACREDITA LA REPRESENTACION. Reutiliza el mismo
+           mecanismo de CREAR CONSULTA: POST /marketer/upload-cargo-doc,
+           que guarda el archivo y su sha256 en el perfil y solo se consulta
+           autenticado desde la revision administrativa. Nunca se publica
+           ni se adjunta a un correo. -->
+      <div class="field">
+        <label>Documento que acredita tu relación laboral y tu autorización para representar a la empresa</label>
+        <input type="file" id="reg-doc"
+               accept="image/jpeg,image/png,image/webp,application/pdf"/>
+        <div style="font-size:12px;color:var(--muted);line-height:1.5;margin-top:6px;">
+          Contrato de trabajo, poder notarial, certificado de vigencia o carta
+          de autorización firmada. JPG, PNG o PDF. Se guarda cifrado y solo lo
+          consulta quien revisa la acreditación.
+        </div>
+      </div>
+      <button class="btn-primary" onclick="doRegister()">ENVIAR SOLICITUD</button>
       <p class="auth-err" id="reg-err"></p>
     </div>
     <!-- DEFECTO CORREGIDO — el portal entraba al panel operativo con solo
@@ -371,6 +386,8 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
             <div class="stat-card">
               <div class="stat-label">Credits Balance</div>
               <div class="stat-value gold" id="ov-balance">—</div>
+              <div id="ov-demo" style="display:none;font-size:12px;color:var(--muted);
+                   line-height:1.4;margin-top:6px;"></div>
             </div>
             <div class="stat-card">
               <div class="stat-label">Active Campaigns</div>
@@ -1051,6 +1068,11 @@ async function doRegister() {
   if (!category) faltantes.push('la categoría de tu empresa');
   if (!cargo) faltantes.push('tu cargo en la empresa');
   if (tieneSup && !supEmail) faltantes.push('el correo del supervisor que te autorizará');
+  // El documento es el antecedente central de la revision: sin el, quien
+  // revisa no tiene con que comprobar la representacion.
+  const docInput = document.getElementById('reg-doc');
+  const doc = docInput && docInput.files ? docInput.files[0] : null;
+  if (!doc) faltantes.push('el documento que acredita tu representación');
   if (faltantes.length) {
     showErr('reg-err', 'Falta ' + faltantes.join(', ') + '.');
     return;
@@ -1095,6 +1117,28 @@ async function doRegister() {
       // Es lo mismo que el servidor acaba de hacer, no un estado nuevo.
       supervisorSolicitado = supEmail;
       localStorage.setItem('pref_adv_supervisor', supEmail);
+    }
+    // El documento se adjunta a la solicitud recien creada. Si la subida
+    // falla se dice, en vez de dar por recibida una solicitud incompleta.
+    if (!yaExistia) {
+      const fd = new FormData();
+      fd.append('file', doc);
+      let subido = false;
+      try {
+        const ru = await fetch(`${API}/marketer/upload-cargo-doc`,
+          {method: 'POST', headers: {'Authorization': 'Bearer ' + token}, body: fd});
+        subido = ru.ok;
+        if (!subido) {
+          const du = await ru.json().catch(() => ({}));
+          showErr('reg-err', (du.detail || 'No se pudo adjuntar el documento.')
+            + ' Tu cuenta quedó creada; vuelve a entrar y adjúntalo para '
+            + 'completar la solicitud.');
+        }
+      } catch (_) {
+        showErr('reg-err', 'No se pudo adjuntar el documento. Tu cuenta quedó '
+          + 'creada; vuelve a entrar y adjúntalo para completar la solicitud.');
+      }
+      if (!subido) return;
     }
     await showApp(yaExistia ? 'cuenta-existente' : 'cuenta-creada');
   } else {
@@ -1171,6 +1215,35 @@ function _mostrarPendiente(html, opciones) {
   document.getElementById('main-app').classList.remove('visible');
 }
 
+// PANTALLA DE SOLICITUD RECIBIDA. Exclusivamente este texto: ni panel, ni
+// botones, ni saldo, ni creditos, ni creacion de campanas. Una solicitud
+// enviada no es una cuenta habilitada, y la pantalla no debe insinuar que
+// si lo es.
+function _pantallaSolicitudRecibida() {
+  ['login-err', 'reg-err'].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) { e.textContent = ''; e.style.display = 'none'; }
+  });
+  ['tab-login', 'tab-register'].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) e.style.display = 'none';
+  });
+  const tabs = document.querySelector('#auth-screen .tabs');
+  if (tabs) tabs.style.display = 'none';
+  const el = document.getElementById('pending-notice');
+  if (el) {
+    el.innerHTML =
+      '<div style="font-weight:700;letter-spacing:.04em;margin-bottom:10px;">'
+      + 'SOLICITUD RECIBIDA.</div>'
+      + '<div>Su solicitud de acreditación empresarial ha sido recibida '
+      + 'correctamente. Le notificaremos por correo electrónico cuando haya '
+      + 'sido revisada y autorizada.</div>';
+    el.style.display = 'block';
+  }
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('main-app').classList.remove('visible');
+}
+
 function _mostrarFormulario() {
   const el = document.getElementById('pending-notice');
   if (el) el.style.display = 'none';
@@ -1194,9 +1267,40 @@ function _mostrarFormulario() {
 //   'login'             -> inicio de sesion
 async function showApp(origen) {
   const est = await _estadoAnunciante();
-  const correoOk = !!(est && est.verifications && est.verifications.email);
   const aprobado = !!(est && est.status === 'approved');
   const esSesionPrevia = origen === 'sesion-previa';
+
+  // Solicitud recien enviada: EXCLUSIVAMENTE el acuse. Nada de panel,
+  // botones, saldo, creditos ni creacion de campanas.
+  if (origen === 'cuenta-creada' && !aprobado) {
+    _pantallaSolicitudRecibida();
+    return;
+  }
+  // Vuelve a entrar con la solicitud en revision: solo su estado.
+  if (est && !aprobado) {
+    const v = est.verifications || {};
+    const marca = ok => ok ? '✓' : '·';
+    const viaSup = supervisorSolicitado
+      ? '<br><br>Solicitud dirigida al supervisor <b>'
+        + _escaparHtml(supervisorSolicitado) + '</b>.'
+      : '';
+    _mostrarPendiente(
+      '<div style="font-weight:700;letter-spacing:.04em;margin-bottom:10px;">'
+      + 'SOLICITUD EN REVISIÓN.</div>'
+      + 'Su solicitud de acreditación empresarial está en revisión. Le '
+      + 'notificaremos por correo electrónico cuando haya sido revisada y '
+      + 'autorizada.<br><br>'
+      + 'Estado: <b>' + _escaparHtml(est.status || 'desconocido') + '</b>'
+      + (est.company_name ? ' · ' + _escaparHtml(est.company_name) : '')
+      + (est.cargo ? ' · ' + _escaparHtml(est.cargo) : '')
+      + '<br><span style="font-size:12px;opacity:.85;">Antecedentes: '
+      + marca(v.email) + ' correo &nbsp; ' + marca(v.rut) + ' identificación tributaria'
+      + ' &nbsp; ' + marca(v.domain) + ' dominio &nbsp; ' + marca(v.web) + ' sitio web'
+      + ' &nbsp; ' + marca(v.doc) + ' documento</span>'
+      + viaSup,
+      {ofrecerCerrar: true});
+    return;
+  }
 
   let encabezado;
   if (origen === 'cuenta-creada') {
@@ -1218,25 +1322,10 @@ async function showApp(origen) {
       {ofrecerCerrar: true});
     return;
   }
-  if (!aprobado || !correoOk) {
-    let faltan = [];
-    if (!correoOk) faltan.push('confirmar tu correo electrónico');
-    if (!aprobado)  faltan.push('la acreditación de tu representación por parte de Preferendum');
-    const viaSupervisor = supervisorSolicitado
-      ? 'Enviamos la solicitud de autorización a <b>'
-        + _escaparHtml(supervisorSolicitado) + '</b>. Solo puede autorizarte '
-        + 'si ya está acreditado y pertenece a tu misma empresa.<br><br>'
-      : '';
-    _mostrarPendiente(encabezado + '<br><br>'
-      + 'Estado: <b>' + _escaparHtml(est.status || 'desconocido') + '</b>'
-      + (correoOk ? ' · correo confirmado' : ' · correo sin confirmar') + '<br><br>'
-      + 'Falta: ' + faltan.join(' y ') + '.<br><br>'
-      + viaSupervisor
-      + 'Mientras tanto no puedes crear ni activar campañas, ni obtener saldo. '
-      + 'Te avisaremos en cuanto quede acreditada.',
-      {ofrecerCerrar: true});
-    return;
-  }
+  // Aqui solo se llega con la cuenta APROBADA: los dos casos pendientes
+  // retornaron arriba. Una ultima guarda, por si alguien aniade una rama
+  // nueva mas adelante: el panel no se abre sin aprobacion.
+  if (!aprobado) { _pantallaSolicitudRecibida(); return; }
 
   _mostrarFormulario();
   document.getElementById('auth-screen').style.display = 'none';
@@ -1254,9 +1343,22 @@ async function refreshBalance() {
   const r = await fetch(`${API}/payments/balance`, {headers:{'Authorization':'Bearer '+token}});
   if (!r.ok) return;
   const d = await r.json();
-  const bal = (d.balance_credits || 0).toFixed(2);
-  document.getElementById('nav-balance').textContent = `⬡ ${bal} Credits`;
+  // Dos contabilidades, dos cifras. Los creditos DEMO no se suman al
+  // saldo real: el portal mostraba solo el real, asi que tras recibir
+  // creditos de demostracion la pantalla decia 0 y parecia que no habia
+  // saldo. Nunca se suman ni se presentan como dinero.
+  const bal  = (d.balance_credits || 0).toFixed(2);
+  const demo = (d.demo_credits || 0);
+  document.getElementById('nav-balance').textContent =
+    `⬡ ${bal} Credits` + (demo > 0 ? `  ·  ⬡ ${demo.toFixed(2)} DEMO` : '');
   document.getElementById('ov-balance').textContent = bal;
+  const avisoDemo = document.getElementById('ov-demo');
+  if (avisoDemo) {
+    avisoDemo.textContent = demo > 0
+      ? `+ ⬡ ${demo.toFixed(2)} en créditos de demostración (no son dinero: no se cobran ni se retiran)`
+      : '';
+    avisoDemo.style.display = demo > 0 ? 'block' : 'none';
+  }
 }
 
 // ── OVERVIEW ──────────────────────────────────────────────────
@@ -1793,7 +1895,12 @@ async function createCampaign() {
     });
     d = await r.json();
     if (!r.ok) { showAlert('newcamp-alert','error',d.detail||'Error creating campaign'); return; }
-    showAlert('newcamp-alert','success',`✓ Campaign "${title}" created! ID: ${d.campaign_id}`);
+    // La campana nace PAUSADA: activarla es un acto aparte y expreso. Si
+    // no se dice, el anunciante cree que ya esta publicandose.
+    showAlert('newcamp-alert','success',
+      `✓ Campaña "${title}" creada (ID ${d.campaign_id}) y en PAUSA. ` +
+      `Todavía no se publica: actívala con el botón Resume en Campaigns ` +
+      `cuando quieras que empiece a mostrarse.`);
     resetBrandSafety();
   }
   loadCampaigns();

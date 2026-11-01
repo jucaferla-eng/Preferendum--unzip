@@ -916,6 +916,30 @@ class TestFormularioCampanas(Base):
         self.assertIn('is_supervisor: !tieneSup', self.js)
         self.assertIn('supervisor_email: tieneSup', self.js)
 
+    def test_el_formulario_pide_el_documento_y_lo_sube(self):
+        self.assertIn('id="reg-doc"', self.html)
+        self.assertIn('/marketer/upload-cargo-doc', self.js,
+                      'reutiliza el mecanismo que ya existia')
+        self.assertIn("faltantes.push('el documento que acredita tu representación')",
+                      self.js, 'sin documento no se envia la solicitud')
+
+    def test_el_boton_dice_ENVIAR_SOLICITUD(self):
+        self.assertIn('>ENVIAR SOLICITUD<', self.html)
+        self.assertNotIn('Create Account', self.html,
+                         'registrarse es enviar una solicitud, no abrir una cuenta')
+
+    def test_el_acuse_es_exactamente_el_texto_acordado(self):
+        self.assertIn('SOLICITUD RECIBIDA.', self.js)
+        self.assertIn('Su solicitud de acreditación empresarial ha sido recibida',
+                      self.js)
+        self.assertIn('Le notificaremos por correo electrónico cuando haya', self.js)
+        self.assertIn('sido revisada y autorizada.', self.js)
+
+    def test_el_panel_no_se_abre_sin_aprobacion(self):
+        self.assertIn('if (!aprobado) { _pantallaSolicitudRecibida(); return; }',
+                      self.js, 'la guarda final de showApp')
+        self.assertIn("origen === 'cuenta-creada' && !aprobado", self.js)
+
     def test_el_aviso_dice_a_quien_se_pidio_la_autorizacion(self):
         self.assertIn('supervisorSolicitado', self.js)
         self.assertIn('_escaparHtml(supervisorSolicitado)', self.js)

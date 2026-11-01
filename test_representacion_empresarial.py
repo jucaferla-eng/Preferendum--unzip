@@ -304,6 +304,11 @@ class TestY_LasDosPuertas(Base):
                               headers=self.auth(u.id, 'marketer'))
         self.assertEqual(cr.status_code, 200, cr.text[:300])
         cid = cr.json()['campaign_id']
+        # La campaña nace PAUSADA desde noviembre de 2026: lo que esta prueba
+        # comprueba es que una campaña ACTIVA no se apaga, así que el
+        # anunciante la activa primero, como en el portal.
+        self.client.put(f'/advertiser/campaigns/{cid}/pause',
+                        headers=self.auth(u.id, 'marketer'))
         # el perfil pasa a pendiente DESPUES de tener la campaña activa
         p = self.db.query(main.MarketerProfile).filter(
             main.MarketerProfile.user_id == u.id).first()
@@ -583,10 +588,16 @@ class TestW_RecorridoRealDelPortal(Base):
                       'showApp no consulta el estado real')
         self.assertIn("status === 'approved'", bloque,
                       'no comprueba la aprobación del perfil')
-        self.assertIn('verifications.email', bloque,
-                      'no comprueba la verificación del correo')
+        # El correo ya no condiciona la apertura del panel: la unica
+        # condicion es la APROBACION, y el servidor exige el correo
+        # verificado por su cuenta (get_verified_user). El estado del correo
+        # se muestra en la pantalla de revision, que es donde sirve.
+        self.assertIn('if (!aprobado)', bloque,
+                      'el panel no puede abrirse sin aprobación')
+        self.assertIn('_pantallaSolicitudRecibida', bloque,
+                      'falta el acuse de solicitud recibida')
         # y el panel solo se revela DESPUÉS de las comprobaciones
-        i_check = bloque.index('_mostrarPendiente')
+        i_check = bloque.index('_pantallaSolicitudRecibida')
         i_panel = bloque.index("classList.add('visible')")
         self.assertLess(i_check, i_panel,
                         'revela el panel antes de comprobar el estado')

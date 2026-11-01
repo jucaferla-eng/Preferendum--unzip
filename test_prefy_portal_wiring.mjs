@@ -126,6 +126,34 @@ assertTrue(/switchTab\(\s*['"]login['"]\s*\)/.test(voter), "voter_portal.html's 
 // Bootstrap: an unauthenticated visit previously had NO context at all.
 assertTrue(/if\s*\(token\)\s*showApp\(\);\s*else\s+if\s*\(window\.Prefy\)\s*Prefy\.setContext\(\s*['"]organizer\.auth\.login['"]\s*\)/.test(organizer), 'preferendum_organizer.html sets a context for the default unauthenticated landing screen');
 
+// El portal mostraba SOLO el saldo real, asi que tras recibir creditos de
+// demostracion la pantalla decia 0 y parecia que no habia saldo. Y no decia
+// que la campana nace pausada, asi que el anunciante creia que ya se estaba
+// publicando.
+['d.demo_credits', "id=\"ov-demo\"", 'DEMO', 'en PAUSA']
+  .forEach(m => assertTrue(marketer.includes(m), `marketer_portal.html muestra ${m}`));
+
+// El registro empresarial es una SOLICITUD, no un alta: campo de documento,
+// boton que lo dice, y acuse de recibo en vez del panel.
+[["id=\"reg-doc\"", 'campo para adjuntar el documento'],
+ ['ENVIAR SOLICITUD', 'boton ENVIAR SOLICITUD'],
+ ['/marketer/upload-cargo-doc', 'sube el documento al mecanismo existente'],
+ ['SOLICITUD RECIBIDA.', 'acuse de recibo exacto'],
+ ['Su solicitud de acreditación empresarial ha sido recibida',
+  'texto del acuse'],
+ ['Le notificaremos por correo electrónico cuando haya', 'aviso por correo'],
+ ['_pantallaSolicitudRecibida', 'pantalla de acuse'],
+ ['SOLICITUD EN REVISIÓN.', 'estado al volver a entrar'],
+].forEach(([m, etiqueta]) => assertTrue(marketer.includes(m),
+  `marketer_portal.html: ${etiqueta}`));
+
+// El acuse NO debe ofrecer nada operativo, y el panel no se abre sin
+// aprobacion: la ultima guarda de showApp.
+assertTrue(/if \(!aprobado\) \{ _pantallaSolicitudRecibida\(\); return; \}/.test(marketer),
+  'marketer_portal.html no abre el panel sin aprobacion');
+assertTrue(!/Create Account/.test(marketer),
+  'marketer_portal.html ya no dice "Create Account": es una solicitud');
+
 // ═══════════════════════════════════════════════════════════════════════
 // Marketer portal
 // ═══════════════════════════════════════════════════════════════════════

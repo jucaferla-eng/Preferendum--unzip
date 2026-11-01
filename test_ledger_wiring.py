@@ -151,6 +151,20 @@ LEDGER_ADAPTER_NAMES = {
 }
 
 
+def activar(db, camp_id):
+    """Enciende una campana recien creada.
+
+    Desde el cambio de noviembre de 2026 una campana NACE PAUSADA: antes
+    quedaba servible en el instante de crearla, sin que nadie la activara.
+    Estas pruebas cobran o sirven la campana, asi que ahora tienen que
+    encenderla primero, igual que tiene que hacerlo el anunciante.
+    """
+    c = db.query(main.AdCampaign).filter(main.AdCampaign.id == camp_id).first()
+    c.is_active = True
+    db.commit()
+    return camp_id
+
+
 class Base(unittest.TestCase):
 
     @classmethod
@@ -418,7 +432,7 @@ class TestFundingDemo(Base):
         r = self.client.post('/advertiser/campaigns',
                              json=campaign_payload(u, value_class='DEMO'), headers=auth(u))
         self.assertEqual(r.status_code, 200, r.text)
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
 
         r = self.client.post('/payments/allocate-to-campaign',
                              json={'campaign_id': camp_id, 'credits': 100}, headers=auth(u))
@@ -470,7 +484,7 @@ class TestRealDemoWiring(Base):
         self.client.post('/payments/demo-credits', headers=auth(u))  # DEMO only
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u, value_class='REAL'),
                              headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         r2 = self.client.post('/payments/allocate-to-campaign',
                               json={'campaign_id': camp_id, 'credits': 50}, headers=auth(u))
         self.assertFalse(r2.json()['ok'])
@@ -483,7 +497,7 @@ class TestRealDemoWiring(Base):
         self.fund_real(u, 1000)   # REAL only
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u, value_class='DEMO'),
                              headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         r2 = self.client.post('/payments/allocate-to-campaign',
                               json={'campaign_id': camp_id, 'credits': 50}, headers=auth(u))
         self.assertFalse(r2.json()['ok'])
@@ -493,7 +507,7 @@ class TestRealDemoWiring(Base):
         u = mk_marketer(self.db)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u, value_class='REAL'),
                              headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         body = campaign_payload(u, value_class='DEMO')  # attempt to flip it
         r2 = self.client.patch(f'/advertiser/campaigns/{camp_id}', json=body, headers=auth(u))
         self.assertEqual(r2.status_code, 200, r2.text)
@@ -505,7 +519,7 @@ class TestRealDemoWiring(Base):
         self.fund_real(u, 500)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u, value_class='REAL'),
                              headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         self.client.post('/payments/allocate-to-campaign',
                          json={'campaign_id': camp_id, 'credits': 100}, headers=auth(u))
         before_demo = main._ledger_balance(self.db, L.USER_DEMO, u.id)
@@ -524,7 +538,7 @@ class TestCampaignReservation(Base):
         u = mk_marketer(self.db)
         self.fund_real(u, 10)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         before = self.db.execute(main.text("SELECT COUNT(*) FROM ledger_transactions")).fetchone()[0]
         r2 = self.client.post('/payments/allocate-to-campaign',
                               json={'campaign_id': camp_id, 'credits': 999}, headers=auth(u))
@@ -538,7 +552,7 @@ class TestCampaignReservation(Base):
         attacker = mk_marketer(self.db)
         self.fund_real(attacker, 1000)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(owner), headers=auth(owner))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         r2 = self.client.post('/payments/allocate-to-campaign',
                               json={'campaign_id': camp_id, 'credits': 50}, headers=auth(attacker))
         self.assertEqual(r2.status_code, 403, r2.text)
@@ -548,7 +562,7 @@ class TestCampaignReservation(Base):
         u = mk_marketer(self.db)
         self.fund_real(u, 1000)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         for bad in (0, -10):
             r2 = self.client.post('/payments/allocate-to-campaign',
                                   json={'campaign_id': camp_id, 'credits': bad}, headers=auth(u))
@@ -558,7 +572,7 @@ class TestCampaignReservation(Base):
         u = mk_marketer(self.db)
         self.fund_real(u, 1000)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         body = {'campaign_id': camp_id, 'credits': 100, 'idempotency_key': 'dup-key-1'}
         r1 = self.client.post('/payments/allocate-to-campaign', json=body, headers=auth(u))
         r2 = self.client.post('/payments/allocate-to-campaign', json=body, headers=auth(u))
@@ -573,7 +587,7 @@ class TestCampaignReservation(Base):
         u = mk_marketer(self.db)
         r = self.client.post('/advertiser/campaigns',
                              json=campaign_payload(u, budget_clp=999_000_000), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         for vc in (L.CAMPAIGN_REAL_RESERVED, L.CAMPAIGN_DEMO_RESERVED):
             self.assertEqual(main._ledger_balance(self.db, vc, camp_id), 0.0)
 
@@ -603,7 +617,7 @@ class TestAdSpendUnification(Base):
         u = mk_marketer(self.db)
         self.fund_real(u, credits + 50)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         self.client.post('/payments/allocate-to-campaign',
                          json={'campaign_id': camp_id, 'credits': credits}, headers=auth(u))
         return u, camp_id
@@ -674,7 +688,7 @@ class TestAdSpendUnification(Base):
         u = mk_marketer(self.db)
         r = self.client.post('/advertiser/campaigns',
                              json=campaign_payload(u, budget_clp=999_000_000), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         voter = mk_user(self.db)
         before = self.db.execute(main.text(
             "SELECT COUNT(*) FROM ad_impression_logs WHERE campaign_id=:c"), {'c': camp_id}).fetchone()[0]
@@ -723,7 +737,7 @@ class TestBrokenLegacyRoutesFixed(Base):
         u = mk_marketer(self.db)
         self.fund_real(u, 100)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         self.client.post('/payments/allocate-to-campaign',
                          json={'campaign_id': camp_id, 'credits': 50}, headers=auth(u))
         voter = mk_user(self.db)
@@ -736,7 +750,7 @@ class TestBrokenLegacyRoutesFixed(Base):
     def test_ads_click_no_longer_500s(self):
         u = mk_marketer(self.db)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         r2 = self.client.post('/ads/click', params={'campaign_id': camp_id, 'debate_id': 0})
         self.assertEqual(r2.status_code, 200, r2.text)
         camp = self.db.query(main.AdCampaign).filter(main.AdCampaign.id == camp_id).first()
@@ -746,7 +760,7 @@ class TestBrokenLegacyRoutesFixed(Base):
         u = mk_marketer(self.db)
         self.fund_real(u, 500)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         r2 = self.client.post('/payments/allocate-to-campaign',
                               json={'campaign_id': camp_id, 'credits': 100}, headers=auth(u))
         self.assertEqual(r2.status_code, 200, r2.text)
@@ -756,7 +770,7 @@ class TestBrokenLegacyRoutesFixed(Base):
         u = mk_marketer(self.db)
         self.fund_real(u, 500)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         self.client.post('/payments/allocate-to-campaign',
                          json={'campaign_id': camp_id, 'credits': 100}, headers=auth(u))
         r2 = self.client.post(f'/payments/return-from-campaign/{camp_id}', headers=auth(u))
@@ -774,7 +788,7 @@ class TestReleaseRefund(Base):
         u = mk_marketer(self.db)
         self.fund_real(u, 500)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         self.client.post('/payments/allocate-to-campaign',
                          json={'campaign_id': camp_id, 'credits': 200}, headers=auth(u))
         r2 = self.client.post(f'/payments/return-from-campaign/{camp_id}', headers=auth(u))
@@ -785,7 +799,7 @@ class TestReleaseRefund(Base):
     def test_release_of_an_empty_reservation_is_a_safe_no_op(self):
         u = mk_marketer(self.db)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         r2 = self.client.post(f'/payments/return-from-campaign/{camp_id}', headers=auth(u))
         self.assertEqual(r2.status_code, 200, r2.text)
         self.assertEqual(r2.json()['returned'], 0)
@@ -794,7 +808,7 @@ class TestReleaseRefund(Base):
         u = mk_marketer(self.db)
         self.fund_real(u, 500)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         self.client.post('/payments/allocate-to-campaign',
                          json={'campaign_id': camp_id, 'credits': 200}, headers=auth(u))
         self.client.post(f'/payments/return-from-campaign/{camp_id}', headers=auth(u))
@@ -807,7 +821,7 @@ class TestReleaseRefund(Base):
         attacker = mk_marketer(self.db)
         self.fund_real(owner, 300)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(owner), headers=auth(owner))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         self.client.post('/payments/allocate-to-campaign',
                          json={'campaign_id': camp_id, 'credits': 100}, headers=auth(owner))
         r2 = self.client.post(f'/payments/return-from-campaign/{camp_id}', headers=auth(attacker))
@@ -1035,7 +1049,7 @@ class TestAuthPrivacy(Base):
         stranger = mk_marketer(self.db)
         self.fund_real(stranger, 1000)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(owner), headers=auth(owner))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         r2 = self.client.post('/payments/allocate-to-campaign',
                               json={'campaign_id': camp_id, 'credits': 10}, headers=auth(stranger))
         self.assertEqual(r2.status_code, 403)
@@ -1445,7 +1459,7 @@ class TestLegacyCampaignTransition(Base):
         u = mk_marketer(self.db)
         self.fund_real(u, 100)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         camp = self.db.query(main.AdCampaign).filter(main.AdCampaign.id == camp_id).first()
         self.assertEqual(camp.ledger_status, 'LEGACY_UNRECONCILED')
         r2 = self.client.post('/payments/allocate-to-campaign',
@@ -1458,7 +1472,7 @@ class TestLegacyCampaignTransition(Base):
     def test_a_failed_reservation_does_not_flip_the_status(self):
         u = mk_marketer(self.db)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         r2 = self.client.post('/payments/allocate-to-campaign',
                               json={'campaign_id': camp_id, 'credits': 10}, headers=auth(u))
         self.assertFalse(r2.json().get('ok', True), 'an unfunded allocation unexpectedly succeeded')
@@ -1646,7 +1660,7 @@ class TestIdempotencyKeyRequiredAtHTTPLayer(Base):
         u = mk_marketer(self.db)
         self.fund_real(u, credits + 50)
         r = self.client.post('/advertiser/campaigns', json=campaign_payload(u), headers=auth(u))
-        camp_id = r.json()['campaign_id']
+        camp_id = activar(self.db, r.json()['campaign_id'])
         self.client.post('/payments/allocate-to-campaign',
                          json={'campaign_id': camp_id, 'credits': credits}, headers=auth(u))
         return u, camp_id

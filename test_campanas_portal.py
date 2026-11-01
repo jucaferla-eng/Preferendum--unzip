@@ -340,12 +340,76 @@ class TestQ_RecorridoDelAnunciante(unittest.TestCase):
         self.db.expire_all()
         c = self.db.query(main.AdCampaign).filter(main.AdCampaign.id == cid).first()
         self.assertEqual(c.budget_clp, 120000, 'la edición no se guardó')
+        # La campana nace pausada, asi que primero se enciende: lo que se
+        # comprueba aqui es que la pausa apaga.
+        self._activar(cid)
         r2 = self.client.put(f'/advertiser/campaigns/{cid}/pause',
                              headers=self.auth())
         self.assertEqual(r2.status_code, 200, r2.text[:300])
         self.db.expire_all()
         c = self.db.query(main.AdCampaign).filter(main.AdCampaign.id == cid).first()
         self.assertFalse(c.is_active, 'la pausa no desactivó la campaña')
+
+    def _activar(self, cid):
+        """Enciende una campana recien creada.
+
+        Desde el cambio de noviembre de 2026 una campana NACE PAUSADA:
+        antes quedaba servible en el instante de crearla. Lo que estas
+        pruebas comprueban -entrega, cobro, segmentacion- solo ocurre con
+        la campana encendida, asi que ahora la encienden, igual que tiene
+        que hacerlo el anunciante.
+        """
+        self.db.expire_all()
+        c = self.db.query(main.AdCampaign).filter(main.AdCampaign.id == cid).first()
+        c.is_active = True
+        self.db.commit()
+        return cid
+
+    def test_Q6b_una_campana_nueva_NACE_PAUSADA(self):
+        """Antes quedaba servible en el instante de crearla: el anunciante
+        pulsaba Crear y ya se estaba publicando, sin encenderla nadie."""
+        for ruta in ('/marketer/campaigns', '/advertiser/campaigns'):
+            cr = self.client.post(ruta, json=self._cuerpo_campana(),
+                                  headers=self.auth())
+            self.assertEqual(cr.status_code, 200, f'{ruta}: {cr.text[:200]}')
+            cid = cr.json()['campaign_id']
+            self.db.expire_all()
+            c = self.db.query(main.AdCampaign).filter(
+                main.AdCampaign.id == cid).first()
+            self.assertFalse(c.is_active,
+                             f'{ruta} dejo la campana activa al crearla')
+
+    def test_Q6c_solo_el_dueno_la_activa_expresamente(self):
+        cr = self.client.post('/marketer/campaigns', json=self._cuerpo_campana(),
+                              headers=self.auth())
+        cid = cr.json()['campaign_id']
+        sin_sesion = self.client.put(f'/advertiser/campaigns/{cid}/pause')
+        self.assertIn(sin_sesion.status_code, (401, 403),
+                      'un extrano no puede encender la campana')
+        self.db.expire_all()
+        c = self.db.query(main.AdCampaign).filter(main.AdCampaign.id == cid).first()
+        self.assertFalse(c.is_active, 'sigue pausada')
+        propia = self.client.put(f'/advertiser/campaigns/{cid}/pause',
+                                 headers=self.auth())
+        self.assertEqual(propia.status_code, 200, propia.text[:200])
+        self.assertTrue(propia.json()['is_active'],
+                        'el dueno si puede activarla')
+
+    def test_Q6d_el_saldo_DEMO_se_ve_y_no_se_mezcla_con_el_real(self):
+        """El portal mostraba solo el saldo real, asi que tras recibir
+        creditos de demostracion la pantalla decia 0."""
+        # El importe lo fija el servidor, no el cuerpo de la peticion.
+        g = self.client.post('/payments/demo-credits', headers=self.auth())
+        self.assertEqual(g.status_code, 200, g.text[:200])
+        concedido = g.json()['demo_balance']
+        self.assertGreater(concedido, 0)
+        r = self.client.get('/payments/balance', headers=self.auth())
+        self.assertEqual(r.status_code, 200, r.text[:200])
+        d = r.json()
+        self.assertIn('demo_credits', d, 'el saldo DEMO no se expone')
+        self.assertEqual(d['demo_credits'], concedido, d)
+        self.assertEqual(d['balance_credits'], 0.0,
+                         'los creditos DEMO no pueden sumarse al saldo real')
 
     def test_Q7_un_anunciante_ajeno_no_toca_la_campana(self):
         cr = self.client.post('/marketer/campaigns', json=self._cuerpo_campana(),
@@ -372,10 +436,11 @@ class TestQ_RecorridoDelAnunciante(unittest.TestCase):
 
     def test_Q8_la_segmentacion_elige_al_publico_correcto(self):
         marca = _uniq('MarcaSeg')
-        self.client.post('/marketer/campaigns',
-                         json=self._cuerpo_campana(advertiser_name=marca,
-                                                   target_communes='Las Condes'),
-                         headers=self.auth())
+        _cr = self.client.post('/marketer/campaigns',
+                               json=self._cuerpo_campana(advertiser_name=marca,
+                                                         target_communes='Las Condes'),
+                               headers=self.auth())
+        self._activar(_cr.json()['campaign_id'])
         _, cab_ok = self._votante(commune='Las Condes')
         _, cab_no = self._votante(commune='Conchalí')
         dentro = [a.get('brand') for a in
@@ -392,7 +457,7 @@ class TestQ_RecorridoDelAnunciante(unittest.TestCase):
         asignar a la campaña, entregar, cobrar y medir."""
         cr = self.client.post('/marketer/campaigns', json=self._cuerpo_campana(),
                               headers=self.auth())
-        cid = cr.json()['campaign_id']
+        cid = self._activar(cr.json()['campaign_id'])
         c = self.db.query(main.AdCampaign).filter(main.AdCampaign.id == cid).first()
         c.value_class = main._ledger.DEMO
         self.db.commit()
@@ -439,7 +504,7 @@ class TestQ_RecorridoDelAnunciante(unittest.TestCase):
     def test_Q10_al_agotarse_el_presupuesto_la_campana_se_detiene(self):
         cr = self.client.post('/marketer/campaigns', json=self._cuerpo_campana(),
                               headers=self.auth())
-        cid = cr.json()['campaign_id']
+        cid = self._activar(cr.json()['campaign_id'])
         c = self.db.query(main.AdCampaign).filter(main.AdCampaign.id == cid).first()
         c.value_class = main._ledger.DEMO
         self.db.commit()

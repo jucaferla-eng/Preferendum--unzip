@@ -10732,7 +10732,12 @@ def create_campaign(data: CampaignCreate, db: Session = Depends(get_db),
         min_hnw_score       = getattr(data, 'min_hnw_score', 0.0) or 0.0,
         start_date          = datetime.fromisoformat(data.start_date),
         end_date            = datetime.fromisoformat(data.end_date),
-        is_active           = True,
+        # Una campana nace PAUSADA. Antes quedaba servible en el
+        # instante de crearla, sin que nadie la encendiera: el
+        # anunciante pulsaba Crear y ya estaba publicandose. Activarla
+        # es un acto aparte, expreso, y solo del dueno -la ruta de
+        # activacion exige _require_campaign_owner-.
+        is_active           = False,
     )
     db.add(campaign)
     db.commit()
@@ -14907,7 +14912,12 @@ def create_marketer_campaign(data: CampaignCreate, db: Session = Depends(get_db)
         blocked_competitors  = data.blocked_competitors,
         start_date           = datetime.fromisoformat(data.start_date),
         end_date            = datetime.fromisoformat(data.end_date),
-        is_active           = True,
+        # Una campana nace PAUSADA. Antes quedaba servible en el
+        # instante de crearla, sin que nadie la encendiera: el
+        # anunciante pulsaba Crear y ya estaba publicandose. Activarla
+        # es un acto aparte, expreso, y solo del dueno -la ruta de
+        # activacion exige _require_campaign_owner-.
+        is_active           = False,
         logo_url            = data.logo_url or '',
         ad_copy             = data.ad_copy or '',
         ad_image_url        = data.ad_image_url or '',
@@ -15902,6 +15912,12 @@ def payments_balance(user: User = Depends(get_current_user), db: Session = Depen
     ).fetchall()
     return {
         'balance_credits': account['balance_credits'],
+        # Los creditos DEMO viven en su propio libro (CHANGE-001) y NO se
+        # suman al saldo real. El portal mostraba solo `balance_credits`,
+        # asi que tras recibir creditos de demostracion la pantalla decia
+        # 0 y parecia que no habia saldo. Se expone aparte, con su nombre:
+        # dos contabilidades separadas, dos cifras separadas.
+        'demo_credits':    _ledger_balance(db, _ledger.USER_DEMO, user.id),
         'total_purchased': account['total_purchased'],
         'total_spent':     account['total_spent'],
         'recent_transactions': [dict(r._mapping) for r in txs],
