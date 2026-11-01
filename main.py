@@ -20272,11 +20272,28 @@ def admin_acreditacion_decidir(body: dict,
     cuando y con que resultado.
 
     Cuerpo: {tipo, user_id, decision: approved|rejected|more_info,
-             motivo, decidido_por, vincular_company_id (opcional)}
+             motivo, decidido_por,
+             vincular_company_id (opcional),
+             crear_empresa: {country, tax_id, name} (opcional)}
 
-    `vincular_company_id` es la via de la decision 7: los 21 perfiles
-    historicos no se vinculan automaticamente, y aqui se les asocia su
-    empresa tras una revision manual, uno a uno.
+    `vincular_company_id` es la via de la decision 7: los perfiles
+    historicos no se vinculan automaticamente, y aqui se les asocia una
+    empresa YA registrada tras una revision manual, uno a uno.
+
+    `crear_empresa` cubre el punto ciego de las solicitudes antiguas: se
+    registraron con los formularios que no enviaban la identificacion
+    tributaria, asi que no hay ninguna empresa a la que vincularlas y no
+    existia forma de completarlas. Aqui quien revisa escribe el pais, la
+    identificacion y la razon social que ACABA DE COMPROBAR en los
+    antecedentes, y se resuelve con `_resolver_empresa`, la misma funcion
+    que usa el registro. No es un segundo sistema de identificacion ni una
+    via paralela: es el mismo mecanismo, iniciado desde la revision.
+
+    Escribir esos datos NO aprueba a nadie. Lo unico que decide es
+    `decision`, que es obligatoria: con `more_info` la empresa queda
+    identificada y la cuenta sigue pendiente. La decision es expresa,
+    autenticada por cabecera, y queda registrada con quien, cuando y el
+    resultado.
     """
     tipo = (body or {}).get('tipo')
     user_id = (body or {}).get('user_id')
@@ -20293,10 +20310,56 @@ def admin_acreditacion_decidir(body: dict,
         raise HTTPException(404, 'Perfil no encontrado')
 
     vincular = (body or {}).get('vincular_company_id')
+    crear = (body or {}).get('crear_empresa')
+    if vincular is not None and crear is not None:
+        raise HTTPException(422, 'Indica vincular_company_id o crear_empresa, '
+                                 'no las dos')
+
+    empresa_resuelta = empresa_creada = None
     if vincular is not None:
-        if not db.query(Company).filter(Company.id == int(vincular)).first():
+        empresa_resuelta = db.query(Company).filter(
+            Company.id == int(vincular)).first()
+        if not empresa_resuelta:
             raise HTTPException(404, 'La empresa indicada no existe')
-        p.company_id = int(vincular)
+        empresa_creada = False
+    elif crear is not None:
+        if not isinstance(crear, dict):
+            raise HTTPException(422, 'crear_empresa debe ser un objeto con '
+                                     'country, tax_id y name')
+        pais = (crear.get('country') or '').strip().upper()
+        tax = (crear.get('tax_id') or '').strip()
+        razon = (crear.get('name') or '').strip()
+        if not pais:
+            raise HTTPException(422, 'crear_empresa exige el pais')
+        if not _norm_tax_id(tax):
+            raise HTTPException(422, 'crear_empresa exige una identificacion '
+                                     'tributaria o registral normalizable; sin '
+                                     'ella la empresa no queda identificada')
+        if not razon:
+            raise HTTPException(422, 'crear_empresa exige la razon social')
+        # Se reutiliza la validacion que ya existe. Para Chile el digito
+        # verificador es una comprobacion objetiva, no una afirmacion de
+        # quien revisa; fuera de Chile no hay validador y queda sin
+        # verificar, igual que en el registro.
+        tax_ok = _verify_company_rut(tax)['valid'] if pais == 'CL' else False
+        # _resolver_empresa reutiliza la empresa existente si ya esta
+        # registrada: la identidad es (pais, identificacion), y el indice
+        # unico de la base impide duplicarla aunque haya una carrera.
+        empresa_resuelta, empresa_creada = _resolver_empresa(
+            db, country=pais, tax_id=tax, name=razon,
+            verified_tax_id=tax_ok, user_id=None)
+        if not empresa_resuelta:
+            raise HTTPException(422, 'No se pudo identificar la empresa con '
+                                     'esos datos')
+
+    if empresa_resuelta is not None:
+        # Nunca se mueve en silencio a un representante de una empresa a
+        # otra: seria crear una autorizacion entre empresas con una errata.
+        if p.company_id and p.company_id != empresa_resuelta.id:
+            raise HTTPException(409,
+                'Este perfil ya esta vinculado a otra empresa verificada; '
+                'no se reasigna desde aqui')
+        p.company_id = empresa_resuelta.id
 
     if decision == 'approved':
         # No se aprueba a una organizacion sin empresa identificada: seria
@@ -20305,8 +20368,9 @@ def admin_acreditacion_decidir(body: dict,
         if _es_organizacion(p.org_type) and not p.company_id:
             raise HTTPException(409,
                 'No se puede aprobar una organizacion sin empresa '
-                'identificada; indica vincular_company_id tras revisar los '
-                'antecedentes')
+                'identificada; indica crear_empresa (pais, identificacion '
+                'tributaria y razon social comprobados en los antecedentes) '
+                'o vincular_company_id si la empresa ya esta registrada')
         p.status = 'approved'
         p.approved_at = datetime.utcnow()
         p.rejection_reason = ''
@@ -20320,13 +20384,23 @@ def admin_acreditacion_decidir(body: dict,
     # Queda registrado quien decidio, cuando y el resultado. Sin datos
     # personales del solicitante: solo su id interno.
     print(f'[acreditacion] decision={decision} tipo={tipo} '
-          f'user={user_id} company={p.company_id} por={quien} '
+          f'user={user_id} company={p.company_id} '
+          f'empresa_creada={bool(empresa_creada)} por={quien} '
           f'en={datetime.utcnow().isoformat()}Z')
-    return {'ok': True, 'tipo': tipo, 'user_id': user_id,
-            'decision': decision, 'estado': p.status,
-            'company_id': p.company_id, 'decidido_por': quien,
-            'decidido_en': datetime.utcnow().isoformat() + 'Z',
-            'motivo': p.rejection_reason or ''}
+    salida = {'ok': True, 'tipo': tipo, 'user_id': user_id,
+              'decision': decision, 'estado': p.status,
+              'company_id': p.company_id, 'decidido_por': quien,
+              'decidido_en': datetime.utcnow().isoformat() + 'Z',
+              'motivo': p.rejection_reason or ''}
+    if empresa_resuelta is not None:
+        salida['empresa'] = {
+            'creada': bool(empresa_creada),
+            'pais': empresa_resuelta.country,
+            'identificacion_normalizada': empresa_resuelta.tax_id_norm,
+            'identificacion_verificada': bool(empresa_resuelta.verified_tax_id),
+            'razon_social': empresa_resuelta.name or '',
+        }
+    return salida
 
 
 @app.get('/admin/socioeconomic/impact')

@@ -88,6 +88,30 @@ los antecedentes la empresa es la que dice ser, se vincula en la misma llamada:
  "decidido_por":"JC","vincular_company_id":7}
 ```
 
+### Completar los antecedentes de una solicitud antigua
+
+Las solicitudes anteriores a este procedimiento se registraron con los
+formularios que no enviaban la identificación tributaria, así que no hay
+ninguna empresa a la que vincularlas. Tras comprobar los antecedentes, se
+escriben en la misma decisión:
+
+```json
+{"tipo":"anunciante","user_id":321,"decision":"approved","decidido_por":"JC",
+ "crear_empresa":{"country":"CL","tax_id":"76.123.456-7","name":"Empresa SpA"}}
+```
+
+Se resuelve con la misma función que usa el registro, así que si esa empresa
+ya está registrada **se reutiliza**, no se duplica. La respuesta dice si se
+creó o se reutilizó, la identificación normalizada y si quedó verificada
+—para Chile se comprueba el dígito verificador; fuera de Chile no hay
+validador y queda sin verificar, igual que en el registro—.
+
+Escribir esos datos **no aprueba a nadie**. Lo único que decide es
+`decision`: con `more_info` la empresa queda identificada y la cuenta sigue
+pendiente. Un perfil ya vinculado a otra empresa no se reasigna desde aquí
+(409): mover a un representante entre empresas con una errata sería crear
+justo la autorización cruzada que el procedimiento impide.
+
 Esa es también la vía para los **21 perfiles empresariales históricos**: la
 migración no vinculó ninguno y no cambió ningún permiso. Siguen aprobados y
 siguen operando. Lo único que no pueden hacer mientras estén sin vincular es

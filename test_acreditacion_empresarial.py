@@ -535,6 +535,276 @@ class TestPanelDeRevision(Base):
 
 
 # ══════════════════════════════════════════════════════════════════
+# D bis. COMPLETAR LOS ANTECEDENTES DE UNA SOLICITUD ANTIGUA
+# ══════════════════════════════════════════════════════════════════
+#
+# Las solicitudes anteriores a la acreditacion se registraron con los
+# formularios que no enviaban la identificacion tributaria: no hay ninguna
+# empresa a la que vincularlas, y sin ella no se pueden aprobar. Quien
+# revisa escribe los datos que acaba de comprobar en los antecedentes y se
+# resuelven con la MISMA funcion del registro.
+
+def _rut_valido():
+    """Un RUT chileno distinto en cada llamada, con digito verificador
+    correcto.
+
+    Hace falta uno nuevo por prueba: la base es compartida dentro del
+    archivo, asi que si dos pruebas reusan el mismo RUT la segunda
+    REUTILIZA la empresa -que es el comportamiento correcto- y la asercion
+    de "creada" deja de valer. Me paso.
+    """
+    _rut_valido.n = getattr(_rut_valido, 'n', 0) + 1
+    digitos = 78000000 + _rut_valido.n
+    n, suma, mult = digitos, 0, 2
+    while n:
+        suma += (n % 10) * mult
+        n //= 10
+        mult = 2 if mult == 7 else mult + 1
+    dv = str(11 - suma % 11).replace('10', 'K').replace('11', '0')
+    return f'{digitos}-{dv}' 
+
+
+class TestCompletarAntecedentes(Base):
+
+    def _admin(self):
+        h = _ip(); h['X-Admin-Secret'] = ADMIN
+        return h
+
+    def _antigua(self, Modelo=None, org_type='company'):
+        """Una solicitud como las diez pendientes: sin RUT y sin empresa."""
+        Modelo = Modelo or main.OrganizerProfile
+        rol = 'organizer' if Modelo is main.OrganizerProfile else 'marketer'
+        u = self._usuario(rol)
+        p = Modelo(user_id=u.id, org_type=org_type, status='pending',
+                   is_supervisor=False, company_name='Empresa Antigua',
+                   company_rut='', rut_verified=False, company_id=None)
+        self.db.add(p); self.db.commit()
+        return u, p
+
+    def _decidir(self, tipo, user_id, **extra):
+        cuerpo = {'tipo': tipo, 'user_id': user_id, 'decidido_por': 'JC'}
+        cuerpo.update(extra)
+        return self.client.post('/admin/accreditation/decide', json=cuerpo,
+                                headers=self._admin())
+
+    # ── Condicion 1: se pueden completar y aprobar ────────────────
+    def test_completar_y_aprobar(self):
+        u, _ = self._antigua()
+        rut = _rut_valido()
+        r = self._decidir('organizador', u.id, decision='approved',
+                          crear_empresa={'country': 'CL', 'tax_id': rut,
+                                         'name': 'Empresa Antigua SpA'})
+        self.assertEqual(r.status_code, 200, r.text[:300])
+        d = r.json()
+        self.assertEqual(d['estado'], 'approved')
+        self.assertTrue(d['company_id'])
+        self.assertTrue(d['empresa']['creada'])
+        self.assertEqual(d['empresa']['identificacion_normalizada'],
+                         main._norm_tax_id(rut))
+        self.assertTrue(d['empresa']['identificacion_verificada'],
+                        'el digito verificador de este RUT es correcto')
+
+    def test_completar_y_rechazar(self):
+        u, _ = self._antigua()
+        r = self._decidir('organizador', u.id, decision='rejected',
+                          motivo='El poder no acredita el cargo',
+                          crear_empresa={'country': 'CL', 'tax_id': _rut_valido(),
+                                         'name': 'Empresa Antigua SpA'})
+        self.assertEqual(r.status_code, 200, r.text[:300])
+        self.assertEqual(r.json()['estado'], 'rejected')
+        self.assertIn('no acredita', r.json()['motivo'])
+
+    # ── Condicion 2: escribir los datos NO aprueba ────────────────
+    def test_completar_sin_aprobar_deja_la_cuenta_PENDIENTE(self):
+        u, _ = self._antigua()
+        r = self._decidir('organizador', u.id, decision='more_info',
+                          motivo='Falta el certificado de vigencia',
+                          crear_empresa={'country': 'CL', 'tax_id': _rut_valido(),
+                                         'name': 'Empresa Antigua SpA'})
+        self.assertEqual(r.status_code, 200, r.text[:300])
+        self.assertEqual(r.json()['estado'], 'pending',
+                         'identificar la empresa no es acreditar al '
+                         'representante')
+        self.assertTrue(r.json()['company_id'], 'pero si queda identificada')
+        p = self.db.query(main.OrganizerProfile).filter(
+            main.OrganizerProfile.user_id == u.id).first()
+        self.db.refresh(p)
+        self.assertEqual(p.status, 'pending')
+        self.assertIsNone(p.approved_at)
+
+    def test_la_decision_es_obligatoria(self):
+        u, _ = self._antigua()
+        r = self._decidir('organizador', u.id,
+                          crear_empresa={'country': 'CL', 'tax_id': _rut_valido(),
+                                         'name': 'X'})
+        self.assertEqual(r.status_code, 422,
+                         'sin decision expresa no pasa nada')
+
+    def test_sin_credencial_no_se_completa_nada(self):
+        u, _ = self._antigua()
+        r = self.client.post('/admin/accreditation/decide',
+                             json={'tipo': 'organizador', 'user_id': u.id,
+                                   'decision': 'approved',
+                                   'crear_empresa': {'country': 'CL',
+                                                     'tax_id': _rut_valido(),
+                                                     'name': 'X'}},
+                             headers=_ip())
+        self.assertEqual(r.status_code, 403)
+        p = self.db.query(main.OrganizerProfile).filter(
+            main.OrganizerProfile.user_id == u.id).first()
+        self.db.refresh(p)
+        self.assertEqual(p.status, 'pending')
+        self.assertIsNone(p.company_id)
+
+    def test_el_secreto_por_la_URL_tampoco(self):
+        u, _ = self._antigua()
+        r = self.client.post(f'/admin/accreditation/decide?secret={ADMIN}',
+                             json={'tipo': 'organizador', 'user_id': u.id,
+                                   'decision': 'approved',
+                                   'crear_empresa': {'country': 'CL',
+                                                     'tax_id': _rut_valido(),
+                                                     'name': 'X'}},
+                             headers=_ip())
+        self.assertEqual(r.status_code, 403)
+
+    def test_la_decision_queda_registrada(self):
+        u, _ = self._antigua()
+        r = self._decidir('organizador', u.id, decision='approved',
+                          crear_empresa={'country': 'CL', 'tax_id': _rut_valido(),
+                                         'name': 'Empresa Antigua SpA'})
+        d = r.json()
+        self.assertEqual(d['decidido_por'], 'JC')
+        self.assertTrue(d['decidido_en'].endswith('Z'))
+
+    # ── Condicion 3: duplicados ───────────────────────────────────
+    def test_dos_solicitudes_del_mismo_rut_comparten_empresa(self):
+        antes = self.db.query(main.Company).count()
+        u1, _ = self._antigua()
+        u2, _ = self._antigua(main.MarketerProfile)
+        rut = _rut_valido()
+        r1 = self._decidir('organizador', u1.id, decision='more_info',
+                           crear_empresa={'country': 'CL', 'tax_id': rut,
+                                          'name': 'Compartida SpA'})
+        r2 = self._decidir('anunciante', u2.id, decision='more_info',
+                           crear_empresa={'country': 'cl',
+                                          'tax_id': main._norm_tax_id(rut),
+                                          'name': 'COMPARTIDA S.P.A.'})
+        self.assertEqual(r1.status_code, 200, r1.text[:200])
+        self.assertEqual(r2.status_code, 200, r2.text[:200])
+        self.assertEqual(r1.json()['company_id'], r2.json()['company_id'],
+                         'la identidad es (pais, identificacion), no el nombre')
+        self.assertTrue(r1.json()['empresa']['creada'])
+        self.assertFalse(r2.json()['empresa']['creada'],
+                         'la segunda reutiliza la empresa, no la duplica')
+        self.assertEqual(self.db.query(main.Company).count(), antes + 1)
+
+    def test_no_se_reasigna_un_perfil_a_otra_empresa(self):
+        u, _ = self._antigua()
+        otra = self._empresa()
+        self._decidir('organizador', u.id, decision='more_info',
+                      vincular_company_id=otra.id)
+        r = self._decidir('organizador', u.id, decision='approved',
+                          crear_empresa={'country': 'CL', 'tax_id': _rut_valido(),
+                                         'name': 'Otra SpA'})
+        self.assertEqual(r.status_code, 409, r.text[:300])
+        self.assertIn('otra empresa', r.json()['detail'])
+
+    def test_las_dos_vias_juntas_se_rechazan(self):
+        u, _ = self._antigua()
+        emp = self._empresa()
+        r = self._decidir('organizador', u.id, decision='approved',
+                          vincular_company_id=emp.id,
+                          crear_empresa={'country': 'CL', 'tax_id': _rut_valido(),
+                                         'name': 'X'})
+        self.assertEqual(r.status_code, 422)
+
+    # ── Datos insuficientes: nunca se inventa una empresa ─────────
+    def test_sin_identificacion_normalizable_no_se_crea_nada(self):
+        for basura in ('', '   ', '-', '...'):
+            u, _ = self._antigua()
+            antes = self.db.query(main.Company).count()
+            r = self._decidir('organizador', u.id, decision='approved',
+                              crear_empresa={'country': 'CL',
+                                             'tax_id': basura, 'name': 'X'})
+            self.assertEqual(r.status_code, 422, f'{basura!r}: {r.text[:120]}')
+            self.assertEqual(self.db.query(main.Company).count(), antes)
+            p = self.db.query(main.OrganizerProfile).filter(
+                main.OrganizerProfile.user_id == u.id).first()
+            self.db.refresh(p)
+            self.assertEqual(p.status, 'pending')
+
+    def test_sin_pais_ni_razon_social_no_se_crea_nada(self):
+        u, _ = self._antigua()
+        r = self._decidir('organizador', u.id, decision='approved',
+                          crear_empresa={'tax_id': _rut_valido(), 'name': 'X'})
+        self.assertEqual(r.status_code, 422)
+        r = self._decidir('organizador', u.id, decision='approved',
+                          crear_empresa={'country': 'CL', 'tax_id': _rut_valido()})
+        self.assertEqual(r.status_code, 422)
+
+    def test_crear_empresa_tiene_que_ser_un_objeto(self):
+        u, _ = self._antigua()
+        r = self._decidir('organizador', u.id, decision='approved',
+                          crear_empresa='Empresa Antigua SpA')
+        self.assertEqual(r.status_code, 422)
+
+    def test_un_rut_con_digito_equivocado_no_queda_verificado(self):
+        u, _ = self._antigua()
+        r = self._decidir('organizador', u.id, decision='more_info',
+                          crear_empresa={'country': 'CL',
+                                         'tax_id': '78.555.222-1',
+                                         'name': 'Digito Malo SpA'})
+        self.assertEqual(r.status_code, 200, r.text[:300])
+        self.assertFalse(r.json()['empresa']['identificacion_verificada'],
+                         'se identifica pero NO se marca como verificada')
+
+    def test_empresa_extranjera_se_identifica_sin_verificar(self):
+        u, _ = self._antigua()
+        r = self._decidir('organizador', u.id, decision='more_info',
+                          crear_empresa={'country': 'ES',
+                                         'tax_id': 'B-12345678',
+                                         'name': 'Sociedad Iberica SL'})
+        self.assertEqual(r.status_code, 200, r.text[:300])
+        self.assertTrue(r.json()['company_id'])
+        self.assertFalse(r.json()['empresa']['identificacion_verificada'],
+                         'fuera de Chile no hay validador: igual que en el '
+                         'registro, queda sin verificar')
+
+    # ── Condicion 3: las guardas del supervisor siguen intactas ───
+    def test_completar_NO_abre_la_puerta_a_otra_empresa(self):
+        """Tras completar los antecedentes, un supervisor de OTRA empresa
+        sigue sin poder acreditar a este representante."""
+        u, _ = self._antigua(main.MarketerProfile)
+        r = self._decidir('anunciante', u.id, decision='more_info',
+                          crear_empresa={'country': 'CL', 'tax_id': _rut_valido(),
+                                         'name': 'Empresa Antigua SpA'})
+        self.assertEqual(r.status_code, 200, r.text[:200])
+
+        otra = self._empresa()
+        jefe = self._usuario('marketer')
+        self._perfil(main.MarketerProfile, jefe.id, company_id=otra.id,
+                     status='approved', supervisor=True)
+        req = main.MarketerAuthorizationRequest(
+            employee_user_id=u.id, employee_name=u.name,
+            employee_email=u.email, supervisor_email=jefe.email,
+            token=_uniq('tok'), status='pending')
+        self.db.add(req); self.db.commit()
+        rr = self.client.post(f'/marketer/authorize/{req.token}?action=approved',
+                              headers=self.auth(jefe.id, 'marketer'))
+        self.assertEqual(rr.status_code, 403, rr.text[:200])
+        self.assertIn('misma empresa', rr.json()['detail'])
+
+    def test_un_ciudadano_no_necesita_empresa(self):
+        u = self._usuario('organizer')
+        self._perfil(main.OrganizerProfile, u.id, company_id=None,
+                     status='pending', org_type=main._ORG_TYPE_PERSONA)
+        r = self._decidir('organizador', u.id, decision='approved')
+        self.assertEqual(r.status_code, 200, r.text[:300])
+        self.assertEqual(r.json()['estado'], 'approved')
+        self.assertIsNone(r.json()['company_id'])
+
+
+# ══════════════════════════════════════════════════════════════════
 # E. EL AVISO AL REVISOR NO LLEVA DATOS PERSONALES NI DOCUMENTOS
 # ══════════════════════════════════════════════════════════════════
 
