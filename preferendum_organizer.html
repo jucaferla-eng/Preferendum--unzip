@@ -145,7 +145,65 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
       <div class="field"><label>Full Name</label><input type="text" id="r-name" placeholder="Your name"/></div>
       <div class="field"><label>Email</label><input type="email" id="r-email" placeholder="you@organization.com"/></div>
       <div class="field"><label>Password</label><input type="password" id="r-pass" placeholder="••••••••"/></div>
-      <div class="field"><label>Organization</label><input type="text" id="r-org" placeholder="Municipality, NGO, Company…"/></div>
+      <!-- ACREDITACION EMPRESARIAL — el formulario solo pedia un nombre de
+           organizacion en texto libre, y el registro no enviaba `org_type`,
+           asi que TODO perfil nacia 'person' y se aprobaba solo, tambien
+           cuando quien registraba decia representar a una empresa o a un
+           organismo publico. Estos campos son los que el servidor ya
+           verificaba (RUT, dominio, sitio web) pero que nunca recibia. -->
+      <div class="field"><label>¿A quién representas?</label>
+        <select id="r-org-type" onchange="toggleCamposEmpresa()">
+          <option value="person">A mí mismo, como ciudadano</option>
+          <option value="company">A una empresa u organización</option>
+          <option value="public">A un organismo público</option>
+        </select>
+      </div>
+      <div id="campos-empresa" style="display:none;">
+        <div class="field"><label>País</label>
+          <select id="r-country">
+            <option value="CL">Chile</option>
+            <option value="AR">Argentina</option>
+            <option value="BR">Brasil</option>
+            <option value="CO">Colombia</option>
+            <option value="MX">México</option>
+            <option value="PE">Perú</option>
+            <option value="ES">España</option>
+            <option value="US">Estados Unidos</option>
+            <option value="OTRO">Otro país</option>
+          </select>
+        </div>
+        <div class="field"><label>Razón social</label><input type="text" id="r-org" placeholder="Nombre legal de la empresa u organismo"/></div>
+        <div class="field"><label>Identificación tributaria o registral (RUT, CUIT, NIF, EIN…)</label><input type="text" id="r-tax-id" placeholder="76.123.456-7"/></div>
+        <div class="field"><label>Sitio web oficial</label><input type="text" id="r-web" placeholder="https://www.empresa.cl"/></div>
+        <div class="field"><label>Tu cargo</label><input type="text" id="r-cargo" placeholder="Gerente de Comunicaciones"/></div>
+        <!-- La via del supervisor YA existia en el servidor
+             (AuthorizationRequest + /organizer/authorize/{token}); el
+             formulario nunca la ofrecia, asi que la solicitud no se creaba
+             nunca y todo pasaba por revision manual. Es el MISMO
+             procedimiento que en CAMPANAS. -->
+        <div class="field">
+          <label>¿Hay alguien de tu organización ya acreditado en Preferendum?</label>
+          <select id="r-tiene-supervisor" onchange="toggleCamposSupervisor()">
+            <option value="no">No — soy el primer representante</option>
+            <option value="si">Sí — un supervisor ya acreditado me autorizará</option>
+          </select>
+        </div>
+        <div id="campos-supervisor" style="display:none;">
+          <div class="field"><label>Correo del supervisor</label><input type="email" id="r-sup-email" placeholder="supervisor@empresa.cl"/></div>
+          <div style="font-size:12px;color:var(--muted);line-height:1.5;margin:-8px 0 14px;">
+            Le enviaremos la solicitud a ese correo. Solo puede autorizarte un
+            supervisor ya acreditado de tu misma organización, y solo si la
+            solicitud está dirigida a él. Nadie puede autorizarse a sí mismo.
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.5;margin:-4px 0 14px;">
+          Representar a una empresa u organismo requiere acreditación. Tu cuenta
+          queda creada de inmediato, pero no podrá publicar consultas hasta que
+          Preferendum revise los antecedentes. La identificación tributaria es lo
+          que permite comprobar que dos personas representan a la misma empresa:
+          sin ella la solicitud queda en revisión excepcional.
+        </div>
+      </div>
       <button class="btn" onclick="doRegister()">Create Account</button>
       <div class="err" id="r-err"></div>
     </div>
@@ -163,6 +221,25 @@ html,body{min-height:100%;background:var(--bg);color:var(--text);font-family:'In
     </div>
   </div>
   <div class="content">
+    <!-- ESTADO DE ACREDITACION — visible dentro del panel, no un panel
+         nuevo. Se rellena desde /organizer/status. -->
+    <div id="acred-estado" style="display:none;margin-bottom:18px;padding:16px;
+         background:rgba(196,154,42,0.12);border:1px solid rgba(196,154,42,0.35);
+         border-radius:10px;line-height:1.55;font-size:14px;"></div>
+    <div id="acred-subir-doc" style="display:none;margin-bottom:24px;padding:16px;
+         background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+         font-size:14px;line-height:1.55;">
+      <b>Documento que acredita tu cargo</b><br>
+      <span style="font-size:12px;color:var(--muted);">Contrato, poder notarial o
+      certificado de vigencia. JPG, PNG o PDF. Se guarda cifrado y solo lo
+      consulta quien revisa la acreditación; nunca se publica.</span>
+      <div style="margin-top:10px;">
+        <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf"
+               onchange="subirDocCargo(this)"/>
+      </div>
+      <div id="acred-doc-estado" style="font-size:12px;color:var(--muted);margin-top:8px;"></div>
+    </div>
+
     <!-- NUEVA CONSULTA CTA -->
     <div id="nueva-consulta-cta" style="margin-bottom:24px;">
       <button class="btn" onclick="openTypeSelect()" style="width:100%;font-size:16px;padding:18px;border-radius:14px;letter-spacing:.02em;">+ Nueva Consulta</button>
@@ -472,6 +549,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 });
 
+// showApp() es async: el estado de acreditacion se pinta al resolverse.
 if (token) showApp();
 else if (window.Prefy) Prefy.setContext('organizer.auth.login');
 
@@ -498,24 +576,61 @@ async function doLogin() {
   referralCode = d.user?.referral_code || '';
   localStorage.setItem('pref_org_token', token);
   if (referralCode) localStorage.setItem('pref_org_referral_code', referralCode);
-  showApp();
+  await showApp();
+}
+
+function toggleCamposEmpresa() {
+  const tipo = document.getElementById('r-org-type').value;
+  const bloque = document.getElementById('campos-empresa');
+  if (bloque) bloque.style.display = (tipo === 'person') ? 'none' : '';
+}
+
+function toggleCamposSupervisor() {
+  const tiene = document.getElementById('r-tiene-supervisor').value === 'si';
+  const bloque = document.getElementById('campos-supervisor');
+  if (bloque) bloque.style.display = tiene ? '' : 'none';
 }
 
 async function doRegister() {
   const name  = document.getElementById('r-name').value.trim();
   const email = document.getElementById('r-email').value.trim();
   const pass  = document.getElementById('r-pass').value;
+  const tipo  = document.getElementById('r-org-type').value;
   const org   = document.getElementById('r-org').value.trim();
-  document.getElementById('r-err').textContent = '';
+  const taxId = document.getElementById('r-tax-id').value.trim();
+  const web   = document.getElementById('r-web').value.trim();
+  const cargo = document.getElementById('r-cargo').value.trim();
+  const pais  = document.getElementById('r-country').value;
+  const tieneSup = document.getElementById('r-tiene-supervisor').value === 'si';
+  const supEmail = document.getElementById('r-sup-email').value.trim();
+  const err   = document.getElementById('r-err');
+  err.textContent = '';
+  // `organization` no era un campo del modelo del servidor: se descartaba
+  // en silencio. Los nombres de abajo son los que la ruta realmente lee.
+  const cuerpo = {name, email, password: pass, org_type: tipo,
+    country: (tipo === 'person') ? 'CL' : pais,
+    lang: window.PreferendumLang ? window.PreferendumLang.currentLanguage() : ''};
+  if (tipo !== 'person') {
+    if (!org)   { err.textContent = 'Indica la razón social de la empresa u organismo.'; return; }
+    if (!cargo) { err.textContent = 'Indica tu cargo en la empresa u organismo.'; return; }
+    if (tieneSup && !supEmail) { err.textContent = 'Indica el correo del supervisor que te autorizará.'; return; }
+    cuerpo.company_name = org;
+    cuerpo.company_rut  = taxId;
+    cuerpo.company_web  = web;
+    cuerpo.cargo        = cargo;
+    // is_supervisor=false es lo que hace que el servidor cree la
+    // AuthorizationRequest y avise al supervisor designado.
+    cuerpo.is_supervisor    = !tieneSup;
+    cuerpo.supervisor_email = tieneSup ? supEmail : '';
+  }
   const r = await fetch(`${API}/organizer/register`, {method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name,email,password:pass,organization:org,country:'CL',
-      lang: window.PreferendumLang ? window.PreferendumLang.currentLanguage() : ''})});
+    body:JSON.stringify(cuerpo)});
   const d = await r.json();
-  if (!r.ok) { document.getElementById('r-err').textContent = d.detail || 'Registration failed'; return; }
+  if (!r.ok) { err.textContent = d.detail || 'Registration failed'; return; }
   token = d.token;
   userName = name;
   localStorage.setItem('pref_org_token', token);
-  showApp();
+  await showApp();
 }
 
 function doLogout() {
@@ -526,12 +641,102 @@ function doLogout() {
   if (window.Prefy) Prefy.setContext('organizer.logout', { forceOpen: true });
 }
 
-function showApp() {
+function _escaparHtml(t) {
+  return String(t || '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[ch]);
+}
+
+// El portal nunca consultaba /organizer/status: ofrecia «+ Nueva Consulta» a
+// cualquiera, y la cuenta pendiente descubria que no podia publicar solo al
+// pulsar Crear, con un 403 sin explicacion. La puerta del servidor no cambia
+// -sigue exigiendo perfil aprobado-; esto deja de prometer en pantalla algo
+// que no se puede hacer, y dice que falta.
+async function _estadoOrganizador() {
+  try {
+    const r = await fetch(`${API}/organizer/status`, {headers:{'Authorization':'Bearer '+token}});
+    if (!r.ok) return null;          // 404 = cuenta sin perfil de organizador
+    return await r.json();
+  } catch (_) { return null; }
+}
+
+function _mostrarEstadoAcreditacion(est) {
+  const aviso = document.getElementById('acred-estado');
+  const cta   = document.getElementById('nueva-consulta-cta');
+  const subir = document.getElementById('acred-subir-doc');
+  if (!aviso) return;
+
+  // Sin perfil: son las cuentas historicas. Conservan la lectura de sus
+  // consultas anteriores; lo que no pueden es publicar una nueva.
+  if (!est) {
+    aviso.innerHTML = '<b>Tu cuenta no tiene un perfil de organizador acreditado.</b>'
+      + '<br>Puedes consultar tus consultas anteriores y sus resultados. Para '
+      + 'publicar una consulta nueva necesitas completar el registro con los '
+      + 'datos de quien representas.';
+    aviso.style.display = 'block';
+    if (cta) cta.style.display = 'none';
+    if (subir) subir.style.display = 'none';
+    return;
+  }
+
+  if (est.can_create_consultations) {
+    aviso.style.display = 'none';
+    if (cta) cta.style.display = '';
+    if (subir) subir.style.display = 'none';
+    return;
+  }
+
+  const falta = [];
+  if (!(est.verifications && est.verifications.email)) falta.push('confirmar tu correo electrónico');
+  if (est.status !== 'approved') falta.push('la acreditación de tu representación por parte de Preferendum');
+  const v = est.verifications || {};
+  const marca = ok => ok ? '✓' : '·';
+  aviso.innerHTML = '<b>Tu cuenta todavía no puede publicar consultas.</b><br>'
+    + 'Estado de acreditación: <b>' + _escaparHtml(est.status || 'desconocido') + '</b>'
+    + (est.company_name ? ' · ' + _escaparHtml(est.company_name) : '')
+    + (est.cargo ? ' · ' + _escaparHtml(est.cargo) : '') + '<br>'
+    + '<span style="font-size:12px;opacity:.85;">Verificaciones: '
+    + marca(v.email) + ' correo &nbsp; ' + marca(v.phone) + ' teléfono &nbsp; '
+    + marca(v.rut) + ' identificación tributaria &nbsp; ' + marca(v.domain) + ' dominio &nbsp; '
+    + marca(v.web) + ' sitio web &nbsp; ' + marca(v.doc) + ' documento de cargo</span><br><br>'
+    + (falta.length ? 'Falta: ' + falta.join(' y ') + '.<br>' : '')
+    + 'Mientras tanto puedes consultar tus consultas anteriores y sus resultados. '
+    + 'Te avisaremos en cuanto quede acreditada.';
+  aviso.style.display = 'block';
+  if (cta) cta.style.display = 'none';
+  // El documento que acredita el cargo solo se pide a quien dice representar
+  // a una organizacion, y solo mientras no este acreditado.
+  if (subir) subir.style.display = (est.org_type && est.org_type !== 'person') ? 'block' : 'none';
+}
+
+async function subirDocCargo(input) {
+  const estado = document.getElementById('acred-doc-estado');
+  const f = input.files && input.files[0];
+  if (!f) return;
+  estado.textContent = 'Enviando documento…';
+  const fd = new FormData();
+  fd.append('file', f);
+  try {
+    const r = await fetch(`${API}/organizer/upload-cargo-doc`,
+      {method:'POST', headers:{'Authorization':'Bearer '+token}, body: fd});
+    const d = await r.json();
+    estado.textContent = r.ok
+      ? (d.message || 'Documento recibido.')
+      : (d.detail || 'No se pudo enviar el documento.');
+    if (r.ok) _mostrarEstadoAcreditacion(await _estadoOrganizador());
+  } catch (_) {
+    estado.textContent = 'No se pudo enviar el documento. Inténtalo de nuevo.';
+  }
+  input.value = '';
+}
+
+async function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('main-app').style.display = 'block';
   setDefaultDate();
   loadDebates();
   initConvergenceCheck();
+  _mostrarEstadoAcreditacion(await _estadoOrganizador());
   if (window.Prefy) Prefy.setContext('organizer.home');
 }
 

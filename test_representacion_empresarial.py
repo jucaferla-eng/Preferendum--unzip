@@ -68,11 +68,25 @@ class Base(unittest.TestCase):
         return u
 
     def _perfil(self, Modelo, uid, org_type='company', status='pending',
-                supervisor=False):
+                supervisor=False, company_id=None):
         p = Modelo(user_id=uid, org_type=org_type, status=status,
-                   is_supervisor=supervisor, company_name='Empresa Ficticia')
+                   is_supervisor=supervisor, company_name='Empresa Ficticia',
+                   company_id=company_id)
         self.db.add(p); self.db.commit()
         return p
+
+    def _empresa_comun(self):
+        """Una empresa identificada, para los recorridos legitimos.
+
+        Desde la acreditacion empresarial, un supervisor solo puede acreditar
+        a alguien de SU MISMA empresa, y la empresa se identifica por (pais,
+        identificacion tributaria). Un perfil sin vincular -los historicos-
+        no puede acreditar a nadie hasta que una revision manual lo asocie.
+        """
+        emp, _ = main._resolver_empresa(
+            self.db, country='CL', tax_id=_uniq('76').replace('-', ''),
+            name='Empresa Ficticia', verified_tax_id=True)
+        return emp
 
     def _cuerpo_consulta(self):
         return {
@@ -377,11 +391,13 @@ class TestZ_AcreditacionDelSupervisor(Base):
 
     def test_Z5_un_supervisor_ACREDITADO_si_aprueba_y_habilita_la_puerta(self):
         """El recorrido completo: pendiente -> acreditado -> puede crear."""
+        empresa = self._empresa_comun()
         emp = self._usuario('organizer')
-        self._perfil(main.OrganizerProfile, emp.id, status='pending')
+        self._perfil(main.OrganizerProfile, emp.id, status='pending',
+                     company_id=empresa.id)
         jefe = self._usuario('organizer', selfie=True)
         self._perfil(main.OrganizerProfile, jefe.id, status='approved',
-                     supervisor=True)
+                     supervisor=True, company_id=empresa.id)
         tok = self._solicitud(main.AuthorizationRequest, emp.id, jefe.email)
 
         # antes: la puerta está cerrada
@@ -408,12 +424,14 @@ class TestZ_AcreditacionDelSupervisor(Base):
 
     def test_Z6_lo_mismo_en_CAMPANAS(self):
         """Paridad: el camino del anunciante exige lo mismo."""
+        empresa = self._empresa_comun()
         emp = self._usuario('marketer')
-        self._perfil(main.MarketerProfile, emp.id, status='pending')
+        self._perfil(main.MarketerProfile, emp.id, status='pending',
+                     company_id=empresa.id)
         # jefe sin selfie -> rechazado
         jefe = self._usuario('marketer', selfie=False)
         self._perfil(main.MarketerProfile, jefe.id, status='approved',
-                     supervisor=True)
+                     supervisor=True, company_id=empresa.id)
         tok = self._solicitud(main.MarketerAuthorizationRequest, emp.id,
                               jefe.email)
         r = self.client.post(f'/marketer/authorize/{tok}?action=approved',

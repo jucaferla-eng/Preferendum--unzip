@@ -1692,7 +1692,13 @@ class TestPinnedConsultation(unittest.TestCase):
 # not have been enough.
 # ═══════════════════════════════════════════════════════════════════════
 
-AUTH_DEPENDENCIES = ('get_current_user', 'get_verified_user', 'get_optional_user')
+AUTH_DEPENDENCIES = ('get_current_user', 'get_verified_user', 'get_optional_user',
+                     # Misma credencial administrativa, por CABECERA en vez de
+                     # por URL: las rutas de revision de acreditacion consultan
+                     # documentos de identidad, y una URL queda en el historial,
+                     # en los logs del proxy y en el Referer. La dependencia
+                     # compara contra ADMIN_SECRET y responde 403 sin ella.
+                     '_require_admin_header')
 
 # Deliberate, individually justified exceptions — both verified to expose
 # nothing and to mutate nothing:
@@ -1759,6 +1765,26 @@ class TestAdminRouteExposureSweep(unittest.TestCase):
             '\n\nAñade _check_admin(secret) (o justifícala en '
             'ADMIN_ROUTES_INTENTIONALLY_PUBLIC solo si no expone ni muta nada).'
         )
+
+    def test_las_rutas_de_acreditacion_no_aceptan_el_secreto_por_la_URL(self):
+        """El secreto de las rutas de revisión viaja por cabecera.
+
+        Esas rutas devuelven documentos de identidad y de cargo. Un secreto
+        en la query string queda en el historial del navegador, en los logs
+        del proxy y en el Referer de cualquier recurso externo.
+        """
+        by_key = {(m, p): n for m, p, n in _all_routes()}
+        rutas = [('GET',  '/admin/accreditation/pending'),
+                 ('GET',  '/admin/accreditation/document'),
+                 ('POST', '/admin/accreditation/decide')]
+        for method, path in rutas:
+            node = by_key.get((method, path))
+            self.assertIsNotNone(node, f'{method} {path} no existe')
+            nombres = [a.arg for a in node.args.args]
+            self.assertNotIn('secret', nombres,
+                             f'{path} no puede recibir el secreto por URL')
+            self.assertIn('Depends(_require_admin_header)', _src_of(node),
+                          f'{path} tiene que exigir la cabecera')
 
     def test_the_intentional_exceptions_really_are_inert(self):
         """An allowlist is only safe while its entries stay harmless. If

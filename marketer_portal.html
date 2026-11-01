@@ -270,6 +270,41 @@ nav{display:flex;align-items:center;justify-content:space-between;padding:20px 4
           <option value="otro">Otro</option>
         </select>
       </div>
+      <!-- ACREDITACION EMPRESARIAL — el formulario no pedia ninguno de los
+           datos que el servidor YA verifica (identificacion tributaria,
+           sitio web, cargo), asi que esas verificaciones nunca se ejecutaban
+           y toda acreditacion quedaba en revision manual sin antecedente
+           alguno. La identificacion tributaria es, ademas, lo unico que
+           permite comprobar que dos representantes son de la MISMA empresa:
+           un nombre o un dominio de correo no lo demuestran. -->
+      <div class="field"><label>Identificación tributaria o registral (RUT, CUIT, NIF, EIN…)</label><input type="text" id="reg-tax-id" placeholder="76.123.456-7"/></div>
+      <div class="field"><label>Sitio web oficial</label><input type="text" id="reg-web" placeholder="https://www.empresa.cl"/></div>
+      <div class="field"><label>Tu cargo en la empresa</label><input type="text" id="reg-cargo" placeholder="Gerente de Marketing"/></div>
+      <!-- La via del supervisor YA existia en el servidor
+           (MarketerAuthorizationRequest + /marketer/authorize/{token}) pero
+           ninguna pantalla creaba la solicitud: el registro siempre enviaba
+           is_supervisor por omision. -->
+      <div class="field">
+        <label>¿Hay alguien de tu empresa ya acreditado en Preferendum?</label>
+        <select id="reg-tiene-supervisor" onchange="toggleCamposSupervisor()">
+          <option value="no">No — soy el primer representante de mi empresa</option>
+          <option value="si">Sí — un supervisor ya acreditado me autorizará</option>
+        </select>
+      </div>
+      <div id="campos-supervisor" style="display:none;">
+        <div class="field"><label>Nombre del supervisor</label><input type="text" id="reg-sup-name" placeholder="Nombre y apellido"/></div>
+        <div class="field"><label>Correo del supervisor</label><input type="email" id="reg-sup-email" placeholder="supervisor@empresa.cl"/></div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.5;margin:-6px 0 14px;">
+          Le enviaremos la solicitud a ese correo. Solo puede autorizarte un
+          supervisor ya acreditado de tu misma empresa, y solo si la solicitud
+          está dirigida a él. Nadie puede autorizarse a sí mismo.
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.5;margin:-6px 0 14px;">
+        El primer representante de una empresa queda pendiente hasta que
+        Preferendum revise los antecedentes. Tu cuenta se crea de inmediato,
+        pero no podrá crear campañas ni obtener saldo hasta entonces.
+      </div>
       <button class="btn-primary" onclick="doRegister()">Create Account</button>
       <p class="auth-err" id="reg-err"></p>
     </div>
@@ -908,6 +943,9 @@ const API = 'https://preferendum-unzip.onrender.com';
 let token = localStorage.getItem('pref_adv_token') || '';
 let userEmail = localStorage.getItem('pref_adv_email') || '';
 let userName  = localStorage.getItem('pref_adv_name')  || '';
+// A quien se le pidio la autorizacion, para poder decirlo en el aviso
+// de cuenta pendiente tambien al volver a entrar.
+let supervisorSolicitado = localStorage.getItem('pref_adv_supervisor') || '';
 let selectedPkg = 'starter';
 let selectedPayMethod = 'stripe';
 let selectedCommunes = [];
@@ -985,12 +1023,24 @@ async function doLogin() {
   await showApp('login');
 }
 
+function toggleCamposSupervisor() {
+  const tiene = document.getElementById('reg-tiene-supervisor').value === 'si';
+  const bloque = document.getElementById('campos-supervisor');
+  if (bloque) bloque.style.display = tiene ? '' : 'none';
+}
+
 async function doRegister() {
   const name    = document.getElementById('reg-name').value.trim();
   const email   = document.getElementById('reg-email').value.trim();
   const pass    = document.getElementById('reg-pass').value;
   const country = document.getElementById('reg-country').value;
   const category = document.getElementById('reg-category').value;
+  const taxId   = document.getElementById('reg-tax-id').value.trim();
+  const web     = document.getElementById('reg-web').value.trim();
+  const cargo   = document.getElementById('reg-cargo').value.trim();
+  const tieneSup = document.getElementById('reg-tiene-supervisor').value === 'si';
+  const supName  = document.getElementById('reg-sup-name').value.trim();
+  const supEmail = document.getElementById('reg-sup-email').value.trim();
   // CORRECCION 3 — antes esto era `if (!name || !email || !pass) return;`:
   // un retorno MUDO. Si faltaba un campo, el boton no hacia absolutamente
   // nada y nadie sabia por que. Ahora se dice exactamente que falta.
@@ -999,6 +1049,8 @@ async function doRegister() {
   if (!email) faltantes.push('el correo');
   if (!pass)  faltantes.push('la contraseña');
   if (!category) faltantes.push('la categoría de tu empresa');
+  if (!cargo) faltantes.push('tu cargo en la empresa');
+  if (tieneSup && !supEmail) faltantes.push('el correo del supervisor que te autorizará');
   if (faltantes.length) {
     showErr('reg-err', 'Falta ' + faltantes.join(', ') + '.');
     return;
@@ -1018,6 +1070,12 @@ async function doRegister() {
   const r = await fetch(`${API}/marketer/register`, {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({name, email, password: pass, country,
       company_name: name, business_category: category,
+      company_rut: taxId, company_web: web, cargo: cargo,
+      // is_supervisor=false es lo que hace que el servidor cree la
+      // MarketerAuthorizationRequest y avise al supervisor.
+      is_supervisor: !tieneSup,
+      supervisor_name: tieneSup ? supName : '',
+      supervisor_email: tieneSup ? supEmail : '',
       lang: window.PreferendumLang ? window.PreferendumLang.currentLanguage() : ''})});
   const d = await r.json();
   if (!r.ok) { showErr('reg-err', d.detail || 'Registration failed'); return; }
@@ -1032,6 +1090,12 @@ async function doRegister() {
     // crear nada. Los dos mostraban el mismo aviso, asi que reintentar con
     // el mismo correo parecia que "no pasaba nada".
     const yaExistia = !d.verifications;
+    if (!yaExistia && tieneSup && supEmail) {
+      // El aviso de cuenta pendiente dice a quien se envio la solicitud.
+      // Es lo mismo que el servidor acaba de hacer, no un estado nuevo.
+      supervisorSolicitado = supEmail;
+      localStorage.setItem('pref_adv_supervisor', supEmail);
+    }
     await showApp(yaExistia ? 'cuenta-existente' : 'cuenta-creada');
   } else {
     document.getElementById('login-email').value = email;
@@ -1158,10 +1222,16 @@ async function showApp(origen) {
     let faltan = [];
     if (!correoOk) faltan.push('confirmar tu correo electrónico');
     if (!aprobado)  faltan.push('la acreditación de tu representación por parte de Preferendum');
+    const viaSupervisor = supervisorSolicitado
+      ? 'Enviamos la solicitud de autorización a <b>'
+        + _escaparHtml(supervisorSolicitado) + '</b>. Solo puede autorizarte '
+        + 'si ya está acreditado y pertenece a tu misma empresa.<br><br>'
+      : '';
     _mostrarPendiente(encabezado + '<br><br>'
       + 'Estado: <b>' + _escaparHtml(est.status || 'desconocido') + '</b>'
       + (correoOk ? ' · correo confirmado' : ' · correo sin confirmar') + '<br><br>'
       + 'Falta: ' + faltan.join(' y ') + '.<br><br>'
+      + viaSupervisor
       + 'Mientras tanto no puedes crear ni activar campañas, ni obtener saldo. '
       + 'Te avisaremos en cuanto quede acreditada.',
       {ofrecerCerrar: true});

@@ -725,6 +725,39 @@ class ClosedListEntry(Base):
     created_at       = Column(DateTime, default=datetime.utcnow)
 
 
+class Company(Base):
+    """IDENTIDAD DE EMPRESA — el sujeto que antes no existia.
+
+    Hasta ahora la empresa era TEXTO LIBRE dentro del perfil de cada
+    persona (`company_name`, `company_rut`, `company_email_domain`). Dos
+    representantes de la misma empresa eran dos filas sin relacion alguna,
+    asi que "mismo empleador" no se podia comprobar: supervisor_approve no
+    comparaba empresa, ni RUT, ni dominio, ni siquiera que quien aprobaba
+    fuera el jefe nombrado. Cualquier supervisor acreditado podia autorizar
+    a cualquier solicitante de cualquier otra empresa.
+
+    La identidad es (pais, identificacion tributaria o registral)
+    normalizada, NO el nombre: el nombre y la categoria siguen siendo datos
+    del formulario, pero no identifican.
+    """
+    __tablename__ = 'companies'
+    id              = Column(Integer, primary_key=True)
+    country         = Column(String, nullable=False)
+    tax_id          = Column(String, default='')
+    tax_id_norm     = Column(String, default='')
+    name            = Column(String, default='')
+    category        = Column(String, default='')
+    web             = Column(String, default='')
+    email_domain    = Column(String, default='')
+    verified_tax_id = Column(Boolean, default=False)
+    created_by_user_id = Column(Integer, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (
+        Index('ux_companies_country_taxid', 'country', 'tax_id_norm',
+              unique=True),
+    )
+
+
 class OrganizerProfile(Base):
     """
     Perfil extendido del organizador — persona natural o representante de empresa.
@@ -766,6 +799,11 @@ class OrganizerProfile(Base):
     rejection_reason     = Column(String, default='')
     created_at           = Column(DateTime, default=datetime.utcnow)
     approved_at          = Column(DateTime, nullable=True)
+    # Vinculo con la empresa (tabla companies). NULL = sin vincular, que es
+    # el estado de los 21 perfiles empresariales historicos: se conservan
+    # intactos y con sus permisos, pero no pueden acreditar empleados hasta
+    # que una revision manual los asocie (decision 7).
+    company_id           = Column(Integer, nullable=True, index=True)
 
 
 class AuthorizationRequest(Base):
@@ -832,6 +870,11 @@ class MarketerProfile(Base):
     rejection_reason     = Column(String, default='')
     created_at           = Column(DateTime, default=datetime.utcnow)
     approved_at          = Column(DateTime, nullable=True)
+    # Vinculo con la empresa (tabla companies). NULL = sin vincular, que es
+    # el estado de los 21 perfiles empresariales historicos: se conservan
+    # intactos y con sus permisos, pero no pueden acreditar empleados hasta
+    # que una revision manual los asocie (decision 7).
+    company_id           = Column(Integer, nullable=True, index=True)
 
 
 class MarketerAuthorizationRequest(Base):
@@ -1699,6 +1742,47 @@ def _migrate():
             print(f'[tally] no se pudo crear el índice del escrutinio (no '
                   f'fatal: el recuento sigue siendo correcto, solo más '
                   f'lento): {type(e).__name__}')
+
+        # ACREDITACION EMPRESARIAL — company_id en los dos perfiles.
+        # ADITIVA y REVERSIBLE: las filas existentes quedan en NULL ("sin
+        # vincular"). Ningun permiso cambia y ningun perfil historico se
+        # toca. El codigo anterior ignora la columna, asi que revertir el
+        # despliegue no exige tocar la base.
+        for _tabla in ('organizer_profiles', 'marketer_profiles'):
+            try:
+                _cols = ({c['name'] for c in inspector.get_columns(_tabla)}
+                         if inspector.has_table(_tabla) else set())
+                if _cols and 'company_id' not in _cols:
+                    conn.execute(text(
+                        f'ALTER TABLE {_tabla} ADD COLUMN company_id INTEGER'))
+                    conn.commit()
+                    print(f'[acreditacion] {_tabla}.company_id anadida')
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                print(f'[acreditacion] company_id en {_tabla}: {type(e).__name__}')
+        # El indice unico que materializa la identidad. Aparte, porque
+        # create_all omite las tablas que ya existen (leccion de CHANGE-005).
+        try:
+            from sqlalchemy import inspect as _insp_c
+            _ic = _insp_c(engine)
+            if _ic.has_table('companies'):
+                if 'ux_companies_country_taxid' not in {
+                        i['name'] for i in _ic.get_indexes('companies')}:
+                    conn.execute(text(
+                        'CREATE UNIQUE INDEX IF NOT EXISTS '
+                        'ux_companies_country_taxid ON companies '
+                        '(country, tax_id_norm)'))
+                    conn.commit()
+                    print('[acreditacion] ux_companies_country_taxid creado')
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            print(f'[acreditacion] indice de companies: {type(e).__name__}')
 
         # CHANGE-004 — al final, cuando todas las tablas ya existen.
         _migrate_vote_uniqueness(conn, inspector, text)
@@ -6504,6 +6588,108 @@ def _estado_inicial_de_perfil(org_type: str) -> str:
     return 'pending' if _es_organizacion(org_type) else 'approved'
 
 
+REVISION_ACREDITACION_EMAIL = os.getenv('ACCREDITATION_REVIEW_EMAIL',
+                                        'jucaferla@preferendum.com')
+
+
+def _norm_tax_id(valor: str) -> str:
+    """Normaliza una identificacion tributaria o registral para comparar.
+
+    Solo alfanumericos en mayusculas: '76.123.456-K', '761234 56K' y
+    '76123456k' son la MISMA empresa. Normalizar y validar son cosas
+    distintas; aqui solo se normaliza.
+    """
+    return ''.join(ch for ch in (valor or '').upper() if ch.isalnum())
+
+
+def _resolver_empresa(db: Session, *, country: str, tax_id: str, name: str,
+                      category: str = '', web: str = '', email_domain: str = '',
+                      verified_tax_id: bool = False, user_id=None):
+    """Devuelve (Company|None, creada) para (pais, identificacion).
+
+    Sin identificacion normalizable devuelve (None, False): la empresa NO se
+    identifica, y quien llama deja el perfil pendiente para revision
+    excepcional (decision 8). Nunca se usa el NOMBRE como identidad.
+    """
+    tn = _norm_tax_id(tax_id)
+    cc = (country or '').strip().upper()
+    if not tn or not cc:
+        return None, False
+    existente = db.query(Company).filter(
+        Company.country == cc, Company.tax_id_norm == tn).first()
+    if existente:
+        return existente, False
+    empresa = Company(
+        country=cc, tax_id=(tax_id or '').strip(), tax_id_norm=tn,
+        name=(name or '').strip(), category=(category or '').strip(),
+        web=(web or '').strip(), email_domain=(email_domain or '').strip(),
+        verified_tax_id=bool(verified_tax_id), created_by_user_id=user_id)
+    db.add(empresa)
+    try:
+        db.commit()
+        db.refresh(empresa)
+        return empresa, True
+    except IntegrityError:
+        # Carrera: otro representante de la MISMA empresa la creo primero.
+        db.rollback()
+        return db.query(Company).filter(
+            Company.country == cc, Company.tax_id_norm == tn).first(), False
+
+
+def _notificar_revision_acreditacion(*, perfil_tipo: str, user_id: int,
+                                     company_id, company_name: str,
+                                     country: str, tax_id_norm: str,
+                                     cargo: str, tiene_documento: bool,
+                                     motivo: str) -> bool:
+    """Avisa a quien revisa que hay una acreditacion pendiente.
+
+    PRIVACIDAD, deliberada: el correo NO lleva documentos, ni el RUT de la
+    persona, ni su telefono, ni su correo, ni enlaces publicos, ni ninguna
+    credencial. Solo los identificadores internos necesarios para abrir la
+    revision en el panel administrativo autenticado, que es donde se
+    consultan los antecedentes.
+
+    Nunca lanza. Sin proveedor de correo lo registra en el log -sin datos
+    personales- y la solicitud sigue pendiente igual: la notificacion es un
+    aviso, no la autorizacion.
+    """
+    cuerpo = (
+        'Hay una solicitud de acreditacion empresarial pendiente.\n\n'
+        f'  tipo de perfil : {perfil_tipo}\n'
+        f'  user_id        : {user_id}\n'
+        f'  company_id     : {company_id if company_id else "(sin identificar)"}\n'
+        f'  razon social   : {company_name or "(sin dato)"}\n'
+        f'  pais           : {country or "(sin dato)"}\n'
+        f'  identificacion : {tax_id_norm or "(sin identificacion verificable)"}\n'
+        f'  cargo declarado: {cargo or "(sin dato)"}\n'
+        f'  documento      : {"adjuntado" if tiene_documento else "NO adjuntado"}\n'
+        f'  motivo         : {motivo}\n\n'
+        'Los antecedentes y el documento se revisan autenticado en el panel '
+        'administrativo. Este correo no incluye documentos, datos personales '
+        'del solicitante ni enlaces con credenciales.\n'
+    )
+    try:
+        resend_key = os.getenv('RESEND_API_KEY')
+        if not resend_key:
+            print(f'[acreditacion] revision pendiente (sin proveedor de correo): '
+                  f'{perfil_tipo} user={user_id} company={company_id} '
+                  f'motivo={motivo}')
+            return False
+        _requests.post(
+            'https://api.resend.com/emails',
+            json={'from': 'Preferendum <noreply@preferendum.com>',
+                  'to': [REVISION_ACREDITACION_EMAIL],
+                  'subject': f'[Preferendum] Acreditacion pendiente ({perfil_tipo})',
+                  'text': cuerpo},
+            headers={'Authorization': f'Bearer {resend_key}'}, timeout=10)
+        print(f'[acreditacion] revision notificada: {perfil_tipo} user={user_id}')
+        return True
+    except Exception as e:
+        print(f'[acreditacion] no se pudo notificar ({type(e).__name__}); '
+              f'la solicitud sigue pendiente')
+        return False
+
+
 def _verify_company_rut(rut: str) -> dict:
     """
     Valida RUT chileno por dígito verificador (matemático, siempre funciona).
@@ -11019,8 +11205,35 @@ def organizer_register_v2(data: OrganizerRegisterFullInput, bg: BackgroundTasks,
     # del cuerpo de la peticion, con True por defecto. Una organizacion no
     # nace supervisora.
     profile.is_supervisor = not _es_organizacion(data.org_type)
+
+    # ACREDITACION EMPRESARIAL — vincular el perfil a la IDENTIDAD de la
+    # empresa (pais + identificacion tributaria), no a su nombre. Si no hay
+    # identificacion normalizable, el perfil queda sin vincular y la
+    # solicitud va a revision excepcional (decision 8).
+    if _es_organizacion(data.org_type):
+        _empresa, _creada = _resolver_empresa(
+            db, country=data.country, tax_id=data.company_rut,
+            name=data.company_name, category=getattr(data, 'business_category', '') or '',
+            web=data.company_web,
+            email_domain=(data.email.split('@')[1] if '@' in data.email else ''),
+            verified_tax_id=rut_ok, user_id=user.id)
+        if _empresa:
+            profile.company_id = _empresa.id
+        # El aviso se envia DESPUES de que el perfil quede guardado: avisar
+        # de una solicitud que todavia podria no existir seria mentir.
+        _motivo_acred = ('primer representante de una empresa nueva' if _creada
+                         else ('empresa sin identificacion verificable'
+                               if not _empresa else
+                               'representante adicional sin supervisor acreditado'))
     db.add(profile)
     db.commit()
+    if _es_organizacion(data.org_type):
+        _notificar_revision_acreditacion(
+            perfil_tipo='organizador', user_id=user.id,
+            company_id=profile.company_id, company_name=data.company_name or '',
+            country=data.country or '', tax_id_norm=_norm_tax_id(data.company_rut),
+            cargo=data.cargo or '', tiene_documento=False,
+            motivo=_motivo_acred)
     if profile.status == 'approved':
         profile.approved_at = datetime.utcnow()
         db.commit()
@@ -11209,6 +11422,38 @@ def supervisor_approve(token: str, action: str, db: Session = Depends(get_db),
     # closes that path, exactly per the "no crook films their own face" logic.
     if not user.selfie_verified:
         raise HTTPException(403, 'Debes verificar tu propia identidad con selfie antes de poder autorizar a alguien')
+
+    emp_profile_pre = db.query(OrganizerProfile).filter(
+        OrganizerProfile.user_id == req.employee_user_id).first()
+
+    # ═══════════════════════════════════════════════════════════════
+    # ACREDITACION EMPRESARIAL — las tres comprobaciones que faltaban
+    # ═══════════════════════════════════════════════════════════════
+    # Antes bastaba ser ALGUN supervisor acreditado para aprobar a
+    # CUALQUIER solicitante: no se comparaba el jefe nombrado, ni la
+    # empresa, ni se impedia aprobarse a si mismo. Verificado sobre el
+    # codigo: cero comparaciones de supervisor_email, company_name,
+    # company_rut o dominio.
+    #
+    # 1) Nadie se aprueba a si mismo.
+    if req.employee_user_id == user.id:
+        raise HTTPException(403, 'No puedes aprobar tu propia solicitud')
+    # 2) Quien aprueba tiene que ser el jefe DESIGNADO en la solicitud. El
+    #    token viaja por correo a ese destinatario; sin esta comprobacion,
+    #    poseer el token bastaba.
+    if not _same_email(req.supervisor_email or '', user.email or ''):
+        raise HTTPException(403, 'Esta solicitud esta dirigida a otro supervisor')
+    # 3) MISMA empresa, por company_id — no por nombre ni por dominio, que
+    #    son texto que cualquiera escribe. Un perfil sin vincular (los 21
+    #    historicos) no puede acreditar a nadie hasta que una revision
+    #    manual lo asocie a su empresa.
+    if not sup_profile.company_id:
+        raise HTTPException(403, 'Tu perfil aun no esta vinculado a una empresa '
+                                 'verificada; se requiere revision manual antes '
+                                 'de poder acreditar empleados')
+    if not emp_profile_pre or emp_profile_pre.company_id != sup_profile.company_id:
+        raise HTTPException(403, 'El solicitante no pertenece a tu misma empresa '
+                                 'verificada')
 
     req.status             = action  # approved / rejected
     req.supervisor_user_id = user.id
@@ -11575,8 +11820,35 @@ def marketer_register(data: MarketerRegisterInput, bg: BackgroundTasks, db: Sess
     # decidir. Una organizacion no nace supervisora; un ciudadano a titulo
     # personal si, porque se representa a si mismo.
     profile.is_supervisor = not _es_organizacion(data.org_type)
+
+    # ACREDITACION EMPRESARIAL — vincular el perfil a la IDENTIDAD de la
+    # empresa (pais + identificacion tributaria), no a su nombre. Si no hay
+    # identificacion normalizable, el perfil queda sin vincular y la
+    # solicitud va a revision excepcional (decision 8).
+    if _es_organizacion(data.org_type):
+        _empresa, _creada = _resolver_empresa(
+            db, country=data.country, tax_id=data.company_rut,
+            name=data.company_name, category=getattr(data, 'business_category', '') or '',
+            web=data.company_web,
+            email_domain=(data.email.split('@')[1] if '@' in data.email else ''),
+            verified_tax_id=rut_ok, user_id=user.id)
+        if _empresa:
+            profile.company_id = _empresa.id
+        # El aviso se envia DESPUES de que el perfil quede guardado: avisar
+        # de una solicitud que todavia podria no existir seria mentir.
+        _motivo_acred = ('primer representante de una empresa nueva' if _creada
+                         else ('empresa sin identificacion verificable'
+                               if not _empresa else
+                               'representante adicional sin supervisor acreditado'))
     db.add(profile)
     db.commit()
+    if _es_organizacion(data.org_type):
+        _notificar_revision_acreditacion(
+            perfil_tipo='anunciante', user_id=user.id,
+            company_id=profile.company_id, company_name=data.company_name or '',
+            country=data.country or '', tax_id_norm=_norm_tax_id(data.company_rut),
+            cargo=data.cargo or '', tiene_documento=False,
+            motivo=_motivo_acred)
     if profile.status == 'approved':
         profile.approved_at = datetime.utcnow()
         db.commit()
@@ -11716,6 +11988,38 @@ def marketer_supervisor_approve(token: str, action: str, db: Session = Depends(g
     # paperwork-only approval lets someone authorize without ever showing a face.
     if not user.selfie_verified:
         raise HTTPException(403, 'Debes verificar tu propia identidad con selfie antes de poder autorizar campañas')
+
+    emp_profile_pre = db.query(MarketerProfile).filter(
+        MarketerProfile.user_id == req.employee_user_id).first()
+
+    # ═══════════════════════════════════════════════════════════════
+    # ACREDITACION EMPRESARIAL — las tres comprobaciones que faltaban
+    # ═══════════════════════════════════════════════════════════════
+    # Antes bastaba ser ALGUN supervisor acreditado para aprobar a
+    # CUALQUIER solicitante: no se comparaba el jefe nombrado, ni la
+    # empresa, ni se impedia aprobarse a si mismo. Verificado sobre el
+    # codigo: cero comparaciones de supervisor_email, company_name,
+    # company_rut o dominio.
+    #
+    # 1) Nadie se aprueba a si mismo.
+    if req.employee_user_id == user.id:
+        raise HTTPException(403, 'No puedes aprobar tu propia solicitud')
+    # 2) Quien aprueba tiene que ser el jefe DESIGNADO en la solicitud. El
+    #    token viaja por correo a ese destinatario; sin esta comprobacion,
+    #    poseer el token bastaba.
+    if not _same_email(req.supervisor_email or '', user.email or ''):
+        raise HTTPException(403, 'Esta solicitud esta dirigida a otro supervisor')
+    # 3) MISMA empresa, por company_id — no por nombre ni por dominio, que
+    #    son texto que cualquiera escribe. Un perfil sin vincular (los 21
+    #    historicos) no puede acreditar a nadie hasta que una revision
+    #    manual lo asocie a su empresa.
+    if not sup_profile.company_id:
+        raise HTTPException(403, 'Tu perfil aun no esta vinculado a una empresa '
+                                 'verificada; se requiere revision manual antes '
+                                 'de poder acreditar empleados')
+    if not emp_profile_pre or emp_profile_pre.company_id != sup_profile.company_id:
+        raise HTTPException(403, 'El solicitante no pertenece a tu misma empresa '
+                                 'verificada')
 
     req.status             = action  # approved / rejected
     req.supervisor_user_id = user.id
@@ -19881,6 +20185,148 @@ def admin_tally_reconciliation(secret: str, limit: int = 500,
             'almacenadas, y 12 votantes simultáneos dejaban el contador en 1 '
             '(medido en PostgreSQL real).'),
     }
+
+
+def _require_admin_header(x_admin_secret: str = Header(None)):
+    """Credencial administrativa por CABECERA, nunca en la URL.
+
+    Las rutas /admin/* existentes reciben `?secret=...`, y una URL se queda
+    en el historial del navegador, en los logs del proxy, en el Referer y en
+    cualquier captura de pantalla. Para revisar acreditaciones -donde se
+    consultan documentos de identidad y de cargo- eso no es aceptable.
+
+    Mismo secreto, mismo nivel de autoridad: lo unico que cambia es por
+    donde viaja. No se crea ningun mecanismo de autenticacion nuevo.
+    """
+    esperado = os.getenv('ADMIN_SECRET')
+    if not esperado:
+        raise HTTPException(503, 'ADMIN_SECRET no configurado')
+    if not x_admin_secret or x_admin_secret != esperado:
+        raise HTTPException(403, 'Forbidden')
+    return True
+
+
+@app.get('/admin/accreditation/pending')
+def admin_acreditaciones_pendientes(_ok: bool = Depends(_require_admin_header),
+                                    db: Session = Depends(get_db)):
+    """SOLO LECTURA — las acreditaciones empresariales por revisar.
+
+    No devuelve documentos ni datos personales del solicitante: solo lo
+    necesario para decidir a quien abrir. El documento se pide aparte, por
+    su propia ruta autenticada, para que no viaje en un listado.
+    """
+    salida = []
+    for tipo, Perfil in (('organizador', OrganizerProfile),
+                         ('anunciante', MarketerProfile)):
+        for p in db.query(Perfil).filter(Perfil.status == 'pending').all():
+            emp = (db.query(Company).filter(Company.id == p.company_id).first()
+                   if p.company_id else None)
+            salida.append({
+                'tipo': tipo, 'user_id': p.user_id,
+                'org_type': p.org_type, 'cargo': p.cargo or '',
+                'company_id': p.company_id,
+                'razon_social_declarada': p.company_name or '',
+                'empresa_identificada': bool(emp),
+                'pais': emp.country if emp else '',
+                'identificacion': emp.tax_id_norm if emp else '',
+                'identificacion_verificada': bool(emp.verified_tax_id) if emp else False,
+                'verificaciones': {
+                    'rut': bool(p.rut_verified), 'dominio': bool(p.domain_verified),
+                    'web': bool(p.web_verified),
+                },
+                'tiene_documento_de_cargo': bool(p.cargo_doc_hash),
+                'solicitado_en': p.created_at.isoformat() if p.created_at else None,
+            })
+    return {'ok': True, 'pendientes': salida, 'total': len(salida),
+            'nota': ('Solo lectura. Los documentos se consultan por '
+                     '/admin/accreditation/document, autenticado y de uno en '
+                     'uno; no viajan en este listado ni en ningun correo.')}
+
+
+@app.get('/admin/accreditation/document')
+def admin_acreditacion_documento(tipo: str, user_id: int,
+                                 _ok: bool = Depends(_require_admin_header),
+                                 db: Session = Depends(get_db)):
+    """Acceso seguro al documento de cargo de UN solicitante.
+
+    Autenticado por cabecera y de uno en uno. El documento nunca se publica
+    en un enlace abierto ni se adjunta a un correo: se consulta aqui.
+    """
+    Perfil = OrganizerProfile if tipo == 'organizador' else MarketerProfile
+    p = db.query(Perfil).filter(Perfil.user_id == user_id).first()
+    if not p:
+        raise HTTPException(404, 'Perfil no encontrado')
+    if not p.cargo_doc_bytes:
+        return {'ok': False, 'tiene_documento': False,
+                'mensaje': 'El solicitante no ha adjuntado documento de cargo'}
+    return {'ok': True, 'tiene_documento': True,
+            'sha256': p.cargo_doc_hash,
+            'contenido_base64': p.cargo_doc_bytes}
+
+
+@app.post('/admin/accreditation/decide')
+def admin_acreditacion_decidir(body: dict,
+                               _ok: bool = Depends(_require_admin_header),
+                               db: Session = Depends(get_db)):
+    """Aprobar, rechazar o pedir antecedentes. Queda registrado quien,
+    cuando y con que resultado.
+
+    Cuerpo: {tipo, user_id, decision: approved|rejected|more_info,
+             motivo, decidido_por, vincular_company_id (opcional)}
+
+    `vincular_company_id` es la via de la decision 7: los 21 perfiles
+    historicos no se vinculan automaticamente, y aqui se les asocia su
+    empresa tras una revision manual, uno a uno.
+    """
+    tipo = (body or {}).get('tipo')
+    user_id = (body or {}).get('user_id')
+    decision = (body or {}).get('decision')
+    motivo = ((body or {}).get('motivo') or '').strip()
+    quien = ((body or {}).get('decidido_por') or 'admin').strip()
+    if tipo not in ('organizador', 'anunciante'):
+        raise HTTPException(422, "tipo debe ser 'organizador' o 'anunciante'")
+    if decision not in ('approved', 'rejected', 'more_info'):
+        raise HTTPException(422, "decision debe ser approved, rejected o more_info")
+    Perfil = OrganizerProfile if tipo == 'organizador' else MarketerProfile
+    p = db.query(Perfil).filter(Perfil.user_id == user_id).first()
+    if not p:
+        raise HTTPException(404, 'Perfil no encontrado')
+
+    vincular = (body or {}).get('vincular_company_id')
+    if vincular is not None:
+        if not db.query(Company).filter(Company.id == int(vincular)).first():
+            raise HTTPException(404, 'La empresa indicada no existe')
+        p.company_id = int(vincular)
+
+    if decision == 'approved':
+        # No se aprueba a una organizacion sin empresa identificada: seria
+        # volver a acreditar por nombre. Si hace falta, se vincula en la
+        # misma llamada con vincular_company_id.
+        if _es_organizacion(p.org_type) and not p.company_id:
+            raise HTTPException(409,
+                'No se puede aprobar una organizacion sin empresa '
+                'identificada; indica vincular_company_id tras revisar los '
+                'antecedentes')
+        p.status = 'approved'
+        p.approved_at = datetime.utcnow()
+        p.rejection_reason = ''
+    elif decision == 'rejected':
+        p.status = 'rejected'
+        p.rejection_reason = motivo or 'Antecedentes insuficientes'
+    else:
+        p.status = 'pending'
+        p.rejection_reason = motivo or 'Se solicitaron antecedentes adicionales'
+    db.commit()
+    # Queda registrado quien decidio, cuando y el resultado. Sin datos
+    # personales del solicitante: solo su id interno.
+    print(f'[acreditacion] decision={decision} tipo={tipo} '
+          f'user={user_id} company={p.company_id} por={quien} '
+          f'en={datetime.utcnow().isoformat()}Z')
+    return {'ok': True, 'tipo': tipo, 'user_id': user_id,
+            'decision': decision, 'estado': p.status,
+            'company_id': p.company_id, 'decidido_por': quien,
+            'decidido_en': datetime.utcnow().isoformat() + 'Z',
+            'motivo': p.rejection_reason or ''}
 
 
 @app.get('/admin/socioeconomic/impact')
