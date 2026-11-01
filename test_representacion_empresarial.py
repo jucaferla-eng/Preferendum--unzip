@@ -578,7 +578,11 @@ class TestW_RecorridoRealDelPortal(Base):
         for fn in ('doLogin', 'doRegister'):
             bloque = self.PORTAL[self.PORTAL.index(f'async function {fn}'):]
             bloque = bloque[:bloque.index('\n}') + 2]
-            self.assertIn('await showApp()', bloque,
+            # El prefijo, no la firma exacta: showApp recibe ahora el
+            # origen de la llamada —showApp('login')— para distinguir una
+            # sesión guardada de un registro recién hecho. Fijar la firma
+            # rompia la prueba sin que nada funcionara peor.
+            self.assertIn('await showApp(', bloque,
                           f'{fn} no espera la comprobación de estado')
 
     def test_W5_existe_el_aviso_y_no_es_un_panel_nuevo(self):
@@ -702,3 +706,221 @@ class TestW_RecorridoRealDelPortal(Base):
         # y ver sus campañas
         rl = self.client.get(f'/advertiser/campaigns?email={em}', headers=h())
         self.assertEqual(rl.status_code, 200, rl.text[:200])
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# V. CLARIDAD DEL PORTAL — que la persona entienda qué pasó
+#
+# JC pulsó «Create Account» y "no ocurrió nada": aparecía un aviso de
+# cuenta pendiente, sin saber si se había creado una cuenta, si ya tenía
+# una, o si era una sesión anterior guardada en el navegador.
+#
+# Cinco causas sumadas, todas de claridad y ninguna del servidor.
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestV_ClaridadDelPortal(Base):
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.P = open('marketer_portal.html', encoding='utf-8').read()
+
+    def _js_showApp(self):
+        i = self.P.index('async function showApp(')
+        return self.P[i:self.P.index('\n// ── BALANCE')]
+
+    # ── 1. sesión anterior vs registro nuevo ─────────────────────────
+
+    def test_V1_showApp_distingue_el_origen_de_la_llamada(self):
+        """CORRECCION 1. `token` se lee de localStorage al cargar la página,
+        así que el aviso aparecía sin haber pulsado nada."""
+        js = self._js_showApp()
+        self.assertIn('async function showApp(origen)', js,
+                      'showApp no recibe el origen de la llamada')
+        for origen in ('sesion-previa', 'cuenta-creada', 'cuenta-existente'):
+            self.assertIn(origen, js, f'no contempla el origen {origen!r}')
+
+    def test_V2_el_onload_declara_que_es_una_sesion_anterior(self):
+        i = self.P.index('window.onload = () => {')
+        bloque = self.P[i:i + 900]
+        self.assertIn("showApp('sesion-previa')", bloque,
+                      'el onload no distingue la sesión guardada')
+
+    def test_V3_los_tres_textos_son_distintos_entre_si(self):
+        """Si los mensajes coinciden, la distinción no sirve de nada."""
+        js = self._js_showApp()
+        self.assertIn('Cuenta creada', js)
+        self.assertIn('Ya tenías una cuenta con este correo', js)
+        self.assertIn('sesión anterior guardada en este navegador', js)
+        self.assertIn('No se creó una nueva', js,
+                      'no aclara que reintentar no creó otra cuenta')
+
+    def test_V4_una_sesion_anterior_se_puede_cerrar(self):
+        js = self._js_showApp()
+        self.assertIn('ofrecerCerrar', js)
+        bloque = self.P[self.P.index('function _mostrarPendiente'):
+                        self.P.index('function _mostrarFormulario')]
+        self.assertIn('doLogout()', bloque,
+                      'el aviso no ofrece cerrar la sesión anterior')
+
+    # ── 2. el aviso nombra la cuenta ─────────────────────────────────
+
+    def test_V5_el_aviso_dice_a_que_cuenta_se_refiere(self):
+        bloque = self.P[self.P.index('function _mostrarPendiente'):
+                        self.P.index('function _mostrarFormulario')]
+        self.assertIn('Cuenta:', bloque, 'el aviso no nombra la cuenta')
+        self.assertIn('userEmail', bloque)
+        self.assertIn('_escaparHtml(userEmail)', bloque,
+                      'el correo se inyecta sin escapar en innerHTML')
+
+    def test_V6_el_correo_se_escapa_antes_de_pintarlo(self):
+        """Va a innerHTML: hay que escaparlo."""
+        i = self.P.index('function _escaparHtml')
+        bloque = self.P[i:i + 300]
+        for ch in ('&amp;', '&lt;', '&gt;', '&quot;'):
+            self.assertIn(ch, bloque, f'_escaparHtml no cubre {ch}')
+
+    # ── 3. ningún retorno mudo ───────────────────────────────────────
+
+    def _doRegister_sin_comentarios(self):
+        """El cuerpo de doRegister con los comentarios quitados.
+
+        Los comentarios CITAN el codigo antiguo para explicarlo, asi que una
+        busqueda por substring lo encontraria ahi y daria un falso positivo
+        (me paso al escribir esto)."""
+        i = self.P.index('async function doRegister')
+        j = self.P.index('\nfunction doLogout', i)
+        return '\n'.join(l for l in self.P[i:j].split('\n')
+                          if not l.strip().startswith('//'))
+
+    def test_V7_el_boton_nunca_se_queda_callado(self):
+        """CORRECCION 3. Era `if (!name || !email || !pass) return;`."""
+        bloque = self._doRegister_sin_comentarios()
+        self.assertNotIn('|| !pass) return;', bloque,
+                         'volvió el retorno mudo')
+        self.assertIn('faltantes.push', bloque)
+        self.assertIn("showErr('reg-err', 'Falta '", bloque,
+                      'no dice qué campo falta')
+        for campo in ('el nombre de la empresa', 'el correo',
+                      'la contraseña', 'la categoría de tu empresa'):
+            self.assertIn(campo, bloque, f'no menciona {campo!r}')
+
+    # ── 4. distinguir "ya tenías cuenta" ─────────────────────────────
+
+    def test_V8_el_portal_usa_la_senal_que_el_servidor_ya_daba(self):
+        """Un registro nuevo responde con `verifications`; un correo que ya
+        tenía cuenta responde sin ella. Comprobado contra el servidor."""
+        bloque = self._doRegister_sin_comentarios()
+        self.assertIn('const yaExistia = !d.verifications;', bloque)
+        self.assertIn("'cuenta-existente' : 'cuenta-creada'", bloque)
+
+    def test_V9_el_servidor_de_verdad_distingue_los_dos_casos(self):
+        """La señal en la que se apoya la corrección 4, medida."""
+        em = _uniq('clar') + '@example.com'
+        cuerpo = {'name': 'Marca', 'email': em, 'password': 'ClaveV123!',
+                  'country': 'CL', 'company_name': 'Marca',
+                  'business_category': 'retail_comercio'}
+        antes = self.db.execute(main.text('SELECT count(*) FROM users')).scalar()
+        r1 = self.client.post('/marketer/register', json=cuerpo, headers=_ip())
+        self.assertIn(r1.status_code, (200, 201), r1.text[:200])
+        medio = self.db.execute(main.text('SELECT count(*) FROM users')).scalar()
+        r2 = self.client.post('/marketer/register', json=cuerpo, headers=_ip())
+        despues = self.db.execute(main.text('SELECT count(*) FROM users')).scalar()
+
+        self.assertEqual(medio, antes + 1, 'el primer registro no creó cuenta')
+        self.assertEqual(despues, medio,
+                         'el segundo intento creó una cuenta duplicada')
+        self.assertIn('verifications', r1.json(),
+                      'un registro NUEVO debe traer `verifications`')
+        self.assertNotIn('verifications', r2.json(),
+                         'una cuenta preexistente no debe traerla: es la '
+                         'señal que usa el portal')
+        self.assertTrue(r2.json().get('token'),
+                        'sin token el portal no sabría que hay sesión')
+
+    def test_V10_una_contrasena_distinta_da_un_error_claro(self):
+        em = _uniq('clar2') + '@example.com'
+        base = {'name': 'Marca', 'email': em, 'country': 'CL',
+                'company_name': 'Marca', 'business_category': 'retail_comercio'}
+        self.client.post('/marketer/register',
+                         json={**base, 'password': 'ClaveV123!'}, headers=_ip())
+        r = self.client.post('/marketer/register',
+                             json={**base, 'password': 'OtraClave999!'},
+                             headers=_ip())
+        self.assertEqual(r.status_code, 400, r.text[:200])
+        self.assertIn('Ya tienes cuenta', r.json().get('detail', ''),
+                      'el mensaje no explica el problema')
+
+    # ── 5. el formulario se oculta ───────────────────────────────────
+
+    def test_V11_el_aviso_oculta_el_formulario_y_las_pestanas(self):
+        """CORRECCION 5. El formulario quedaba visible con los datos
+        escritos, así que parecía que el botón no había hecho nada."""
+        bloque = self.P[self.P.index('function _mostrarPendiente'):
+                        self.P.index('function _mostrarFormulario')]
+        for id_ in ('tab-login', 'tab-register'):
+            self.assertIn(id_, bloque, f'no oculta {id_}')
+        self.assertIn("querySelector('#auth-screen .tabs')", bloque,
+                      'no oculta las pestañas')
+
+    def test_V12_el_aviso_limpia_los_errores_anteriores(self):
+        bloque = self.P[self.P.index('function _mostrarPendiente'):
+                        self.P.index('function _mostrarFormulario')]
+        self.assertIn('login-err', bloque)
+        self.assertIn('reg-err', bloque)
+
+    def test_V13_una_cuenta_habilitada_recupera_el_formulario_oculto(self):
+        """Si no se restaura, quien cierre sesión después se quedaría sin
+        formulario para volver a entrar."""
+        self.assertIn('function _mostrarFormulario', self.P)
+        js = self._js_showApp()
+        self.assertIn('_mostrarFormulario();', js,
+                      'el camino aprobado no restaura el formulario')
+        bloque = self.P[self.P.index('function _mostrarFormulario'):
+                        self.P.index('// CORRECCION 1')]
+        self.assertIn("switchTab('login')", bloque)
+
+    # ── cierre de sesión ─────────────────────────────────────────────
+
+    def test_V14_cerrar_sesion_borra_la_sesion_guardada(self):
+        """Pedido explícitamente. Si no se limpia localStorage, al recargar
+        reaparecería el aviso de sesión anterior."""
+        i = self.P.index('function doLogout')
+        bloque = self.P[i:i + 400]
+        self.assertIn('localStorage.clear()', bloque,
+                      'cerrar sesión no borra el token guardado')
+        self.assertIn('location.reload()', bloque)
+
+    def test_V15_el_servidor_sigue_bloqueando_igual(self):
+        """Las cinco correcciones son de claridad: la seguridad no cambia."""
+        em = _uniq('clar3') + '@example.com'
+        r = self.client.post('/marketer/register', json={
+            'name': 'Marca', 'email': em, 'password': 'ClaveV123!',
+            'country': 'CL', 'company_name': 'Marca',
+            'business_category': 'retail_comercio'}, headers=_ip())
+        h = _ip(); h['Authorization'] = 'Bearer ' + r.json()['token']
+        for met, ruta, cuerpo in (
+                ('POST', '/payments/demo-credits', {}),
+                ('POST', '/marketer/campaigns', {
+                    'advertiser_email': em, 'advertiser_name': 'M',
+                    'campaign_title': 'C', 'budget_clp': 95000,
+                    'target_country': 'CL',
+                    'start_date': '2026-11-20T00:00:00',
+                    'end_date': '2026-12-20T23:59:59',
+                    'ad_copy': 'x', 'link_url': 'https://e.invalid'})):
+            rr = self.client.request(met, ruta, json=cuerpo, headers=h)
+            self.assertEqual(rr.status_code, 403,
+                             f'{met} {ruta} dio {rr.status_code}')
+
+    def test_V16_el_formulario_de_acceso_tampoco_se_queda_callado(self):
+        """El mismo retorno mudo estaba en doLogin: pulsar «Sign In» con un
+        campo vacío no hacía nada. Encontrado al probar el inicio de sesión
+        que JC pidió comprobar."""
+        i = self.P.index('async function doLogin')
+        j = self.P.index('\nfunction switchTab', i) if '\nfunction switchTab' in self.P[i:] else i + 1500
+        bloque = '\n'.join(l for l in self.P[i:j].split('\n')
+                           if not l.strip().startswith('//'))
+        self.assertNotIn('if (!email || !pass) return;', bloque,
+                         'volvió el retorno mudo del acceso')
+        self.assertIn("showErr('login-err', 'Falta '", bloque,
+                      'el acceso no dice qué campo falta')

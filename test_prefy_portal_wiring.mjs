@@ -250,7 +250,12 @@ assertTrue(!marketersLanding.includes("PrefyVideo.show('welcome')") && !marketer
   // token-based branch — so it covers the (unauthenticated) auth-screen
   // state too, not just the post-login app.
   const onloadStart = marketer.indexOf('window.onload = () => {');
-  const onloadTokenCheck = marketer.indexOf('if (token) showApp()', onloadStart);
+  // La asercion mide el ORDEN, no la firma exacta de la llamada. Antes
+  // buscaba el literal 'if (token) showApp()' y se rompia en cuanto showApp
+  // recibia un argumento — showApp('sesion-previa'), para distinguir una
+  // sesion guardada en el navegador de un registro recien hecho. Se busca
+  // el prefijo, que es lo que de verdad identifica esa rama.
+  const onloadTokenCheck = marketer.indexOf('if (token) showApp(', onloadStart);
   const earlyShowCampaign = marketer.indexOf("PrefyVideo.show('campaign')", onloadStart);
   assertTrue(onloadStart !== -1 && onloadTokenCheck !== -1 && earlyShowCampaign !== -1 && earlyShowCampaign < onloadTokenCheck,
     "marketer_portal.html's window.onload establishes Campaign Prefy before the token/auth-screen branch");

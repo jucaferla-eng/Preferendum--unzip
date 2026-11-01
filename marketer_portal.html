@@ -932,7 +932,7 @@ window.onload = () => {
   // stays correct once showApp() -> showPanel('overview') runs too (see
   // _PREFY_CAMPAIGN_PANELS below, which now includes 'overview').
   if (window.PrefyVideo) PrefyVideo.show('campaign');
-  if (token) showApp();
+  if (token) showApp('sesion-previa');
   else {
     document.getElementById('auth-screen').style.display = 'flex';
     if (window.Prefy) Prefy.setContext('marketer.auth.login');
@@ -964,7 +964,15 @@ function switchTab(tab) {
 async function doLogin() {
   const email = document.getElementById('login-email').value.trim();
   const pass  = document.getElementById('login-pass').value;
-  if (!email || !pass) return;
+  // CORRECCION 3, tambien en el formulario de acceso: era un retorno MUDO,
+  // el boton no hacia nada y nadie sabia por que.
+  const faltanLogin = [];
+  if (!email) faltanLogin.push('el correo');
+  if (!pass)  faltanLogin.push('la contraseña');
+  if (faltanLogin.length) {
+    showErr('login-err', 'Falta ' + faltanLogin.join(' y ') + '.');
+    return;
+  }
   const r = await fetch(`${API}/marketer/login`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, password: pass})});
   const d = await r.json();
   if (!r.ok) { showErr('login-err', d.detail || 'Login failed'); return; }
@@ -974,7 +982,7 @@ async function doLogin() {
   localStorage.setItem('pref_adv_token', token);
   localStorage.setItem('pref_adv_email', userEmail);
   localStorage.setItem('pref_adv_name',  userName);
-  await showApp();
+  await showApp('login');
 }
 
 async function doRegister() {
@@ -983,8 +991,18 @@ async function doRegister() {
   const pass    = document.getElementById('reg-pass').value;
   const country = document.getElementById('reg-country').value;
   const category = document.getElementById('reg-category').value;
-  if (!name || !email || !pass) return;
-  if (!category) { showErr('reg-err', 'Selecciona la categoría de tu empresa'); return; }
+  // CORRECCION 3 — antes esto era `if (!name || !email || !pass) return;`:
+  // un retorno MUDO. Si faltaba un campo, el boton no hacia absolutamente
+  // nada y nadie sabia por que. Ahora se dice exactamente que falta.
+  const faltantes = [];
+  if (!name)  faltantes.push('el nombre de la empresa');
+  if (!email) faltantes.push('el correo');
+  if (!pass)  faltantes.push('la contraseña');
+  if (!category) faltantes.push('la categoría de tu empresa');
+  if (faltantes.length) {
+    showErr('reg-err', 'Falta ' + faltantes.join(', ') + '.');
+    return;
+  }
   // DEFECTO CORREGIDO — esto llamaba a /auth/register, que crea un usuario
   // con rol 'voter' y SIN MarketerProfile. Reproducido de punta a punta: el
   // anunciante se daba de alta, verificaba su correo, y al crear su primera
@@ -992,10 +1010,11 @@ async function doRegister() {
   // anunciante nuevo podia usar CAMPANAS desde la interfaz.
   //
   // /marketer/register es la ruta real de alta de anunciante y YA existia:
-  // crea el usuario con rol 'marketer' y su MarketerProfile con
-  // status='approved'. No se inventa nada; solo se conecta lo que estaba
-  // desconectado. El nombre del formulario es el de la empresa, asi que va
-  // a `name` y a `company_name`.
+  // crea el usuario con rol 'marketer' y su MarketerProfile. Desde la
+  // Opcion A ese perfil nace 'pending' y lo acredita un supervisor ya
+  // acreditado o un administrador; este comentario decia 'approved', que
+  // era cierto cuando se escribio y dejo de serlo. El nombre del formulario
+  // es el de la empresa, asi que va a `name` y a `company_name`.
   const r = await fetch(`${API}/marketer/register`, {method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({name, email, password: pass, country,
       company_name: name, business_category: category,
@@ -1007,7 +1026,13 @@ async function doRegister() {
     localStorage.setItem('pref_adv_token', token);
     localStorage.setItem('pref_adv_email', userEmail);
     localStorage.setItem('pref_adv_name',  userName);
-    await showApp();
+    // CORRECCION 4 — el servidor ya distingue los dos casos y el portal lo
+    // ignoraba: un registro NUEVO responde con `message` y `verifications`;
+    // un correo que YA tenia cuenta responde solo con `token` y `user`, sin
+    // crear nada. Los dos mostraban el mismo aviso, asi que reintentar con
+    // el mismo correo parecia que "no pasaba nada".
+    const yaExistia = !d.verifications;
+    await showApp(yaExistia ? 'cuenta-existente' : 'cuenta-creada');
   } else {
     document.getElementById('login-email').value = email;
     document.getElementById('login-pass').value  = pass;
@@ -1043,38 +1068,107 @@ async function _estadoAnunciante() {
   } catch (_) { return null; }
 }
 
-function _mostrarPendiente(html) {
+// CORRECCION 2 y 5 — el aviso dice A QUE CUENTA se refiere y OCULTA el
+// formulario. Antes era un texto generico debajo de un formulario que seguia
+// visible con los datos escritos, asi que parecia que el boton no habia
+// hecho nada. Tambien limpia los errores anteriores, que podian quedar de
+// un intento previo y contradecir el aviso.
+function _escaparHtml(t) {
+  return String(t || '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[ch]);
+}
+
+function _mostrarPendiente(html, opciones) {
+  const o = opciones || {};
+  ['login-err', 'reg-err'].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) { e.textContent = ''; e.style.display = 'none'; }
+  });
+  // Ocultar el formulario y las pestañas: no hay nada que rellenar aquí.
+  ['tab-login', 'tab-register'].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) e.style.display = 'none';
+  });
+  const tabs = document.querySelector('#auth-screen .tabs');
+  if (tabs) tabs.style.display = 'none';
+
+  const cuenta = userEmail
+    ? '<div style="margin-bottom:10px;font-size:13px;opacity:.85;">Cuenta: <b>'
+      + _escaparHtml(userEmail) + '</b></div>'
+    : '';
+  const boton = o.ofrecerCerrar
+    ? '<div style="margin-top:16px;"><button class="btn-primary" onclick="doLogout()"'
+      + ' style="width:auto;padding:10px 22px;">Cerrar esta sesión</button></div>'
+    : '';
   const el = document.getElementById('pending-notice');
-  if (el) { el.innerHTML = html; el.style.display = 'block'; }
+  if (el) { el.innerHTML = cuenta + html + boton; el.style.display = 'block'; }
   document.getElementById('auth-screen').style.display = 'flex';
   document.getElementById('main-app').classList.remove('visible');
 }
 
-async function showApp() {
+function _mostrarFormulario() {
+  const el = document.getElementById('pending-notice');
+  if (el) el.style.display = 'none';
+  ['tab-login', 'tab-register'].forEach(id => {
+    const e = document.getElementById(id);
+    if (e) e.style.display = '';
+  });
+  const tabs = document.querySelector('#auth-screen .tabs');
+  if (tabs) tabs.style.display = '';
+  switchTab('login');
+}
+
+// CORRECCION 1 — `origen` distingue de donde viene esta llamada, para no
+// confundir una SESION ANTERIOR guardada en el navegador con un registro
+// que se acaba de hacer. Antes las dos mostraban el mismo texto, y como
+// `token` se lee de localStorage al cargar la pagina, el aviso aparecia sin
+// haber pulsado nada.
+//   'sesion-previa'     -> token recuperado del navegador al cargar
+//   'cuenta-creada'     -> registro nuevo, la cuenta se acaba de crear
+//   'cuenta-existente'  -> el correo YA tenia cuenta; no se creo ninguna
+//   'login'             -> inicio de sesion
+async function showApp(origen) {
   const est = await _estadoAnunciante();
   const correoOk = !!(est && est.verifications && est.verifications.email);
   const aprobado = !!(est && est.status === 'approved');
+  const esSesionPrevia = origen === 'sesion-previa';
+
+  let encabezado;
+  if (origen === 'cuenta-creada') {
+    encabezado = '<b>✓ Cuenta creada.</b> Todavía no está habilitada para operar.';
+  } else if (origen === 'cuenta-existente') {
+    encabezado = '<b>Ya tenías una cuenta con este correo.</b> No se creó una nueva; '
+               + 'hemos recuperado tu sesión. Todavía no está habilitada para operar.';
+  } else if (esSesionPrevia) {
+    encabezado = '<b>Esta es una sesión anterior guardada en este navegador.</b><br>'
+               + 'La cuenta todavía no está habilitada para operar. Si quieres '
+               + 'registrar o usar otra, cierra esta sesión.';
+  } else {
+    encabezado = '<b>Tu cuenta todavía no está habilitada para operar.</b>';
+  }
 
   if (!est) {
-    _mostrarPendiente('<b>Tu cuenta todavía no está habilitada para operar.</b><br>'
-      + 'No encontramos un perfil de anunciante asociado. Completa el registro '
-      + 'de empresa u organismo para continuar.');
+    _mostrarPendiente(encabezado + '<br><br>No encontramos un perfil de anunciante '
+      + 'asociado a esta sesión. Crea tu cuenta de empresa u organismo para continuar.',
+      {ofrecerCerrar: true});
     return;
   }
   if (!aprobado || !correoOk) {
     let faltan = [];
     if (!correoOk) faltan.push('confirmar tu correo electrónico');
     if (!aprobado)  faltan.push('la acreditación de tu representación por parte de Preferendum');
-    _mostrarPendiente('<b>Tu cuenta todavía no está habilitada para operar.</b><br>'
-      + 'Estado: <b>' + (est.status || 'desconocido') + '</b>'
-      + (correoOk ? '' : ' · correo sin confirmar') + '<br><br>'
+    _mostrarPendiente(encabezado + '<br><br>'
+      + 'Estado: <b>' + _escaparHtml(est.status || 'desconocido') + '</b>'
+      + (correoOk ? ' · correo confirmado' : ' · correo sin confirmar') + '<br><br>'
       + 'Falta: ' + faltan.join(' y ') + '.<br><br>'
       + 'Mientras tanto no puedes crear ni activar campañas, ni obtener saldo. '
-      + 'Te avisaremos en cuanto quede acreditada.');
+      + 'Te avisaremos en cuanto quede acreditada.',
+      {ofrecerCerrar: true});
     return;
   }
 
-  document.getElementById('pending-notice') && (document.getElementById('pending-notice').style.display = 'none');
+  _mostrarFormulario();
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('main-app').classList.add('visible');
   document.getElementById('nav-name').textContent = userName;
