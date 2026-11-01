@@ -138,7 +138,35 @@ En `/marketer-portal`:
 
 **Sin ejecutar pagos reales**: no comprar paquetes ni usar Stripe.
 
-### 3.7 Estado del blockchain
+### 3.7 Representación empresarial e institucional (Opción A)
+
+Dos comprobaciones nuevas, ambas de solo lectura:
+
+**a) Una organización nueva nace pendiente.** Dar de alta una cuenta de
+prueba de empresa y confirmar que `/organizer/status` (o `/marketer/status`)
+devuelve `status: "pending"`. **No debe quedar aprobada** por tener correo
+corporativo, RUT válido y web. Borrar la cuenta de prueba al terminar.
+
+**b) Las cuentas ya aprobadas siguen operando.** Un organizador y un
+anunciante de los que ya estaban aprobados deben poder crear como antes.
+
+**Consecuencia operativa que hay que asumir desde el despliegue:** cada
+empresa u organismo público nuevo queda pendiente hasta que **un
+administrador** compruebe su representación y lo acredite:
+
+```
+POST /admin/organizer/{user_id}/status?secret=…&status=approved
+POST /admin/marketer/{user_id}/status?secret=…&status=approved
+```
+
+Después, ese supervisor acreditado ya puede autorizar a sus empleados por el
+mecanismo existente, sin intervención administrativa.
+
+**Los dos organizadores sin perfil** no se acreditan: deben completar su
+identificación por el procedimiento normal antes de crear consultas nuevas.
+Conservan el acceso a su información y a sus consultas anteriores.
+
+### 3.8 Estado del blockchain
 
 ```bash
 curl -s 'https://preferendum-unzip-d2zd.onrender.com/admin/blockchain-status?secret=…'
