@@ -4123,14 +4123,36 @@ async function showVoteSuccess(data, optIdx) {
   const explorerLink = (isAnchored && data.blockchain_tx)
     ? `<a class="verify-link" href="https://polygonscan.com/tx/${data.blockchain_tx}" target="_blank" rel="noopener">Ver en Polygon blockchain ↗</a>`
     : '';
+  // VOTO DE PRUEBA. Lo decide el SERVIDOR -devuelve voto_de_prueba: true
+  // cuando la cuenta esta designada para pruebas-, nunca el navegador
+  // comparando correos. Si lo es, la pantalla no puede dar a entender que
+  // se registro algo: ni codigo que guardar, ni compartir, ni premio.
+  const esPrueba = data.voto_de_prueba === true;
+  const avisoPrueba = esPrueba
+    ? `<div style="background:#fef3c7;border:2px solid #d97706;border-radius:12px;
+         padding:16px;margin-bottom:16px;color:#7c2d12;line-height:1.6;">
+         <div style="font-weight:800;letter-spacing:.04em;font-size:15px;">
+           VOTO DE PRUEBA — NO CONTABILIZADO</div>
+         <div style="font-size:13px;margin-top:8px;">
+           Esta cuenta está designada para pruebas sin reconocimiento facial.
+           Este voto <b>no se guardó</b>: no genera papeleta, no suma a los
+           resultados, el código de abajo <b>no es un comprobante válido</b> y
+           puedes repetir la prueba cuantas veces quieras sin gastar tu
+           derecho a votar.</div>
+       </div>`
+    : '';
+
   content.innerHTML = `
     <div class="success-card">
-      <div class="success-icon">✓</div>
-      <div class="success-title">${successTitle}</div>
-      <div class="success-text">${successBody}</div>
-      ${rewardHtml}
+      ${avisoPrueba}
+      <div class="success-icon">${esPrueba ? '🧪' : '✓'}</div>
+      <div class="success-title">${esPrueba ? 'Recorrido de prueba completado' : successTitle}</div>
+      <div class="success-text">${esPrueba ? 'El recorrido funciona de principio a fin. Nada quedó registrado.' : successBody}</div>
+      ${esPrueba ? '' : rewardHtml}
       <div class="vcode-box">${esc(vcode)}</div>
-      <div class="vcode-label">Guarda este código — te permitirá verificar cómo fue contabilizado tu voto cuando termine el período de votación</div>
+      <div class="vcode-label">${esPrueba
+        ? 'Código de prueba: NO es un comprobante y no verifica ningún voto.'
+        : 'Guarda este código — te permitirá verificar cómo fue contabilizado tu voto cuando termine el período de votación'}</div>
       ${explorerLink}
       <div style="display:flex;gap:10px;margin-top:14px;">
         <button onclick="${waShareFn}"

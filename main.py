@@ -136,10 +136,57 @@ def _is_google_full_review_account(email) -> bool:
 # Kept as its own constant/predicate rather than being added to
 # GOOGLE_PLAY_FULL_REVIEW_EMAIL so the two identities are never conflated
 # in logs, comments, or future audits.
-JC_FULL_DEMO_EMAIL = 'jucaferla24649@gmail.com'
+# El correo ya NO vive aqui. Este repositorio es PUBLICO, y tenerlo escrito
+# en el fuente publicaba un correo personal en el. La cuenta, su rol y sus
+# permisos no cambian: lo unico que cambia es de donde se lee su
+# identificador.
+#
+# OJO AL DESPLEGAR: sin PREFY_DEMO_ACCOUNT configurada, esta cuenta pierde
+# su autoridad elevada de creacion. La variable tiene que estar puesta en
+# los dos servicios ANTES de desplegar esto, o seria cambiarle los permisos
+# por omision.
+JC_FULL_DEMO_EMAIL = (os.getenv('PREFY_DEMO_ACCOUNT', '') or '').strip().lower()
 
 def _is_jc_full_demo_account(email) -> bool:
-    return (email or '').strip().lower() == JC_FULL_DEMO_EMAIL
+    em = (email or '').strip().lower()
+    return bool(JC_FULL_DEMO_EMAIL) and em == JC_FULL_DEMO_EMAIL
+
+# ══════════════════════════════════════════════════════════════
+# CUENTAS DE PRUEBA DE VOTO — exentas de camara, voto SIMULADO
+# ══════════════════════════════════════════════════════════════
+#
+# Una cuenta designada aqui puede entrar y recorrer la votacion sin
+# reconocimiento facial, y en cambio su voto NO se guarda: no genera
+# papeleta, ni codigo valido, ni suma a ningun resultado, ni consume su
+# derecho a votar. Es el MISMO mecanismo que usa el revisor de Google
+# Play, no uno nuevo.
+#
+# LA INVARIANTE, y es la que hace que esto sea seguro: la exencion de
+# camara y la simulacion del voto cuelgan del MISMO predicado. No existe
+# forma de quedar exento de la camara y emitir un voto real: son la misma
+# condicion, comprobada en el servidor. Hay una prueba que lo fija.
+#
+# POR QUE UNA VARIABLE DE ENTORNO Y NO UNA CONSTANTE EN EL CODIGO: este
+# repositorio es PUBLICO. Las dos constantes de arriba publican un correo
+# personal en el; una designacion mas no. Ademas asi se revoca cambiando
+# una variable en Render, sin desplegar. Sin la variable, nada de esto se
+# activa: el valor por omision es la lista vacia.
+def _cuentas_de_prueba_de_voto() -> set:
+    crudo = os.getenv('PREFY_TEST_VOTE_ACCOUNTS', '') or ''
+    return {c.strip().lower() for c in crudo.split(',') if c.strip()}
+
+
+def _es_cuenta_de_prueba_de_voto(email) -> bool:
+    """True si esta cuenta vota en modo SIMULADO.
+
+    Incluye al revisor de Google Play -que ya se comportaba asi- y a las
+    cuentas designadas por PREFY_TEST_VOTE_ACCOUNTS.
+    """
+    em = (email or '').strip().lower()
+    if not em:
+        return False
+    return _is_google_full_review_account(em) or em in _cuentas_de_prueba_de_voto()
+
 
 def _is_full_demo_account(email) -> bool:
     """Shared predicate for the two accounts entitled to elevated
@@ -6405,6 +6452,20 @@ def complete_login(data: CompleteLoginInput, db: Session = Depends(get_db)):
 
     # Validar código de SMS solo si Twilio está activo
     twilio_active = bool(os.getenv('TWILIO_ACCOUNT_SID') and os.getenv('TWILIO_AUTH_TOKEN'))
+    # CUENTA DE PRUEBA: para ella el SMS NO es opcional. Va a entrar sin
+    # reconocimiento facial, asi que los dos canales que quedan -correo y
+    # SMS- se exigen los dos, y los dos tienen que estar ya verificados.
+    _prueba = _es_cuenta_de_prueba_de_voto(user.email)
+    if _prueba:
+        if not (user.email_verified and user.phone_verified and user.phone):
+            raise HTTPException(403,
+                'Esta cuenta esta designada para pruebas sin reconocimiento '
+                'facial, y para eso necesita el correo Y el telefono ya '
+                'verificados. Verificalos primero.')
+        if not twilio_active:
+            raise HTTPException(503,
+                'El envio de SMS no esta disponible, y sin el no se puede '
+                'entrar sin reconocimiento facial. Intenta mas tarde.')
     if user.phone_verified and user.phone and twilio_active:
         if not data.sms_code:
             raise HTTPException(400, 'Se requiere el código de SMS')
@@ -6418,7 +6479,12 @@ def complete_login(data: CompleteLoginInput, db: Session = Depends(get_db)):
         otp_sms.used = True
 
     # Validar face token
-    if user.selfie_verified:
+    #
+    # La cuenta de prueba entra sin camara: ya ha probado la titularidad del
+    # correo y del telefono mas arriba, los dos obligatorios para ella. Lo
+    # que cede en identidad lo paga en que su voto no cuenta: el MISMO
+    # predicado la manda a la rama simulada en _cast_vote_inner.
+    if user.selfie_verified and not _prueba:
         if not data.face_token:
             raise HTTPException(400, 'Se requiere verificación facial')
         try:
@@ -9833,7 +9899,10 @@ def _cast_vote_inner(debate_id: int, data, user, db):
     # UNICA excepcion, deliberada y preexistente: la cuenta del revisor de
     # Google Play, cuyo voto es SIMULADO y no se persiste (ver mas abajo).
     # No deja escapar ningun voto real sin control.
-    if not _is_google_full_review_account(user.email):
+    # La exencion de camara y la simulacion del voto son la MISMA
+    # condicion: ver _es_cuenta_de_prueba_de_voto. Quien no paga la camara,
+    # no emite papeleta.
+    if not _es_cuenta_de_prueba_de_voto(user.email):
         if not data.face_token:
             raise HTTPException(403, 'Se requiere verificación facial para votar')
         try:
@@ -9963,10 +10032,15 @@ def _cast_vote_inner(debate_id: int, data, user, db):
     # real vote that actually counts, not a simulated one. The legacy
     # review accounts in APP_REVIEW_DEMO_EMAILS also do NOT reach this
     # branch and vote through the normal path like any real user.
-    if _is_google_full_review_account(user.email):
+    if _es_cuenta_de_prueba_de_voto(user.email):
         current_counts = json.loads(debate.vote_counts or '{}')
         return {
             'success': True,
+            # El codigo lleva el prefijo DEMO- y NO se guarda en ninguna
+            # tabla, asi que /debates/{id}/verify no lo encuentra: no es un
+            # comprobante de nada.
+            'voto_de_prueba': True,
+            'aviso': 'VOTO DE PRUEBA — NO CONTABILIZADO',
             'verify_code': 'DEMO-' + generate_verify_code(),
             'option': option,
             'blockchain_tx': 'demo-not-anchored',

@@ -119,8 +119,14 @@ class TestPredicatesExtracted(unittest.TestCase):
 
     def setUp(self):
         ns = {}
-        for name in ('GOOGLE_PLAY_FULL_REVIEW_EMAIL', 'JC_FULL_DEMO_EMAIL'):
-            ns[name] = _module_level_constant(name)
+        ns['GOOGLE_PLAY_FULL_REVIEW_EMAIL'] = _module_level_constant(
+            'GOOGLE_PLAY_FULL_REVIEW_EMAIL')
+        # JC_FULL_DEMO_EMAIL ya no es un literal: se lee de
+        # PREFY_DEMO_ACCOUNT, porque el repositorio es publico y tenerlo
+        # escrito aqui publicaba un correo personal. Para probar la CONDUCTA
+        # del predicado se inyecta un valor ficticio: lo que se comprueba es
+        # la regla, no el correo.
+        ns['JC_FULL_DEMO_EMAIL'] = 'cuenta.demostracion@test.invalid'
         exec(_src_of(_function('_is_google_full_review_account')), ns)
         exec(_src_of(_function('_is_jc_full_demo_account')), ns)
         exec(_src_of(_function('_is_full_demo_account')), ns)
@@ -130,16 +136,25 @@ class TestPredicatesExtracted(unittest.TestCase):
         self.jc_email           = ns['JC_FULL_DEMO_EMAIL']
         self.google_email       = ns['GOOGLE_PLAY_FULL_REVIEW_EMAIL']
 
-    def test_jc_email_is_exactly_the_requested_account(self):
-        self.assertEqual(self.jc_email, 'jucaferla24649@gmail.com')
+    def test_jc_email_comes_from_the_environment_not_the_source(self):
+        """El repositorio es publico: el identificador es configuracion."""
+        self.assertIn("os.getenv('PREFY_DEMO_ACCOUNT'", SRC)
+        self.assertNotIn('jucaferla24649', SRC)
+
+    def test_sin_la_variable_el_predicado_no_casa_con_nadie(self):
+        ns = {'JC_FULL_DEMO_EMAIL': ''}
+        exec(_src_of(_function('_is_jc_full_demo_account')), ns)
+        sin_variable = ns['_is_jc_full_demo_account']
+        for valor in ('', '   ', None, 'cualquiera@test.invalid'):
+            self.assertFalse(sin_variable(valor))
 
     def test_jc_and_google_emails_stay_distinct_constants(self):
         self.assertNotEqual(self.jc_email, self.google_email)
 
     def test_is_jc_demo_account_matches_case_and_whitespace_insensitively(self):
-        self.assertTrue(self.is_jc_demo('jucaferla24649@gmail.com'))
-        self.assertTrue(self.is_jc_demo('JUCAFERLA24649@GMAIL.COM'))
-        self.assertTrue(self.is_jc_demo('  jucaferla24649@gmail.com  '))
+        self.assertTrue(self.is_jc_demo(self.jc_email))
+        self.assertTrue(self.is_jc_demo(self.jc_email.upper()))
+        self.assertTrue(self.is_jc_demo('  ' + self.jc_email + '  '))
 
     def test_is_jc_demo_account_false_for_everything_else(self):
         self.assertFalse(self.is_jc_demo(self.google_email))
@@ -171,7 +186,11 @@ class TestPredicatesExtracted(unittest.TestCase):
             legacy_set,
             {'jucaferla@gmail.com', 'chatgpt.auditor@preferendum.com', 'googleplay.reviewer@preferendum.com'},
         )
-        self.assertNotIn('jucaferla24649@gmail.com', legacy_set)
+        # La cuenta de demostracion no esta en el conjunto heredado: usan
+        # predicados distintos. Se comprueba con el valor configurado, que
+        # ya no es un literal del fuente.
+        self.assertNotIn(self.jc_email if hasattr(self, 'jc_email')
+                         else 'cuenta.demostracion@test.invalid', legacy_set)
 
     def test_vote_gate_predicate_distinguishes_jc_from_google_reviewer(self):
         """Direct behavioural proof, using the real extracted
@@ -253,13 +272,27 @@ class TestEligibilityAndVotingAndCampaignAuthority(unittest.TestCase):
         node = _function('_cast_vote_inner')
         self.assertIsNotNone(node)
         src = _src_of(node)
-        # The demo/no-write vote branch must be gated EXCLUSIVELY on
-        # _is_google_full_review_account — never on _is_full_demo_account
-        # (which would also match JC) and never on _is_jc_full_demo_account
-        # directly. JC gets elevated creation authority but votes for real.
-        self.assertIn('_is_google_full_review_account(user.email)', src)
+        # La rama simulada se gobierna con `_es_cuenta_de_prueba_de_voto`,
+        # que INCLUYE al revisor de Google Play y admite ademas las cuentas
+        # designadas por PREFY_TEST_VOTE_ACCOUNTS. Lo que esta prueba
+        # defiende no cambia: nunca se gobierna por _is_full_demo_account
+        # -que tambien casaria con JC- ni por _is_jc_full_demo_account. JC
+        # tiene autoridad de creacion elevada, pero vota de verdad, y se
+        # comprueba sobre el predicado, no solo sobre el texto.
+        self.assertIn('_es_cuenta_de_prueba_de_voto(user.email)', src)
         self.assertNotIn('_is_full_demo_account(user.email)', src)
         self.assertNotIn('_is_jc_full_demo_account', src)
+        # Esta suite analiza el codigo SIN importarlo, a proposito, asi que
+        # la comprobacion se hace sobre el predicado mismo: incluye al
+        # revisor y a la lista de entorno, y no menciona a JC.
+        pred = _src_of(_function('_es_cuenta_de_prueba_de_voto'))
+        self.assertIn('_is_google_full_review_account(em)', pred)
+        self.assertIn('_cuentas_de_prueba_de_voto()', pred)
+        self.assertNotIn('_is_jc_full_demo_account', pred)
+        self.assertNotIn('JC_FULL_DEMO_EMAIL', pred)
+        lista = _src_of(_function('_cuentas_de_prueba_de_voto'))
+        self.assertIn("os.getenv('PREFY_TEST_VOTE_ACCOUNTS'", lista,
+                      'la designacion viene del entorno, no del codigo')
         # The demo-vote branch must never also commit a real vote —
         # i.e. no db.commit() call textually inside the demo return block.
         # We check this by finding the
@@ -276,7 +309,7 @@ class TestEligibilityAndVotingAndCampaignAuthority(unittest.TestCase):
                 # esta elegia la primera, que es la facial, y encontraba su
                 # commit. La rama de demostracion es la afirmativa; la
                 # facial es la negada.
-                if (test_src.strip() == '_is_google_full_review_account(user.email)'
+                if (test_src.strip() == '_es_cuenta_de_prueba_de_voto(user.email)'
                         and 'user.role' not in test_src):
                     demo_if = sub
                     break
@@ -343,7 +376,7 @@ class TestNoGlobalBypassInCanonicalEvaluator(unittest.TestCase):
         evaluator. This is what makes 'no global authorization bypass
         exists' true structurally, not just by convention."""
         elig_src = Path(__file__).with_name('eligibility.py').read_text(encoding='utf-8')
-        for needle in ('jucaferla24649', 'googleplay.reviewer', 'JC_FULL_DEMO',
+        for needle in ('PREFY_DEMO_ACCOUNT', 'googleplay.reviewer', 'JC_FULL_DEMO',
                        'GOOGLE_PLAY_FULL_REVIEW', '_is_full_demo_account'):
             self.assertNotIn(needle, elig_src, f'{needle!r} leaked into the canonical evaluator')
 
@@ -353,8 +386,11 @@ class TestNoGlobalBypassInCanonicalEvaluator(unittest.TestCase):
         function) returns False, so every 'and not is_demo' / 'or
         _is_full_demo_account(...)' guard falls through to the exact
         same original check ordinary users have always faced."""
+        # JC_FULL_DEMO_EMAIL se lee del entorno, no es un literal: se
+        # inyecta un valor ficticio, que es ademas el caso que importa aqui
+        # -ningun correo ordinario puede casar con el-.
         ns = {'GOOGLE_PLAY_FULL_REVIEW_EMAIL': _module_level_constant('GOOGLE_PLAY_FULL_REVIEW_EMAIL'),
-              'JC_FULL_DEMO_EMAIL': _module_level_constant('JC_FULL_DEMO_EMAIL')}
+              'JC_FULL_DEMO_EMAIL': 'cuenta.demostracion@test.invalid'}
         exec(_src_of(_function('_is_google_full_review_account')), ns)
         exec(_src_of(_function('_is_jc_full_demo_account')), ns)
         exec(_src_of(_function('_is_full_demo_account')), ns)
@@ -377,7 +413,11 @@ class TestNoSecretsInSource(unittest.TestCase):
 
     def test_jc_demo_email_constant_has_no_password_assigned_alongside_it(self):
         node_src = SRC
-        self.assertNotIn("JC_FULL_DEMO_EMAIL = 'jucaferla24649@gmail.com'\nJC_", node_src)
+        i = node_src.index('JC_FULL_DEMO_EMAIL =')
+        ventana = node_src[i:i + 400]
+        for prohibido in ('password', 'PASSWORD', 'secret', 'token'):
+            self.assertNotIn(prohibido, ventana,
+                             'nada parecido a una credencial junto a esa constante')
 
 
 if __name__ == '__main__':

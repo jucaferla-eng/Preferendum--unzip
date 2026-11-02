@@ -355,7 +355,7 @@ class TestEscrutinioCoherente(Base):
         cuerpo = inspect.getsource(main._cast_vote_inner)
         # La rama de demostracion es la que devuelve el codigo 'DEMO-'.
         i = cuerpo.index("'DEMO-'")
-        rama = cuerpo[cuerpo.rindex('if _is_google_full_review_account', 0, i):]
+        rama = cuerpo[cuerpo.rindex('if _es_cuenta_de_prueba_de_voto', 0, i):]
         rama = rama[:rama.index('reward_code')]
         self.assertNotIn('db.add(', rama)
         self.assertNotIn('db.commit(', rama)

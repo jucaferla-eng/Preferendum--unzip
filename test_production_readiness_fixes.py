@@ -369,8 +369,20 @@ class TestNoRegressionInEstablishedBehavior(unittest.TestCase):
     def test_jc_and_reviewer_vote_split_still_intact(self):
         node = _function('_cast_vote_inner')
         src = _src_of(node)
-        self.assertIn('_is_google_full_review_account(user.email)', src)
+        # La rama simulada ya no se nombra con el predicado del revisor
+        # sino con `_es_cuenta_de_prueba_de_voto`, que lo INCLUYE y ademas
+        # admite las cuentas designadas por PREFY_TEST_VOTE_ACCOUNTS. Lo
+        # que esta prueba defiende sigue en pie y se comprueba igual: el
+        # voto NUNCA se gobierna por _is_full_demo_account, y la cuenta de
+        # JC vota de verdad.
+        self.assertIn('_es_cuenta_de_prueba_de_voto(user.email)', src)
         self.assertNotIn('_is_full_demo_account(user.email)', src)
+        import main as _m
+        self.assertFalse(_m._es_cuenta_de_prueba_de_voto(_m.JC_FULL_DEMO_EMAIL),
+                         'la cuenta de JC no puede votar en modo simulado')
+        self.assertTrue(
+            _m._es_cuenta_de_prueba_de_voto(_m.GOOGLE_PLAY_FULL_REVIEW_EMAIL),
+            'el revisor de Google Play sigue votando en modo simulado')
 
     def test_target_categories_and_excluded_categories_enforced_in_eligibility(self):
         """Confirms this audit's finding that these ARE real, enforced
