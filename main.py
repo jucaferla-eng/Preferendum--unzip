@@ -4835,10 +4835,16 @@ seed_demo_data()
 @app.get('/', response_class=HTMLResponse)
 def root():
     return HTMLResponse(content="""<!DOCTYPE html>
-<html lang="en" data-source-lang="en" style="background:#090D18;">
+<html lang="en" data-source-lang="en" translate="no" class="notranslate" style="background:#090D18;">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+<!-- PUNTO 3 — Chrome ofrecia traducir esta pagina y, al aceptar, cambiaba
+     la MARCA: «preferendum» aparecia como «prefiero endum». Preferendum
+     ya traduce por su cuenta (lang.js + translate.js, con su propio
+     selector), asi que la traduccion automatica del navegador duplicaba
+     el trabajo y encima rompia el nombre. -->
+<meta name="google" content="notranslate"/>
 <meta name="color-scheme" content="dark"/>
 <meta name="supported-color-schemes" content="dark"/>
 <title>Preferendum</title>
@@ -6549,6 +6555,17 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
         # esto en el navegador no abre nada.
         'role': user.role,
         'is_admin': user.role == 'admin',
+        # PUNTO 7. El portal pide la camara ANTES de votar, y lo hacia para
+        # todo el mundo: la cuenta designada quedaba atascada ahi y nunca
+        # llegaba al servidor, que si la exime. Igual que paso con el
+        # ingreso, habia que corregir tambien el endpoint que ANUNCIA.
+        #
+        # Esto es informativo: la autorizacion la decide el servidor en
+        # /debates/{id}/vote con el mismo predicado. Falsear esto en el
+        # navegador no consigue nada -sin token facial y sin estar
+        # designado, el voto se rechaza-; lo unico que evita es pedirle una
+        # camara a quien esta exento de ella.
+        'voto_simulado': _es_cuenta_de_prueba_de_voto(user.email),
     }
 
 # ══════════════════════════════════════════════════════════════

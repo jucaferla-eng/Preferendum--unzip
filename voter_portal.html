@@ -2,7 +2,13 @@
 <html lang="es" data-source-lang="es">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"/>
+<!-- PUNTO 3 — Chrome ofrecia traducir la pagina y, al aceptar, cambiaba
+     hasta la marca: «preferendum» salia como «prefiero endum». Preferendum
+     ya tiene su propio sistema de idiomas (el motor de traduccion esta mas
+     abajo y se controla desde el selector), asi que la traduccion
+     automatica del navegador sobra y estorba. -->
+<meta name="google" content="notranslate"/>
 <meta name="color-scheme" content="light dark"/>
 <title>Preferendum — Voter Portal</title>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Manrope:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
@@ -34,7 +40,20 @@ body{top:0!important;}
    structurally impossible, regardless of name length, since nothing else
    shares this row. Only `top` differs by breakpoint — size, colors,
    right-alignment, and the selector's own markup/behavior are unchanged. */
-#gt-float{position:fixed;top:56px;right:10px;z-index:99999;background:rgba(10,13,20,0.88);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:4px 10px;backdrop-filter:blur(8px);}
+/* ══════════════════════════════════════════════════════════════
+   PUNTO 2 — EL SELECTOR DE IDIOMA
+   ══════════════════════════════════════════════════════════════
+   Era un recuadro flotante (`position:fixed`) anclado a una esquina con
+   coordenadas fijas. Tapaba el nombre del autor de la consulta y las
+   alternativas, se montaba sobre la barra del sistema y no se adaptaba a
+   ningún ancho.
+
+   Ahora vive DENTRO de la cabecera, en el flujo normal: se coloca solo,
+   no tapa nada y nunca puede quedar sobre la barra de estado porque la
+   cabecera ya respeta la safe area. Sigue visible desde la primera
+   pantalla, que era el motivo de que estuviera flotando. */
+#gt-float{display:inline-block;vertical-align:middle;background:transparent;
+  border:0;padding:0;margin:0;}
 @media (min-width:1200px){
   /* Conservative desktop-only breakpoint — tablet and ordinary/narrow
      widths stay on the second row regardless of username length, since
@@ -44,7 +63,7 @@ body{top:0!important;}
      same corner — so this needs the horizontal offset too, not just the
      restored top. 240px clears a long real name ("Juan Carlos Fernández")
      without reaching into the left brand/Inicio content at 1200px+. */
-  #gt-float{top:10px;right:240px;}
+  /* Ya no flota: no necesita coordenadas en ningun ancho. */
 }
 </style>
 <style>
@@ -91,13 +110,41 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
 /* ── MAIN APP ── */
 #main-app{display:none;flex-direction:column;min-height:100vh;}
 #main-app.visible{display:flex;}
-.topbar{background:rgba(245,243,238,0.93);border-bottom:1px solid #e8e4dc;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;backdrop-filter:blur(10px);box-shadow:0 1px 0 #e8e4dc;}
+/* ══════════════════════════════════════════════════════════════
+   PUNTO 1 — SAFE AREAS
+   ══════════════════════════════════════════════════════════════
+   La cabecera se dibujaba bajo la barra de estado: el reloj, la señal y
+   la batería se montaban encima de «← Inicio», de la marca y del nombre
+   del usuario. Con `viewport-fit=cover` la página llega hasta los bordes
+   y `env(safe-area-inset-*)` devuelve el alto real de cada barra en ESE
+   teléfono — muesca, cámara perforada o gestos—, en vez de un margen
+   fijo que solo acierta en un modelo.
+
+   El valor de respaldo es 0 para que en un navegador de escritorio, que
+   no define esas variables, nada cambie. */
+.topbar{background:rgba(245,243,238,0.93);border-bottom:1px solid #e8e4dc;
+  padding:12px 16px;
+  padding-top:calc(12px + env(safe-area-inset-top, 0px));
+  padding-left:calc(16px + env(safe-area-inset-left, 0px));
+  padding-right:calc(16px + env(safe-area-inset-right, 0px));
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  position:sticky;top:0;z-index:100;backdrop-filter:blur(10px);box-shadow:0 1px 0 #e8e4dc;}
+/* PUNTO 5 — el nombre largo empujaba el resto fuera de la pantalla. Que se
+   recorte con puntos suspensivos en vez de desbordar. */
+.topbar-user{min-width:0;}
+.topbar-user #user-name-display{overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;max-width:38vw;display:inline-block;vertical-align:middle;}
+/* PUNTO 5 — nada de desplazamiento horizontal accidental. */
+html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:contain;}
+/* PUNTO 1 — el contenido no queda debajo de la barra inferior ni de la
+   franja de gestos. */
+.content,.detail-wrap,#main-app{padding-bottom:calc(72px + env(safe-area-inset-bottom, 0px));}
 .topbar-brand{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;color:#060810;}
 .topbar-brand span{color:#1a3a8f;}
 .topbar-user{font-size:13px;color:#7a7570;display:flex;align-items:center;gap:10px;}
 .logout-btn{font-size:12px;color:#1a3a8f;cursor:pointer;text-decoration:underline;}
 /* ── BOTTOM NAV ── */
-.bottomnav{position:fixed;bottom:0;left:0;right:0;background:#1a1a1a;display:flex;align-items:stretch;z-index:200;padding-bottom:env(safe-area-inset-bottom);}
+.bottomnav{position:fixed;bottom:0;left:0;right:0;background:#1a1a1a;display:flex;align-items:stretch;z-index:200;padding-bottom:env(safe-area-inset-bottom, 0px);}
 .bottomtab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 4px 8px;cursor:pointer;color:rgba(255,255,255,0.45);transition:color 0.15s;gap:4px;border:none;background:none;}
 .bottomtab.active{color:#ffffff;}
 .bottomtab svg{width:24px;height:24px;fill:currentColor;}
@@ -319,12 +366,6 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
   </div>
 </div>
 
-<!-- TRANSLATE — always visible from first screen -->
-<div id="gt-float">
-  <div data-pref-lang-selector style="display:inline-block;vertical-align:middle;"></div>
-  <div id="gt-widget" style="display:inline-block;vertical-align:middle;"></div>
-</div>
-
 <!-- GLOBAL ERROR BANNER -->
 <div id="global-error" onclick="this.style.display='none'">
   <span id="global-error-msg">Error</span>
@@ -540,9 +581,15 @@ html,body{height:100%;background:#0a0d14;background:var(--bg);color:#f0f4ff;colo
   <div class="topbar">
     <div style="display:flex;align-items:center;gap:10px;">
       <a href="/" style="text-decoration:none;font-size:13px;color:#7a7570;">← Inicio</a>
-      <a href="/" style="text-decoration:none;color:inherit;"><div class="topbar-brand">prefer<span>endum</span></div></a>
+      <a href="/" style="text-decoration:none;color:inherit;"><div class="topbar-brand" translate="no">prefer<span>endum</span></div></a>
     </div>
     <div class="topbar-user">
+      <!-- PUNTO 2 — el selector de idioma, dentro de la cabecera y en el
+           flujo normal. Antes flotaba sobre el contenido. -->
+      <div id="gt-float">
+        <div data-pref-lang-selector style="display:inline-block;vertical-align:middle;"></div>
+        <div id="gt-widget" style="display:inline-block;vertical-align:middle;"></div>
+      </div>
       <!-- ADMINISTRACION. Oculto por omision y revelado SOLO si el servidor
            dice que esta sesion tiene rol administrativo (/auth/me). No es la
            proteccion: la proteccion esta en el servidor, que exige el rol en
@@ -667,6 +714,11 @@ let token = localStorage.getItem('pref_voter_token') || '';
 let userCountry = localStorage.getItem('pref_voter_country') || 'CL';
 let userSelfieVerified = localStorage.getItem('pref_selfie_verified') === 'true';
 let userReferralCode = localStorage.getItem('pref_referral_code') || '';
+// PUNTO 7. Lo decide el SERVIDOR (/auth/me). No se guarda en localStorage a
+// proposito: un indicador persistido en el navegador fue justo lo que fallo
+// con la camara del voto, y aqui no debe haber estado que sobreviva a una
+// respuesta del servidor.
+let usuarioEnModoPrueba = false;
 
 // ── Occupation search ─────────────────────────────────────────────────────────
 let _occData = null;
@@ -1600,6 +1652,8 @@ async function validateAndShowApp() {
         localStorage.setItem('pref_referral_code', userReferralCode);
       }
       aplicarMenuAdministracion(d.is_admin);
+      usuarioEnModoPrueba = d.voto_simulado === true;
+      aplicarAvisoModoPrueba();
       showApp();
     } else { token=''; localStorage.removeItem('pref_voter_token'); }
   } catch(e) { showApp(); }
@@ -1608,6 +1662,23 @@ async function validateAndShowApp() {
 // ── ADMINISTRACION ──
 // El menu se revela con lo que responde el SERVIDOR, no con nada guardado en
 // el navegador: cada vez que se carga el portal se vuelve a preguntar.
+// Aviso permanente: esta sesion vota en modo de prueba. Si no se dice
+// siempre, es facil creer que un voto conto.
+function aplicarAvisoModoPrueba() {
+  let el = document.getElementById('aviso-modo-prueba');
+  if (!usuarioEnModoPrueba) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'aviso-modo-prueba';
+    el.style.cssText = 'background:#fef3c7;color:#7c2d12;border-bottom:1px solid #d97706;'
+      + 'font-size:12px;font-weight:700;letter-spacing:.03em;text-align:center;'
+      + 'padding:7px 12px;line-height:1.4;';
+    el.textContent = 'MODO DE PRUEBA — tus votos no se contabilizan';
+    const barra = document.querySelector('.topbar');
+    if (barra && barra.parentNode) barra.parentNode.insertBefore(el, barra.nextSibling);
+  }
+}
+
 function aplicarMenuAdministracion(esAdmin) {
   const m = document.getElementById('admin-menu');
   if (m) m.style.display = esAdmin ? '' : 'none';
@@ -3040,19 +3111,34 @@ function renderDebate(db, res, items) {
         ? resDeb.total_votes
         : resultsList.reduce((a, r) => a + (r.count || 0), 0))
     : 0;
-  // La participación del objeto de la consulta se conserva aparte, para
-  // poder decirla sin mezclarla con un escrutinio que no tenemos.
+  // PUNTO 6 — LA PARTICIPACION ES UNA SOLA CIFRA, EN UN SOLO SITIO.
+  //
+  // EL DEFECTO, MEDIDO, Y ES MIO: al atar `total` al escrutinio, la
+  // cabecera de la consulta -que usa `total` para su «⬡ N votos»- pasó a
+  // mostrar «0 votos» cuando no habia escrutinio, mientras el aviso de mas
+  // abajo decia «Participacion hasta ahora: 2 votos». Dos cifras
+  // contradictorias de la misma consulta, en la misma pantalla.
+  //
+  // Cuantas personas han participado NO es informacion restringida -la
+  // lista de consultas ya la muestra-; lo restringido es el reparto por
+  // alternativa. Asi que la cabecera usa SIEMPRE la participacion, el
+  // grafico usa el escrutinio, y el aviso ya no repite la cifra.
   const participacion = (db.total_votes != null) ? db.total_votes : 0;
   const motivoSinEscrutinio = !hayEscrutinio
     ? (res.content_restricted
         ? 'Esta consulta mantiene sus resultados reservados hasta su cierre.'
-        : (db.has_voted
-            ? 'No pudimos cargar el escrutinio en este momento. Vuelve a '
-              + 'entrar en unos minutos; tu voto está registrado.'
-            : 'Los resultados se muestran a quienes ya votaron en esta '
-              + 'consulta.'))
-      + (participacion ? ' Participación hasta ahora: ' + participacion
-                         + (participacion === 1 ? ' voto.' : ' votos.') : '')
+        : (usuarioEnModoPrueba
+            // Un voto simulado NO abre el escrutinio, porque no es un voto.
+            // Decirlo asi evita dos malentendidos: creer que el voto conto,
+            // y creer que el sistema no lo registro por un fallo.
+            ? 'Estás en modo de prueba: tus votos son simulados y no se '
+              + 'registran, así que no abren el escrutinio de esta consulta. '
+              + 'No es un error.'
+            : (db.has_voted
+                ? 'No pudimos cargar el escrutinio en este momento. Vuelve a '
+                  + 'entrar en unos minutos; tu voto está registrado.'
+                : 'Los resultados se muestran a quienes ya votaron en esta '
+                  + 'consulta.')))
     : '';
   const COLORS  = ['#8ba7d4','#1a2f5e','#c07848','#b498c8','#5cbfbc','#7a9e96','#cc8878','#3d7a70','#a8a840','#c4a8d4'];
   const imgs    = db.option_images || [];
@@ -3137,7 +3223,7 @@ function renderDebate(db, res, items) {
       <div class="detail-title">${esc(db.title)}</div>
       ${db.context ? `<div class="detail-context">${esc(db.context)}</div>` : ''}
       <div class="debate-meta">
-        <span class="debate-votes">⬡ ${total} ${t('votes')}</span>
+        <span class="debate-votes">⬡ ${participacion} ${t('votes')}</span>
         <span>${countryLabel(db.scope_country)}</span>
         ${db.created_at ? `<span>🕐 ${fmtDateTime(db.created_at)}</span>` : ''}
         ${db.closes_at ? `<span>${t('closes')} ${fmtDate(db.closes_at)}</span>` : ''}
@@ -3918,12 +4004,19 @@ async function castVote() {
   //
   // Ahora se pide siempre. El servidor tambien lo exige siempre, asi que
   // saltarse esta pantalla no sirve de nada: el voto se rechaza.
+  // La cuenta designada para pruebas esta EXENTA de camara, y su voto es
+  // simulado. Lo dice el servidor en /auth/me (voto_simulado), no el
+  // navegador: aqui solo se obedece. Quien no este designado y no traiga
+  // token facial recibe 403 del servidor, asi que saltarse esta pantalla
+  // no sirve de nada.
   let faceToken = '';
-  faceToken = await requestFaceToken(debateId);
-  if (!faceToken) {
-    submitBtn.disabled = false;
-    submitBtn.textContent = t('submitBtn');
-    return;
+  if (!usuarioEnModoPrueba) {
+    faceToken = await requestFaceToken(debateId);
+    if (!faceToken) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = t('submitBtn');
+      return;
+    }
   }
 
   const voteBody = JSON.stringify({ option_index: q1Idx, vote_chain: newPath, device_fp: deviceFp, face_token: faceToken });
