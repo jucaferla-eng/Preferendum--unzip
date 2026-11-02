@@ -3017,19 +3017,55 @@ function renderDebate(db, res, items) {
     renderExpiredDebate(db, res, items, content);
     return;
   }
-  const resultsList = (res.debate || res).results || [];
+  // ESCRUTINIO — UNA SOLA FUENTE.
+  //
+  // EL DEFECTO, MEDIDO. Los recuentos salian de `res` (la respuesta de
+  // /debates/{id}/results) y el total salia de `db.total_votes` (el objeto
+  // de la consulta). Cuando `res` venia vacio -y venia vacio en cuanto
+  // /results devolvia cualquier error: `const res = rr.ok ? ... : {}`-,
+  // `resultsList` quedaba en [] y por tanto TODAS las alternativas en 0,
+  // mientras el total seguia diciendo 2. Esa es exactamente la pantalla
+  // que vimos: «Votos registrados: 2», todo a 0 % y el anillo vacio.
+  //
+  // Ahora las dos cifras salen del MISMO sitio. Si el escrutinio no esta
+  // disponible no se dibuja un grafico de ceros: se dice por que.
+  const resDeb = res.debate || res;
+  const resultsList = (resDeb && resDeb.results) || [];
+  const hayEscrutinio = resultsList.length > 0;
   const counts  = {};
   resultsList.forEach(r => { counts[r.option] = r.count || 0; });
-  const total   = (res.debate || res).total_votes || db.total_votes || 0;
+  // El total acompaña a los recuentos, nunca a otra fuente.
+  const total   = hayEscrutinio
+    ? (resDeb.total_votes != null
+        ? resDeb.total_votes
+        : resultsList.reduce((a, r) => a + (r.count || 0), 0))
+    : 0;
+  // La participación del objeto de la consulta se conserva aparte, para
+  // poder decirla sin mezclarla con un escrutinio que no tenemos.
+  const participacion = (db.total_votes != null) ? db.total_votes : 0;
+  const motivoSinEscrutinio = !hayEscrutinio
+    ? (res.content_restricted
+        ? 'Esta consulta mantiene sus resultados reservados hasta su cierre.'
+        : (db.has_voted
+            ? 'No pudimos cargar el escrutinio en este momento. Vuelve a '
+              + 'entrar en unos minutos; tu voto está registrado.'
+            : 'Los resultados se muestran a quienes ya votaron en esta '
+              + 'consulta.'))
+      + (participacion ? ' Participación hasta ahora: ' + participacion
+                         + (participacion === 1 ? ' voto.' : ' votos.') : '')
+    : '';
   const COLORS  = ['#8ba7d4','#1a2f5e','#c07848','#b498c8','#5cbfbc','#7a9e96','#cc8878','#3d7a70','#a8a840','#c4a8d4'];
   const imgs    = db.option_images || [];
   const hasImgs = imgs.some(Boolean);
 
   let winnerIdx = 0;
-  if (total > 0 && opts.length > 0) {
+  if (hayEscrutinio && total > 0 && opts.length > 0) {
     opts.forEach((opt, i) => { if ((counts[opt]||0) > (counts[opts[winnerIdx]]||0)) winnerIdx = i; });
   }
-  const winnerPct = total > 0 ? Math.round((counts[opts[winnerIdx]]||0) / total * 100) : 0;
+  // Sin escrutinio no hay ganador ni porcentaje: proclamar un 0% seria
+  // presentar la ausencia de datos como un resultado.
+  const winnerPct = (hayEscrutinio && total > 0)
+    ? Math.round((counts[opts[winnerIdx]]||0) / total * 100) : 0;
   const winnerOpt = opts[winnerIdx] || '';
   const winnerImg = imgs[winnerIdx] || '';
 
@@ -3212,7 +3248,9 @@ function renderDebate(db, res, items) {
           </div>
         </div>
       </div>` : ''}
-      <div class="detail-card">${renderDonut(opts, counts, total, COLORS)}</div>
+      <div class="detail-card">${hayEscrutinio
+        ? renderDonut(opts, counts, total, COLORS)
+        : `<div style="font-size:14px;color:#7a7570;line-height:1.6;">${esc(motivoSinEscrutinio)}</div>`}</div>
     </div>
 
     ${!isLive ? `

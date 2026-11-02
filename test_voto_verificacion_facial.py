@@ -292,6 +292,114 @@ class TestResultadosTrasVotar(Base):
                          'una consulta reservada no entrega resultados')
 
 
+class TestEscrutinioCoherente(Base):
+    """El total y los recuentos tienen que venir del MISMO sitio.
+
+    El defecto: en `renderDebate` los recuentos salian de la respuesta de
+    /results y el total de `db.total_votes`. Cuando /results fallaba -y
+    fallaba en cuanto devolvia 403 «debes votar primero»-, los recuentos
+    quedaban vacios y el total seguia diciendo 2: «Votos registrados: 2»,
+    todas las alternativas a 0 % y el anillo vacio.
+    """
+
+    def test_el_servidor_cuenta_bien_cada_alternativa(self):
+        d = self._consulta()
+        reparto = [0, 0, 1]          # dos a la primera, uno a la segunda
+        d.options = json.dumps(['A', 'B', 'C'])
+        self.db.commit()
+        for idx in reparto:
+            u, cab = self._votante()
+            tk = self._verificacion(u, d)
+            r = self.client.post(f'/debates/{d.id}/vote',
+                                 json={'option_index': idx, 'vote_chain': [],
+                                       'face_token': tk}, headers=cab)
+            self.assertEqual(r.status_code, 200, r.text[:200])
+        # Se consulta con alguien que YA voto.
+        u, cab = self._votante()
+        tk = self._verificacion(u, d)
+        self.client.post(f'/debates/{d.id}/vote',
+                         json={'option_index': 1, 'vote_chain': [],
+                               'face_token': tk}, headers=cab)
+        res = self.client.get(f'/debates/{d.id}/results', headers=cab).json()
+        deb = res['debate']
+        por_opcion = {f['option']: f['count'] for f in deb['results']}
+        # Mas el voto de quien consulta, que va a la segunda: A2 B2 C0.
+        self.assertEqual(por_opcion, {'A': 2, 'B': 2, 'C': 0})
+        self.assertEqual(deb['total_votes'], 4)
+        self.assertEqual(sum(f['count'] for f in deb['results']),
+                         deb['total_votes'],
+                         'la suma de alternativas tiene que dar el total')
+        pcts = {f['option']: f['pct'] for f in deb['results']}
+        self.assertEqual(pcts['A'], 50.0)
+        self.assertAlmostEqual(sum(pcts.values()), 100.0, places=1)
+
+    def test_los_comentarios_no_cuentan_como_votos(self):
+        d = self._consulta()
+        u, cab = self._votante()
+        tk = self._verificacion(u, d)
+        self.client.post(f'/debates/{d.id}/vote',
+                         json={'option_index': 0, 'vote_chain': [],
+                               'face_token': tk}, headers=cab)
+        self.client.post(f'/debates/{d.id}/opinions',
+                         json={'text': 'Una opinion ficticia de mas de veinte '
+                                       'caracteres para que pase el minimo.'},
+                         headers=cab)
+        deb = self.client.get(f'/debates/{d.id}/results',
+                              headers=cab).json()['debate']
+        self.assertEqual(deb['total_votes'], 1,
+                         'un comentario no puede contar como voto')
+
+    def test_el_voto_simulado_del_revisor_no_cuenta(self):
+        """No se persiste, asi que no puede inflar el escrutinio."""
+        import inspect
+        cuerpo = inspect.getsource(main._cast_vote_inner)
+        # La rama de demostracion es la que devuelve el codigo 'DEMO-'.
+        i = cuerpo.index("'DEMO-'")
+        rama = cuerpo[cuerpo.rindex('if _is_google_full_review_account', 0, i):]
+        rama = rama[:rama.index('reward_code')]
+        self.assertNotIn('db.add(', rama)
+        self.assertNotIn('db.commit(', rama)
+        self.assertIn("'success': True", rama)
+
+    def test_quien_ya_voto_ve_el_escrutinio_al_volver_a_entrar(self):
+        d = self._consulta()
+        u, cab = self._votante()
+        tk = self._verificacion(u, d)
+        self.client.post(f'/debates/{d.id}/vote',
+                         json={'option_index': 0, 'vote_chain': [],
+                               'face_token': tk}, headers=cab)
+        # Nueva sesion, misma persona: el escrutinio sigue visible.
+        otra = _ip()
+        otra['Authorization'] = 'Bearer ' + main.make_token(u.id, 'voter')
+        r = self.client.get(f'/debates/{d.id}/results', headers=otra)
+        self.assertEqual(r.status_code, 200, r.text[:200])
+        self.assertTrue(r.json()['debate']['results'])
+
+    def test_el_portal_toma_total_y_recuentos_de_la_misma_fuente(self):
+        portal = open('voter_portal.html', encoding='utf-8').read()
+        i = portal.index('function renderDebate(')
+        bloque = portal[i:i + 3000]
+        self.assertNotIn('resDeb.total_votes || db.total_votes', bloque,
+                         'el total no puede caer a otra fuente que los '
+                         'recuentos')
+        self.assertIn('const hayEscrutinio = resultsList.length > 0', bloque)
+        self.assertIn('motivoSinEscrutinio', bloque)
+        # Lo que de verdad importa: el total CUELGA de que haya escrutinio.
+        # Sin esta asercion, cambiar la condicion por `true` no rompia nada
+        # -comprobado por mutacion-, y el defecto podia volver.
+        self.assertRegex(bloque, r'const total\s*=\s*hayEscrutinio')
+        # Sin escrutinio: ni grafico de ceros ni ganador al 0%.
+        self.assertIn('hayEscrutinio\n        ? renderDonut(', portal)
+        self.assertIn('const winnerPct = (hayEscrutinio && total > 0)', portal)
+
+    def test_el_portal_explica_por_que_no_hay_grafico(self):
+        portal = open('voter_portal.html', encoding='utf-8').read()
+        for texto in ('resultados reservados hasta su cierre',
+                      'a quienes ya votaron en esta',
+                      'Participación hasta ahora'):
+            self.assertIn(texto, portal, f'falta el aviso: {texto}')
+
+
 class TestElPortal(Base):
 
     @classmethod
