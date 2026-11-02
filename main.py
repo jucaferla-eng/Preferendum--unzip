@@ -9737,10 +9737,23 @@ async def get_face_vote_token(
         raise
     except ClientError:
         raise HTTPException(503, 'Verificación facial no disponible en este momento — intenta de nuevo en unos minutos.')
+    # UN SOLO USO. El token iba firmado con sub + debate_id + exp, y nada
+    # mas: dentro de sus cinco minutos servia para cuantos intentos de voto
+    # se quisiera. Ahora lleva un identificador unico que se GUARDA aqui y
+    # se CONSUME al votar, con el mismo mecanismo de codigos de un solo uso
+    # que la plataforma ya usa (OTPCode). Sin fila pendiente, el voto se
+    # rechaza: una verificacion facial vale por un voto.
+    jti = uuid.uuid4().hex
+    db.add(OTPCode(user_id=user.id, email=user.email or '', code=jti,
+                   channel='face_vote', used=False,
+                   expires_at=datetime.utcnow() + timedelta(minutes=5)))
+    db.commit()
     token = jwt.encode({
         'sub': user.id,
         'debate_id': debate_id,
         'type': 'face_vote',
+        'jti': jti,
+        'iat': datetime.utcnow(),
         'exp': datetime.utcnow() + timedelta(minutes=5)
     }, SECRET, algorithm='HS256')
     return {
@@ -9793,18 +9806,61 @@ def _cast_vote_inner(debate_id: int, data, user, db):
               f'verdict={_decision.verdict} blocking={_blocked}')
         raise HTTPException(403, 'No cumples las condiciones de participacion de esta consulta')
 
-    # Bloqueo 0: verificación facial (solo para usuarios con selfie verificada)
-    if user.selfie_verified:
+    # ══════════════════════════════════════════════════════════════
+    # BLOQUEO 0 — VERIFICACION FACIAL, SIN EXCEPCIONES
+    # ══════════════════════════════════════════════════════════════
+    # EL DEFECTO, MEDIDO. Esto decia `if user.selfie_verified:`. Es decir:
+    # la verificacion facial se le exigia a quien YA habia probado su cara,
+    # y se le perdonaba a quien NO. Justo al reves.
+    #
+    # Reproducido sobre una copia de produccion con un clon del perfil que
+    # voto de verdad en la consulta destacada (selfie_verified = false):
+    # POST /debates/819/vote con face_token vacio devolvio 200 y registro
+    # el voto, con su codigo de comprobacion. Ninguna camara, ninguna
+    # comparacion facial.
+    #
+    # Ahora se exige SIEMPRE, y se comprueba que la verificacion:
+    #   · es valida y esta firmada por este servidor,
+    #   · es reciente (el token vive cinco minutos),
+    #   · corresponde a ESTE ciudadano (sub) y a ESTA consulta (debate_id),
+    #   · no se ha usado antes (jti de un solo uso, consumido aqui).
+    #
+    # La emision del token ya era solida y falla cerrada: exige cara de
+    # referencia, exige AWS Rekognition, exige 90% de similitud y comprueba
+    # que esa misma cara no haya votado ya en esta consulta con otra cuenta.
+    # Lo unico que faltaba era exigirla.
+    #
+    # UNICA excepcion, deliberada y preexistente: la cuenta del revisor de
+    # Google Play, cuyo voto es SIMULADO y no se persiste (ver mas abajo).
+    # No deja escapar ningun voto real sin control.
+    if not _is_google_full_review_account(user.email):
         if not data.face_token:
             raise HTTPException(403, 'Se requiere verificación facial para votar')
         try:
             payload = jwt.decode(data.face_token, SECRET, algorithms=['HS256'])
-            if payload.get('type') != 'face_vote' or payload.get('sub') != user.id or payload.get('debate_id') != debate_id:
-                raise HTTPException(403, 'Token de verificación facial inválido')
         except jwt.ExpiredSignatureError:
             raise HTTPException(403, 'La verificación facial expiró — por favor tómate una nueva selfie')
         except Exception:
             raise HTTPException(403, 'Token de verificación facial inválido')
+        if (payload.get('type') != 'face_vote'
+                or payload.get('sub') != user.id
+                or payload.get('debate_id') != debate_id):
+            raise HTTPException(403, 'Token de verificación facial inválido')
+        _jti = payload.get('jti')
+        if not _jti:
+            # Un token sin identificador unico es de los antiguos: reusable.
+            raise HTTPException(403, 'La verificación facial expiró — por favor tómate una nueva selfie')
+        _pendiente = db.query(OTPCode).filter(
+            OTPCode.user_id == user.id, OTPCode.channel == 'face_vote',
+            OTPCode.code == _jti, OTPCode.used == False,
+            OTPCode.expires_at > datetime.utcnow()
+        ).first()
+        if not _pendiente:
+            raise HTTPException(403,
+                'Esta verificación facial ya se usó o expiró — tómate una '
+                'nueva selfie para votar')
+        _pendiente.used = True
+        db.commit()
 
     # CHANGE-004 — candado por (consulta, persona) ANTES de los cinco
     # bloqueos. Sin él, dos peticiones simultáneas ejecutan sus SELECT antes

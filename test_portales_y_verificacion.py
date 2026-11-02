@@ -22,6 +22,7 @@ import unittest
 # ayudantes del recorrido real.
 from test_flujos_completos import Base, _ip, _uniq        # noqa: E402
 import main                                              # noqa: E402
+import pruebas_voto_facial  # noqa: E402,F401  (rellena el token facial del voto)
 
 
 # ═══════════════════════════════════════════════════════════════════════

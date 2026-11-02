@@ -45,6 +45,7 @@ for _k in ('SENDGRID_API_KEY', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN',
 
 from fastapi.testclient import TestClient      # noqa: E402
 import main                                    # noqa: E402
+import pruebas_voto_facial  # noqa: E402,F401  (rellena el token facial del voto)
 import payments                                # noqa: E402
 import ledger as L                             # noqa: E402
 import eligibility as E                        # noqa: E402
@@ -1211,7 +1212,10 @@ class TestVoteFlowBilling(Base):
         deb = mk_debate(self.db, scope_country='CL')
         camp = self._campaign(marketer)
         with self._matched(camp):
-            result = main._cast_vote_inner(deb.id, main.CastVoteRequest(option_index=0), voter, self.db)
+            result = main._cast_vote_inner(deb.id, main.CastVoteRequest(
+                option_index=0,
+                face_token=pruebas_voto_facial.token(main, voter.id, deb.id)),
+                voter, self.db)
         self.assertTrue(result['success'])
         self.db.expire_all()
         logs = self.db.query(main.AdImpressionLog).filter(
@@ -1232,7 +1236,10 @@ class TestVoteFlowBilling(Base):
                              idempotency_key=f'vote-reserve-{_uid()}')
         before = main._ledger_balance(self.db, L.CAMPAIGN_REAL_RESERVED, camp.id)
         with self._matched(camp):
-            result = main._cast_vote_inner(deb.id, main.CastVoteRequest(option_index=0), voter, self.db)
+            result = main._cast_vote_inner(deb.id, main.CastVoteRequest(
+                option_index=0,
+                face_token=pruebas_voto_facial.token(main, voter.id, deb.id)),
+                voter, self.db)
         self.assertTrue(result['success'])
         self.db.expire_all()
         logs = self.db.query(main.AdImpressionLog).filter(
@@ -1254,7 +1261,10 @@ class TestVoteFlowBilling(Base):
         main._ledger_reserve(self.db, camp, marketer.id, 50,
                              idempotency_key=f'vote-reserve-{_uid()}')
         with self._matched(camp):
-            main._cast_vote_inner(deb.id, main.CastVoteRequest(option_index=0), voter, self.db)
+            main._cast_vote_inner(deb.id, main.CastVoteRequest(
+                option_index=0,
+                face_token=pruebas_voto_facial.token(main, voter.id, deb.id)),
+                voter, self.db)
         after_first = main._ledger_balance(self.db, L.CAMPAIGN_REAL_RESERVED, camp.id)
         idem_key = f'spend:vote:{voter.id}:{deb.id}'
         replay = main._ledger_spend(self.db, camp, 6.0 / 1000.0, idempotency_key=idem_key,
@@ -1274,9 +1284,15 @@ class TestVoteFlowBilling(Base):
         voter1 = mk_user(self.db, country='CL', county='Las Condes')
         voter2 = mk_user(self.db, country='CL', county='Las Condes')
         with self._matched(camp):
-            main._cast_vote_inner(deb.id, main.CastVoteRequest(option_index=0), voter1, self.db)
+            main._cast_vote_inner(deb.id, main.CastVoteRequest(
+                option_index=0,
+                face_token=pruebas_voto_facial.token(main, voter1.id, deb.id)),
+                voter1, self.db)
             mid = main._ledger_balance(self.db, L.CAMPAIGN_REAL_RESERVED, camp.id)
-            main._cast_vote_inner(deb.id, main.CastVoteRequest(option_index=0), voter2, self.db)
+            main._cast_vote_inner(deb.id, main.CastVoteRequest(
+                option_index=0,
+                face_token=pruebas_voto_facial.token(main, voter2.id, deb.id)),
+                voter2, self.db)
         end = main._ledger_balance(self.db, L.CAMPAIGN_REAL_RESERVED, camp.id)
         self.assertLess(end, mid, 'a second, distinct voter must be billed as a separate event')
 

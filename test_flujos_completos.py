@@ -36,6 +36,7 @@ import bcrypt                                    # noqa: E402
 from fastapi.testclient import TestClient        # noqa: E402
 
 import main                                      # noqa: E402
+import pruebas_voto_facial  # noqa: E402,F401  (rellena el token facial del voto)
 
 ADMIN = os.environ['ADMIN_SECRET']
 
@@ -247,15 +248,25 @@ class TestG_VerificacionDeIdentidad(Base):
                          'marcó selfie_verified sin verificación real')
 
     def test_G7_el_voto_exige_token_facial_si_la_selfie_esta_verificada(self):
-        """Quien tiene selfie verificada no puede votar sin el token facial:
-        es el factor que impide que otra persona vote con su cuenta."""
+        """Nadie vota sin el token facial: es el factor que impide que otra
+        persona vote con su cuenta.
+
+        Antes esto solo se exigia a quien tenia la selfie verificada, y se
+        perdonaba a quien no. Hoy se exige siempre, asi que la prueba
+        comprueba los dos casos; `face_token` vacio va explicito para que
+        el andamiaje de conftest.py no lo rellene."""
         u, cab = self.votante()
         _, d = self.consulta_abierta()
+        r0 = self.client.post(f'/debates/{d.id}/vote',
+                              json={'option_index': 0, 'face_token': ''},
+                              headers=cab)
+        self.assertEqual(r0.status_code, 403, r0.text[:200])
         self.db.execute(main.text('UPDATE users SET selfie_verified=1 WHERE id=:i'),
                         {'i': u.id})
         self.db.commit()
         r = self.client.post(f'/debates/{d.id}/vote',
-                             json={'option_index': 0}, headers=cab)
+                             json={'option_index': 0, 'face_token': ''},
+                             headers=cab)
         self.assertEqual(r.status_code, 403, r.text[:300])
         self.assertIn('facial', r.text.lower())
 

@@ -269,7 +269,15 @@ class TestEligibilityAndVotingAndCampaignAuthority(unittest.TestCase):
         for sub in ast.walk(node):
             if isinstance(sub, ast.If):
                 test_src = ast.get_source_segment(SRC, sub.test) or ''
-                if '_is_google_full_review_account(user.email)' in test_src and 'user.role' not in test_src:
+                # `test_src` es solo la CONDICION. El localizador exigia
+                # unicamente que mencionara el predicado, y desde que el
+                # bloqueo facial tambien lo menciona -para exentar al
+                # revisor, cuyo voto es simulado- hay dos ramas que encajan:
+                # esta elegia la primera, que es la facial, y encontraba su
+                # commit. La rama de demostracion es la afirmativa; la
+                # facial es la negada.
+                if (test_src.strip() == '_is_google_full_review_account(user.email)'
+                        and 'user.role' not in test_src):
                     demo_if = sub
                     break
         self.assertIsNotNone(demo_if, 'could not locate the demo-vote if-branch')

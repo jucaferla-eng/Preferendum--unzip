@@ -37,6 +37,7 @@ for _k in ('SENDGRID_API_KEY', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN',
 
 from fastapi.testclient import TestClient          # noqa: E402
 import main                                        # noqa: E402
+import pruebas_voto_facial  # noqa: E402,F401  (rellena el token facial del voto)
 import eligibility as E                            # noqa: E402
 
 ADMIN_SECRET = os.environ['ADMIN_SECRET']

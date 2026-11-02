@@ -1061,8 +1061,15 @@ class TestFaceDuplicateCheckFailsClosed(unittest.TestCase):
         nothing behind to clean up or that blocks a fresh attempt."""
         node = _function('get_face_vote_token')
         src = _src_of(node)
-        self.assertNotIn('db.add(', src)
-        self.assertNotIn('db.commit(', src)
+        # La garantia es que no se persiste nada ANTES del punto de fallo
+        # cerrado, para que un fallo ahi sea reintentable sin dejar rastro.
+        # Desde que el token facial es de un solo uso, su registro SI se
+        # escribe — pero despues de que todas las comprobaciones hayan
+        # pasado, cuando ya no hay nada que reintentar. Se comprueba el
+        # tramo anterior, que es donde esta la promesa.
+        antes = src.split('_pg_try_advisory_lock')[0]
+        self.assertNotIn('db.add(', antes)
+        self.assertNotIn('db.commit(', antes)
 
     def test_duplicate_check_uses_a_postgres_advisory_lock_not_an_in_process_one(self):
         """CROSS-PROCESS/CROSS-INSTANCE HARDENING: an earlier version of

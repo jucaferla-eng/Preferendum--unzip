@@ -38,6 +38,7 @@ import bcrypt                                    # noqa: E402
 from fastapi.testclient import TestClient        # noqa: E402
 
 import main                                      # noqa: E402
+import pruebas_voto_facial  # noqa: E402,F401  (rellena el token facial del voto)
 import usa_data_agent as USA                     # noqa: E402
 
 ADMIN = os.environ['ADMIN_SECRET']

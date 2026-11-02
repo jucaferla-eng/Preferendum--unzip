@@ -3870,15 +3870,22 @@ async function castVote() {
   if (errEl) errEl.textContent = '';
   const deviceFp = await generateDeviceFingerprint().catch(() => '');
 
-  // Face verification for users who have completed selfie verification
+  // VERIFICACION FACIAL ANTES DE REGISTRAR EL VOTO, SIEMPRE.
+  //
+  // Esto decia `if (userSelfieVerified)`, y esa variable se leia de
+  // localStorage. Con el indicador ausente o en falso -navegador nuevo,
+  // datos borrados-, el portal NO pedia la camara y enviaba face_token
+  // vacio; y el servidor, que tenia la misma condicion, aceptaba el voto.
+  // Es lo que paso en la consulta destacada.
+  //
+  // Ahora se pide siempre. El servidor tambien lo exige siempre, asi que
+  // saltarse esta pantalla no sirve de nada: el voto se rechaza.
   let faceToken = '';
-  if (userSelfieVerified) {
-    faceToken = await requestFaceToken(debateId);
-    if (!faceToken) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = t('submitBtn');
-      return;
-    }
+  faceToken = await requestFaceToken(debateId);
+  if (!faceToken) {
+    submitBtn.disabled = false;
+    submitBtn.textContent = t('submitBtn');
+    return;
   }
 
   const voteBody = JSON.stringify({ option_index: q1Idx, vote_chain: newPath, device_fp: deviceFp, face_token: faceToken });
@@ -3952,19 +3959,59 @@ async function showVoteSuccess(data, optIdx) {
     }
   } catch(_) {}
 
-  // Fetch updated results for donut
+  // GRAFICO DE RESULTADOS.
+  //
+  // Antes esto dependia de `opts` -las opciones de `currentDebate`, que
+  // puede no estar cargado en este punto- y cualquier fallo se tragaba en
+  // un `catch(_) {}` vacio: si la peticion no salia bien, `donutHtml`
+  // quedaba en blanco y el bloque entero desaparecia sin decir nada. Eso
+  // es lo que vimos: voto registrado y ningun grafico.
+  //
+  // Ahora las etiquetas salen de la PROPIA respuesta -cada resultado trae
+  // su opcion-, y si no hay grafico se explica por que. Nunca en silencio.
   let donutHtml = '';
+  let avisoResultados = '';
   try {
     const rr = await fetch(`${API}/debates/${debId}/results`, {headers: token ? {'Authorization':'Bearer '+token} : {}});
-    if (rr.ok) {
-      const res = await rr.json();
-      const resultsList = (res.debate || res).results || [];
+    const res = rr.ok ? await rr.json().catch(() => ({})) : {};
+    const deb = res.debate || res;
+    const resultsList = (deb && deb.results) || [];
+    if (!rr.ok) {
+      avisoResultados = rr.status === 403
+        ? 'Los resultados se muestran a quienes ya votaron en esta consulta.'
+        : 'No pudimos cargar el gráfico de resultados en este momento. '
+          + 'Tu voto quedó registrado y tu código es válido.';
+    } else if (res.content_restricted || !resultsList.length) {
+      // La consulta reserva sus resultados: se respeta su configuracion y
+      // se dice cuando estaran disponibles, sin cambiarla.
+      const cierre = deb && deb.closes_at
+        ? new Date(deb.closes_at).toLocaleString()
+        : null;
+      avisoResultados = 'Esta consulta mantiene sus resultados reservados'
+        + (cierre ? ' hasta su cierre, el ' + cierre : ' hasta su cierre')
+        + '. Tu voto quedó registrado y tu código es válido.'
+        + (deb && deb.total_votes != null
+            ? ' Participación hasta ahora: ' + deb.total_votes + ' votos.'
+            : '');
+    } else {
+      // Las etiquetas vienen de la respuesta, no de currentDebate.
+      const etiquetas = resultsList.map(r => r.option);
       const counts = {};
       resultsList.forEach(r => { counts[r.option] = r.count || 0; });
-      const total = (res.debate || res).total_votes || 0;
-      donutHtml = renderDonut(opts, counts, total, COLORS);
+      const total = (deb.total_votes != null)
+        ? deb.total_votes
+        : resultsList.reduce((a, r) => a + (r.count || 0), 0);
+      donutHtml = renderDonut(etiquetas.length ? etiquetas : opts,
+                              counts, total, COLORS);
     }
-  } catch(_) {}
+  } catch(_) {
+    avisoResultados = 'No pudimos cargar el gráfico de resultados en este '
+      + 'momento. Tu voto quedó registrado y tu código es válido.';
+  }
+  if (!donutHtml && avisoResultados) {
+    donutHtml = '<div style="color:#7a7570;font-size:14px;line-height:1.6;">'
+      + avisoResultados + '</div>';
+  }
 
   // Accuracy stats: % of votes anchored on blockchain.
   // PRODUCTION READINESS AUDIT — this used to read `data.blockchain_tx
@@ -4491,7 +4538,27 @@ async function captureFace() {
       });
       const d = await r.json();
       if (!r.ok) {
-        errEl.textContent = d.detail || 'Verificación fallida. Intenta de nuevo.';
+        // Quien nunca completo su verificacion de identidad no tiene cara
+        // de referencia con la que comparar. Antes el portal simplemente
+        // le dejaba votar sin camara; ahora se le dice que falta y a donde
+        // ir, en vez de dejarle en un callejon.
+        const sinReferencia = (d.detail || '').indexOf('referencia') >= 0
+                           || (d.detail || '').indexOf('antes de votar') >= 0;
+        if (sinReferencia) {
+          errEl.innerHTML = 'Para votar necesitas haber verificado tu identidad '
+            + 'con tu documento y una selfie. '
+            + '<a href="#" id="face-ir-verificar" style="color:#4ade80;'
+            + 'font-weight:700;text-decoration:underline;">Verificar ahora →</a>';
+          const ir = document.getElementById('face-ir-verificar');
+          if (ir) ir.onclick = (ev) => {
+            ev.preventDefault();
+            _closeFaceModal();
+            _faceResolve('');
+            showVerifyScreen();
+          };
+        } else {
+          errEl.textContent = d.detail || 'Verificación fallida. Intenta de nuevo.';
+        }
         btn.disabled = false;
         btn.textContent = 'Tomar foto';
         return;
