@@ -415,6 +415,142 @@ class TestElIngresoSinCamara(Base):
         self.assertIn('facial', r.text.lower())
 
 
+class TestLaPantallaDeIngresoNoPideLaCamara(Base):
+    """EL FALLO REAL, reproducido.
+
+    La exencion se habia aplicado en /auth/complete-login -el endpoint que
+    VALIDA-, pero la pantalla del portal se construye con el `requires` que
+    devuelve /auth/login -el que ANUNCIA-. Ese seguia diciendo
+    `face: true`, asi que el portal pedia la camara y se negaba a seguir
+    sin token facial: la peticion a complete-login NO se hacia nunca y la
+    exencion no se alcanzaba.
+
+    Resultado para el usuario: «todavia me exige reconocimiento facial».
+    """
+
+    def _login(self, user, clave='Clave-de-prueba-2026'):
+        return self.client.post('/auth/login', headers=_ip(),
+                                json={'email': user.email, 'password': clave})
+
+    def _con_entrega(self):
+        """Simula que los codigos SALEN, que es lo que ocurre en produccion.
+
+        Sin proveedor de correo ni SMS, /auth/login responde 503 -y hace
+        bien: para una cuenta exenta de camara, un fallo de envio es un
+        bloqueo real-. Aqui lo que se mide es la exencion, no el proveedor.
+        """
+        previos = (main.send_email_otp, main.send_sms_otp)
+        main.send_email_otp = lambda *a, **k: True
+        main.send_sms_otp = lambda *a, **k: True
+        return previos
+
+    def _restaurar(self, previos):
+        main.send_email_otp, main.send_sms_otp = previos
+
+    def test_a_la_cuenta_designada_NO_se_le_anuncia_la_camara(self):
+        os.environ['TWILIO_ACCOUNT_SID'] = 'sid-de-prueba'
+        os.environ['TWILIO_AUTH_TOKEN'] = 'token-de-prueba'
+        u, _ = self._usuario(email=_uniq('designada') + '@test.invalid')
+        os.environ['PREFY_TEST_VOTE_ACCOUNTS'] = u.email
+        _envio = self._con_entrega()
+        try:
+            self.assertTrue(u.selfie_verified,
+                            'la cuenta tiene selfie verificada: es el caso real')
+            r = self._login(u)
+            self.assertEqual(r.status_code, 200, r.text[:200])
+            d = r.json()
+            self.assertTrue(d.get('pending_2fa'))
+            req = d['requires']
+            self.assertFalse(req['face'],
+                             'se le sigue anunciando la camara: el portal la '
+                             'pedira y no llegara a complete-login')
+            # `requires.email` informa si el codigo SALIO de verdad, y en
+            # el entorno de pruebas no hay proveedor de correo. Lo que se
+            # comprueba es que el codigo SE GENERO: en produccion, donde el
+            # proveedor funciona, ademas se anuncia.
+            self.assertTrue(
+                self.db.query(main.OTPCode).filter(
+                    main.OTPCode.user_id == u.id,
+                    main.OTPCode.channel == 'email',
+                    main.OTPCode.used == False).count(),
+                'no se genero el codigo de correo')
+        finally:
+            self._restaurar(_envio)
+            os.environ['PREFY_TEST_VOTE_ACCOUNTS'] = CUENTA
+            os.environ.pop('TWILIO_ACCOUNT_SID', None)
+            os.environ.pop('TWILIO_AUTH_TOKEN', None)
+
+    def test_a_cualquier_otra_cuenta_SI_se_le_anuncia(self):
+        u, _ = self._usuario()
+        r = self._login(u)
+        self.assertEqual(r.status_code, 200, r.text[:200])
+        self.assertTrue(r.json()['requires']['face'],
+                        'los demas tienen que seguir pasando por la camara')
+
+    def test_el_recorrido_completo_de_ingreso_sin_camara(self):
+        """De punta a punta: login -> los dos codigos -> sesion. Sin cara."""
+        os.environ['TWILIO_ACCOUNT_SID'] = 'sid-de-prueba'
+        os.environ['TWILIO_AUTH_TOKEN'] = 'token-de-prueba'
+        u, _ = self._usuario(email=_uniq('completa') + '@test.invalid')
+        os.environ['PREFY_TEST_VOTE_ACCOUNTS'] = u.email
+        _envio = self._con_entrega()
+        try:
+            r = self._login(u)
+            self.assertEqual(r.status_code, 200, r.text[:200])
+            d = r.json()
+            self.assertFalse(d['requires']['face'])
+            pre = d['pre_auth_token']
+            codigos = {c.channel: c.code for c in self.db.query(main.OTPCode).filter(
+                main.OTPCode.user_id == u.id, main.OTPCode.used == False).all()}
+            self.assertIn('email', codigos, 'no se genero codigo de correo')
+            # El SMS puede no haberse enviado en el entorno de pruebas; se
+            # siembra para poder recorrer el paso que el usuario SI vera.
+            if 'sms' not in codigos:
+                self.db.add(main.OTPCode(
+                    user_id=u.id, email=u.email, code='654321', channel='sms',
+                    used=False,
+                    expires_at=datetime.utcnow() + timedelta(minutes=10)))
+                self.db.commit()
+                codigos['sms'] = '654321'
+            fin = self.client.post('/auth/complete-login', headers=_ip(), json={
+                'pre_auth_token': pre, 'email_code': codigos['email'],
+                'sms_code': codigos['sms'], 'face_token': ''})
+            self.assertEqual(fin.status_code, 200, fin.text[:300])
+            self.assertTrue(fin.json().get('token'), 'no devolvio sesion')
+        finally:
+            self._restaurar(_envio)
+            os.environ['PREFY_TEST_VOTE_ACCOUNTS'] = CUENTA
+            os.environ.pop('TWILIO_ACCOUNT_SID', None)
+            os.environ.pop('TWILIO_AUTH_TOKEN', None)
+
+    def test_si_no_sale_ningun_codigo_se_dice_claramente(self):
+        """Sin camara como salida, un fallo de envio tiene que fallar
+        claro en vez de dejarla en una pantalla sin nada que rellenar."""
+        u, _ = self._usuario(email=_uniq('sinenvio') + '@test.invalid')
+        os.environ['PREFY_TEST_VOTE_ACCOUNTS'] = u.email
+        try:
+            r = self._login(u)
+            self.assertEqual(r.status_code, 503, r.text[:200])
+            self.assertIn('ningún canal', r.text)
+        finally:
+            os.environ['PREFY_TEST_VOTE_ACCOUNTS'] = CUENTA
+
+    def test_una_cuenta_normal_conserva_la_cara_como_salida(self):
+        """La misma situacion, para otra cuenta, NO es un bloqueo: le queda
+        la camara."""
+        u, _ = self._usuario()
+        r = self._login(u)
+        self.assertEqual(r.status_code, 200, r.text[:200])
+        self.assertTrue(r.json()['requires']['face'])
+
+    def test_el_portal_obedece_a_requires_face(self):
+        """Por que `requires.face` era decisivo: el portal se niega a
+        continuar sin token facial cuando viene en true."""
+        portal = open('voter_portal.html', encoding='utf-8').read()
+        self.assertIn("if (req.face  && !_loginFaceToken)", portal)
+        self.assertIn('req.face', portal)
+
+
 class TestElAvisoEnPantalla(Base):
 
     @classmethod

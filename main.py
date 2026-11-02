@@ -6331,7 +6331,15 @@ def login(data: LoginInput, request: Request, bg: BackgroundTasks, db: Session =
     # to deliver, with no other way in (no other channel attempted, and
     # no face fallback either) is a genuine lockout — fail clearly rather
     # than returning pending_2fa for codes that were never sent anywhere.
-    if (attempted_email or attempted_sms) and not email_sent and not sms_sent and not user.selfie_verified:
+    #
+    # Para una cuenta designada, la cara NO es una salida: esta exenta de
+    # ella justamente porque no puede usarla. Contarla aqui la habria
+    # dejado en una pantalla de 2FA sin nada que rellenar y sin forma de
+    # continuar, en vez de decirle claramente que no se pudo enviar el
+    # codigo. Se calcula una sola vez y se usa en los dos sitios.
+    _prueba_login = _es_cuenta_de_prueba_de_voto(user.email)
+    _hay_salida_facial = bool(user.selfie_verified) and not _prueba_login
+    if (attempted_email or attempted_sms) and not email_sent and not sms_sent and not _hay_salida_facial:
         raise HTTPException(503, 'No pudimos enviar tu código de verificación por ningún canal disponible. Intenta de nuevo en unos minutos.')
 
     pre_auth = jwt.encode({
@@ -6339,13 +6347,24 @@ def login(data: LoginInput, request: Request, bg: BackgroundTasks, db: Session =
         'exp': datetime.utcnow() + timedelta(minutes=10)
     }, SECRET, algorithm='HS256')
 
+    # EL DEFECTO, MEDIDO. `face` se anunciaba como `bool(user.selfie_verified)`
+    # a secas. La exencion de camara se habia aplicado en
+    # /auth/complete-login -el endpoint que VALIDA-, pero la pantalla del
+    # portal se construye con ESTE `requires`, que es el que ANUNCIA: con
+    # `face: true` el portal pedia la camara y se negaba a continuar sin
+    # token facial, asi que la peticion a complete-login no llegaba a
+    # hacerse NUNCA y la exencion no se alcanzaba.
+    #
+    # Reproducido: la cuenta designada recibia requires.face = true.
+    #
+    # Mismo predicado del servidor, nada decidido en el navegador.
     return {
         'pending_2fa': True,
         'pre_auth_token': pre_auth,
         'requires': {
             'email': email_sent,
             'sms':   sms_sent,
-            'face':  bool(user.selfie_verified),
+            'face':  _hay_salida_facial,
         },
         'email_hint': user.email[:3] + '***' + user.email[user.email.find('@'):] if user.email else '',
         'phone_hint': ('***' + user.phone[-4:]) if user.phone else '',
